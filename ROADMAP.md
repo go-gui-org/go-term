@@ -786,6 +786,83 @@ attribution in the reflow walker — a shared fix with the OSC 133
 prompt-jump precision issue, deferred until either of those becomes
 a real annoyance.
 
+---
+
+## Phase 33 — OS Notifications (OSC 9 / 777)
+
+**Why:** Users running long builds or scripts expect to be notified when the task completes if the terminal is out of focus. High utility, low effort.
+
+- [ ] `parser.go`: Catch `OSC 9` or `OSC 777;notify`.
+- [ ] Route payload to a cross-platform OS notification library.
+
+**Demo test:** `printf '\x1b]9;Build finished\x07'` triggers a native OS notification.
+
+---
+
+## Phase 34 — iTerm2 Inline Images (OSC 1337)
+
+**Why:** While Sixel is supported, many modern CLI workflows use tools like `imgcat` which rely on the iTerm2 inline image protocol (`OSC 1337`).
+
+- [ ] `parser.go`: Intercept `OSC 1337`, parse base64 payload.
+- [ ] Feed decoded image into the `term/graphics.go` engine.
+
+**Demo test:** Run `imgcat image.png` and verify it renders correctly.
+
+---
+
+## Phase 35 — Smooth, Pixel-Perfect Scrolling
+
+**Why:** Currently, most terminal emulators scroll cell-by-cell. Ghostty and Kitty are famous for their buttery-smooth, pixel-perfect scrolling, a major UX polish.
+
+- [ ] `grid.go`: Change `ViewOffset` from an `int` (rows) to a `float32` (pixels).
+- [ ] `widget.go`: `onDraw` renders partial top and bottom rows based on the fractional offset.
+
+**Demo test:** Slowly scroll the mouse wheel; text should move by pixels, not by full cell heights.
+
+---
+
+## Phase 36 — Kitty Graphics Protocol (CSI _ G)
+
+**Why:** Sixel is a legacy protocol that is notoriously inefficient. The Kitty graphics protocol is the modern standard for terminal graphics, heavily adopted by modern emulators.
+
+- [ ] `parser.go`: Add parsing for `CSI _ G` and handle chunked data.
+- [ ] Support off-screen image caching and direct-over-text rendering.
+
+**Demo test:** Run a kitty-graphics compatible script (like `kitten icat`) to view high-performance images.
+
+---
+
+## Phase 37 — Font Ligatures
+
+**Why:** Modern developers love fonts like Fira Code and JetBrains Mono. Translating sequences like `!=`, `=>`, or `<!--` into specialized glyphs is standard in modern terminals.
+
+- [ ] `widget.go`: Integrate a text shaper like HarfBuzz or `go-text/typesetting`.
+- [ ] Modify `onDraw` to render shaped text runs rather than per-cell strings.
+
+**Demo test:** Type `!=` and see it rendered as a single ligature glyph.
+
+---
+
+## Phase 38 — Bidirectional Text (BiDi) & RTL
+
+**Why:** Essential for full internationalization support (Arabic, Hebrew).
+
+- [ ] Implement the Unicode Bidirectional Algorithm (UBA) to reorder cells visually.
+- [ ] Maintain logical order in `grid.go` while updating visual rendering in `widget.go`.
+
+**Demo test:** `echo "שלום"` renders right-to-left correctly.
+
+---
+
+## Phase 39 — Native Splits, Panes, and Tabs
+
+**Why:** A defining feature of modern terminals is their native window multiplexing, turning the emulator into a full workspace without relying on `tmux`.
+
+- [ ] Create a higher-level layout manager above `Term`.
+- [ ] Support vertical/horizontal splits and route keystrokes/PTY IO to the focused pane.
+
+**Demo test:** Cmd+D splits the terminal pane; Cmd+[ switches focus between them.
+
 ## Critical files
 
 All edits stay in:
