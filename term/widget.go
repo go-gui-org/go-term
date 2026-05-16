@@ -584,10 +584,10 @@ func (t *Term) onWindowEvent(e *gui.Event) {
 	if e == nil {
 		return
 	}
-	// Any mouse button press cancels a momentum coast — this is the most
-	// reliable signal available when the user returns a hand to the trackpad,
-	// since SDL blocks the zero-delta scroll events that carry the phase flag.
-	if e.Type == gui.EventMouseDown {
+	// Cancel momentum on mouse press or trackpad touch. EventScrollBegan
+	// fires when a finger first contacts the trackpad (zero-delta phase),
+	// giving immediate cancellation before any scroll delta arrives.
+	if e.Type == gui.EventMouseDown || e.Type == gui.EventScrollBegan {
 		t.cancelMomentum()
 	}
 	var report []byte
