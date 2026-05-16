@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/mike-ward/go-glyph v1.7.0
+	github.com/mike-ward/go-glyph v1.7.1
 	github.com/mike-ward/go-gui v0.0.0-00010101000000-000000000000
 	github.com/rivo/uniseg v0.4.7
 )

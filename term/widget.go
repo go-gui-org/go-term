@@ -584,6 +584,12 @@ func (t *Term) onWindowEvent(e *gui.Event) {
 	if e == nil {
 		return
 	}
+	// Any mouse button press cancels a momentum coast — this is the most
+	// reliable signal available when the user returns a hand to the trackpad,
+	// since SDL blocks the zero-delta scroll events that carry the phase flag.
+	if e.Type == gui.EventMouseDown {
+		t.cancelMomentum()
+	}
 	var report []byte
 	t.grid.Mu.Lock()
 	focus := t.grid.FocusReporting
@@ -1489,6 +1495,14 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 // any-motion report. Falls through to selection extension when this
 // drag was started outside of a reporting mode.
 func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	// Any pointer motion means the user's hand is on the input device again;
+	// cancel a coasting momentum scroll so they get immediate control.
+	t.momentumMu.Lock()
+	coasting := t.momentumCoasting
+	t.momentumMu.Unlock()
+	if coasting {
+		t.cancelMomentum()
+	}
 	r, c := t.posToCell(e.MouseX, e.MouseY)
 	snap := t.mouseSnap()
 	if snap.sgr && snap.live {
@@ -1692,7 +1706,10 @@ func (t *Term) copySelection(w *gui.Window) bool {
 // Each event also feeds the momentum EMA so that releasing the trackpad
 // produces a brief coast rather than an abrupt stop.
 func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	// Zero-delta: macOS sends this when a finger touches the trackpad during
+	// a momentum coast. Cancel immediately so the user gets instant control.
 	if e.ScrollY == 0 {
+		t.cancelMomentum()
 		return
 	}
 	snap := t.mouseSnap()
@@ -1709,10 +1726,16 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if !realNumber(e.ScrollY) || !finite(t.cellH) {
 		return
 	}
+
+	// Mouse wheel detection: SDL populates PreciseY (float) for trackpad and
+	// falls back to integer Y for discrete mouse wheels. go-gui merges them
+	// into ScrollY, so integer-valued ScrollY reliably signals a mouse wheel.
+	isMouseWheel := e.ScrollY == float32(int32(e.ScrollY))
+
 	// Accumulate scaled pixels so sub-cell deltas carry over between events.
 	// scrollSensitivity converts raw trackpad px to a faster scroll speed;
 	// the accumulator ensures no movement is lost to integer truncation.
-	const scrollSensitivity float32 = 12
+	const scrollSensitivity float32 = 15
 	t.scrollAcc += e.ScrollY * scrollSensitivity
 	lines := int(t.scrollAcc / t.cellH)
 	if lines != 0 {
@@ -1724,13 +1747,22 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		t.bumpVersion()
 		w.UpdateWindow()
 	}
-	// Track peak velocity of the current gesture, scaled up so coast covers a
-	// meaningful number of lines. Ignore decelerating OS-momentum samples by
-	// only updating when the new sample is larger in magnitude or direction
+
+	// Mouse wheel: no momentum. Cancel any in-progress coast and return.
+	if isMouseWheel {
+		t.cancelMomentum()
+		e.IsHandled = true
+		return
+	}
+
+	// Track peak velocity of the current gesture so coast starts at
+	// live-scroll speed. Ignore decelerating OS-momentum samples by only
+	// updating when the new sample is larger in magnitude or direction
 	// reverses. Cap prevents a huge flick from coasting forever.
 	const (
-		momentumScale = 5.0
-		momentumCap   = 300.0
+		momentumScale = 12.0 // match scrollSensitivity so coast starts at live-scroll speed
+		momentumCap   = 600.0
+		coastDelay    = 40 * time.Millisecond
 	)
 	t.momentumMu.Lock()
 	newVel := math.Max(-momentumCap, math.Min(momentumCap, float64(e.ScrollY)*momentumScale))
@@ -1741,13 +1773,24 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	t.momentumCellH = t.cellH
 	t.momentumCoasting = false
 	t.momentumMu.Unlock()
-	// Arm/reset a timer: coast starts 80 ms after the last scroll event.
 	if t.momentumTimer == nil {
-		t.momentumTimer = time.AfterFunc(80*time.Millisecond, t.kickMomentum)
+		t.momentumTimer = time.AfterFunc(coastDelay, t.kickMomentum)
 	} else {
-		t.momentumTimer.Reset(80 * time.Millisecond)
+		t.momentumTimer.Reset(coastDelay)
 	}
 	e.IsHandled = true
+}
+
+// cancelMomentum stops any in-progress momentum coast immediately.
+func (t *Term) cancelMomentum() {
+	if t.momentumTimer != nil {
+		t.momentumTimer.Stop()
+	}
+	t.momentumMu.Lock()
+	t.momentumVel = 0
+	t.momentumAcc = 0
+	t.momentumCoasting = false
+	t.momentumMu.Unlock()
 }
 
 // kickMomentum is the AfterFunc callback fired 80 ms after the last scroll
@@ -1767,9 +1810,11 @@ func (t *Term) kickMomentum() {
 // pixel accumulator and converts whole cells into ScrollView calls.
 func (t *Term) momentumLoop() {
 	const (
-		tickDur  = 16 * time.Millisecond
-		friction = 0.96 // velocity multiplier per 16 ms tick (~1.8 s to 1 % of start)
-		minVel   = 0.3  // px/tick below which coast stops
+		tickDur      = 16 * time.Millisecond
+		frictionFast  = 0.90 // decelerate at high speed — avoids linear feel
+		frictionCoast = 0.95 // gentle tail once slow — covers real distance
+		phaseVel      = 120.0 // px/tick threshold between phases
+		minVel       = 1.0  // px/tick below which coast stops
 	)
 	tk := time.NewTicker(tickDur)
 	defer tk.Stop()
@@ -1784,6 +1829,10 @@ func (t *Term) momentumLoop() {
 			if !t.momentumCoasting {
 				t.momentumMu.Unlock()
 				continue
+			}
+			friction := frictionCoast
+			if math.Abs(t.momentumVel) > phaseVel {
+				friction = frictionFast
 			}
 			t.momentumVel *= friction
 			t.momentumAcc += t.momentumVel
