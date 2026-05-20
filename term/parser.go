@@ -24,6 +24,11 @@ const (
 // silently swallowed up to its terminator.
 const maxOSCBytes = 4096
 
+// maxOSC1337Bytes is the enlarged cap for OSC 1337 (iTerm2 inline
+// images). Images are base64-encoded so a 50 KB PNG becomes ~67 KB
+// on the wire; 4 MiB matches the DCS/Sixel limit.
+const maxOSC1337Bytes = 4 << 20
+
 // maxDCSBytes caps DCS payloads. Sixel images can be sizable (a small
 // 320×240 sample is ~50 KB of sixel data); 1 MiB tolerates real-world
 // frames while keeping a malicious stream bounded.
@@ -63,9 +68,11 @@ type Parser struct {
 	utfLen       int
 
 	// osc accumulates the payload of the in-progress OSC (Operating
-	// System Command). Reset on entry to stOSC; capped at maxOSCBytes.
-	osc []byte
-	dcs []byte
+	// System Command). Reset on entry to stOSC; capped at maxOSCBytes
+	// unless oscIsImage is set (OSC 1337), in which case maxOSC1337Bytes.
+	osc        []byte
+	oscIsImage bool // true once "1337;" prefix detected
+	dcs        []byte
 
 	// onTitle, if non-nil, is invoked for OSC 0/1/2 (window title).
 	// onReply, if non-nil, is invoked when the parser needs to write
@@ -89,6 +96,11 @@ type Parser struct {
 // Empty string falls back to os.TempDir(). The widget creates a private
 // subdir per Term so cleanup on Close removes only its own files.
 func (p *Parser) SetGraphicsDir(dir string) { p.graphicsDir = dir }
+
+func (p *Parser) oscReset() {
+	p.osc = p.osc[:0]
+	p.oscIsImage = false
+}
 
 // SetTitleHandler registers a callback for OSC 0/1/2. Pass nil to
 // disable. Called while Grid.Mu is held.
@@ -181,7 +193,7 @@ func (p *Parser) Feed(b []byte) {
 				p.intermediate = 0
 			case ']':
 				p.state = stOSC
-				p.osc = p.osc[:0]
+				p.oscReset()
 			case 'P':
 				p.state = stDCS
 				p.dcs = p.dcs[:0]
@@ -299,11 +311,21 @@ func (p *Parser) Feed(b []byte) {
 			switch c {
 			case 0x07:
 				p.dispatchOSC()
+				p.oscReset()
 				p.state = stGround
 			case 0x1B:
 				p.state = stOSCEsc
 			default:
-				if len(p.osc) < maxOSCBytes {
+				lim := maxOSCBytes
+				if p.oscIsImage {
+					lim = maxOSC1337Bytes
+				} else if len(p.osc) == 4 &&
+					p.osc[0] == '1' && p.osc[1] == '3' &&
+					p.osc[2] == '3' && p.osc[3] == '7' && c == ';' {
+					p.oscIsImage = true
+					lim = maxOSC1337Bytes
+				}
+				if len(p.osc) < lim {
 					p.osc = append(p.osc, c)
 				}
 			}
@@ -311,11 +333,11 @@ func (p *Parser) Feed(b []byte) {
 		case stOSCEsc:
 			if c == '\\' {
 				p.dispatchOSC()
+				p.oscReset()
 				p.state = stGround
 				i++
 			} else {
-
-				p.osc = p.osc[:0]
+				p.oscReset()
 				p.state = stEsc
 			}
 		}

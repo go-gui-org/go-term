@@ -803,8 +803,8 @@ a real annoyance.
 
 **Why:** While Sixel is supported, many modern CLI workflows use tools like `imgcat` which rely on the iTerm2 inline image protocol (`OSC 1337`).
 
-- [ ] `parser.go`: Intercept `OSC 1337`, parse base64 payload.
-- [ ] Feed decoded image into the `term/graphics.go` engine.
+- [x] `parser.go`: Intercept `OSC 1337`, parse base64 payload.
+- [x] Feed decoded image into the `term/graphics.go` engine.
 
 **Demo test:** Run `imgcat image.png` and verify it renders correctly.
 

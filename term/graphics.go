@@ -1,10 +1,14 @@
 package term
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"image"
 	"image/color"
+	"image/draw"
+	_ "image/gif"
+	_ "image/jpeg"
 	"image/png"
 	"math"
 	"os"
@@ -61,6 +65,25 @@ var sixelDefaultPalette = [16]color.NRGBA{
 	{0x57, 0x99, 0x99, 0xFF}, // 13 Light cyan
 	{0x99, 0x99, 0x57, 0xFF}, // 14 Light yellow
 	{0xCC, 0xCC, 0xCC, 0xFF}, // 15 Gray-75
+}
+
+// decodeImageBytes decodes a raw image (PNG, JPEG, GIF, or any format
+// registered via blank import) into an NRGBA. Returns nil on failure.
+func decodeImageBytes(data []byte) *image.NRGBA {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil || img == nil {
+		return nil
+	}
+	b := img.Bounds()
+	if b.Dx() > maxSixelWidth || b.Dy() > maxSixelHeight {
+		return nil
+	}
+	if nrgba, ok := img.(*image.NRGBA); ok {
+		return nrgba
+	}
+	out := image.NewNRGBA(b)
+	draw.Draw(out, b, img, image.Point{}, draw.Src)
+	return out
 }
 
 // decodeSixel parses a Sixel DCS body (the bytes after the introducer's

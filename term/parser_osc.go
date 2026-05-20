@@ -146,7 +146,10 @@ func (p *Parser) dispatchOSC() {
 		}
 		data, err := base64.StdEncoding.DecodeString(b64)
 		if err != nil {
-			return
+			data, err = base64.RawStdEncoding.DecodeString(b64)
+			if err != nil {
+				return
+			}
 		}
 		if p.onClipboard != nil {
 			p.onClipboard(data)
@@ -164,6 +167,49 @@ func (p *Parser) dispatchOSC() {
 		if p.onNotify != nil {
 			p.onNotify(truncatePaste(title, notifyMax), truncatePaste(body, notifyMax))
 		}
+	case 1337:
+		p.handleOSC1337(pt)
+	}
+}
+
+// handleOSC1337 implements the iTerm2 inline image protocol.
+// Payload format: File=[key=value;...]:base64data
+// Only renders when inline=1 is present; all other cases drop silently.
+func (p *Parser) handleOSC1337(pt string) {
+	const prefix = "File="
+	if !strings.HasPrefix(pt, prefix) {
+		return
+	}
+	rest := pt[len(prefix):]
+	colon := strings.IndexByte(rest, ':')
+	if colon < 0 {
+		return
+	}
+	args, b64 := rest[:colon], rest[colon+1:]
+
+	if !strings.Contains(";"+args+";", ";inline=1;") {
+		return
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		raw, err = base64.RawStdEncoding.DecodeString(b64)
+		if err != nil {
+			return
+		}
+	}
+	img := decodeImageBytes(raw)
+	if img == nil {
+		return
+	}
+	b := img.Bounds()
+	path := encodePNGFile(img, p.graphicsDir)
+	if path == "" {
+		return
+	}
+	_, rows := p.g.AddGraphic(path, b.Dx(), b.Dy())
+	for range rows {
+		p.g.Newline()
 	}
 }
 
