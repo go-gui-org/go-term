@@ -177,6 +177,13 @@ type Cfg struct {
 	// to wrap the title in app-specific framing.
 	OnTitle func(string)
 
+	// OnNotify, if non-nil, is called for OSC 9 / OSC 777 desktop
+	// notification requests. title may be empty (OSC 9). When nil,
+	// the widget fires a native OS notification via osascript (macOS)
+	// or notify-send (Linux). Called on a background goroutine — safe
+	// to block.
+	OnNotify func(title, body string)
+
 	// CursorBlink, if non-nil, overrides the application's DECSCUSR
 	// blink request. Use *true to force blinking on, *false to force
 	// steady. Leave nil to honor whatever the shell asks for (steady
@@ -260,6 +267,10 @@ type Term struct {
 
 	// closed guards Close so multiple calls are safe.
 	closed atomic.Bool
+
+	// notifyBusy prevents goroutine pile-up from rapid OSC 9/777 sequences.
+	// Only one notification runs at a time; extras are dropped.
+	notifyBusy atomic.Bool
 
 	// cursorEpoch is the reference time for blink-phase calculation.
 	// Set in New so the cursor starts in the "on" half-cycle.
@@ -434,6 +445,20 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 			w.SetClipboard(text)
 		})
 	})
+	t.parser.SetNotifyHandler(func(title, body string) {
+		if !t.notifyBusy.CompareAndSwap(false, true) {
+			return
+		}
+		fn := t.cfg.OnNotify
+		go func() {
+			defer t.notifyBusy.Store(false)
+			if fn != nil {
+				fn(title, body)
+			} else {
+				sendDesktopNotify(title, body)
+			}
+		}()
+	})
 	prevOnEvent := w.OnEvent
 	w.OnEvent = func(e *gui.Event, w *gui.Window) {
 		t.onWindowEvent(e)
@@ -562,6 +587,34 @@ func (t *Term) onParserReply(b []byte) {
 	cp := make([]byte, len(b))
 	copy(cp, b)
 	t.pendingReplies = append(t.pendingReplies, cp)
+}
+
+// cleanNotifyStr removes null bytes, which would truncate C-string args
+// passed to subprocesses at the syscall boundary.
+func cleanNotifyStr(s string) string {
+	return strings.ReplaceAll(s, "\x00", "")
+}
+
+// sendDesktopNotify fires a native OS notification. Blocks briefly
+// (subprocess exec), so always call from a goroutine.
+func sendDesktopNotify(title, body string) {
+	switch runtime.GOOS {
+	case "darwin":
+		// Pass title/body as argv to avoid AppleScript string-literal injection.
+		stmt := `display notification (item 1 of argv)`
+		args := []string{"-e", "on run argv", "-e", stmt, "-e", "end run", cleanNotifyStr(body)}
+		if title != "" {
+			stmt = `display notification (item 1 of argv) with title (item 2 of argv)`
+			args = []string{"-e", "on run argv", "-e", stmt, "-e", "end run", cleanNotifyStr(body), cleanNotifyStr(title)}
+		}
+		exec.Command("osascript", args...).Run() //nolint:errcheck
+	case "linux":
+		args := []string{cleanNotifyStr(body)}
+		if title != "" {
+			args = []string{cleanNotifyStr(title), cleanNotifyStr(body)}
+		}
+		exec.Command("notify-send", args...).Run() //nolint:errcheck
+	}
 }
 
 // flushPendingReplies writes all queued parser replies to the PTY.

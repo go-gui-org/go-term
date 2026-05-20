@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+// notifyMax caps notification strings before handing them to onNotify.
+// Prevents subprocess arg-length overflows and large heap allocations
+// from hostile OSC payloads.
+const notifyMax = 512
+
 func encodeHexBytes(s string) []byte {
 	const hexdigits = "0123456789abcdef"
 	out := make([]byte, 0, len(s)*2)
@@ -124,6 +129,11 @@ func (p *Parser) dispatchOSC() {
 		case 'D':
 			p.g.AddMark(MarkCommandEnd)
 		}
+	case 9:
+		// iTerm2-style notification: OSC 9 ; message BEL — body only, no title.
+		if p.onNotify != nil {
+			p.onNotify("", truncatePaste(pt, notifyMax))
+		}
 	case 52:
 
 		semiIdx := strings.IndexByte(pt, ';')
@@ -140,6 +150,19 @@ func (p *Parser) dispatchOSC() {
 		}
 		if p.onClipboard != nil {
 			p.onClipboard(data)
+		}
+	case 777:
+		// libnotify-style: OSC 777 ; notify ; title ; body BEL
+		parts := strings.SplitN(pt, ";", 3)
+		if len(parts) < 2 || parts[0] != "notify" {
+			return
+		}
+		title, body := "", parts[1]
+		if len(parts) == 3 {
+			title, body = parts[1], parts[2]
+		}
+		if p.onNotify != nil {
+			p.onNotify(truncatePaste(title, notifyMax), truncatePaste(body, notifyMax))
 		}
 	}
 }

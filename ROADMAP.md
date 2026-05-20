@@ -792,8 +792,8 @@ a real annoyance.
 
 **Why:** Users running long builds or scripts expect to be notified when the task completes if the terminal is out of focus. High utility, low effort.
 
-- [ ] `parser.go`: Catch `OSC 9` or `OSC 777;notify`.
-- [ ] Route payload to a cross-platform OS notification library.
+- [x] `parser.go`: Catch `OSC 9` or `OSC 777;notify`.
+- [x] Route payload to a cross-platform OS notification library.
 
 **Demo test:** `printf '\x1b]9;Build finished\x07'` triggers a native OS notification.
 

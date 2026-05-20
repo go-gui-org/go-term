@@ -393,3 +393,63 @@ func TestParser_OSCDynColor_InvalidIgnored(t *testing.T) {
 		t.Fatalf("invalid color changed DefaultFG: got rgb(%d,%d,%d)", fg.R, fg.G, fg.B)
 	}
 }
+
+func TestParser_OSC9_Notify(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	var gotTitle, gotBody string
+	g.Mu.Lock()
+	p.SetNotifyHandler(func(title, body string) { gotTitle = title; gotBody = body })
+	g.Mu.Unlock()
+	feed(t, g, p, []byte("\x1b]9;Build finished\x07"))
+	if gotTitle != "" || gotBody != "Build finished" {
+		t.Fatalf("OSC 9: got title=%q body=%q, want title=\"\" body=\"Build finished\"", gotTitle, gotBody)
+	}
+}
+
+func TestParser_OSC777_NotifyTitleBody(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	var gotTitle, gotBody string
+	g.Mu.Lock()
+	p.SetNotifyHandler(func(title, body string) { gotTitle = title; gotBody = body })
+	g.Mu.Unlock()
+	feed(t, g, p, []byte("\x1b]777;notify;My App;Task done\x07"))
+	if gotTitle != "My App" || gotBody != "Task done" {
+		t.Fatalf("OSC 777: got title=%q body=%q", gotTitle, gotBody)
+	}
+}
+
+func TestParser_OSC777_NotifyBodyOnly(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	var gotTitle, gotBody string
+	g.Mu.Lock()
+	p.SetNotifyHandler(func(title, body string) { gotTitle = title; gotBody = body })
+	g.Mu.Unlock()
+	feed(t, g, p, []byte("\x1b]777;notify;just a message\x07"))
+	if gotTitle != "" || gotBody != "just a message" {
+		t.Fatalf("OSC 777 body-only: got title=%q body=%q", gotTitle, gotBody)
+	}
+}
+
+func TestParser_OSC777_UnknownSubcommandDropped(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	called := false
+	g.Mu.Lock()
+	p.SetNotifyHandler(func(title, body string) { called = true })
+	g.Mu.Unlock()
+	feed(t, g, p, []byte("\x1b]777;other;payload\x07"))
+	if called {
+		t.Fatal("OSC 777 unknown subcommand should be dropped")
+	}
+}
+
+func TestParser_OSC9_NoHandlerNoPanic(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	// handler not registered — must not panic
+	feed(t, g, p, []byte("\x1b]9;hello\x07"))
+}
+
+func TestParser_OSC777_NoHandlerNoPanic(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	// handler not registered — must not panic
+	feed(t, g, p, []byte("\x1b]777;notify;Title;Body\x07"))
+}

@@ -71,11 +71,13 @@ type Parser struct {
 	// onReply, if non-nil, is invoked when the parser needs to write
 	// bytes back toward the application (e.g. DA1 response).
 	// onClipboard, if non-nil, is invoked for OSC 52 clipboard-write
-	// requests. All three run while Grid.Mu is held — handlers must not
-	// re-enter the grid.
+	// requests. onNotify, if non-nil, is invoked for OSC 9 and OSC 777
+	// desktop-notification requests. All run while Grid.Mu is held —
+	// handlers must not re-enter the grid.
 	onTitle     func(string)
 	onReply     func([]byte)
 	onClipboard func([]byte)
+	onNotify    func(title, body string)
 
 	// graphicsDir is the directory where decoded Sixel PNGs are written.
 	// Empty = os.TempDir(). Set via SetGraphicsDir; the widget creates a
@@ -101,6 +103,12 @@ func (p *Parser) SetReplyHandler(fn func([]byte)) { p.onReply = fn }
 // requests. data is the decoded (raw) clipboard payload. Pass nil to
 // disable. Called while Grid.Mu is held.
 func (p *Parser) SetClipboardHandler(fn func([]byte)) { p.onClipboard = fn }
+
+// SetNotifyHandler registers a callback for OSC 9 and OSC 777 desktop
+// notifications. title may be empty (OSC 9 carries body only). Called
+// while Grid.Mu is held — the handler must not block; fire a goroutine
+// for any slow work (e.g. exec).
+func (p *Parser) SetNotifyHandler(fn func(title, body string)) { p.onNotify = fn }
 
 // NewParser binds a parser to a grid. Callers must hold g.Mu while calling
 // Feed.

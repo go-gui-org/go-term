@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	glyph "github.com/mike-ward/go-glyph"
@@ -1215,5 +1216,81 @@ func TestWriteMouse_CellVsPixelCoords(t *testing.T) {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestCleanNotifyStr_NullByte(t *testing.T) {
+	if got := cleanNotifyStr("hel\x00lo"); got != "hello" {
+		t.Fatalf("null byte: got %q, want %q", got, "hello")
+	}
+}
+
+func TestCleanNotifyStr_DoubleQuote(t *testing.T) {
+	s := `say "hi"`
+	if got := cleanNotifyStr(s); got != s {
+		t.Fatalf("double quote should be preserved: got %q", got)
+	}
+}
+
+func TestCleanNotifyStr_BothHostile(t *testing.T) {
+	in := "a\x00b\"c"
+	want := "ab\"c"
+	if got := cleanNotifyStr(in); got != want {
+		t.Fatalf("both: got %q, want %q", got, want)
+	}
+}
+
+func TestCleanNotifyStr_Clean(t *testing.T) {
+	s := "no hostile chars"
+	if got := cleanNotifyStr(s); got != s {
+		t.Fatalf("clean input changed: got %q", got)
+	}
+}
+
+func TestSendDesktopNotify_HostileInputNoPanic(t *testing.T) {
+	// Subprocess errors are swallowed; just verify no panic with hostile input.
+	sendDesktopNotify(`"; rm -rf /`, "body\x00with null")
+	sendDesktopNotify("", `body "quoted"`)
+}
+
+// TestTerm_NotifyBusy_ExtrasDropped verifies that concurrent OSC notifications
+// are deduplicated: while one is in flight, subsequent calls are dropped.
+func TestTerm_NotifyBusy_ExtrasDropped(t *testing.T) {
+	block := make(chan struct{})
+	finished := make(chan struct{})
+	calls := 0
+
+	term := &Term{grid: NewGrid(4, 8)}
+	term.cfg.OnNotify = func(_, _ string) {
+		calls++
+		<-block
+		close(finished)
+	}
+
+	// Replicate the exact handler registered in New.
+	send := func() {
+		if !term.notifyBusy.CompareAndSwap(false, true) {
+			return
+		}
+		fn := term.cfg.OnNotify
+		go func() {
+			defer term.notifyBusy.Store(false)
+			fn("", "msg")
+		}()
+	}
+
+	send() // acquires busy, goroutine blocks on <-block
+	send() // dropped
+	send() // dropped
+	close(block)
+
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for notification goroutine")
+	}
+
+	if calls != 1 {
+		t.Fatalf("want 1 call, got %d", calls)
 	}
 }
