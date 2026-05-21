@@ -244,3 +244,141 @@ func TestGrid_ScrollViewTop_PinsToOldestRow(t *testing.T) {
 		t.Errorf("empty scrollback: ViewOffset = %d, want 0", g2.ViewOffset)
 	}
 }
+
+func TestGrid_ScrollViewPx_SubRow(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	const cellH float32 = 20
+	// Scroll 5px — less than one row, stays at ViewOffset=0.
+	g.ScrollViewPx(5, cellH)
+	if g.ViewOffset != 0 {
+		t.Errorf("ViewOffset = %d, want 0", g.ViewOffset)
+	}
+	if math.Abs(float64(g.ViewSubPx-5)) > 0.001 {
+		t.Errorf("ViewSubPx = %v, want 5", g.ViewSubPx)
+	}
+}
+
+func TestGrid_ScrollViewPx_MultiRow(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	const cellH float32 = 20
+	// Scroll 1.5 rows = 30px.
+	g.ScrollViewPx(30, cellH)
+	if g.ViewOffset != 1 {
+		t.Errorf("ViewOffset = %d, want 1", g.ViewOffset)
+	}
+	if math.Abs(float64(g.ViewSubPx-10)) > 0.001 {
+		t.Errorf("ViewSubPx = %v, want 10", g.ViewSubPx)
+	}
+}
+
+func TestGrid_ScrollViewPx_ClampAtZero(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	const cellH float32 = 20
+	g.ScrollViewPx(10, cellH) // scroll forward 10px
+	g.ScrollViewPx(-50, cellH) // try to scroll past the bottom
+	if g.ViewOffset != 0 {
+		t.Errorf("ViewOffset = %d, want 0", g.ViewOffset)
+	}
+	if g.ViewSubPx != 0 {
+		t.Errorf("ViewSubPx = %v, want 0", g.ViewSubPx)
+	}
+}
+
+func TestGrid_ScrollViewPx_ClampAtTop(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	const cellH float32 = 20
+	// Scroll way past the top.
+	g.ScrollViewPx(9999, cellH)
+	if g.ViewOffset != 4 {
+		t.Errorf("ViewOffset = %d, want 4", g.ViewOffset)
+	}
+	if g.ViewSubPx != 0 {
+		t.Errorf("ViewSubPx = %v, want 0 at top", g.ViewSubPx)
+	}
+}
+
+func TestGrid_ScrollViewPx_ResetView(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	g.ScrollViewPx(35, 20)
+	g.ResetView()
+	if g.ViewOffset != 0 || g.ViewSubPx != 0 {
+		t.Errorf("ResetView: got (%d, %v), want (0, 0)", g.ViewOffset, g.ViewSubPx)
+	}
+}
+
+func TestGrid_ScrollViewTop_ZerosViewSubPx(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	g.ViewSubPx = 7.5
+	g.ScrollViewTop()
+	if g.ViewSubPx != 0 {
+		t.Errorf("ViewSubPx = %v after ScrollViewTop, want 0", g.ViewSubPx)
+	}
+}
+
+func TestGrid_ScrollViewPx_NaNDeltaIsNoOp(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	g.ScrollViewPx(10, 20)
+	offset, subPx := g.ViewOffset, g.ViewSubPx
+	g.ScrollViewPx(float32(math.NaN()), 20)
+	if g.ViewOffset != offset || g.ViewSubPx != subPx {
+		t.Errorf("NaN delta changed state: (%d,%v) → (%d,%v)", offset, subPx, g.ViewOffset, g.ViewSubPx)
+	}
+}
+
+func TestGrid_ScrollViewPx_ZeroCellHIsNoOp(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	g.ScrollViewPx(10, 20)
+	offset, subPx := g.ViewOffset, g.ViewSubPx
+	g.ScrollViewPx(99, 0)
+	if g.ViewOffset != offset || g.ViewSubPx != subPx {
+		t.Errorf("zero cellH changed state: (%d,%v) → (%d,%v)", offset, subPx, g.ViewOffset, g.ViewSubPx)
+	}
+}
+
+func TestGrid_ScrollViewPx_ScrollView_ZerosSubPx(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	g.ScrollViewPx(15, 20) // ViewOffset=0, ViewSubPx=15
+	g.ScrollView(1)        // integer jump; must clear ViewSubPx
+	if g.ViewSubPx != 0 {
+		t.Errorf("ScrollView did not zero ViewSubPx: got %v", g.ViewSubPx)
+	}
+	if g.ViewOffset != 1 {
+		t.Errorf("ViewOffset = %d, want 1", g.ViewOffset)
+	}
+}

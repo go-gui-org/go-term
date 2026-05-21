@@ -262,3 +262,17 @@ func TestGrid_Resize_Reflow_DeepScrollbackNarrow_CursorSurvives(t *testing.T) {
 		t.Errorf("scrollback len %d exceeds cap %d", g.Scrollback.Len(), g.ScrollbackCap)
 	}
 }
+
+func TestGrid_Resize_ZerosViewSubPx(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	g.ViewSubPx = 12.5
+	g.ViewOffset = 2
+	g.Resize(4, 3)
+	if g.ViewSubPx != 0 {
+		t.Errorf("ViewSubPx = %v after Resize, want 0", g.ViewSubPx)
+	}
+}

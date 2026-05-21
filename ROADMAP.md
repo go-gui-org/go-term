@@ -814,8 +814,18 @@ a real annoyance.
 
 **Why:** Currently, most terminal emulators scroll cell-by-cell. Ghostty and Kitty are famous for their buttery-smooth, pixel-perfect scrolling, a major UX polish.
 
-- [ ] `grid.go`: Change `ViewOffset` from an `int` (rows) to a `float32` (pixels).
-- [ ] `widget.go`: `onDraw` renders partial top and bottom rows based on the fractional offset.
+- [x] `grid.go`: Added `ViewSubPx float32` alongside `ViewOffset int` — combined they give
+      the exact pixel scroll position (ViewOffset rows + ViewSubPx pixels). Added
+      `partialTopCell(col)` helper for the extra row rendered at the top of the viewport.
+- [x] `grid_scroll.go`: `ScrollViewPx(deltaPx, cellH)` converts raw pixel deltas into
+      `(ViewOffset, ViewSubPx)`. `ResetView`, `ScrollViewTop`, and `ScrollView` zero
+      `ViewSubPx` so integer jumps land cleanly on row boundaries.
+- [x] `widget.go`: `onDraw` applies `renderYOff = ViewSubPx` to shift all content rows;
+      renders an extra partial row above the viewport when `ViewSubPx > 0`. Scroll input
+      (`onMouseScroll`, `momentumLoop`) calls `ScrollViewPx` directly — no more integer
+      truncation. All `ViewOffset == 0` liveness checks include `ViewSubPx == 0`.
+- [x] Tests: `TestGrid_ScrollViewPx_SubRow`, `…_MultiRow`, `…_ClampAtZero`,
+      `…_ClampAtTop`, `…_ResetView`, `…_ScrollView_ZerosSubPx`.
 
 **Demo test:** Slowly scroll the mouse wheel; text should move by pixels, not by full cell heights.
 

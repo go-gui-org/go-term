@@ -290,6 +290,8 @@ type Grid struct {
 	Scrollback    scrollbackRing
 	ScrollbackCap int
 	ViewOffset    int
+	// 0 ≤ ViewSubPx < cellH; with ViewOffset gives the exact scroll position.
+	ViewSubPx float32
 
 	// RowWrapped[r] is true when row r ended with an autowrap (the cursor
 	// reached the right margin and wrapped onto row r+1). During Resize,
@@ -917,6 +919,17 @@ func (g *Grid) ContentRowToViewport(contentRow int) (int, bool) {
 		return vr, true
 	}
 	return 0, false
+}
+
+// partialTopRow returns the scrollback row just above the current viewport top —
+// visible when ViewSubPx > 0. Returns nil when no such row exists. Caller must hold Mu.
+func (g *Grid) partialTopRow() []Cell {
+	sb := g.Scrollback.Len()
+	idx := sb - clamp(g.ViewOffset, 0, sb) - 1
+	if idx < 0 {
+		return nil
+	}
+	return g.Scrollback.Row(idx)
 }
 
 // rowRunes returns the rune slice for a content row with length == g.Cols,

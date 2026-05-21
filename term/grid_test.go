@@ -154,6 +154,39 @@ func TestClampScrollback_Bounds(t *testing.T) {
 	}
 }
 
+func TestGrid_PartialTopRow_ReturnsScrollbackRow(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	fillRow(g, 0, 'X')
+	g.scrollUpRegion(1)
+	row := g.partialTopRow()
+	if row == nil {
+		t.Fatal("partialTopRow returned nil, want scrollback row")
+	}
+	if row[0].Ch != 'X' {
+		t.Errorf("row[0].Ch = %q, want 'X'", row[0].Ch)
+	}
+}
+
+func TestGrid_PartialTopRow_EmptyScrollbackReturnsNil(t *testing.T) {
+	g := NewGrid(3, 2)
+	if g.partialTopRow() != nil {
+		t.Error("empty scrollback: want nil")
+	}
+}
+
+func TestGrid_PartialTopRow_AtTopReturnsNil(t *testing.T) {
+	g := NewGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	g.ViewOffset = g.Scrollback.Len()
+	if g.partialTopRow() != nil {
+		t.Error("at top: want nil")
+	}
+}
+
 // fillRow writes ch into every cell of row r. Test helper for region
 // scroll/insert/delete coverage where each row needs a unique marker.
 func fillRow(g *Grid, r int, ch rune) {

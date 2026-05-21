@@ -13,7 +13,7 @@ import (
 
 // scrollbarThumb delegates to scrollbarGeometry so tests share the production formula.
 func scrollbarThumb(sbRows, liveRows, viewOffset int, viewH float32) (thumbY, thumbH float32) {
-	return scrollbarGeometry(sbRows, liveRows, viewOffset, viewH)
+	return scrollbarGeometry(sbRows, liveRows, float32(viewOffset), viewH)
 }
 
 func TestScrollbarGeometry_LiveView(t *testing.T) {
@@ -45,6 +45,24 @@ func TestScrollbarGeometry_MidView(t *testing.T) {
 		t.Errorf("mid view: thumb midpoint = %.3f, want ~%.3f", thumbMid, float32(h/2))
 	}
 }
+
+func TestScrollbarGeometry_SubPixel(t *testing.T) {
+	// Verify that fractional viewOffset produces fractional thumbY changes
+	const sb, rows, h = 100, 24, 480.0
+	y0, _ := scrollbarGeometry(sb, rows, 10.0, h)
+	yHalf, _ := scrollbarGeometry(sb, rows, 10.5, h)
+	y1, _ := scrollbarGeometry(sb, rows, 11.0, h)
+
+	if yHalf <= y1 || yHalf >= y0 {
+		t.Errorf("expected yHalf (%f) to be strictly between y1 (%f) and y0 (%f)", yHalf, y1, y0)
+	}
+
+	expectedHalf := (y0 + y1) / 2
+	if math.Abs(float64(yHalf-expectedHalf)) > 0.001 {
+		t.Errorf("yHalf = %f, want exactly half-way value %f", yHalf, expectedHalf)
+	}
+}
+
 
 func TestRuneString_ASCIINoAlloc(t *testing.T) {
 	var sink string

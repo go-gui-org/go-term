@@ -296,10 +296,6 @@ type Term struct {
 	// buffer sink so key/focus behavior can be asserted without a live PTY.
 	writeHost func([]byte) error
 
-	// scrollAcc carries sub-cell pixel remainder between live scroll events
-	// so no movement is lost. Main-thread only; no lock needed.
-	scrollAcc float32
-
 	// Search state. All fields accessed on the GUI goroutine only (onChar,
 	// onKeyDown, onDraw) — no lock required.
 	searchActive  bool
@@ -344,7 +340,6 @@ type Term struct {
 	// momentumMu-protected fields.
 	momentumMu       sync.Mutex
 	momentumVel      float64       // EMA of recent scroll deltas (pixels)
-	momentumAcc      float64       // sub-cell pixel remainder for coast
 	momentumCellH    float32       // cellH snapshot at last scroll event
 	momentumCoasting bool          // true while goroutine is decelerating
 	momentumKick     chan struct{} // buffered 1; wakes momentumLoop
@@ -488,7 +483,7 @@ func (t *Term) blinkLoop() {
 		case <-tk.C:
 			t.grid.Mu.Lock()
 			redraw := t.grid.CursorVisible &&
-				t.grid.ViewOffset == 0 &&
+				t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0 &&
 				t.cursorBlinks()
 			t.grid.Mu.Unlock()
 			if redraw {
@@ -812,13 +807,13 @@ func (t *Term) bumpVersion() { t.drawVersion.Add(1) }
 
 // scrollbarGeometry computes the scrollbar thumb Y position and height.
 // sbLen = len(Scrollback), viewH = canvas pixel height. Caller ensures sbLen > 0.
-func scrollbarGeometry(sbLen, rows, viewOffset int, viewH float32) (thumbY, thumbH float32) {
+func scrollbarGeometry(sbLen, rows int, viewOffset float32, viewH float32) (thumbY, thumbH float32) {
 	total := float32(sbLen + rows)
 	if total <= 0 {
 		return
 	}
 	thumbH = float32(rows) / total * viewH
-	thumbY = float32(sbLen-viewOffset) / total * viewH
+	thumbY = (float32(sbLen) - viewOffset) / total * viewH
 	return
 }
 
@@ -956,7 +951,8 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	// branches and per-cell InSelection / search-match work.
 	g := t.grid
 	rows, cols = g.Rows, g.Cols
-	live := g.ViewOffset == 0 && !g.SelActive && !t.searchActive
+	renderYOff := g.ViewSubPx
+	live := g.ViewOffset == 0 && renderYOff == 0 && !g.SelActive && !t.searchActive
 	cells := g.Cells
 
 	// Pre-map search matches and selection to viewport rows to avoid O(N)
@@ -1034,19 +1030,41 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		}
 	}
 
-	// Background pass: coalesce runs of equal bg color per row.
+	// Resolve partial top row once for both bg and fg passes.
+	// Nil when there is no scrollback row above the current viewport.
+	var partialRow []Cell
+	if renderYOff > 0 {
+		partialRow = g.partialTopRow()
+	}
+
+	// Background pass: optional partial top row (renders at y = -cellH + renderYOff
+	// so only its bottom renderYOff pixels are visible; canvas clips y < 0), then
+	// all regular rows.
+	if partialRow != nil {
+		runStart := 0
+		runColor := g.Theme.bg(partialRow[0])
+		for c := 1; c < cols; c++ {
+			cur := g.Theme.bg(partialRow[c])
+			if cur != runColor {
+				t.fillRun(dc, -1, runStart, c, runColor, renderYOff)
+				runStart = c
+				runColor = cur
+			}
+		}
+		t.fillRun(dc, -1, runStart, cols, runColor, renderYOff)
+	}
 	for r := range renderRows {
 		runStart := 0
 		runColor := g.Theme.bg(resolveCell(r, 0))
 		for c := 1; c < cols; c++ {
 			cur := g.Theme.bg(resolveCell(r, c))
 			if cur != runColor {
-				t.fillRun(dc, r, runStart, c, runColor)
+				t.fillRun(dc, r, runStart, c, runColor, renderYOff)
 				runStart = c
 				runColor = cur
 			}
 		}
-		t.fillRun(dc, r, runStart, cols, runColor)
+		t.fillRun(dc, r, runStart, cols, runColor, renderYOff)
 	}
 
 	// Foreground pass: coalesce adjacent cells with identical style into a
@@ -1086,16 +1104,32 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		cs.Typeface = runStyle.typeface
 		cs.Underline = false
 		cs.Strikethrough = runStyle.strikethrough
-		dc.Text(float32(runStart)*t.cellW, float32(r)*t.cellH, text, cs)
+		rowY := float32(r)*t.cellH + renderYOff
+		dc.Text(float32(runStart)*t.cellW, rowY, text, cs)
 		if runStyle.ulStyle != ULNone {
 			t.drawUnderlineDecor(dc,
-				float32(runStart)*t.cellW, float32(r)*t.cellH,
+				float32(runStart)*t.cellW, rowY,
 				float32(runCols)*t.cellW,
 				runStyle.ulStyle, runStyle.ulColor)
 		}
 		runOpen = false
 		t.runBuf.Reset()
 		runCols = 0
+	}
+	// Partial top row foreground pass: per-cell (no run coalescing).
+	if partialRow != nil {
+		partialY := -t.cellH + renderYOff
+		for c := range cols {
+			cell := partialRow[c]
+			if cell.Width == 0 && cell.Ch == 0 {
+				continue
+			}
+			if cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0 {
+				continue
+			}
+			k := cellRunKey(cell, style, g, hR, hC)
+			t.emitCell(dc, float32(c)*t.cellW, partialY, cell, k, style)
+		}
 	}
 	for r := range renderRows {
 		runOpen = false
@@ -1110,18 +1144,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			isPlainSpace := cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0
 			if cell.Width == 2 {
 				flushRun(r)
-				cs := style
-				cs.Color = k.color
-				cs.Typeface = k.typeface
-				cs.Underline = false
-				cs.Strikethrough = k.strikethrough
-				dc.Text(float32(c)*t.cellW, float32(r)*t.cellH,
-					runeString(cell.Ch), cs)
-				if k.ulStyle != ULNone {
-					t.drawUnderlineDecor(dc,
-						float32(c)*t.cellW, float32(r)*t.cellH,
-						2*t.cellW, k.ulStyle, k.ulColor)
-				}
+				t.emitCell(dc, float32(c)*t.cellW, float32(r)*t.cellH+renderYOff, cell, k, style)
 				continue
 			}
 			if isPlainSpace {
@@ -1160,7 +1183,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 				continue
 			}
 			x := float32(gr.OriginC) * t.cellW
-			y := float32(vr) * t.cellH
+			y := float32(vr)*t.cellH + renderYOff
 			w := float32(gr.Cols) * t.cellW
 			h := float32(gr.Rows) * t.cellH
 			dc.Image(x, y, w, h, gr.Src,
@@ -1174,7 +1197,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	// entirely when DEC ?25 has hidden it OR when the viewport is
 	// scrolled back into history. Honor blink-off half-cycle when
 	// blinking is enabled.
-	if g.CursorVisible && g.ViewOffset == 0 && !t.cursorBlinkOff(now) {
+	if g.CursorVisible && g.ViewOffset == 0 && renderYOff == 0 && !t.cursorBlinkOff(now) {
 		cc := g.CursorC
 		if cc >= cols {
 			cc = cols - 1
@@ -1196,8 +1219,9 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	// Scrollbar: pill-shaped thumb on the right edge. Visible while scrolled
 	// back or within scrollbarDuration of the last scroll event.
 	sb := g.Scrollback.Len()
-	if (now.Before(t.scrollbarUntil) || g.ViewOffset > 0) && sb > 0 && dc.Width >= scrollbarWidth {
-		thumbY, thumbH := scrollbarGeometry(sb, g.Rows, g.ViewOffset, dc.Height)
+	if (now.Before(t.scrollbarUntil) || g.ViewOffset > 0 || g.ViewSubPx > 0) && sb > 0 && dc.Width >= scrollbarWidth {
+		viewOffsetVal := float32(g.ViewOffset) + g.ViewSubPx/t.cellH
+		thumbY, thumbH := scrollbarGeometry(sb, g.Rows, viewOffsetVal, dc.Height)
 		dc.FilledRoundedRect(dc.Width-scrollbarWidth, thumbY, scrollbarWidth, thumbH,
 			scrollbarWidth/2, gui.RGBA(128, 128, 128, 120))
 	}
@@ -1315,12 +1339,24 @@ func (t *Term) drawUnderlineDecor(dc *gui.DrawContext, x, y, w float32, ulStyle 
 	}
 }
 
-func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color) {
+func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell Cell, k runKey, base gui.TextStyle) {
+	cs := base
+	cs.Color = k.color
+	cs.Typeface = k.typeface
+	cs.Underline = false
+	cs.Strikethrough = k.strikethrough
+	dc.Text(x, y, runeString(cell.Ch), cs)
+	if k.ulStyle != ULNone {
+		t.drawUnderlineDecor(dc, x, y, float32(cell.Width)*t.cellW, k.ulStyle, k.ulColor)
+	}
+}
+
+func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yOff float32) {
 	if color == t.grid.Theme.DefaultBG {
 		return // canvas already painted with default bg.
 	}
 	x := float32(c0) * t.cellW
-	y := float32(row) * t.cellH
+	y := float32(row)*t.cellH + yOff
 	w := float32(c1-c0) * t.cellW
 	dc.FilledRect(x, y, w, t.cellH, color)
 }
@@ -1409,7 +1445,7 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
 // rendered at the live grid. No-op when already at the bottom.
 func (t *Term) snapToLive() {
 	t.grid.Mu.Lock()
-	if t.grid.ViewOffset != 0 {
+	if t.grid.ViewOffset != 0 || t.grid.ViewSubPx != 0 {
 		t.grid.ResetView()
 	}
 	t.grid.Mu.Unlock()
@@ -1459,7 +1495,7 @@ type mouseSnap struct {
 	any    bool // ?1003
 	sgr    bool // ?1006
 	pixels bool // ?1016 — pixel-precise SGR coordinates
-	live   bool // ViewOffset == 0
+	live   bool // ViewOffset == 0 && ViewSubPx == 0
 }
 
 func (t *Term) mouseSnap() mouseSnap {
@@ -1471,7 +1507,7 @@ func (t *Term) mouseSnap() mouseSnap {
 		any:    t.grid.MouseTrackAny,
 		sgr:    t.grid.MouseSGR,
 		pixels: t.grid.MouseSGRPixels,
-		live:   t.grid.ViewOffset == 0,
+		live:   t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0,
 	}
 }
 
@@ -1785,17 +1821,16 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// into ScrollY, so integer-valued ScrollY reliably signals a mouse wheel.
 	isMouseWheel := e.ScrollY == float32(int32(e.ScrollY))
 
-	// Accumulate scaled pixels so sub-cell deltas carry over between events.
-	// scrollSensitivity converts raw trackpad px to a faster scroll speed;
-	// the accumulator ensures no movement is lost to integer truncation.
+	// Pixel-perfect scroll: pass the raw scaled delta directly to ScrollViewPx
+	// which accumulates it into ViewOffset + ViewSubPx. No integer truncation.
 	const scrollSensitivity float32 = 15
-	t.scrollAcc += e.ScrollY * scrollSensitivity
-	lines := int(t.scrollAcc / t.cellH)
-	if lines != 0 {
-		t.scrollAcc -= float32(lines) * t.cellH
-		t.grid.Mu.Lock()
-		t.grid.ScrollView(lines)
-		t.grid.Mu.Unlock()
+	deltaPx := e.ScrollY * scrollSensitivity
+	t.grid.Mu.Lock()
+	prevOff, prevSub := t.grid.ViewOffset, t.grid.ViewSubPx
+	t.grid.ScrollViewPx(deltaPx, t.cellH)
+	changed := t.grid.ViewOffset != prevOff || t.grid.ViewSubPx != prevSub
+	t.grid.Mu.Unlock()
+	if changed {
 		t.showScrollbar()
 		t.bumpVersion()
 		w.UpdateWindow()
@@ -1822,7 +1857,6 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if math.Abs(newVel) >= math.Abs(t.momentumVel) || (t.momentumVel > 0) != (newVel > 0) {
 		t.momentumVel = newVel
 	}
-	t.momentumAcc = 0
 	t.momentumCellH = t.cellH
 	t.momentumCoasting = false
 	t.momentumMu.Unlock()
@@ -1841,7 +1875,6 @@ func (t *Term) cancelMomentum() {
 	}
 	t.momentumMu.Lock()
 	t.momentumVel = 0
-	t.momentumAcc = 0
 	t.momentumCoasting = false
 	t.momentumMu.Unlock()
 }
@@ -1859,8 +1892,8 @@ func (t *Term) kickMomentum() {
 }
 
 // momentumLoop decelerates the scroll velocity after the user lifts their
-// finger. Ticks at ~60 fps; each tick applies the decaying velocity to a
-// pixel accumulator and converts whole cells into ScrollView calls.
+// finger. Ticks at ~60 fps; each tick passes the decaying pixel velocity
+// to ScrollViewPx for sub-cell-accurate smooth scrolling.
 func (t *Term) momentumLoop() {
 	const (
 		tickDur      = 16 * time.Millisecond
@@ -1888,24 +1921,16 @@ func (t *Term) momentumLoop() {
 				friction = frictionFast
 			}
 			t.momentumVel *= friction
-			t.momentumAcc += t.momentumVel
 			cellH := t.momentumCellH
-			lines := 0
-			if finite(cellH) {
-				lines = int(t.momentumAcc / float64(cellH))
-				if lines != 0 {
-					t.momentumAcc -= float64(lines) * float64(cellH)
-				}
-			}
 			if math.Abs(t.momentumVel) < minVel {
 				t.momentumCoasting = false
 				t.momentumVel = 0
-				t.momentumAcc = 0
 			}
+			deltaPx := float32(t.momentumVel)
 			t.momentumMu.Unlock()
-			if lines != 0 {
+			if deltaPx != 0 && finite(cellH) {
 				t.grid.Mu.Lock()
-				t.grid.ScrollView(lines)
+				t.grid.ScrollViewPx(deltaPx, cellH)
 				t.grid.Mu.Unlock()
 				t.bumpVersion()
 				t.win.QueueCommand(func(w *gui.Window) {
@@ -2480,6 +2505,7 @@ func (t *Term) jumpToMark(backward bool, w *gui.Window) {
 		} else {
 			t.grid.ViewOffset = sb - row
 		}
+		t.grid.ViewSubPx = 0
 	}
 	t.grid.Mu.Unlock()
 	if ok {
@@ -2520,6 +2546,7 @@ func (t *Term) searchJump(forward bool, w *gui.Window) {
 		} else {
 			g.ViewOffset = clamp(sb-pos.Row, 0, sb)
 		}
+		g.ViewSubPx = 0
 	}
 	g.Mu.Unlock()
 	if ok {

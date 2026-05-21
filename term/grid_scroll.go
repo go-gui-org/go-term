@@ -1,5 +1,7 @@
 package term
 
+import "math"
+
 // scrollUpRegion shifts rows [Top..Bottom] up by n, clearing the bottom
 // n rows of the region with default cells. When the region spans the
 // full screen and ScrollbackCap > 0, the displaced top rows are pushed
@@ -110,6 +112,8 @@ func (g *Grid) ScrollDown(n int) { g.scrollDownRegion(n) }
 // Result clamped to [0, len(Scrollback)]. Saturating add: a delta near
 // math.MinInt/MaxInt (e.g. derived from NaN/Inf wheel deltas) would
 // overflow ViewOffset+delta before clamp, so detect the wrap.
+// ViewSubPx is zeroed so integer jumps (PgUp/PgDn, jump-to-mark) land
+// cleanly on row boundaries.
 func (g *Grid) ScrollView(delta int) {
 	max := g.Scrollback.Len()
 	switch {
@@ -120,10 +124,37 @@ func (g *Grid) ScrollView(delta int) {
 	default:
 		g.ViewOffset = clamp(g.ViewOffset+delta, 0, max)
 	}
+	g.ViewSubPx = 0
+}
+
+// ScrollViewPx scrolls the viewport by deltaPx pixels. The total pixel
+// position (ViewOffset*cellH + ViewSubPx + deltaPx) is converted back
+// into a whole-row ViewOffset and a fractional ViewSubPx remainder.
+// Clamped to [0, Scrollback.Len()*cellH]. cellH <= 0 is a no-op.
+func (g *Grid) ScrollViewPx(deltaPx, cellH float32) {
+	if cellH <= 0 || math.IsNaN(float64(deltaPx)) {
+		return
+	}
+	total := float64(g.ViewOffset)*float64(cellH) + float64(g.ViewSubPx) + float64(deltaPx)
+	maxPx := float64(g.Scrollback.Len()) * float64(cellH)
+	if total < 0 {
+		total = 0
+	} else if total > maxPx {
+		total = maxPx
+	}
+	rows := int(total / float64(cellH))
+	g.ViewOffset = rows
+	g.ViewSubPx = float32(total - float64(rows)*float64(cellH))
 }
 
 // ResetView snaps the viewport back to the live grid.
-func (g *Grid) ResetView() { g.ViewOffset = 0 }
+func (g *Grid) ResetView() {
+	g.ViewOffset = 0
+	g.ViewSubPx = 0
+}
 
 // ScrollViewTop moves the viewport to the oldest scrollback row.
-func (g *Grid) ScrollViewTop() { g.ViewOffset = g.Scrollback.Len() }
+func (g *Grid) ScrollViewTop() {
+	g.ViewOffset = g.Scrollback.Len()
+	g.ViewSubPx = 0
+}

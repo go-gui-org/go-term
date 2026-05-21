@@ -389,6 +389,7 @@ func (g *Grid) Resize(rows, cols int) {
 	g.Top = 0
 	g.Bottom = rows - 1
 	g.ViewOffset = 0
+	g.ViewSubPx = 0
 
 	if g.SelActive {
 		delta := g.Scrollback.Len() - oldSbLen
