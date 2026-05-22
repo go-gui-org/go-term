@@ -9,10 +9,9 @@ at the repo root. Tick boxes there as work lands.
 
 ## What this is
 
-`go-term` is a minimal terminal-emulator widget built on the `go-gui`
+`go-term` is a full-featured terminal-emulator widget built on the `go-gui`
 framework (sibling repo `../go-gui`). It spawns a real shell via PTY and
-renders the cell grid through `gui.DrawCanvas`. It is intentionally
-small — designed to stay approachable, not feature-complete. Targets
+renders the cell grid through `gui.DrawCanvas` (GPU-accelerated). Targets
 macOS + Linux only.
 
 ## Common commands
@@ -60,24 +59,40 @@ immediately by `go build`.
 
 ## Architecture
 
-Three layers, one file each, in `term/`. Each layer is independently
-testable and the dependencies flow strictly downward.
+Three layers; dependencies flow strictly downward. Each layer is split
+across multiple files by concern — the layering invariant is what matters,
+not the file count.
 
 ```
-cmd/demo/main.go       gui.NewWindow + term.New + backend.Run
+cmd/demo/main.go         gui.NewWindow + term.New + backend.Run
         │
         ▼
-term/widget.go         Term widget: View(), OnDraw, OnChar, OnKeyDown,
-                       reader goroutine. Bridge to go-gui.
+term/widget.go           Term widget: View(), OnDraw, OnChar, OnKeyDown,
+                         reader goroutine. Bridge to go-gui.
         │
         ▼
-term/parser.go         VT state machine. Bytes → grid mutations.
+term/parser.go           VT state machine entry point. Bytes → grid mutations.
+term/parser_csi.go       CSI dispatch (SGR, cursor, erase, modes, DECSCUSR, KKP…)
+term/parser_osc.go       OSC dispatch (0/1/2/7/8/9/10/11/12/52/133/777/1337)
+term/parser_dcs.go       DCS dispatch (DECRQSS, XTGETTCAP, sixel, sync)
+term/parser_apc.go       APC dispatch (Kitty Graphics Protocol)
         │
         ▼
-term/grid.go           Cell buffer + cursor + scroll-up. Pure data.
+term/grid.go             Cell buffer + cursor state. Pure data.
+term/grid_alt.go         Alt-screen enter/exit.
+term/grid_cursor.go      Cursor move, save/restore, DECSCUSR.
+term/grid_edit.go        Erase, insert/delete lines/chars.
+term/grid_mark.go        OSC 133 semantic shell marks.
+term/grid_reflow.go      Logical line reflow on resize.
+term/grid_scroll.go      Scroll regions; pixel-accurate ViewSubPx math.
+term/grid_search.go      Literal and RE2 regex search.
+term/grid_selection.go   Content-relative text selection.
+term/scrollback.go       Scrollback ring buffer.
+term/graphics.go         Graphic type; sixel decoder; PNG data-URL encoder.
 
-term/pty.go            creack/pty wrapper. Spawns $SHELL, resize ioctl.
-term/palette.go        16-color ANSI table + default fg/bg.
+term/pty.go              creack/pty wrapper. Spawns $SHELL, resize ioctl.
+term/palette.go          256-color ANSI table (16 + 6×6×6 cube + 24 grayscale) +
+                         RGB resolution helpers.
 ```
 
 ### Concurrency model
@@ -101,36 +116,54 @@ term/palette.go        16-color ANSI table + default fg/bg.
 3. Each frame: derive `rows = floor(dc.Height/cellH)`,
    `cols = floor(dc.Width/cellW)`. If they changed, `Grid.Resize` and
    `PTY.Resize` (sends `TIOCSWINSZ` so the child sees `SIGWINCH`).
-4. Two passes per frame: coalesced bg-rect runs per row, then per-cell
-   text. Cursor drawn last as inverted block.
-5. The `DrawCanvas` is created with empty `ID`, which bypasses the
-   tessellation cache — every frame re-runs `OnDraw`. If perf becomes
-   an issue, give it an ID and bump `Version` on grid changes.
+4. Three passes per frame: coalesced bg-rect runs per row, then coalesced
+   foreground text runs, then graphics (sixel/kitty/iTerm2 images), then
+   the cursor. Cursor shape depends on `CursorShape` (block/underline/bar)
+   and `CursorColor`; block falls back to cell-inversion when no color set.
+5. `DrawCanvas` uses `ID: "term-canvas"` and a `Version` counter —
+   go-gui's tessellation cache skips `OnDraw` entirely when the version
+   is unchanged. `readLoop` only bumps the version when `HasDirtyRows`
+   is true, so no-op PTY sequences do not invalidate the cache.
 
-### Parser scope (intentional)
+### Parser scope
 
-Supports a modern xterm-compatible subset:
+Supports a modern xterm/kitty-compatible subset:
 
 - C0: `BEL`, `BS`, `HT`, `LF`, `CR`, `ESC`.
-- `CSI ... m` (SGR): reset, bold/underline/inverse, dim/italic/strike,
-  fg/bg 16-color, 256-color, and 24-bit truecolor.
-- CSI: cursor movement, erase, scroll regions (DECSTBM), line/char
-  insertion/deletion.
-- Modes: Alt screen (1049/1047/47), Mouse (1000/1002/1003/1006),
-  Bracketed paste (2004), Focus reporting (1004).
-- OSC: window title (0/1/2), CWD (7), Hyperlinks (8), Clipboard (52).
-- DCS: DECRQSS, XTGETTCAP, Synchronized Updates (?2026).
+- SGR (`CSI … m`): reset; bold/dim/italic/underline/inverse/strikethrough;
+  extended underlines (4:1–4:5, SGR 21); underline color (58); fg/bg
+  16-color, 256-color, 24-bit truecolor.
+- CSI: cursor movement and positioning, erase in line/display, scroll
+  regions (DECSTBM), IND/RI/NEL, IL/DL/ICH/DCH/SU/SD, DECSCUSR (cursor
+  shape/blink), DA1, tab stop clear (TBC).
+- Modes: alt screen (1049/1047/47), mouse (1000/1002/1003/1006/1016),
+  bracketed paste (2004), focus reporting (1004), synchronized updates
+  (2026).
+- Kitty Keyboard Protocol: `CSI > u` / `< u` / `= u` / `? u` (push/pop/
+  set/query); key-release events; left/right modifier distinction.
+- DEC Special Graphics: `SI`/`SO`, `ESC (0` / `ESC (B`.
+- OSC: window title (0/1/2), CWD (7), hyperlinks (8), desktop
+  notifications (9/777), dynamic colors (10/11/12), clipboard (52),
+  semantic shell marks (133), iTerm2 inline images (1337).
+- DCS: DECRQSS, XTGETTCAP, sixel graphics, synchronized updates.
+- APC: Kitty Graphics Protocol (transmit/display/place/delete; PNG, raw
+  RGBA/RGB; chunked base64).
 
-When extending: add cases to `dispatchCSI` in `term/parser.go`. Don't
-let parser code reach into go-gui — it must stay grid-only.
+When extending: add cases in the appropriate `parser_*.go` file.
+Don't let parser code reach into go-gui — it must stay grid-only.
 
 ### Keyboard input
 
 `onChar` (printable runes via `gui.ContainerCfg.OnChar`) writes UTF-8
 to the PTY. `onKeyDown` translates non-printable keys (arrows, Enter,
-Backspace, Delete, Page Up/Down, Home/End, Ctrl+letter) into terminal
-byte sequences. Backspace sends `0x7F` (DEL) per xterm convention.
+Backspace (DEL), Delete, Page Up/Down, Home/End, Ctrl+letter, F1–F12,
+numeric keypad) into terminal byte sequences. Alt+key prefixes with ESC.
 Set `e.IsHandled = true` so go-gui doesn't propagate.
+
+When `KittyKeyFlags != 0` the widget emits KKP sequences (`CSI codepoint
+; modifiers u`) instead of legacy bytes for Backspace, Enter, Tab, Escape,
+Ctrl+letters, and functional keys. `onKeyUp` emits release events when
+flag bit 2 is set.
 
 The widget claims focus via `IDFocus: 1` on its outer `gui.Column`.
 If keystrokes don't reach the PTY, focus is the first place to look.
@@ -139,9 +172,7 @@ If keystrokes don't reach the PTY, focus is the first place to look.
 
 These are currently excluded from the roadmap. Each is a real chunk of work:
 
-- Sixel / kitty graphics protocol
 - IME composition / dead keys
-- GPU-accelerated rendering
 - Windows / ConPTY support
 
 ## Conventions
@@ -152,3 +183,10 @@ These are currently excluded from the roadmap. Each is a real chunk of work:
 - Performance target: reduce heap allocations. The OnDraw hot path
   must not allocate per cell — keep `string(rune)` conversions and
   slice growth out of the inner loop if perf work begins.
+- `Grid.Mu` is the single lock — don't add per-feature mutexes.
+- `QueueCommand` is the only thread-safe path from reader goroutine to
+  gui state. Title updates, clipboard writes, and notifications triggered
+  by the parser must go through it.
+- `dispatchCSI`, `dispatchOSC`, `dispatchDCS`, `dispatchAPC` are the
+  single dispatch sites for their respective sequences — extend, don't
+  add parallel dispatchers.
