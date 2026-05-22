@@ -16,6 +16,8 @@ const (
 	stDCSEsc
 	stOSC    // collecting OSC payload, waiting for BEL or ESC \
 	stOSCEsc // saw ESC inside OSC, waiting for terminating '\'
+	stAPC    // collecting APC payload (ESC _ … ESC \) — used by Kitty Graphics Protocol
+	stAPCEsc // saw ESC inside APC, waiting for terminating '\'
 )
 
 // maxOSCBytes caps the OSC payload size so a malicious or runaway
@@ -33,6 +35,24 @@ const maxOSC1337Bytes = 4 << 20
 // 320×240 sample is ~50 KB of sixel data); 1 MiB tolerates real-world
 // frames while keeping a malicious stream bounded.
 const maxDCSBytes = 1 << 20
+
+// maxAPCBytes caps a single APC escape payload. Kitty Graphics Protocol
+// recommends ≤4096 base64 chars per chunk (~3 KB decoded); 8 KB is plenty.
+const maxAPCBytes = 8192
+
+// maxKittyImageBytes caps the assembled (pre-decode) base64 text for a single
+// KGP image across all chunks. Matches the iTerm2 OSC 1337 limit.
+const maxKittyImageBytes = 4 << 20
+
+// maxKittyPendingChunks caps concurrent in-flight KGP chunked transmissions
+// (m=1 sequences that have not yet received a finalising m=0). Bounds
+// kittyChunks growth from a stream that opens many IDs and never closes them.
+const maxKittyPendingChunks = 64
+
+// maxKittyStoreEntries caps the off-screen image store. When full, all
+// stored images are evicted and their temp files removed before adding the
+// new entry, bounding both memory and disk usage.
+const maxKittyStoreEntries = 256
 
 // da1Reply is the Primary Device Attribute response: VT100 with
 // advanced video. Apps like fish probe with CSI c at startup and
@@ -73,6 +93,14 @@ type Parser struct {
 	osc        []byte
 	oscIsImage bool // true once "1337;" prefix detected
 	dcs        []byte
+
+	// apc accumulates the payload of the in-progress APC (Application
+	// Program Command). Used by the Kitty Graphics Protocol (payload
+	// starts with 'G'). Capped at maxAPCBytes per-chunk; chunked images
+	// accumulate base64 text in kittyChunks.
+	apc         []byte
+	kittyChunks map[uint32][]byte      // partial transmissions: id → raw base64 text
+	kittyStore  map[uint32]kittyEntry  // off-screen cache: image id → entry
 
 	// onTitle, if non-nil, is invoked for OSC 0/1/2 (window title).
 	// onReply, if non-nil, is invoked when the parser needs to write
@@ -194,6 +222,9 @@ func (p *Parser) Feed(b []byte) {
 			case ']':
 				p.state = stOSC
 				p.oscReset()
+			case '_':
+				p.state = stAPC
+				p.apc = p.apc[:0]
 			case 'P':
 				p.state = stDCS
 				p.dcs = p.dcs[:0]
@@ -338,6 +369,26 @@ func (p *Parser) Feed(b []byte) {
 				i++
 			} else {
 				p.oscReset()
+				p.state = stEsc
+			}
+		case stAPC:
+			switch c {
+			case 0x1B:
+				p.state = stAPCEsc
+			default:
+				if len(p.apc) < maxAPCBytes {
+					p.apc = append(p.apc, c)
+				}
+			}
+			i++
+		case stAPCEsc:
+			if c == '\\' {
+				p.dispatchAPC()
+				p.apc = p.apc[:0]
+				p.state = stGround
+				i++
+			} else {
+				p.apc = p.apc[:0]
 				p.state = stEsc
 			}
 		}

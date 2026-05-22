@@ -903,22 +903,24 @@ func (g *Grid) ContentCellAt(row, col int) Cell {
 // ViewOffset. Returns (vr, true) when the content row is visible, (0, false)
 // when it is off-screen.
 func (g *Grid) ContentRowToViewport(contentRow int) (int, bool) {
+	vr := g.ContentRowToScreen(contentRow)
+	if vr >= 0 && vr < g.Rows {
+		return vr, true
+	}
+	return 0, false
+}
+
+// ContentRowToScreen maps a content row to its screen row without clamping.
+// The result may be negative (above viewport) or >= g.Rows (below viewport).
+// Use ContentRowToViewport for the ok-gated form.
+func (g *Grid) ContentRowToScreen(contentRow int) int {
 	sb := g.Scrollback.Len()
 	off := clamp(g.ViewOffset, 0, sb)
 	n := min(off, g.Rows)
 	if contentRow < sb {
-		vr := contentRow - (sb - off)
-		if vr >= 0 && vr < n {
-			return vr, true
-		}
-		return 0, false
+		return contentRow - (sb - off)
 	}
-	liveRow := contentRow - sb
-	vr := liveRow + n
-	if vr >= n && vr < g.Rows {
-		return vr, true
-	}
-	return 0, false
+	return contentRow - sb + n
 }
 
 // partialTopRow returns the scrollback row just above the current viewport top —

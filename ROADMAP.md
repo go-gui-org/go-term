@@ -831,12 +831,35 @@ a real annoyance.
 
 ---
 
-## Phase 36 — Kitty Graphics Protocol (CSI _ G)
+## Phase 36 — Kitty Graphics Protocol (APC: ESC _ G … ESC \)
 
 **Why:** Sixel is a legacy protocol that is notoriously inefficient. The Kitty graphics protocol is the modern standard for terminal graphics, heavily adopted by modern emulators.
 
-- [ ] `parser.go`: Add parsing for `CSI _ G` and handle chunked data.
-- [ ] Support off-screen image caching and direct-over-text rendering.
+Note: the protocol uses APC (`ESC _`), not CSI _ G as originally noted.
+
+- [x] `parser.go`: Added `stAPC`/`stAPCEsc` states; `apc []byte`, `kittyChunks`,
+      `kittyStore` fields; `ESC _` dispatch; APC accumulation and dispatch in `Feed()`.
+      `maxAPCBytes = 8192` caps the per-chunk accumulator.
+- [x] `parser_apc.go` (new): `dispatchAPC`, `handleKittyGraphics`, `splitKGPPayload`
+      (key=value parser), `kittyAccumulate` (chunk assembly — base64 text concatenated
+      then decoded once per spec), `kittyPlace`, `kittyDeleteID`, `kittyReply`,
+      `kittyDecodeImage`, `kittyRawToNRGBA`.
+- [x] Actions: `t` (transmit-only), `T` (transmit+display), `p` (place stored),
+      `q` (capability query), `d` (delete by id or `d=a` all).
+- [x] Formats: `f=100` PNG/any-format (via `decodeImageBytes`), `f=32` raw RGBA,
+      `f=24` raw RGB. Off-screen caching in `kittyStore` keyed by image ID.
+- [x] Chunked transmission: raw base64 text is accumulated across chunks in
+      `kittyChunks` and decoded once at the final chunk (`m=0`).
+- [x] Tests: `TestParser_APC_StateTransition`, `TestParser_APC_BareESCAborts`,
+      `TestParser_APC_NonKittyIgnored`, `TestParser_APC_KittyQuery`,
+      `TestParser_APC_KittyQuietMode`, `TestParser_APC_KittyTransmitAndDisplay`,
+      `TestParser_APC_KittyTransmitPNG_Store`, `TestParser_APC_KittyPlace`,
+      `TestParser_APC_KittyChunked`, `TestParser_APC_KittyDelete`,
+      `TestParser_APC_KittyDeleteAll`, `TestParser_APC_KittyRGBA`,
+      `TestParser_APC_KittyRGB`, `TestParser_APC_KittyBadBase64`,
+      `TestParser_APC_KittyRGBAMissingDimensions`, `TestKittyRawToNRGBA_RGBA`,
+      `TestKittyRawToNRGBA_RGB`, `TestKittyRawToNRGBA_TooShort`,
+      `TestKittyRawToNRGBA_InvalidDims`.
 
 **Demo test:** Run a kitty-graphics compatible script (like `kitten icat`) to view high-performance images.
 

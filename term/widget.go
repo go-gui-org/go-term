@@ -940,10 +940,15 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	} else if !t.pendingResizeSince.IsZero() {
 		t.pendingResizeSince = time.Time{}
 	}
-	// Publish the measured cell pixel size so Sixel decode can size graphics
-	// in cell-space at AddGraphic time.
-	t.grid.CellPxW = t.cellW
-	t.grid.CellPxH = t.cellH
+	// Publish cell size in device pixels so image footprint math matches the
+	// device-pixel dimensions stored in image files. dc.Scale is the backing
+	// scale factor (2.0 on Retina); cellW/cellH are in logical points.
+	scale := dc.Scale
+	if scale == 0 {
+		scale = 1
+	}
+	t.grid.CellPxW = t.cellW * scale
+	t.grid.CellPxH = t.cellH * scale
 	t.grid.ClearDirty()
 
 	// Fast path: live viewport with no selection and no active search reads
@@ -1178,8 +1183,11 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	// ContentRowToViewport; off-screen graphics are skipped.
 	if len(g.Graphics) > 0 {
 		for _, gr := range g.Graphics {
-			vr, ok := g.ContentRowToViewport(gr.OriginR)
-			if !ok {
+			vr := g.ContentRowToScreen(gr.OriginR)
+			// Skip only when the image rectangle has no overlap with the
+			// viewport. A negative vr means the top is above the viewport;
+			// dc.Image clips to the canvas so the visible portion renders.
+			if vr >= rows || vr+gr.Rows <= 0 {
 				continue
 			}
 			x := float32(gr.OriginC) * t.cellW

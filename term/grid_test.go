@@ -407,6 +407,41 @@ func TestGrid_ContentRowToViewport_Scrollback(t *testing.T) {
 	}
 }
 
+func TestGrid_ContentRowToScreen_AboveViewport(t *testing.T) {
+	g := NewGrid(3, 5)
+	g.ScrollbackCap = 10
+	g.CursorR = g.Bottom
+	g.Newline()
+	g.Newline()
+	g.Newline()
+	if g.Scrollback.Len() < 2 {
+		t.Skip("insufficient scrollback")
+	}
+	g.ViewOffset = 1
+	got := g.ContentRowToScreen(0)
+	if got >= 0 {
+		t.Errorf("ContentRowToScreen(0) with ViewOffset=1 = %d; want < 0 (above viewport)", got)
+	}
+}
+
+func TestGrid_ContentRowToScreen_BelowViewport(t *testing.T) {
+	g := NewGrid(3, 5)
+	got := g.ContentRowToScreen(g.Rows)
+	if got < g.Rows {
+		t.Errorf("ContentRowToScreen(%d) = %d; want >= %d (below viewport)", g.Rows, got, g.Rows)
+	}
+}
+
+func TestGrid_ContentRowToScreen_LiveRows(t *testing.T) {
+	g := NewGrid(3, 5)
+	for r := range g.Rows {
+		got := g.ContentRowToScreen(r)
+		if got != r {
+			t.Errorf("ContentRowToScreen(%d) = %d; want %d", r, got, r)
+		}
+	}
+}
+
 func TestGrid_TranslateRune_DECGraphicsFullTable(t *testing.T) {
 	g := NewGrid(1, 1)
 	g.CharsetG0 = '0'
