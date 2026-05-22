@@ -189,7 +189,7 @@ func (p *Parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 		// Evict all entries when at capacity to bound disk and memory use.
 		if len(p.kittyStore) >= maxKittyStoreEntries {
 			for _, e := range p.kittyStore {
-				os.Remove(e.path)
+				_ = os.Remove(e.path)
 			}
 			p.kittyStore = make(map[uint32]kittyEntry)
 		}
@@ -233,13 +233,13 @@ func (p *Parser) kittyDeleteID(id uint32, op string) {
 	}
 	if op == "a" || op == "A" {
 		for _, e := range p.kittyStore {
-			os.Remove(e.path)
+			_ = os.Remove(e.path)
 		}
 		p.kittyStore = make(map[uint32]kittyEntry)
 		return
 	}
 	if e, ok := p.kittyStore[id]; ok {
-		os.Remove(e.path)
+		_ = os.Remove(e.path)
 		delete(p.kittyStore, id)
 	}
 }
