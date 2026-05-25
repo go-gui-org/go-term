@@ -2256,6 +2256,8 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	case gui.KeyTab:
 		if kkp := kittyKeySeq(9, e.Modifiers, modes.kittyKeyFlags, false); kkp != nil {
 			out = kkp
+		} else if shift {
+			out = []byte("\x1b[Z")
 		} else {
 			out = []byte{'\t'}
 		}
