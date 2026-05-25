@@ -1,0 +1,137 @@
+package term
+
+import (
+	"strings"
+
+	"golang.org/x/text/unicode/bidi"
+)
+
+// rowHasRTL returns true if any non-null, non-continuation cell in
+// cells[0:cols] carries a strong RTL codepoint (bidi class R or AL).
+// Zero allocations.
+func rowHasRTL(cells []Cell, cols int) bool {
+	if cols > len(cells) {
+		cols = len(cells)
+	}
+	for i := range cols {
+		c := cells[i]
+		if c.Ch == 0 {
+			continue // continuation or empty/uninitialized cell
+		}
+		if isRTLRune(c.Ch) {
+			return true
+		}
+	}
+	return false
+}
+
+// isRTLRune reports whether r has a strong RTL bidi class (R or AL).
+func isRTLRune(r rune) bool {
+	p, _ := bidi.LookupRune(r)
+	cls := p.Class()
+	return cls == bidi.R || cls == bidi.AL
+}
+
+// visualReorder applies the Unicode Bidirectional Algorithm (UAX#9) to
+// cells[0:cols] and returns a visual (screen-order, left-to-right) copy.
+//
+// v2l[visualCol] = logicalCol; padding entries carry -1.
+//
+// Returns nil, nil when no RTL content is detected — the common case for
+// LTR-only terminals, and the result costs zero allocations.
+//
+// Null cells (Ch==0: continuation or empty) are excluded from the bidi
+// string to prevent trailing blank cells from being reordered in RTL
+// paragraphs. Space characters (Ch==' ') are included as content.
+func visualReorder(cells []Cell, cols int) (visual []Cell, v2l []int) {
+	if cols > len(cells) {
+		cols = len(cells)
+	}
+	if !rowHasRTL(cells, cols) {
+		return nil, nil
+	}
+
+	// Collect non-null cells into entries; each entry adds exactly one rune
+	// to the bidi string, so entries[j] ↔ rune j in the bidi paragraph.
+	// bidi.Run.Pos() returns rune indices (0-based, end INCLUSIVE).
+	type entry struct{ cellIdx int }
+	var sb strings.Builder
+	entries := make([]entry, 0, cols)
+	for i := range cols {
+		c := cells[i]
+		if c.Ch == 0 {
+			continue // skip null (continuation / empty / uninitialized)
+		}
+		entries = append(entries, entry{i})
+		sb.WriteRune(c.Ch)
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+
+	var p bidi.Paragraph
+	if _, err := p.SetString(sb.String()); err != nil {
+		return nil, nil
+	}
+	order, err := p.Order()
+	if err != nil {
+		return nil, nil
+	}
+
+	blank := Cell{Width: 1, FG: DefaultColor, BG: DefaultColor}
+	visual = make([]Cell, 0, cols)
+	v2l = make([]int, 0, cols)
+
+	for i := range order.NumRuns() {
+		run := order.Run(i)
+		// Pos returns rune indices; end is INCLUSIVE.
+		first, lastIncl := run.Pos()
+		last := lastIncl + 1 // convert to exclusive for loop bounds
+
+		if last > len(entries) {
+			last = len(entries)
+		}
+		if first < 0 || first >= len(entries) {
+			continue
+		}
+
+		if run.Direction() == bidi.RightToLeft {
+			// RTL run: cells appear in reverse logical order on screen.
+			for j := last - 1; j >= first; j-- {
+				visual, v2l = appendVisualCell(visual, v2l, cells, entries[j].cellIdx, blank, cols)
+			}
+		} else {
+			for j := first; j < last; j++ {
+				visual, v2l = appendVisualCell(visual, v2l, cells, entries[j].cellIdx, blank, cols)
+			}
+		}
+	}
+
+	// Pad to cols with blank cells.
+	for len(visual) < cols {
+		visual = append(visual, blank)
+		v2l = append(v2l, -1)
+	}
+
+	return visual[:cols], v2l[:cols]
+}
+
+// appendVisualCell appends cells[cellIdx] — and its continuation cell when
+// Width==2 — to the visual/v2l slices, stopping at the cols capacity limit.
+func appendVisualCell(visual []Cell, v2l []int, cells []Cell, cellIdx int, blank Cell, cols int) ([]Cell, []int) {
+	if len(visual) >= cols {
+		return visual, v2l
+	}
+	cell := cells[cellIdx]
+	visual = append(visual, cell)
+	v2l = append(v2l, cellIdx)
+	if cell.Width == 2 && len(visual) < cols {
+		cont := blank
+		cont.Width = 0
+		cont.FG = cell.FG
+		cont.BG = cell.BG
+		visual = append(visual, cont)
+		v2l = append(v2l, cellIdx+1) // logical continuation at cellIdx+1
+	}
+	return visual, v2l
+}

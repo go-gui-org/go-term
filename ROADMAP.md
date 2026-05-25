@@ -869,8 +869,8 @@ Note: the protocol uses APC (`ESC _`), not CSI _ G as originally noted.
 
 **Why:** Modern developers love fonts like Fira Code and JetBrains Mono. Translating sequences like `!=`, `=>`, or `<!--` into specialized glyphs is standard in modern terminals.
 
-- [ ] `widget.go`: Integrate a text shaper like HarfBuzz or `go-text/typesetting`.
-- [ ] Modify `onDraw` to render shaped text runs rather than per-cell strings.
+- [x] `widget.go`: Integrate a text shaper like HarfBuzz or `go-text/typesetting`.
+- [x] Modify `onDraw` to render shaped text runs rather than per-cell strings.
 
 **Demo test:** Type `!=` and see it rendered as a single ligature glyph.
 
@@ -880,8 +880,8 @@ Note: the protocol uses APC (`ESC _`), not CSI _ G as originally noted.
 
 **Why:** Essential for full internationalization support (Arabic, Hebrew).
 
-- [ ] Implement the Unicode Bidirectional Algorithm (UBA) to reorder cells visually.
-- [ ] Maintain logical order in `grid.go` while updating visual rendering in `widget.go`.
+- [x] Implement the Unicode Bidirectional Algorithm (UBA) to reorder cells visually.
+- [x] Maintain logical order in `grid.go` while updating visual rendering in `widget.go`.
 
 **Demo test:** `echo "שלום"` renders right-to-left correctly.
 

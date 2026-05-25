@@ -348,6 +348,13 @@ type Term struct {
 	// runBuf reused across onDraw calls; grows once, never freed.
 	runBuf strings.Builder
 
+	// bidiVisRows/bidiV2LRows cache visual-reordered rows and their
+	// visual→logical column maps for the current frame. Pre-allocated to
+	// avoid per-frame heap pressure; grown on resize, never shrunk.
+	// Main-thread only (onDraw).
+	bidiVisRows [][]Cell
+	bidiV2LRows [][]int
+
 	// Pending-resize state. Live mouse drags fire onDraw at the display
 	// refresh rate with continuously changing dims; running grid.Resize
 	// (full scrollback reflow) on every frame allocates ~24 MB per call
@@ -1035,11 +1042,57 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		}
 	}
 
+	// BiDi pre-pass: compute visual-reordered rows for any viewport row
+	// containing RTL characters. For live LTR-only terminals (the common
+	// case) rowHasRTL returns false immediately — zero allocations.
+	if cap(t.bidiVisRows) < renderRows {
+		t.bidiVisRows = make([][]Cell, renderRows)
+		t.bidiV2LRows = make([][]int, renderRows)
+	}
+	t.bidiVisRows = t.bidiVisRows[:renderRows]
+	t.bidiV2LRows = t.bidiV2LRows[:renderRows]
+	for i := range t.bidiVisRows {
+		t.bidiVisRows[i] = nil
+		t.bidiV2LRows[i] = nil
+	}
+	for r := range renderRows {
+		var hasRTL bool
+		if live {
+			hasRTL = rowHasRTL(cells[r*cols:(r+1)*cols], cols)
+		} else {
+			for c := range cols {
+				if isRTLRune(g.ViewCellAt(r, c).Ch) {
+					hasRTL = true
+					break
+				}
+			}
+		}
+		if !hasRTL {
+			continue
+		}
+		logRow := make([]Cell, cols)
+		for c := range cols {
+			logRow[c] = resolveCell(r, c)
+		}
+		t.bidiVisRows[r], t.bidiV2LRows[r] = visualReorder(logRow, cols)
+	}
+	resolveVisual := func(r, c int) Cell {
+		if t.bidiVisRows[r] != nil {
+			return t.bidiVisRows[r][c]
+		}
+		return resolveCell(r, c)
+	}
+
 	// Resolve partial top row once for both bg and fg passes.
 	// Nil when there is no scrollback row above the current viewport.
 	var partialRow []Cell
 	if renderYOff > 0 {
 		partialRow = g.partialTopRow()
+		if partialRow != nil && rowHasRTL(partialRow, cols) {
+			if vis, _ := visualReorder(partialRow, cols); vis != nil {
+				partialRow = vis
+			}
+		}
 	}
 
 	// Background pass: optional partial top row (renders at y = -cellH + renderYOff
@@ -1060,9 +1113,9 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	}
 	for r := range renderRows {
 		runStart := 0
-		runColor := g.Theme.bg(resolveCell(r, 0))
+		runColor := g.Theme.bg(resolveVisual(r, 0))
 		for c := 1; c < cols; c++ {
-			cur := g.Theme.bg(resolveCell(r, c))
+			cur := g.Theme.bg(resolveVisual(r, c))
 			if cur != runColor {
 				t.fillRun(dc, r, runStart, c, runColor, renderYOff)
 				runStart = c
@@ -1141,7 +1194,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		t.runBuf.Reset()
 		runCols = 0
 		for c := range cols {
-			cell := resolveCell(r, c)
+			cell := resolveVisual(r, c)
 			if cell.Width == 0 && cell.Ch == 0 {
 				continue // continuation cell; skip without breaking run
 			}
@@ -1210,7 +1263,17 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		if cc >= cols {
 			cc = cols - 1
 		}
-		if cell := g.At(g.CursorR, cc); cell != nil {
+		// When the cursor's row has bidi reordering, find the visual column
+		// that corresponds to the logical cursor column.
+		if cr := g.CursorR; cr >= 0 && cr < renderRows && t.bidiV2LRows[cr] != nil {
+			for v, l := range t.bidiV2LRows[cr] {
+				if l == g.CursorC {
+					cc = v
+					break
+				}
+			}
+		}
+		if cell := g.At(g.CursorR, g.CursorC); cell != nil {
 			t.drawCursor(dc, cc, g.CursorR, *cell, g.CursorShape, style)
 		}
 	}
