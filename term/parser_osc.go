@@ -86,8 +86,12 @@ func (p *Parser) dispatchOSC() {
 			p.onTitle(pt)
 		}
 	case 7:
-
-		p.g.Cwd = pt
+		// Accept standard file:// URIs and bare absolute paths (common in
+		// zsh/fish integrations). Other schemes are rejected. Control
+		// characters are stripped by sanitizeOSCString.
+		if strings.HasPrefix(pt, "file://") || strings.HasPrefix(pt, "/") {
+			p.g.Cwd = sanitizeOSCString(pt)
+		}
 	case 10, 11, 12:
 
 		if pt == "?" {
@@ -252,6 +256,26 @@ func parseXColor(s string) (uint32, bool) {
 		return rgbColor(uint8(n>>16), uint8(n>>8), uint8(n)), true
 	}
 	return 0, false
+}
+
+// sanitizeOSCString strips ASCII control characters (0x00–0x1F, 0x7F) from
+// an OSC payload string before storing it in a Grid field. Prevents hostile
+// terminal sequences from embedding control bytes in caller-visible state.
+func sanitizeOSCString(s string) string {
+	for i := 0; i < len(s); i++ {
+		if b := s[i]; b < 0x20 || b == 0x7F {
+			var buf strings.Builder
+			buf.Grow(len(s))
+			buf.WriteString(s[:i])
+			for j := i + 1; j < len(s); j++ {
+				if b2 := s[j]; b2 >= 0x20 && b2 != 0x7F {
+					buf.WriteByte(b2)
+				}
+			}
+			return buf.String()
+		}
+	}
+	return s
 }
 
 // oscHexWord expands an 8-bit color component to a 4-hex-digit string

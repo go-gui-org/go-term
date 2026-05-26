@@ -40,6 +40,24 @@ func runeString(r rune) string {
 	return string(r)
 }
 
+// termRuneStr returns string(r) without allocating for runes already in the
+// per-Term cache. Wide-char cells and the cursor call this once per distinct
+// rune seen, then reuse the cached string every subsequent frame.
+func (t *Term) termRuneStr(r rune) string {
+	if uint32(r) < 128 {
+		return asciiStr[r]
+	}
+	if s, ok := t.runeStrCache[r]; ok {
+		return s
+	}
+	s := string(r)
+	if t.runeStrCache == nil {
+		t.runeStrCache = make(map[rune]string, 64)
+	}
+	t.runeStrCache[r] = s
+	return s
+}
+
 func isGeometryGlyph(r rune) bool {
 	switch {
 	case r >= 0x2500 && r <= 0x25FF: // Box Drawing, Block Elements, Geometric Shapes
@@ -63,6 +81,15 @@ func scrollbarGeometry(sbLen, rows int, viewOffset float32, viewH float32) (thum
 	thumbH = float32(rows) / total * viewH
 	thumbY = (float32(sbLen) - viewOffset) / total * viewH
 	return
+}
+
+// vMatch records a single search-highlight span within a viewport row.
+type vMatch struct{ col, len int }
+
+// rowBounds records the selection column span for one viewport row.
+type rowBounds struct {
+	c0, c1 int
+	active bool
 }
 
 // runKey captures the rendering-relevant properties of a cell for
@@ -147,6 +174,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	cols := clampDim(int(dc.Width / t.cellW))
 	rows := clampDim(int(dc.Height / t.cellH))
 
+	var doResize bool // set when grid.Resize fires; pty.Resize deferred to after Mu unlock
 	t.grid.Mu.Lock()
 	if rows != t.grid.Rows || cols != t.grid.Cols {
 		now := time.Now()
@@ -159,9 +187,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		}
 		if elapsed := now.Sub(t.pendingResizeSince); elapsed >= resizeDebounce {
 			t.grid.Resize(rows, cols)
-			if err := t.pty.Resize(rows, cols); err != nil {
-				log.Printf("term: pty resize: %v", err)
-			}
+			doResize = true
 			t.pendingResizeSince = time.Time{}
 		} else {
 			// Schedule a wake so the apply still happens after the
@@ -193,10 +219,17 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 
 	// Pre-map search matches and selection to viewport rows to avoid O(N)
 	// checks inside the per-cell loop.
-	type vMatch struct{ col, len int }
 	var vMatchesByRow [][]vMatch
 	if t.searchActive && t.searchQuery != "" {
-		vMatchesByRow = make([][]vMatch, rows)
+		if cap(t.vMatchBuf) < rows {
+			t.vMatchBuf = make([][]vMatch, rows)
+		} else {
+			t.vMatchBuf = t.vMatchBuf[:rows]
+			for i := range t.vMatchBuf {
+				t.vMatchBuf[i] = t.vMatchBuf[i][:0]
+			}
+		}
+		vMatchesByRow = t.vMatchBuf
 		var matches []SearchMatch
 		if t.searchRegex && t.searchRE != nil {
 			matches = g.ViewportMatchesRegex(t.searchRE)
@@ -211,13 +244,15 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		}
 	}
 
-	type rowBounds struct {
-		c0, c1 int
-		active bool
-	}
 	var rowSel []rowBounds
 	if g.SelActive {
-		rowSel = make([]rowBounds, rows)
+		if cap(t.selBuf) < rows {
+			t.selBuf = make([]rowBounds, rows)
+		} else {
+			t.selBuf = t.selBuf[:rows]
+			clear(t.selBuf)
+		}
+		rowSel = t.selBuf
 		s, e := g.selOrder()
 		for r := range rows {
 			cr := g.viewportToContent(r)
@@ -294,11 +329,15 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		if !hasRTL {
 			continue
 		}
-		logRow := make([]Cell, cols)
-		for c := range cols {
-			logRow[c] = resolveCell(r, c)
+		if cap(t.bidiScratch) < cols {
+			t.bidiScratch = make([]Cell, cols)
+		} else {
+			t.bidiScratch = t.bidiScratch[:cols]
 		}
-		t.bidiVisRows[r], t.bidiV2LRows[r] = visualReorder(logRow, cols)
+		for c := range cols {
+			t.bidiScratch[c] = resolveCell(r, c)
+		}
+		t.bidiVisRows[r], t.bidiV2LRows[r] = visualReorder(t.bidiScratch, cols)
 	}
 	resolveVisual := func(r, c int) Cell {
 		if t.bidiVisRows[r] != nil {
@@ -355,7 +394,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	// (right half of a wide char, Width==0 Ch==0) are skipped without
 	// breaking the current run. Plain spaces with no attrs or link don't
 	// start a new run but extend an existing same-style one.
-	hR, hC := t.hoverR, t.hoverC // benign unsynchronized read; see updateHover
+	hR, hC := int(t.hoverR.Load()), int(t.hoverC.Load())
 	t.runBuf.Reset()
 	var (
 		runStart int
@@ -522,6 +561,14 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	}
 
 	t.grid.Mu.Unlock()
+
+	// Resize the PTY outside the lock: the ioctl can block if the PTY fd
+	// is in a degraded state, and holding Mu would stall readLoop.
+	if doResize {
+		if err := t.pty.Resize(rows, cols); err != nil {
+			log.Printf("term: pty resize: %v", err)
+		}
+	}
 }
 
 // cursorBlinkOff reports whether the cursor is currently in the
@@ -566,7 +613,7 @@ func (t *Term) drawCursor(dc *gui.DrawContext, col, row int, cell Cell,
 		dc.FilledRect(x, y, t.cellW, t.cellH, fillColor)
 		cs := style
 		cs.Color = t.grid.Theme.bg(cell)
-		dc.Text(x, y, runeString(cell.Ch), cs)
+		dc.Text(x, y, t.termRuneStr(cell.Ch), cs)
 	}
 }
 
@@ -640,7 +687,7 @@ func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell Cell, k runKey, 
 	cs.Typeface = k.typeface
 	cs.Underline = false
 	cs.Strikethrough = k.strikethrough
-	dc.Text(x, y, runeString(cell.Ch), cs)
+	dc.Text(x, y, t.termRuneStr(cell.Ch), cs)
 	if k.ulStyle != ULNone {
 		t.drawUnderlineDecor(dc, x, y, float32(cell.Width)*t.cellW, k.ulStyle, k.ulColor)
 	}

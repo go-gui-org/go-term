@@ -336,9 +336,9 @@ func TestParser_APC_KittyStore_EvictsAtCapacity(t *testing.T) {
 	}
 	_, b64 := makePNG(t)
 	h.feedAPC(fmt.Sprintf("a=t,f=100,i=%d,q=1;", maxKittyStoreEntries+1) + b64)
-	// All old entries evicted; only the new image remains.
-	if len(h.p.kittyStore) != 1 {
-		t.Fatalf("store has %d entries after eviction; want 1", len(h.p.kittyStore))
+	// One old entry evicted, new entry added: total stays at capacity.
+	if len(h.p.kittyStore) != maxKittyStoreEntries {
+		t.Fatalf("store has %d entries after eviction; want %d", len(h.p.kittyStore), maxKittyStoreEntries)
 	}
 }
 
@@ -387,5 +387,67 @@ func TestParser_APC_KittyPlace_UnknownID_ErrorReply(t *testing.T) {
 	}
 	if !strings.Contains(string(h.replies[0]), "EINVAL") {
 		t.Errorf("reply %q missing EINVAL", string(h.replies[0]))
+	}
+}
+
+// --- File/temp-file medium rejection ---
+
+func TestParser_APC_KittyFileMediumRejected(t *testing.T) {
+	h := newAPCHelper(t)
+	// t=f requests pixel data from a host file path — not implemented.
+	h.feedAPC("a=t,t=f,i=1;/some/path")
+	if len(h.replies) != 1 {
+		t.Fatalf("got %d replies; want 1 error reply for t=f", len(h.replies))
+	}
+	if !strings.Contains(string(h.replies[0]), "EINVAL") {
+		t.Errorf("reply %q missing EINVAL", string(h.replies[0]))
+	}
+	if len(h.p.kittyStore) != 0 {
+		t.Errorf("kittyStore must stay empty after t=f rejection, got %d entries", len(h.p.kittyStore))
+	}
+}
+
+func TestParser_APC_KittyTempFileMediumRejected(t *testing.T) {
+	h := newAPCHelper(t)
+	// t=t (temp file) is also rejected.
+	h.feedAPC("a=t,t=t,i=2;/tmp/img")
+	if len(h.replies) != 1 {
+		t.Fatalf("got %d replies; want 1 error reply for t=t", len(h.replies))
+	}
+	if !strings.Contains(string(h.replies[0]), "EINVAL") {
+		t.Errorf("reply %q missing EINVAL", string(h.replies[0]))
+	}
+	if len(h.p.kittyStore) != 0 {
+		t.Errorf("kittyStore must stay empty after t=t rejection, got %d entries", len(h.p.kittyStore))
+	}
+}
+
+func TestParser_APC_KittyShmMediumRejected(t *testing.T) {
+	h := newAPCHelper(t)
+	// t=s (shared memory) is also a host resource — reject before accumulating.
+	h.feedAPC("a=t,t=s,i=4;kitty-shm-XXXXX")
+	if len(h.replies) != 1 {
+		t.Fatalf("got %d replies; want 1 error reply for t=s", len(h.replies))
+	}
+	if !strings.Contains(string(h.replies[0]), "EINVAL") {
+		t.Errorf("reply %q missing EINVAL", string(h.replies[0]))
+	}
+	if len(h.p.kittyStore) != 0 {
+		t.Errorf("kittyStore must stay empty after t=s rejection, got %d entries", len(h.p.kittyStore))
+	}
+}
+
+func TestParser_APC_KittyTransmitAndDisplay_FileMediumRejected(t *testing.T) {
+	h := newAPCHelper(t)
+	// a=T (transmit+display) with t=f must also be rejected — no image placed.
+	h.feedAPC("a=T,t=f,i=3;/path")
+	if len(h.replies) != 1 {
+		t.Fatalf("got %d replies; want 1 error reply for a=T,t=f", len(h.replies))
+	}
+	if !strings.Contains(string(h.replies[0]), "EINVAL") {
+		t.Errorf("reply %q missing EINVAL", string(h.replies[0]))
+	}
+	if len(h.g.Graphics) != 0 {
+		t.Errorf("Graphics must be empty after a=T,t=f rejection, got %d", len(h.g.Graphics))
 	}
 }

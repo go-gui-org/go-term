@@ -628,6 +628,9 @@ func NewGrid(rows, cols int) *Grid {
 const maxLinkEntries = 4096
 
 // internLink returns the ID for url, creating one if needed. Called under Mu.
+// Returns 0 when the registry is full; those cells carry no link ID and become
+// non-clickable for the life of the session. This is intentional: the cap
+// prevents unbounded map growth during very long sessions.
 func (g *Grid) internLink(url string) uint16 {
 	if id, ok := g.linkIDs[url]; ok {
 		return id

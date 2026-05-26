@@ -1312,3 +1312,43 @@ func TestTerm_NotifyBusy_ExtrasDropped(t *testing.T) {
 		t.Fatalf("want 1 call, got %d", calls)
 	}
 }
+
+// --- termRuneStr ---
+
+func TestTermRuneStr_ASCIINoAlloc(t *testing.T) {
+	tm := &Term{}
+	var sink string
+	avg := testing.AllocsPerRun(100, func() {
+		sink = tm.termRuneStr('A')
+	})
+	_ = sink
+	if avg != 0 {
+		t.Errorf("ASCII path should not allocate, got %v allocs/op", avg)
+	}
+}
+
+func TestTermRuneStr_NonASCIICachesOnMiss(t *testing.T) {
+	tm := &Term{}
+	r := rune(0x2603) // ☃ snowman
+	s := tm.termRuneStr(r)
+	if s != string(r) {
+		t.Errorf("got %q, want %q", s, string(r))
+	}
+	if tm.runeStrCache == nil || tm.runeStrCache[r] == "" {
+		t.Error("rune not stored in cache after first call")
+	}
+}
+
+func TestTermRuneStr_CacheHitNoAlloc(t *testing.T) {
+	tm := &Term{}
+	r := rune(0x1F600) // 😀 emoji (4-byte UTF-8)
+	tm.termRuneStr(r)  // prime the cache
+	var sink string
+	avg := testing.AllocsPerRun(100, func() {
+		sink = tm.termRuneStr(r)
+	})
+	_ = sink
+	if avg != 0 {
+		t.Errorf("cache hit should not allocate, got %v allocs/op", avg)
+	}
+}

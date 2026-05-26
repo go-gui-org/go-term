@@ -107,12 +107,13 @@ type Term struct {
 	lastMouseR int
 	lastMouseC int
 
-	// hoverR/hoverC track the cell under the pointer for hyperlink
-	// hover highlighting. Updated in onMouseMove; read (unsynchronized)
-	// in onDraw. A benign data race: worst case is one stale frame.
-	// Set to (-1, -1) until the first mouse move.
-	hoverR int
-	hoverC int
+	// hoverR/hoverC track the cell under the pointer for hyperlink hover
+	// highlighting. Updated in onMouseMove and read in onDraw — both on
+	// the GUI main thread. Atomics satisfy the race detector in case the
+	// framework ever dispatches these callbacks concurrently.
+	// Sentinel -1 means "not yet set"; initialized via Store in New.
+	hoverR atomic.Int32
+	hoverC atomic.Int32
 
 	// closed guards Close so multiple calls are safe.
 	closed atomic.Bool
@@ -125,9 +126,12 @@ type Term struct {
 	// Set in New so the cursor starts in the "on" half-cycle.
 	cursorEpoch time.Time
 
-	// blinkDone signals the blink ticker goroutine to exit. Closed by
-	// Close.
+	// blinkDone signals the blink ticker goroutine to exit. Closed by Close.
 	blinkDone chan struct{}
+
+	// readDone is closed by readLoop when it exits. Close waits on it so
+	// no further win.QueueCommand calls can arrive after Close returns.
+	readDone chan struct{}
 
 	// autoScrollDir drives the selection auto-scroll goroutine during a
 	// drag that extends outside the widget (-1 = toward live,
@@ -197,12 +201,26 @@ type Term struct {
 	// runBuf reused across onDraw calls; grows once, never freed.
 	runBuf strings.Builder
 
+	// runeStrCache caches string(r) for non-ASCII runes so wide-char
+	// and cursor cells don't allocate per frame. Populated lazily;
+	// bounded by the set of distinct runes rendered in a session.
+	runeStrCache map[rune]string
+
+	// vMatchBuf/selBuf are pre-allocated slices reused across onDraw
+	// calls for search highlights and selection bounds, replacing per-
+	// frame make([][]vMatch, rows) / make([]rowBounds, rows) calls.
+	vMatchBuf [][]vMatch
+	selBuf    []rowBounds
+
 	// bidiVisRows/bidiV2LRows cache visual-reordered rows and their
 	// visual→logical column maps for the current frame. Pre-allocated to
 	// avoid per-frame heap pressure; grown on resize, never shrunk.
 	// Main-thread only (onDraw).
 	bidiVisRows [][]Cell
 	bidiV2LRows [][]int
+	// bidiScratch is a reused per-row Cell buffer for the BiDi pre-pass,
+	// replacing the per-RTL-row make([]Cell, cols) allocation.
+	bidiScratch []Cell
 
 	// Pending-resize state. Live mouse drags fire onDraw at the display
 	// refresh rate with continuously changing dims; running grid.Resize
@@ -267,13 +285,14 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		win:            w,
 		lastMouseR:     -1,
 		lastMouseC:     -1,
-		hoverR:         -1,
-		hoverC:         -1,
 		cursorEpoch:    time.Now(),
 		blinkDone:      make(chan struct{}),
+		readDone:       make(chan struct{}),
 		momentumKick:   make(chan struct{}, 1),
 		themeMenuItems: themeMenuItems,
 	}
+	t.hoverR.Store(-1)
+	t.hoverC.Store(-1)
 	t.writeHost = func(b []byte) error {
 		_, err := t.pty.Write(b)
 		return err
@@ -579,25 +598,37 @@ func (t *Term) View(w *gui.Window) gui.View {
 	return gui.Column(colCfg)
 }
 
-// Close stops the shell, reader, and blink goroutine. Safe to call
-// once; subsequent calls are no-ops.
+// Close stops the shell, reader, and blink goroutine. Safe to call once;
+// subsequent calls are no-ops. Must be called from the GUI main thread so
+// that pending QueueCommand callbacks and resizeTimer fire on the same
+// goroutine that owns them.
 func (t *Term) Close() error {
 	if t.closed.Swap(true) {
 		return nil
 	}
 	close(t.blinkDone)
+	err := t.pty.Close() // signals readLoop to exit via read error
+	// Wait for readLoop to drain, but don't hang forever if the PTY fd is
+	// in a degraded state where close doesn't unblock an in-progress read.
+	readTimer := time.NewTimer(2 * time.Second)
+	defer readTimer.Stop()
+	select {
+	case <-t.readDone:
+	case <-readTimer.C:
+	}
 	if t.resizeTimer != nil {
 		t.resizeTimer.Stop()
 	}
 	if t.gfxDir != "" {
 		_ = os.RemoveAll(t.gfxDir)
 	}
-	return t.pty.Close()
+	return err
 }
 
 // readLoop forwards PTY output through the parser and schedules a
 // render. Exits when the PTY is closed or returns EOF.
 func (t *Term) readLoop() {
+	defer close(t.readDone)
 	buf := make([]byte, 4096)
 	for {
 		n, err := t.pty.Read(buf)
@@ -626,12 +657,23 @@ func (t *Term) readLoop() {
 						t.bellSeenCount = bellCount
 						t.bellFlashUntil = time.Now().Add(bellFlashDuration)
 						// Schedule a redraw to clear the flash overlay.
-						time.AfterFunc(bellFlashDuration+time.Millisecond, func() {
-							if !t.closed.Load() {
-								t.bumpVersion()
-								t.win.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
+						// Use a select goroutine so blinkDone cancellation
+						// prevents QueueCommand from firing after Close.
+						blinkDone := t.blinkDone
+						go func() {
+							timer := time.NewTimer(bellFlashDuration + time.Millisecond)
+							defer timer.Stop()
+							select {
+							case <-blinkDone:
+								return
+							case <-timer.C:
+								if t.closed.Load() {
+									return
+								}
 							}
-						})
+							t.bumpVersion()
+							t.win.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
+						}()
 					}
 					w.UpdateWindow()
 				})

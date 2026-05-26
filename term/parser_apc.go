@@ -27,7 +27,7 @@ func (p *Parser) dispatchAPC() {
 type kgpParams struct {
 	action   byte   // a=: 't' transmit, 'T' transmit+display, 'p' place, 'q' query, 'd' delete; default 'T'
 	format   int    // f=: 32 RGBA, 24 RGB, 100 PNG; default 32
-	medium   byte   // t=: 'd' direct (default), 'f' file, 't' temp-file
+	medium   byte   // t=: 'd' direct (default), 'f' file, 't' temp-file, 's' shared-memory
 	widthPx  int    // s=: pixel width for raw formats
 	heightPx int    // v=: pixel height for raw formats
 	more     bool   // m=: true when m=1 (more chunks follow)
@@ -45,6 +45,13 @@ func (p *Parser) handleKittyGraphics(payload []byte) {
 	case 'q':
 		p.kittyReply(params.imageID, params.quiet, true)
 	case 't', 'T':
+		// File ('f'), temp-file ('t'), and shared-memory ('s') media all
+		// require reading arbitrary host resources — not implemented; reject
+		// explicitly so the client doesn't hang waiting for a response.
+		if params.medium == 'f' || params.medium == 't' || params.medium == 's' {
+			p.kittyReply(params.imageID, params.quiet, false)
+			return
+		}
 		// Accumulate raw base64 text; decode only at end of chunks.
 		p.kittyAccumulate(params, rawB64)
 	case 'p':
@@ -186,12 +193,24 @@ func (p *Parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 		if p.kittyStore == nil {
 			p.kittyStore = make(map[uint32]kittyEntry)
 		}
-		// Evict all entries when at capacity to bound disk and memory use.
+		// Evict one entry when at capacity, skipping paths still referenced
+		// by Grid.Graphics (evicting a rendered image deletes its file and
+		// causes broken renders for the rest of the session).
 		if len(p.kittyStore) >= maxKittyStoreEntries {
-			for _, e := range p.kittyStore {
-				_ = os.Remove(e.path)
+			for evictID, e := range p.kittyStore {
+				inUse := false
+				for _, gr := range p.g.Graphics {
+					if gr.Src == e.path {
+						inUse = true
+						break
+					}
+				}
+				if !inUse {
+					_ = os.Remove(e.path)
+					delete(p.kittyStore, evictID)
+					break
+				}
 			}
-			p.kittyStore = make(map[uint32]kittyEntry)
 		}
 		p.kittyStore[id] = kittyEntry{path: path, w: b.Dx(), h: b.Dy()}
 	}

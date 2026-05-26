@@ -308,3 +308,36 @@ func TestGrid_ViewportMatches_WithScrollback(t *testing.T) {
 		t.Errorf("expected no matches in live view, got %d", len(matches))
 	}
 }
+
+func TestGrid_ViewportMatches_CapsAtMaxHighlights(t *testing.T) {
+	// 6 rows × 90 cols = 540 single-char cells; exceeds maxSearchHighlights (500).
+	const rows, cols = 6, 90
+	g := NewGrid(rows, cols)
+	for r := range rows {
+		g.CursorR, g.CursorC = r, 0
+		for range cols {
+			g.Put('x')
+		}
+	}
+	matches := g.ViewportMatches("x")
+	if len(matches) != maxSearchHighlights {
+		t.Errorf("ViewportMatches: got %d matches, want cap %d", len(matches), maxSearchHighlights)
+	}
+}
+
+func TestGrid_ViewportMatchesRegex_CapsAtMaxHighlights(t *testing.T) {
+	// 6 rows × 90 cols = 540 cells; regex matching every cell exceeds cap.
+	const rows, cols = 6, 90
+	g := NewGrid(rows, cols)
+	re := regexp.MustCompile(`x`)
+	for r := range rows {
+		g.CursorR, g.CursorC = r, 0
+		for range cols {
+			g.Put('x')
+		}
+	}
+	matches := g.ViewportMatchesRegex(re)
+	if len(matches) != maxSearchHighlights {
+		t.Errorf("ViewportMatchesRegex: got %d matches, want cap %d", len(matches), maxSearchHighlights)
+	}
+}

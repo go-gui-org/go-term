@@ -124,6 +124,11 @@ func (g *Grid) Find(query string, start ContentPos, forward bool) (ContentPos, b
 	return ContentPos{}, false
 }
 
+// maxSearchHighlights caps the number of matches returned by viewport search
+// functions. Prevents O(viewport) highlight work on patterns that match every
+// cell (e.g. "." regex or single-character plain-text queries).
+const maxSearchHighlights = 500
+
 // ViewportMatches returns all plain-text matches visible at the current
 // ViewOffset. Returns nil for an empty query, a zero-column grid, or while
 // the alt screen is active. Called under Mu.
@@ -155,6 +160,9 @@ func (g *Grid) ViewportMatches(query string) []SearchMatch {
 				break
 			}
 			matches = append(matches, SearchMatch{ContentPos: ContentPos{Row: contentRow, Col: idx}, Len: qLen})
+			if len(matches) >= maxSearchHighlights {
+				return matches
+			}
 			col = idx + 1
 		}
 	}
@@ -261,6 +269,9 @@ func (g *Grid) ViewportMatchesRegex(re *regexp.Regexp) []SearchMatch {
 				break
 			}
 			matches = append(matches, SearchMatch{ContentPos: ContentPos{Row: contentRow, Col: c}, Len: l})
+			if len(matches) >= maxSearchHighlights {
+				return matches
+			}
 			col = c + max(l, 1)
 		}
 	}

@@ -453,3 +453,64 @@ func TestParser_OSC777_NoHandlerNoPanic(t *testing.T) {
 	// handler not registered — must not panic
 	feed(t, g, p, []byte("\x1b]777;notify;Title;Body\x07"))
 }
+
+// --- OSC 7 validation ---
+
+func TestParser_OSC7_NonFileSchemeIgnored(t *testing.T) {
+	g, p := newParserGrid(1, 5)
+	feed(t, g, p, []byte("\x1b]7;http://example.com\x07"))
+	if g.Cwd != "" {
+		t.Errorf("non-file:// scheme must not set Cwd, got %q", g.Cwd)
+	}
+}
+
+func TestParser_OSC7_BarePathAccepted(t *testing.T) {
+	g, p := newParserGrid(1, 5)
+	feed(t, g, p, []byte("\x1b]7;/Users/me\x07"))
+	if g.Cwd != "/Users/me" {
+		t.Errorf("bare absolute path must set Cwd, got %q", g.Cwd)
+	}
+}
+
+func TestParser_OSC7_ControlCharsStripped(t *testing.T) {
+	g, p := newParserGrid(1, 5)
+	// 0x01 (SOH) embedded in a file:// URL is stripped by sanitizeOSCString.
+	feed(t, g, p, []byte("\x1b]7;file://host/\x01path\x07"))
+	const want = "file://host/path"
+	if g.Cwd != want {
+		t.Errorf("Cwd got %q, want %q", g.Cwd, want)
+	}
+}
+
+// --- sanitizeOSCString ---
+
+func TestSanitizeOSCString_CleanPassthrough(t *testing.T) {
+	s := "file://host/path/to/dir"
+	if got := sanitizeOSCString(s); got != s {
+		t.Errorf("clean string changed: got %q, want %q", got, s)
+	}
+}
+
+func TestSanitizeOSCString_ControlAtStart(t *testing.T) {
+	if got, want := sanitizeOSCString("\x01hello"), "hello"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestSanitizeOSCString_ControlInMiddle(t *testing.T) {
+	if got, want := sanitizeOSCString("hel\x01lo"), "hello"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestSanitizeOSCString_DELStripped(t *testing.T) {
+	if got, want := sanitizeOSCString("hel\x7flo"), "hello"; got != want {
+		t.Errorf("DEL: got %q, want %q", got, want)
+	}
+}
+
+func TestSanitizeOSCString_AllControlChars(t *testing.T) {
+	if got := sanitizeOSCString("\x00\x01\x1f\x7f"); got != "" {
+		t.Errorf("all-control: got %q, want empty", got)
+	}
+}

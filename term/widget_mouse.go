@@ -267,11 +267,12 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 // updateHover updates t.hoverR/C and requests a redraw when entering or
 // leaving a hyperlinked cell run.
 func (t *Term) updateHover(r, c int, w *gui.Window) {
-	if r == t.hoverR && c == t.hoverC {
+	oldR, oldC := int(t.hoverR.Load()), int(t.hoverC.Load())
+	if oldR == r && oldC == c {
 		return
 	}
-	oldR, oldC := t.hoverR, t.hoverC
-	t.hoverR, t.hoverC = r, c
+	t.hoverR.Store(int32(r))
+	t.hoverC.Store(int32(c))
 	t.grid.Mu.Lock()
 	var prevLink, curLink uint16
 	if oldR >= 0 && oldC >= 0 {
