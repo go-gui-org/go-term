@@ -67,8 +67,12 @@ not the file count.
 cmd/demo/main.go         gui.NewWindow + term.New + backend.Run
         │
         ▼
-term/widget.go           Term widget: View(), OnDraw, OnChar, OnKeyDown,
-                         reader goroutine. Bridge to go-gui.
+term/widget.go           Term struct, New, View, Close; reader goroutine.
+term/widget_draw.go      OnDraw: bg/fg/graphics/cursor render passes.
+term/widget_keyboard.go  onChar, onKeyDown, onKeyUp; KKP encoding.
+term/widget_mouse.go     Mouse button/motion/wheel; SGR encoding.
+term/widget_clipboard.go Cmd+C/V; OSC 52 clipboard write.
+term/widget_scroll.go    Scrollbar, momentum scroll, ViewSubPx math.
         │
         ▼
 term/parser.go           VT state machine entry point. Bytes → grid mutations.
@@ -78,8 +82,7 @@ term/parser_dcs.go       DCS dispatch (DECRQSS, XTGETTCAP, sixel, sync)
 term/parser_apc.go       APC dispatch (Kitty Graphics Protocol)
         │
         ▼
-term/grid.go             Cell buffer + cursor state. Pure data.
-term/grid_alt.go         Alt-screen enter/exit.
+term/grid.go             Cell buffer + cursor state + alt-screen. Pure data.
 term/grid_cursor.go      Cursor move, save/restore, DECSCUSR.
 term/grid_edit.go        Erase, insert/delete lines/chars.
 term/grid_mark.go        OSC 133 semantic shell marks.
@@ -88,6 +91,7 @@ term/grid_scroll.go      Scroll regions; pixel-accurate ViewSubPx math.
 term/grid_search.go      Literal and RE2 regex search.
 term/grid_selection.go   Content-relative text selection.
 term/scrollback.go       Scrollback ring buffer.
+term/bidi.go             Unicode Bidirectional Algorithm (UAX#9) for RTL text.
 term/graphics.go         Graphic type; sixel decoder; PNG data-URL encoder.
 
 term/pty.go              creack/pty wrapper. Spawns $SHELL, resize ioctl.

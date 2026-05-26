@@ -180,26 +180,42 @@ OSC 7, emitted by zsh, bash, and fish with standard shell integration).
 
 ## Architecture
 
-Three layers, one file each; dependencies flow strictly downward.
+Three layers; dependencies flow strictly downward. Each layer is split
+across multiple files by concern.
 
 ```
-cmd/demo/main.go       gui.NewWindow + term.New + backend.Run
+cmd/demo/main.go         gui.NewWindow + term.New + backend.Run
         │
         ▼
-term/widget.go         Term widget: View(), OnDraw, OnChar, OnKeyDown,
-                       reader goroutine. Bridge to go-gui.
+term/widget.go           Term struct, New, View, Close; reader goroutine.
+term/widget_draw.go      OnDraw: bg/fg/graphics/cursor render passes.
+term/widget_keyboard.go  onChar, onKeyDown, onKeyUp; KKP encoding.
+term/widget_mouse.go     Mouse button/motion/wheel; SGR encoding.
+term/widget_clipboard.go Cmd+C/V; OSC 52 clipboard write.
+term/widget_scroll.go    Scrollbar, momentum scroll, ViewSubPx math.
         │
         ▼
-term/parser.go         VT state machine. Bytes → grid mutations.
-term/parser_apc.go     Kitty Graphics Protocol (APC).
+term/parser.go           VT state machine entry point. Bytes → grid mutations.
+term/parser_csi.go       CSI dispatch (SGR, cursor, erase, modes, DECSCUSR, KKP…)
+term/parser_osc.go       OSC dispatch (0/1/2/7/8/9/10/11/12/52/133/777/1337)
+term/parser_dcs.go       DCS dispatch (DECRQSS, XTGETTCAP, sixel, sync)
+term/parser_apc.go       APC dispatch (Kitty Graphics Protocol)
         │
         ▼
-term/grid.go           Cell buffer + cursor + scroll region. Pure data.
-term/grid_scroll.go    Pixel-accurate scroll math.
-term/graphics.go       Graphic type; sixel decoder; PNG data-URL encoder.
+term/grid.go             Cell buffer + cursor state + alt-screen. Pure data.
+term/grid_cursor.go      Cursor move, save/restore, DECSCUSR.
+term/grid_edit.go        Erase, insert/delete lines/chars.
+term/grid_mark.go        OSC 133 semantic shell marks.
+term/grid_reflow.go      Logical line reflow on resize.
+term/grid_scroll.go      Scroll regions; pixel-accurate ViewSubPx math.
+term/grid_search.go      Literal and RE2 regex search.
+term/grid_selection.go   Content-relative text selection.
+term/scrollback.go       Scrollback ring buffer.
+term/bidi.go             Unicode Bidirectional Algorithm (UAX#9) for RTL text.
+term/graphics.go         Graphic type; sixel decoder; PNG data-URL encoder.
 
-term/pty.go            creack/pty wrapper. Spawns $SHELL, resize ioctl.
-term/palette.go        256-color ANSI table + RGB resolution.
+term/pty.go              creack/pty wrapper. Spawns $SHELL, resize ioctl.
+term/palette.go          256-color ANSI table + RGB resolution.
 ```
 
 ### Concurrency
