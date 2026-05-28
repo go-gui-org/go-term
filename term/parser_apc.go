@@ -193,11 +193,14 @@ func (p *Parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 		if p.kittyStore == nil {
 			p.kittyStore = make(map[uint32]kittyEntry)
 		}
-		// Evict one entry when at capacity, skipping paths still referenced
-		// by Grid.Graphics (evicting a rendered image deletes its file and
-		// causes broken renders for the rest of the session).
+		// Evict one entry when at capacity. Prefer an entry not
+		// currently rendered so we don't delete a visible image's
+		// file, but fall back to evicting any entry so the store
+		// doesn't permanently freeze when all images are on screen.
 		if len(p.kittyStore) >= maxKittyStoreEntries {
+			var fallbackID uint32
 			for evictID, e := range p.kittyStore {
+				fallbackID = evictID
 				inUse := false
 				for _, gr := range p.g.Graphics {
 					if gr.Src == e.path {
@@ -208,8 +211,24 @@ func (p *Parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 				if !inUse {
 					_ = os.Remove(e.path)
 					delete(p.kittyStore, evictID)
+					fallbackID = 0
 					break
 				}
+			}
+			if fallbackID != 0 {
+				deletedPath := p.kittyStore[fallbackID].path
+				_ = os.Remove(deletedPath)
+				delete(p.kittyStore, fallbackID)
+				// Remove dangling Graphics entries so the
+				// renderer doesn't try to draw the deleted file.
+				j := 0
+				for _, gr := range p.g.Graphics {
+					if gr.Src != deletedPath {
+						p.g.Graphics[j] = gr
+						j++
+					}
+				}
+				p.g.Graphics = p.g.Graphics[:j]
 			}
 		}
 		p.kittyStore[id] = kittyEntry{path: path, w: b.Dx(), h: b.Dy()}

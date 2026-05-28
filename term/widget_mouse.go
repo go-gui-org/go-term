@@ -356,7 +356,9 @@ func openURL(rawURL string) {
 	default:
 		cmd = exec.Command("xdg-open", rawURL)
 	}
-	_ = cmd.Start()
+	if err := cmd.Start(); err == nil {
+		go func() { _ = cmd.Wait() }()
+	}
 }
 
 // onMouseScroll forwards wheel events to the application as SGR mouse

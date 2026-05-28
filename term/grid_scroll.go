@@ -132,7 +132,7 @@ func (g *Grid) ScrollView(delta int) {
 // into a whole-row ViewOffset and a fractional ViewSubPx remainder.
 // Clamped to [0, Scrollback.Len()*cellH]. cellH <= 0 is a no-op.
 func (g *Grid) ScrollViewPx(deltaPx, cellH float32) {
-	if cellH <= 0 || math.IsNaN(float64(deltaPx)) {
+	if cellH <= 0 || math.IsNaN(float64(cellH)) || math.IsInf(float64(cellH), 0) || math.IsNaN(float64(deltaPx)) {
 		return
 	}
 	total := float64(g.ViewOffset)*float64(cellH) + float64(g.ViewSubPx) + float64(deltaPx)

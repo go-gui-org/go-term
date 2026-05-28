@@ -6,30 +6,6 @@ import (
 	"github.com/mike-ward/go-gui/gui"
 )
 
-// linesFromScroll converts a wheel/trackpad pixel delta into a row
-// count using cellH. Returns 0 for unusable inputs (non-finite cellH,
-// non-real scrollY, or no movement). Sub-cell deltas round up to a
-// single line in their direction so trackpad nudges aren't lost.
-func linesFromScroll(scrollY, cellH float32) int {
-	if !finite(cellH) {
-		return 0
-	}
-	if !realNumber(scrollY) {
-		return 0
-	}
-	lines := int(scrollY / cellH)
-	if lines != 0 {
-		return lines
-	}
-	switch {
-	case scrollY > 0:
-		return 1
-	case scrollY < 0:
-		return -1
-	}
-	return 0
-}
-
 // showScrollbar arms the auto-hide timer for the scrollbar thumb. Call on
 // the main thread whenever the viewport scrolls. Uses a single debounced
 // timer so rapid scroll events don't accumulate goroutines.

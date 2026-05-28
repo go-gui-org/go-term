@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
 	"strings"
 	"testing"
 )
@@ -449,5 +450,36 @@ func TestParser_APC_KittyTransmitAndDisplay_FileMediumRejected(t *testing.T) {
 	}
 	if len(h.g.Graphics) != 0 {
 		t.Errorf("Graphics must be empty after a=T,t=f rejection, got %d", len(h.g.Graphics))
+	}
+}
+
+func TestParser_APC_KittyStore_EvictsFallback_AllVisible(t *testing.T) {
+	h := newAPCHelper(t)
+	tmpDir := t.TempDir()
+
+	// Fill store to capacity; mark every entry as visible in Graphics
+	// so the inUse check never fires — the fallback path must evict.
+	h.p.kittyStore = make(map[uint32]kittyEntry, maxKittyStoreEntries)
+	for i := uint32(1); i <= maxKittyStoreEntries; i++ {
+		f, err := os.CreateTemp(tmpDir, "kgp-*.png")
+		if err != nil {
+			t.Fatalf("CreateTemp: %v", err)
+		}
+		path := f.Name()
+		_ = f.Close()
+		h.p.kittyStore[i] = kittyEntry{path: path, w: 1, h: 1}
+		h.p.g.Graphics = append(h.p.g.Graphics, Graphic{Src: path})
+	}
+
+	_, b64 := makePNG(t)
+	h.feedAPC(fmt.Sprintf("a=t,f=100,i=%d,q=1;", maxKittyStoreEntries+1) + b64)
+
+	if len(h.p.kittyStore) != maxKittyStoreEntries {
+		t.Fatalf("store has %d entries after fallback eviction; want %d",
+			len(h.p.kittyStore), maxKittyStoreEntries)
+	}
+	if len(h.p.g.Graphics) != maxKittyStoreEntries-1 {
+		t.Errorf("Graphics should have one entry removed by fallback eviction: got %d; want %d",
+			len(h.p.g.Graphics), maxKittyStoreEntries-1)
 	}
 }

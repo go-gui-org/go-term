@@ -639,8 +639,12 @@ func (t *Term) Close() error {
 	}
 	close(t.blinkDone)
 	err := t.pty.Close() // signals readLoop to exit via read error
-	// Wait for readLoop to drain, but don't hang forever if the PTY fd is
-	// in a degraded state where close doesn't unblock an in-progress read.
+	// Wait for readLoop to drain, but don't hang forever if the PTY fd
+	// is in a degraded state where close doesn't unblock an in-progress
+	// read. When this timeout fires, readLoop may still be alive and
+	// could call win.QueueCommand after we return. Callers must ensure
+	// the window outlives any such late callback, or call Close only
+	// from the main thread immediately before window teardown.
 	readTimer := time.NewTimer(2 * time.Second)
 	defer readTimer.Stop()
 	select {

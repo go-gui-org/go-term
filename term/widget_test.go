@@ -156,49 +156,6 @@ func TestRealNumber(t *testing.T) {
 	}
 }
 
-func TestLinesFromScroll_NaNInfReturnsZero(t *testing.T) {
-	cases := []struct {
-		scrollY, cellH float32
-	}{
-		{float32(math.NaN()), 16},
-		{float32(math.Inf(1)), 16},
-		{float32(math.Inf(-1)), 16},
-		{10, float32(math.NaN())},
-		{10, float32(math.Inf(1))},
-		{10, 0},  // non-positive cellH rejected by finite()
-		{10, -1}, // ditto
-	}
-	for _, c := range cases {
-		if got := linesFromScroll(c.scrollY, c.cellH); got != 0 {
-			t.Errorf("linesFromScroll(%v, %v) = %d, want 0",
-				c.scrollY, c.cellH, got)
-		}
-	}
-}
-
-func TestLinesFromScroll_SubCellNudge(t *testing.T) {
-	// Pixel delta below cellH should still move one line in its
-	// direction so trackpad inputs aren't lost.
-	if got := linesFromScroll(5, 16); got != 1 {
-		t.Errorf("positive sub-cell: got %d, want 1", got)
-	}
-	if got := linesFromScroll(-5, 16); got != -1 {
-		t.Errorf("negative sub-cell: got %d, want -1", got)
-	}
-	if got := linesFromScroll(0, 16); got != 0 {
-		t.Errorf("zero scroll: got %d, want 0", got)
-	}
-}
-
-func TestLinesFromScroll_FullCellSteps(t *testing.T) {
-	if got := linesFromScroll(48, 16); got != 3 {
-		t.Errorf("3 cells: got %d, want 3", got)
-	}
-	if got := linesFromScroll(-48, 16); got != -3 {
-		t.Errorf("-3 cells: got %d, want -3", got)
-	}
-}
-
 func TestTruncatePaste_ShortReturnsUnchanged(t *testing.T) {
 	if got := truncatePaste("abc", 10); got != "abc" {
 		t.Errorf("got %q, want %q", got, "abc")
@@ -581,7 +538,7 @@ func BenchmarkForegroundPass(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		for r := range rows {
 			for c := range cols {
 				cell := g.Cells[r*cols+c]
@@ -851,6 +808,40 @@ func TestTerm_OnKeyDown_ModifiedCursorKeys(t *testing.T) {
 		e := &gui.Event{KeyCode: c.key, Modifiers: c.mods}
 		term.onKeyDown(nil, e, &gui.Window{})
 		if got := string(*buf); got != c.want {
+			t.Errorf("key=%v mods=%v: got %q want %q", c.key, c.mods, got, c.want)
+		}
+	}
+}
+
+func TestTerm_OnKeyDown_CtrlShiftHomeEndPassthrough(t *testing.T) {
+	// Ctrl+Shift+Home/End must pass through to the PTY as Ctrl+Home/End
+	// (not be consumed by scroll-to-top/bottom). Ctrl+Shift+Tab without
+	// KKP falls through to raw \t instead of emitting \x1b[Z].
+	cases := []struct {
+		key  gui.KeyCode
+		mods gui.Modifier
+		want string
+	}{
+		// Shift+Home/End (no Ctrl) — still scrolls, no PTY output.
+		{gui.KeyHome, gui.ModShift, ""},
+		{gui.KeyEnd, gui.ModShift, ""},
+		// Ctrl+Shift+Home/End — passes through as Ctrl+Home/Ctrl+End
+		// (Shift is deliberately excluded from modParam; it has special
+		// scrollback semantics in this terminal).
+		{gui.KeyHome, gui.ModShift | gui.ModCtrl, "\x1b[1;5H"},
+		{gui.KeyEnd, gui.ModShift | gui.ModCtrl, "\x1b[1;5F"},
+		// Ctrl+Home/End (no Shift) — unaffected.
+		{gui.KeyHome, gui.ModCtrl, "\x1b[1;5H"},
+		{gui.KeyEnd, gui.ModCtrl, "\x1b[1;5F"},
+		// Ctrl+Shift+Tab without KKP — raw \t, not \x1b[Z.
+		{gui.KeyTab, gui.ModShift | gui.ModCtrl, "\t"},
+	}
+	for _, c := range cases {
+		term, buf := newTestTermCapture()
+		e := &gui.Event{KeyCode: c.key, Modifiers: c.mods}
+		term.onKeyDown(nil, e, &gui.Window{})
+		got := string(*buf)
+		if got != c.want {
 			t.Errorf("key=%v mods=%v: got %q want %q", c.key, c.mods, got, c.want)
 		}
 	}

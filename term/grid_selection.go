@@ -2,10 +2,6 @@ package term
 
 import "strings"
 
-// SelPos identifies a viewport cell (row, col). Kept for callers that
-// predate Phase 17; new code should use ContentPos for selection.
-type SelPos struct{ Row, Col int }
-
 // selOrder returns the selection bounds in forward order (start <= end).
 func (g *Grid) selOrder() (start, end ContentPos) {
 	a, b := g.SelAnchor, g.SelHead

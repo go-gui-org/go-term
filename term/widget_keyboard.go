@@ -346,13 +346,13 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 			return
 		}
 	case gui.KeyHome:
-		if shift {
+		if shift && !ctrl {
 			t.scrollToTop(w)
 			e.IsHandled = true
 			return
 		}
 	case gui.KeyEnd:
-		if shift {
+		if shift && !ctrl {
 			t.scrollToBottom(w)
 			e.IsHandled = true
 			return
@@ -383,7 +383,7 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	case gui.KeyTab:
 		if kkp := kittyKeySeq(9, e.Modifiers, modes.kittyKeyFlags, false); kkp != nil {
 			out = kkp
-		} else if shift {
+		} else if shift && !ctrl {
 			out = []byte("\x1b[Z")
 		} else {
 			out = []byte{'\t'}
@@ -428,7 +428,7 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		}
 	case gui.KeyHome:
 		if mod := modParam(false, false, ctrl); mod != 0 {
-			// Shift+Home is consumed by scrollToTop above; only Ctrl here.
+			// Shift excluded from modifier: Shift+Home scrolls, Ctrl+Shift+Home emits Ctrl+Home.
 			out = modSS3('H', mod)
 		} else if modes.appCursor {
 			out = []byte("\x1bOH")
@@ -437,7 +437,7 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		}
 	case gui.KeyEnd:
 		if mod := modParam(false, false, ctrl); mod != 0 {
-			// Shift+End is consumed by scrollToBottom above; only Ctrl here.
+			// Shift excluded from modifier: Shift+End scrolls, Ctrl+Shift+End emits Ctrl+End.
 			out = modSS3('F', mod)
 		} else if modes.appCursor {
 			out = []byte("\x1bOF")
