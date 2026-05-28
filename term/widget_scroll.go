@@ -23,11 +23,12 @@ func (t *Term) showScrollbar() {
 	}
 }
 
-// snapToLive clears any scrollback view-offset so subsequent input is
-// rendered at the live grid. No-op when already at the bottom.
+// snapToLive clears any scrollback view-offset and selection so subsequent
+// input is rendered at the live grid. No-op when already at the bottom.
 func (t *Term) snapToLive() {
 	t.grid.Mu.Lock()
 	defer t.grid.Mu.Unlock()
+	t.grid.ClearSelection()
 	if t.grid.ViewOffset != 0 || t.grid.ViewSubPx != 0 {
 		t.grid.ResetView()
 	}
