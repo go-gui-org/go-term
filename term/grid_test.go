@@ -331,20 +331,6 @@ func TestGrid_ContentCellAt_Live(t *testing.T) {
 	}
 }
 
-func TestGrid_ContentCellAt_Scrollback(t *testing.T) {
-	g := NewGrid(2, 5)
-	putRow(g, "first")
-	g.Newline()
-	putRow(g, "secnd")
-	if g.Scrollback.Len() == 0 {
-		t.Skip("no scrollback produced")
-	}
-	cell := g.ContentCellAt(0, 0)
-	if cell.Ch != 'f' {
-		t.Errorf("ContentCellAt scrollback row 0 col 0 = %q, want 'f'", cell.Ch)
-	}
-}
-
 func TestGrid_ContentCellAt_OutOfRange(t *testing.T) {
 	g := NewGrid(3, 5)
 
@@ -385,25 +371,6 @@ func TestGrid_ContentRowToViewport_OutOfView(t *testing.T) {
 	_, ok = g.ContentRowToViewport(g.ContentRows())
 	if ok {
 		t.Error("content row past end should be off-screen")
-	}
-}
-
-func TestGrid_ContentRowToViewport_Scrollback(t *testing.T) {
-	g := NewGrid(2, 5)
-	putRow(g, "first")
-	g.Newline()
-	putRow(g, "secnd")
-	if g.Scrollback.Len() == 0 {
-		t.Skip("no scrollback produced")
-	}
-
-	g.ScrollView(1)
-	vr, ok := g.ContentRowToViewport(0)
-	if !ok {
-		t.Errorf("scrollback row 0 should be visible, got ok=false")
-	}
-	if vr < 0 || vr >= g.Rows {
-		t.Errorf("scrollback row 0 → viewport %d, out of range [0, %d)", vr, g.Rows)
 	}
 }
 

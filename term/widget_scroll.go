@@ -27,21 +27,23 @@ func (t *Term) showScrollbar() {
 // rendered at the live grid. No-op when already at the bottom.
 func (t *Term) snapToLive() {
 	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
 	if t.grid.ViewOffset != 0 || t.grid.ViewSubPx != 0 {
 		t.grid.ResetView()
 	}
-	t.grid.Mu.Unlock()
 }
 
 // scrollByPage moves the viewport one page (rows-1) in `dir` direction.
 func (t *Term) scrollByPage(dir int, w *gui.Window) {
-	t.grid.Mu.Lock()
-	step := t.grid.Rows - 1
-	if step < 1 {
-		step = 1
-	}
-	t.grid.ScrollView(dir * step)
-	t.grid.Mu.Unlock()
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		step := t.grid.Rows - 1
+		if step < 1 {
+			step = 1
+		}
+		t.grid.ScrollView(dir * step)
+	}()
 	t.showScrollbar()
 	t.bumpVersion()
 	w.UpdateWindow()
@@ -49,9 +51,11 @@ func (t *Term) scrollByPage(dir int, w *gui.Window) {
 
 // scrollToTop pins the viewport at the oldest scrollback row.
 func (t *Term) scrollToTop(w *gui.Window) {
-	t.grid.Mu.Lock()
-	t.grid.ScrollViewTop()
-	t.grid.Mu.Unlock()
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		t.grid.ScrollViewTop()
+	}()
 	t.showScrollbar()
 	t.bumpVersion()
 	w.UpdateWindow()
@@ -59,9 +63,11 @@ func (t *Term) scrollToTop(w *gui.Window) {
 
 // scrollToBottom snaps the viewport back to the live grid.
 func (t *Term) scrollToBottom(w *gui.Window) {
-	t.grid.Mu.Lock()
-	t.grid.ResetView()
-	t.grid.Mu.Unlock()
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		t.grid.ResetView()
+	}()
 	t.showScrollbar()
 	t.bumpVersion()
 	w.UpdateWindow()
@@ -71,31 +77,32 @@ func (t *Term) scrollToBottom(w *gui.Window) {
 // (backward=false) MarkPromptStart mark. No-op when no marks exist or no
 // mark is found in that direction. Suppressed while the alt screen is active.
 func (t *Term) jumpToMark(backward bool, w *gui.Window) {
-	t.grid.Mu.Lock()
-	if t.grid.AltActive {
-		t.grid.Mu.Unlock()
-		return
-	}
-	sb := t.grid.Scrollback.Len()
-	off := clamp(t.grid.ViewOffset, 0, sb)
-	viewTop := sb - off
-	var row int
-	var ok bool
-	if backward {
-		row, ok = t.grid.PrevMark(viewTop, MarkPromptStart)
-	} else {
-		row, ok = t.grid.NextMark(viewTop, MarkPromptStart)
-	}
-	if ok {
-		if row >= sb {
-			t.grid.ViewOffset = 0
-		} else {
-			t.grid.ViewOffset = sb - row
+	var found bool
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		if t.grid.AltActive {
+			return
 		}
-		t.grid.ViewSubPx = 0
-	}
-	t.grid.Mu.Unlock()
-	if ok {
+		sb := t.grid.Scrollback.Len()
+		off := clamp(t.grid.ViewOffset, 0, sb)
+		viewTop := sb - off
+		var row int
+		if backward {
+			row, found = t.grid.PrevMark(viewTop, MarkPromptStart)
+		} else {
+			row, found = t.grid.NextMark(viewTop, MarkPromptStart)
+		}
+		if found {
+			if row >= sb {
+				t.grid.ViewOffset = 0
+			} else {
+				t.grid.ViewOffset = sb - row
+			}
+			t.grid.ViewSubPx = 0
+		}
+	}()
+	if found {
 		t.showScrollbar()
 		t.bumpVersion()
 		w.UpdateWindow()
@@ -108,34 +115,37 @@ func (t *Term) searchJump(forward bool, w *gui.Window) {
 	if t.searchQuery == "" {
 		return
 	}
-	g := t.grid
-	g.Mu.Lock()
-	sb := g.Scrollback.Len()
-	var start ContentPos
-	if len(t.searchMatches) > 0 && t.searchIdx < len(t.searchMatches) {
-		start = t.searchMatches[t.searchIdx].ContentPos
-	} else {
-		start = ContentPos{Row: sb - clamp(g.ViewOffset, 0, sb)}
-	}
-	var (
-		pos ContentPos
-		ok  bool
-	)
-	if t.searchRegex && t.searchRE != nil {
-		pos, _, ok = g.FindRegex(t.searchRE, start, forward)
-	} else if !t.searchRegex {
-		pos, ok = g.Find(t.searchQuery, start, forward)
-	}
-	if ok {
-		liveRow := pos.Row - sb
-		if liveRow >= 0 {
-			g.ViewOffset = 0
+	ok := func() bool {
+		g := t.grid
+		g.Mu.Lock()
+		defer g.Mu.Unlock()
+		sb := g.Scrollback.Len()
+		var start ContentPos
+		if len(t.searchMatches) > 0 && t.searchIdx < len(t.searchMatches) {
+			start = t.searchMatches[t.searchIdx].ContentPos
 		} else {
-			g.ViewOffset = clamp(sb-pos.Row, 0, sb)
+			start = ContentPos{Row: sb - clamp(g.ViewOffset, 0, sb)}
 		}
-		g.ViewSubPx = 0
-	}
-	g.Mu.Unlock()
+		var (
+			pos ContentPos
+			ok  bool
+		)
+		if t.searchRegex && t.searchRE != nil {
+			pos, _, ok = g.FindRegex(t.searchRE, start, forward)
+		} else if !t.searchRegex {
+			pos, ok = g.Find(t.searchQuery, start, forward)
+		}
+		if ok {
+			liveRow := pos.Row - sb
+			if liveRow >= 0 {
+				g.ViewOffset = 0
+			} else {
+				g.ViewOffset = clamp(sb-pos.Row, 0, sb)
+			}
+			g.ViewSubPx = 0
+		}
+		return ok
+	}()
 	if ok {
 		w.UpdateWindow()
 	}

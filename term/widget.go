@@ -375,11 +375,13 @@ func (t *Term) blinkLoop() {
 		case <-t.blinkDone:
 			return
 		case <-tk.C:
-			t.grid.Mu.Lock()
-			redraw := t.grid.CursorVisible &&
-				t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0 &&
-				t.cursorBlinks()
-			t.grid.Mu.Unlock()
+			redraw := func() bool {
+				t.grid.Mu.Lock()
+				defer t.grid.Mu.Unlock()
+				return t.grid.CursorVisible &&
+					t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0 &&
+					t.cursorBlinks()
+			}()
 			if redraw {
 				t.bumpVersion()
 				t.win.QueueCommand(func(w *gui.Window) {
@@ -407,9 +409,11 @@ func (t *Term) autoScrollLoop() {
 			if dir == 0 {
 				continue
 			}
-			t.grid.Mu.Lock()
-			t.grid.ScrollView(dir)
-			t.grid.Mu.Unlock()
+			func() {
+				t.grid.Mu.Lock()
+				defer t.grid.Mu.Unlock()
+				t.grid.ScrollView(dir)
+			}()
 			t.bumpVersion()
 			t.win.QueueCommand(func(w *gui.Window) {
 				if t.closed.Load() {
@@ -537,9 +541,11 @@ func (t *Term) onWindowEvent(e *gui.Event) {
 		t.cancelMomentum()
 	}
 	var report []byte
-	t.grid.Mu.Lock()
-	focus := t.grid.FocusReporting
-	t.grid.Mu.Unlock()
+	focus := func() bool {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		return t.grid.FocusReporting
+	}()
 	if !focus {
 		return
 	}
@@ -569,8 +575,8 @@ func (t *Term) Cwd() string {
 // Safe to call from the main thread at any time.
 func (t *Term) SetTheme(th Theme) {
 	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
 	t.grid.Theme = th
-	t.grid.Mu.Unlock()
 	t.bumpVersion()
 }
 
@@ -671,20 +677,23 @@ func (t *Term) readLoop() {
 	for {
 		n, err := t.pty.Read(buf)
 		if n > 0 {
-			t.grid.Mu.Lock()
-			t.parser.Feed(buf[:n])
-			bellCount := t.grid.BellCount
-			redraw := !t.grid.SyncOutput || !t.grid.SyncActive
-			// Gate the version bump on actual visual changes: cell mutations
-			// (HasDirtyRows) or a new BEL (which marks no cells but needs a
-			// flash). Pure no-op sequences (swallowed queries, etc.) skip the
-			// version bump so the tessellation cache stays valid.
-			dirty := t.grid.HasDirtyRows() || bellCount != t.readBellCount
-			if redraw && dirty {
-				t.readBellCount = bellCount
-				t.bumpVersion()
-			}
-			t.grid.Mu.Unlock()
+			bellCount, redraw, dirty := func() (uint64, bool, bool) {
+				t.grid.Mu.Lock()
+				defer t.grid.Mu.Unlock()
+				t.parser.Feed(buf[:n])
+				bellCount := t.grid.BellCount
+				redraw := !t.grid.SyncOutput || !t.grid.SyncActive
+				// Gate the version bump on actual visual changes: cell mutations
+				// (HasDirtyRows) or a new BEL (which marks no cells but needs a
+				// flash). Pure no-op sequences (swallowed queries, etc.) skip the
+				// version bump so the tessellation cache stays valid.
+				dirty := t.grid.HasDirtyRows() || bellCount != t.readBellCount
+				if redraw && dirty {
+					t.readBellCount = bellCount
+					t.bumpVersion()
+				}
+				return bellCount, redraw, dirty
+			}()
 			// Drain parser replies (DA, DECRQSS, ...) outside Mu so a
 			// blocking pty.Write (slave-side input buffer full) cannot
 			// stall onDraw waiting for the same lock.

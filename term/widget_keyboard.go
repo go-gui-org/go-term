@@ -328,18 +328,22 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 
 	switch e.KeyCode {
 	case gui.KeyPageUp:
-		t.grid.Mu.Lock()
-		inAlt := t.grid.AltActive
-		t.grid.Mu.Unlock()
+		inAlt := func() bool {
+			t.grid.Mu.Lock()
+			defer t.grid.Mu.Unlock()
+			return t.grid.AltActive
+		}()
 		if shift || !inAlt {
 			t.scrollByPage(+1, w)
 			e.IsHandled = true
 			return
 		}
 	case gui.KeyPageDown:
-		t.grid.Mu.Lock()
-		inAlt := t.grid.AltActive
-		t.grid.Mu.Unlock()
+		inAlt := func() bool {
+			t.grid.Mu.Lock()
+			defer t.grid.Mu.Unlock()
+			return t.grid.AltActive
+		}()
 		if shift || !inAlt {
 			t.scrollByPage(-1, w)
 			e.IsHandled = true

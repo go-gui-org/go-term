@@ -118,13 +118,13 @@ func (t *Term) posToCell(x, y float32) (int, int) {
 		c = 0
 	}
 	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
 	if r >= t.grid.Rows {
 		r = t.grid.Rows - 1
 	}
 	if c >= t.grid.Cols {
 		c = t.grid.Cols - 1
 	}
-	t.grid.Mu.Unlock()
 	return r, c
 }
 
@@ -167,12 +167,14 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if e.MouseButton != gui.MouseLeft {
 		return
 	}
-	t.grid.Mu.Lock()
-	contentR := t.grid.viewportToContent(r)
-	t.grid.SelAnchor = ContentPos{Row: contentR, Col: c}
-	t.grid.SelHead = ContentPos{Row: contentR, Col: c}
-	t.grid.SelActive = false
-	t.grid.Mu.Unlock()
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		contentR := t.grid.viewportToContent(r)
+		t.grid.SelAnchor = ContentPos{Row: contentR, Col: c}
+		t.grid.SelHead = ContentPos{Row: contentR, Col: c}
+		t.grid.SelActive = false
+	}()
 	t.dragging = true
 	t.dragButton = e.MouseButton
 	t.dragReport = false
@@ -231,35 +233,37 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		t.updateHover(r, c, w)
 		return
 	}
-	t.grid.Mu.Lock()
-	rows := t.grid.Rows
-	widgetH := float32(rows) * t.cellH
-	if t.cellH > 0 {
-		switch {
-		case e.MouseY < 0:
-			t.grid.ScrollView(1)
-		case e.MouseY > widgetH:
-			t.grid.ScrollView(-1)
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		rows := t.grid.Rows
+		widgetH := float32(rows) * t.cellH
+		if t.cellH > 0 {
+			switch {
+			case e.MouseY < 0:
+				t.grid.ScrollView(1)
+			case e.MouseY > widgetH:
+				t.grid.ScrollView(-1)
+			}
 		}
-	}
-	contentR := t.grid.viewportToContent(r)
-	t.grid.SelHead = ContentPos{Row: contentR, Col: c}
-	if t.grid.SelHead != t.grid.SelAnchor {
-		t.grid.SelActive = true
-	}
-	t.grid.Mu.Unlock()
-	// Persist scroll direction so autoScrollLoop keeps scrolling if
-	// onMouseMove stops firing (mouse above title bar / window edge).
-	if t.cellH > 0 {
-		switch {
-		case e.MouseY < 0:
-			t.autoScrollDir.Store(1)
-		case e.MouseY > widgetH:
-			t.autoScrollDir.Store(-1)
-		default:
-			t.autoScrollDir.Store(0)
+		contentR := t.grid.viewportToContent(r)
+		t.grid.SelHead = ContentPos{Row: contentR, Col: c}
+		if t.grid.SelHead != t.grid.SelAnchor {
+			t.grid.SelActive = true
 		}
-	}
+		// Persist scroll direction so autoScrollLoop keeps scrolling if
+		// onMouseMove stops firing (mouse above title bar / window edge).
+		if t.cellH > 0 {
+			switch {
+			case e.MouseY < 0:
+				t.autoScrollDir.Store(1)
+			case e.MouseY > widgetH:
+				t.autoScrollDir.Store(-1)
+			default:
+				t.autoScrollDir.Store(0)
+			}
+		}
+	}()
 	t.bumpVersion()
 	w.UpdateWindow()
 	t.updateHover(r, c, w)
@@ -274,13 +278,16 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 	}
 	t.hoverR.Store(int32(r))
 	t.hoverC.Store(int32(c))
-	t.grid.Mu.Lock()
-	var prevLink, curLink uint16
-	if oldR >= 0 && oldC >= 0 {
-		prevLink = t.grid.ViewCellAt(oldR, oldC).LinkID
-	}
-	curLink = t.grid.ViewCellAt(r, c).LinkID
-	t.grid.Mu.Unlock()
+	prevLink, curLink := func() (uint16, uint16) {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		var prev, cur uint16
+		if oldR >= 0 && oldC >= 0 {
+			prev = t.grid.ViewCellAt(oldR, oldC).LinkID
+		}
+		cur = t.grid.ViewCellAt(r, c).LinkID
+		return prev, cur
+	}()
 	if prevLink != 0 || curLink != 0 {
 		t.bumpVersion()
 		w.UpdateWindow()
@@ -315,10 +322,12 @@ func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// Single click (no drag) with Cmd/Ctrl on a hyperlink → open URL.
 	if !t.grid.SelActive {
 		if e.Modifiers&gui.ModSuper != 0 || e.Modifiers&gui.ModCtrl != 0 {
-			t.grid.Mu.Lock()
-			cell := t.grid.ViewCellAt(r, c)
-			url := t.grid.LinkURL(cell.LinkID)
-			t.grid.Mu.Unlock()
+			url := func() string {
+				t.grid.Mu.Lock()
+				defer t.grid.Mu.Unlock()
+				cell := t.grid.ViewCellAt(r, c)
+				return t.grid.LinkURL(cell.LinkID)
+			}()
 			if url != "" {
 				openURL(url)
 				e.IsHandled = true
@@ -327,9 +336,11 @@ func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		}
 	}
 	if !t.copySelection(w) {
-		t.grid.Mu.Lock()
-		t.grid.ClearSelection()
-		t.grid.Mu.Unlock()
+		func() {
+			t.grid.Mu.Lock()
+			defer t.grid.Mu.Unlock()
+			t.grid.ClearSelection()
+		}()
 	}
 	t.bumpVersion()
 	w.UpdateWindow()
@@ -398,11 +409,13 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// which accumulates it into ViewOffset + ViewSubPx. No integer truncation.
 	const scrollSensitivity float32 = 15
 	deltaPx := e.ScrollY * scrollSensitivity
-	t.grid.Mu.Lock()
-	prevOff, prevSub := t.grid.ViewOffset, t.grid.ViewSubPx
-	t.grid.ScrollViewPx(deltaPx, t.cellH)
-	changed := t.grid.ViewOffset != prevOff || t.grid.ViewSubPx != prevSub
-	t.grid.Mu.Unlock()
+	changed := func() bool {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		prevOff, prevSub := t.grid.ViewOffset, t.grid.ViewSubPx
+		t.grid.ScrollViewPx(deltaPx, t.cellH)
+		return t.grid.ViewOffset != prevOff || t.grid.ViewSubPx != prevSub
+	}()
 	if changed {
 		t.showScrollbar()
 		t.bumpVersion()
@@ -425,14 +438,16 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		momentumCap   = 600.0
 		coastDelay    = 40 * time.Millisecond
 	)
-	t.momentumMu.Lock()
-	newVel := math.Max(-momentumCap, math.Min(momentumCap, float64(e.ScrollY)*momentumScale))
-	if math.Abs(newVel) >= math.Abs(t.momentumVel) || (t.momentumVel > 0) != (newVel > 0) {
-		t.momentumVel = newVel
-	}
-	t.momentumCellH = t.cellH
-	t.momentumCoasting = false
-	t.momentumMu.Unlock()
+	func() {
+		t.momentumMu.Lock()
+		defer t.momentumMu.Unlock()
+		newVel := math.Max(-momentumCap, math.Min(momentumCap, float64(e.ScrollY)*momentumScale))
+		if math.Abs(newVel) >= math.Abs(t.momentumVel) || (t.momentumVel > 0) != (newVel > 0) {
+			t.momentumVel = newVel
+		}
+		t.momentumCellH = t.cellH
+		t.momentumCoasting = false
+	}()
 	if t.momentumTimer == nil {
 		t.momentumTimer = time.AfterFunc(coastDelay, t.kickMomentum)
 	} else {
@@ -447,17 +462,17 @@ func (t *Term) cancelMomentum() {
 		t.momentumTimer.Stop()
 	}
 	t.momentumMu.Lock()
+	defer t.momentumMu.Unlock()
 	t.momentumVel = 0
 	t.momentumCoasting = false
-	t.momentumMu.Unlock()
 }
 
 // kickMomentum is the AfterFunc callback fired 80 ms after the last scroll
 // event. It marks the momentum state as coasting and wakes momentumLoop.
 func (t *Term) kickMomentum() {
 	t.momentumMu.Lock()
+	defer t.momentumMu.Unlock()
 	t.momentumCoasting = true
-	t.momentumMu.Unlock()
 	select {
 	case t.momentumKick <- struct{}{}:
 	default:
@@ -485,27 +500,33 @@ func (t *Term) momentumLoop() {
 		case <-t.momentumKick:
 			// coasting flag already set; next tick starts the coast
 		case <-tk.C:
-			t.momentumMu.Lock()
-			if !t.momentumCoasting {
-				t.momentumMu.Unlock()
+			deltaPx, cellH, coasting := func() (float32, float32, bool) {
+				t.momentumMu.Lock()
+				defer t.momentumMu.Unlock()
+				if !t.momentumCoasting {
+					return 0, 0, false
+				}
+				friction := frictionCoast
+				if math.Abs(t.momentumVel) > phaseVel {
+					friction = frictionFast
+				}
+				t.momentumVel *= friction
+				cellH := t.momentumCellH
+				if math.Abs(t.momentumVel) < minVel {
+					t.momentumCoasting = false
+					t.momentumVel = 0
+				}
+				return float32(t.momentumVel), cellH, t.momentumCoasting
+			}()
+			if !coasting {
 				continue
 			}
-			friction := frictionCoast
-			if math.Abs(t.momentumVel) > phaseVel {
-				friction = frictionFast
-			}
-			t.momentumVel *= friction
-			cellH := t.momentumCellH
-			if math.Abs(t.momentumVel) < minVel {
-				t.momentumCoasting = false
-				t.momentumVel = 0
-			}
-			deltaPx := float32(t.momentumVel)
-			t.momentumMu.Unlock()
 			if deltaPx != 0 && finite(cellH) {
-				t.grid.Mu.Lock()
-				t.grid.ScrollViewPx(deltaPx, cellH)
-				t.grid.Mu.Unlock()
+				func() {
+					t.grid.Mu.Lock()
+					defer t.grid.Mu.Unlock()
+					t.grid.ScrollViewPx(deltaPx, cellH)
+				}()
 				t.bumpVersion()
 				t.win.QueueCommand(func(w *gui.Window) {
 					if t.closed.Load() {

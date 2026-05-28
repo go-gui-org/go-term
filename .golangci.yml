@@ -1,0 +1,24 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - unused
+    - prealloc
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+run:
+  go: "1.26"
+  timeout: 3m
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

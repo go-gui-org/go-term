@@ -362,6 +362,31 @@ func TestGrid_RowRunesBuf_ReuseWithShrinkingRow(t *testing.T) {
 	}
 }
 
+func BenchmarkGrid_Search(b *testing.B) {
+	const rows, cols = 100, 120
+	g := NewGrid(rows, cols)
+	g.ScrollbackCap = 200
+	for r := range rows {
+		g.CursorR, g.CursorC = r, 0
+		for range cols {
+			g.Put('x')
+		}
+	}
+	// Add some matches
+	g.CursorR, g.CursorC = 50, 0
+	for _, ch := range "needle" {
+		g.Put(ch)
+	}
+	for range 100 {
+		g.scrollUpRegion(1)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		g.ViewportMatches("needle")
+	}
+}
+
 func TestGrid_ViewportMatchesRegex_CapsAtMaxHighlights(t *testing.T) {
 	// 6 rows × 90 cols = 540 cells; regex matching every cell exceeds cap.
 	const rows, cols = 6, 90

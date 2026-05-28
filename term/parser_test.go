@@ -402,3 +402,41 @@ func TestParser_KittyKeyQueryZero(t *testing.T) {
 		t.Fatalf("query zero: got %q, want %q", got, want)
 	}
 }
+
+// ---- Benchmarks ----
+
+func BenchmarkParserFeed_PlainText(b *testing.B) {
+	g := NewGrid(24, 80)
+	p := NewParser(g)
+	input := make([]byte, 4096)
+	for i := range input {
+		input[i] = byte('a' + i%26)
+	}
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		g.Mu.Lock()
+		p.Feed(input)
+		g.Mu.Unlock()
+	}
+}
+
+func BenchmarkParserFeed_SGR(b *testing.B) {
+	g := NewGrid(24, 80)
+	p := NewParser(g)
+	// interleave SGR color sequences with text
+	input := make([]byte, 0, 4096)
+	for len(input) < 4000 {
+		input = append(input, "\x1b[31;1mhello\x1b[0m "...)
+	}
+	input = input[:4096]
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		g.Mu.Lock()
+		p.Feed(input)
+		g.Mu.Unlock()
+	}
+}

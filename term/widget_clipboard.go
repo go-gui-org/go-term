@@ -53,8 +53,8 @@ func (t *Term) pasteFromClipboard(w *gui.Window) {
 	t.snapToLive()
 	clean := stripPasteEnd(text)
 	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
 	bracketed := t.grid.BracketedPaste
-	t.grid.Mu.Unlock()
 	payload := clean
 	if bracketed {
 		payload = pasteStart + clean + pasteEnd
@@ -67,9 +67,12 @@ func (t *Term) pasteFromClipboard(w *gui.Window) {
 // copySelection writes the current selection to the system clipboard
 // and returns true if anything was copied.
 func (t *Term) copySelection(w *gui.Window) bool {
-	t.grid.Mu.Lock()
-	text := t.grid.SelectedText()
-	t.grid.Mu.Unlock()
+	var text string
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		text = t.grid.SelectedText()
+	}()
 	if text == "" {
 		return false
 	}
