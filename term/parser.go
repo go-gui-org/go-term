@@ -99,8 +99,8 @@ type Parser struct {
 	// starts with 'G'). Capped at maxAPCBytes per-chunk; chunked images
 	// accumulate base64 text in kittyChunks.
 	apc         []byte
-	kittyChunks map[uint32][]byte      // partial transmissions: id → raw base64 text
-	kittyStore  map[uint32]kittyEntry  // off-screen cache: image id → entry
+	kittyChunks map[uint32][]byte     // partial transmissions: id → raw base64 text
+	kittyStore  map[uint32]kittyEntry // off-screen cache: image id → entry
 
 	// onTitle, if non-nil, is invoked for OSC 0/1/2 (window title).
 	// onReply, if non-nil, is invoked when the parser needs to write
@@ -109,10 +109,11 @@ type Parser struct {
 	// requests. onNotify, if non-nil, is invoked for OSC 9 and OSC 777
 	// desktop-notification requests. All run while Grid.Mu is held —
 	// handlers must not re-enter the grid.
-	onTitle     func(string)
-	onReply     func([]byte)
-	onClipboard func([]byte)
-	onNotify    func(title, body string)
+	onTitle             func(string)
+	onReply             func([]byte)
+	onClipboard         func([]byte)
+	allowClipboardWrite bool
+	onNotify            func(title, body string)
 
 	// graphicsDir is the directory where decoded Sixel PNGs are written.
 	// Empty = os.TempDir(). Set via SetGraphicsDir; the widget creates a
@@ -141,8 +142,13 @@ func (p *Parser) SetReplyHandler(fn func([]byte)) { p.onReply = fn }
 
 // SetClipboardHandler registers a callback for OSC 52 clipboard-write
 // requests. data is the decoded (raw) clipboard payload. Pass nil to
-// disable. Called while Grid.Mu is held.
+// disable. Called while Grid.Mu is held. OSC 52 writes are ignored unless
+// SetClipboardWriteAllowed(true) is also called.
 func (p *Parser) SetClipboardHandler(fn func([]byte)) { p.onClipboard = fn }
+
+// SetClipboardWriteAllowed controls whether OSC 52 write requests may invoke
+// the registered clipboard handler. Disabled by default.
+func (p *Parser) SetClipboardWriteAllowed(ok bool) { p.allowClipboardWrite = ok }
 
 // SetNotifyHandler registers a callback for OSC 9 and OSC 777 desktop
 // notifications. title may be empty (OSC 9 carries body only). Called

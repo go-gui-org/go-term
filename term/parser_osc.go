@@ -167,7 +167,7 @@ func (p *Parser) dispatchOSC() {
 				return
 			}
 		}
-		if p.onClipboard != nil {
+		if p.allowClipboardWrite && p.onClipboard != nil {
 			p.onClipboard(data)
 		}
 	case 777:

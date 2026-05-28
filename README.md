@@ -63,7 +63,7 @@ purpose and may still shift. See [CHANGELOG.md](CHANGELOG.md).
 | Pixel-perfect scrolling | Sub-row `ViewSubPx` offset; momentum scroll with two-phase friction; cancels on trackpad touch |
 | Scrollbar indicator | Auto-hides at live viewport; fades after inactivity |
 | Text selection | Left-drag; content-relative coordinates survive scroll and resize |
-| Clipboard copy/paste | `Cmd+C` / `Cmd+V`; OSC 52 write |
+| Clipboard copy/paste | `Cmd+C` / `Cmd+V`; OSC 52 write when explicitly enabled |
 | Search | `Cmd+F` literal search; `Ctrl+R` toggles RE2 regex mode; highlights all matches; `Enter`/`Shift+Enter` cycle |
 | Semantic shell marks | OSC 133 A/B/C/D; `Cmd+Up/Down` jumps between command boundaries |
 
@@ -76,7 +76,7 @@ purpose and may still shift. See [CHANGELOG.md](CHANGELOG.md).
 | OSC 8 | Hyperlinks; `Cmd+click` opens in OS default browser |
 | OSC 9 / 777 | Desktop notifications; injection-safe dispatch |
 | OSC 10 / 11 / 12 | Dynamic foreground / background / cursor-color set and query |
-| OSC 52 | Clipboard write (base64); read requests silently dropped |
+| OSC 52 | Clipboard write (base64, disabled by default via `Cfg.AllowOSC52Write`); read requests silently dropped |
 | OSC 133 | Semantic shell integration (prompt / command / output marks) |
 | OSC 1337 | iTerm2 inline images |
 | DCS sixel | Sixel graphics; 256-register color; RLE; up to 4096×4096 px; 256 retained per grid |
@@ -169,6 +169,7 @@ func main() {
 term.Cfg{
     ScrollbackRows: 10000,          // default 5000
     CursorBlink:    ptr(true),      // override DECSCUSR blink state
+    AllowOSC52Write: true,           // allow shell apps to set clipboard
     OnTitle:        func(s string) { /* window title change */ },
 }
 ```
@@ -191,7 +192,7 @@ term/widget.go           Term struct, New, View, Close; reader goroutine.
 term/widget_draw.go      OnDraw: bg/fg/graphics/cursor render passes.
 term/widget_keyboard.go  onChar, onKeyDown, onKeyUp; KKP encoding.
 term/widget_mouse.go     Mouse button/motion/wheel; SGR encoding.
-term/widget_clipboard.go Cmd+C/V; OSC 52 clipboard write.
+term/widget_clipboard.go Cmd+C/V; opt-in OSC 52 clipboard write.
 term/widget_scroll.go    Scrollbar, momentum scroll, ViewSubPx math.
         │
         ▼

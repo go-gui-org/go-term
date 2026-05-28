@@ -61,6 +61,9 @@ Thumbs.db
 # Serena
 .serena/
 
+# Antigravity
+.antigravitycli/
+
 # Graphify
 graphify-out/
 

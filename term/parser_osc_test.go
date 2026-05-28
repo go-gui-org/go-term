@@ -174,6 +174,7 @@ func TestParser_OSC8_DeduplicatesURL(t *testing.T) {
 
 func TestParser_OSC52_Write(t *testing.T) {
 	g, p := newParserGrid(5, 40)
+	p.SetClipboardWriteAllowed(true)
 	var got []byte
 	p.SetClipboardHandler(func(data []byte) {
 		got = append([]byte(nil), data...)
@@ -185,8 +186,19 @@ func TestParser_OSC52_Write(t *testing.T) {
 	}
 }
 
+func TestParser_OSC52_WriteDefaultDenied(t *testing.T) {
+	g, p := newParserGrid(5, 40)
+	called := false
+	p.SetClipboardHandler(func(_ []byte) { called = true })
+	feed(t, g, p, []byte("\x1b]52;c;aGVsbG8=\x07"))
+	if called {
+		t.Error("onClipboard called while OSC 52 writes are disabled")
+	}
+}
+
 func TestParser_OSC52_InvalidBase64(t *testing.T) {
 	g, p := newParserGrid(5, 40)
+	p.SetClipboardWriteAllowed(true)
 	called := false
 	p.SetClipboardHandler(func(_ []byte) { called = true })
 	feed(t, g, p, []byte("\x1b]52;c;!!!notbase64!!!\x07"))
@@ -197,6 +209,7 @@ func TestParser_OSC52_InvalidBase64(t *testing.T) {
 
 func TestParser_OSC52_ReadIgnored(t *testing.T) {
 	g, p := newParserGrid(5, 40)
+	p.SetClipboardWriteAllowed(true)
 	called := false
 	p.SetClipboardHandler(func(_ []byte) { called = true })
 	feed(t, g, p, []byte("\x1b]52;c;?\x07"))
@@ -207,6 +220,7 @@ func TestParser_OSC52_ReadIgnored(t *testing.T) {
 
 func TestParser_OSC52_NoSemicolon(t *testing.T) {
 	g, p := newParserGrid(5, 40)
+	p.SetClipboardWriteAllowed(true)
 	called := false
 	p.SetClipboardHandler(func(_ []byte) { called = true })
 	feed(t, g, p, []byte("\x1b]52;aGVsbG8=\x07"))

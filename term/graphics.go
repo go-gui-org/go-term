@@ -71,6 +71,13 @@ var sixelDefaultPalette = [16]color.NRGBA{
 // decodeImageBytes decodes a raw image (PNG, JPEG, GIF, or any format
 // registered via blank import) into an NRGBA. Returns nil on failure.
 func decodeImageBytes(data []byte) *image.NRGBA {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil
+	}
+	if cfg.Width > maxSixelWidth || cfg.Height > maxSixelHeight {
+		return nil
+	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil || img == nil {
 		return nil

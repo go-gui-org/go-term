@@ -71,7 +71,7 @@ term/widget.go           Term struct, New, View, Close; reader goroutine.
 term/widget_draw.go      OnDraw: bg/fg/graphics/cursor render passes.
 term/widget_keyboard.go  onChar, onKeyDown, onKeyUp; KKP encoding.
 term/widget_mouse.go     Mouse button/motion/wheel; SGR encoding.
-term/widget_clipboard.go Cmd+C/V; OSC 52 clipboard write.
+term/widget_clipboard.go Cmd+C/V; opt-in OSC 52 clipboard write.
 term/widget_scroll.go    Scrollbar, momentum scroll, ViewSubPx math.
         │
         ▼

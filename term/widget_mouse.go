@@ -469,10 +469,10 @@ func (t *Term) momentumLoop() {
 	defer t.loopWg.Done()
 	const (
 		tickDur       = 16 * time.Millisecond
-		frictionFast  = 0.90 // decelerate at high speed — avoids linear feel
-		frictionCoast = 0.95 // gentle tail once slow — covers real distance
+		frictionFast  = 0.90  // decelerate at high speed — avoids linear feel
+		frictionCoast = 0.95  // gentle tail once slow — covers real distance
 		phaseVel      = 120.0 // px/tick threshold between phases
-		minVel        = 1.0  // px/tick below which coast stops
+		minVel        = 1.0   // px/tick below which coast stops
 	)
 	tk := time.NewTicker(tickDur)
 	defer tk.Stop()

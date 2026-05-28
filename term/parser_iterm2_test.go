@@ -3,6 +3,8 @@ package term
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -29,6 +31,26 @@ func make1x1JPEG(c color.RGBA) []byte {
 	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
 		panic(err)
 	}
+	return buf.Bytes()
+}
+
+func makePNGHeader(width, height uint32) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte("\x89PNG\r\n\x1a\n"))
+
+	var ihdr bytes.Buffer
+	_ = binary.Write(&ihdr, binary.BigEndian, width)
+	_ = binary.Write(&ihdr, binary.BigEndian, height)
+	ihdr.Write([]byte{8, 6, 0, 0, 0})
+
+	chunk := ihdr.Bytes()
+	_ = binary.Write(&buf, binary.BigEndian, uint32(len(chunk)))
+	buf.WriteString("IHDR")
+	buf.Write(chunk)
+	crc := crc32.NewIEEE()
+	_, _ = crc.Write([]byte("IHDR"))
+	_, _ = crc.Write(chunk)
+	_ = binary.Write(&buf, binary.BigEndian, crc.Sum32())
 	return buf.Bytes()
 }
 
@@ -224,6 +246,13 @@ func TestDecodeImageBytes_OversizedReturnsNil(t *testing.T) {
 		if got := decodeImageBytes(buf.Bytes()); got != nil {
 			t.Errorf("%dx%d: got non-nil; want nil (oversized)", tc.w, tc.h)
 		}
+	}
+}
+
+func TestDecodeImageBytes_OversizedHeaderReturnsNil(t *testing.T) {
+	raw := makePNGHeader(maxSixelWidth+1, maxSixelHeight+1)
+	if got := decodeImageBytes(raw); got != nil {
+		t.Fatal("got non-nil for oversized PNG header")
 	}
 }
 

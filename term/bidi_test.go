@@ -45,7 +45,7 @@ func TestRowHasRTL_SkipsContinuation(t *testing.T) {
 	// even though they occupy non-zero positions.
 	row := []Cell{
 		{Width: 2, Ch: '日', FG: DefaultColor, BG: DefaultColor}, // wide LTR
-		{Width: 0, Ch: 0, FG: DefaultColor, BG: DefaultColor},    // continuation
+		{Width: 0, Ch: 0, FG: DefaultColor, BG: DefaultColor},   // continuation
 	}
 	if rowHasRTL(row, 2) {
 		t.Error("continuation cell wrongly flagged as RTL")

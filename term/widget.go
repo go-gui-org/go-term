@@ -38,6 +38,11 @@ type Cfg struct {
 	// to block.
 	OnNotify func(title, body string)
 
+	// AllowOSC52Write permits host applications to write the system clipboard
+	// via OSC 52. Disabled by default so untrusted terminal output cannot
+	// silently replace the user's clipboard.
+	AllowOSC52Write bool
+
 	// CursorBlink, if non-nil, overrides the application's DECSCUSR
 	// blink request. Use *true to force blinking on, *false to force
 	// steady. Leave nil to honor whatever the shell asks for (steady
@@ -204,11 +209,11 @@ type Term struct {
 	// (onMouseScroll) except for the timer callback, which only touches
 	// momentumMu-protected fields.
 	momentumMu       sync.Mutex
-	momentumVel      float64      // EMA of recent scroll deltas (pixels)
-	momentumCellH    float32      // cellH snapshot at last scroll event
-	momentumCoasting bool         // true while goroutine is decelerating
+	momentumVel      float64       // EMA of recent scroll deltas (pixels)
+	momentumCellH    float32       // cellH snapshot at last scroll event
+	momentumCoasting bool          // true while goroutine is decelerating
 	momentumKick     chan struct{} // buffered 1; wakes momentumLoop
-	momentumTimer    *time.Timer  // reset on each scroll; fires kickMomentum
+	momentumTimer    *time.Timer   // reset on each scroll; fires kickMomentum
 
 	// runBuf reused across onDraw calls; grows once, never freed.
 	runBuf strings.Builder
@@ -318,12 +323,15 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	}
 	t.parser.SetTitleHandler(t.onParserTitle)
 	t.parser.SetReplyHandler(t.onParserReply)
-	t.parser.SetClipboardHandler(func(data []byte) {
-		text := string(data)
-		t.win.QueueCommand(func(w *gui.Window) {
-			w.SetClipboard(text)
+	t.parser.SetClipboardWriteAllowed(cfg.AllowOSC52Write)
+	if cfg.AllowOSC52Write {
+		t.parser.SetClipboardHandler(func(data []byte) {
+			text := string(data)
+			t.win.QueueCommand(func(w *gui.Window) {
+				w.SetClipboard(text)
+			})
 		})
-	})
+	}
 	t.parser.SetNotifyHandler(func(title, body string) {
 		if !t.notifyBusy.CompareAndSwap(false, true) {
 			return

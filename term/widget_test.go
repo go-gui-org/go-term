@@ -63,7 +63,6 @@ func TestScrollbarGeometry_SubPixel(t *testing.T) {
 	}
 }
 
-
 func TestRuneString_ASCIINoAlloc(t *testing.T) {
 	var sink string
 	avg := testing.AllocsPerRun(100, func() {

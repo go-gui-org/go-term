@@ -286,7 +286,7 @@ func TestGrid_ScrollViewPx_ClampAtZero(t *testing.T) {
 		g.scrollUpRegion(1)
 	}
 	const cellH float32 = 20
-	g.ScrollViewPx(10, cellH) // scroll forward 10px
+	g.ScrollViewPx(10, cellH)  // scroll forward 10px
 	g.ScrollViewPx(-50, cellH) // try to scroll past the bottom
 	if g.ViewOffset != 0 {
 		t.Errorf("ViewOffset = %d, want 0", g.ViewOffset)
