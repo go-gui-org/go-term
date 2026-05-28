@@ -82,6 +82,25 @@ func TestParser_InvalidUTF8YieldsReplacement(t *testing.T) {
 	}
 }
 
+// Regression: invalid UTF-8 carry-over (leader split across chunks) followed
+// by an ESC byte in the next chunk must not silently drop the ESC. The leader
+// produces U+FFFD at the current cursor position, then the escape sequence is
+// processed normally.
+func TestParser_UTF8CarryOverFollowedByEscape(t *testing.T) {
+	// 0xE0 is a 3-byte leader; next chunk starts with ESC [ A (cursor up).
+	// Cursor starts at row 2. Put(FFFD) places it there, then cursor-up moves to row 1.
+	g, p := newParserGrid(3, 5)
+	g.MoveCursor(2, 0)
+	feed(t, g, p, []byte{0xE0})            // partial UTF-8 — stored as carry-over
+	feed(t, g, p, []byte{0x1B, '[', 'A'}) // ESC [ A = cursor up 1
+	if g.At(2, 0).Ch != 0xFFFD {
+		t.Errorf("invalid leader should produce U+FFFD at (2,0), got %U", g.At(2, 0).Ch)
+	}
+	if g.CursorR != 1 {
+		t.Errorf("ESC [ A after carry-over: cursor row = %d, want 1", g.CursorR)
+	}
+}
+
 func TestParser_ESCNonBracketIgnored(t *testing.T) {
 	g, p := newParserGrid(1, 5)
 	feed(t, g, p, []byte("\x1b("))

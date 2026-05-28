@@ -118,6 +118,11 @@ type Term struct {
 	// closed guards Close so multiple calls are safe.
 	closed atomic.Bool
 
+	// loopWg tracks the three auxiliary goroutines (blink, autoScroll,
+	// momentum) so Close can wait for them to exit before tearing down
+	// state they may still reference.
+	loopWg sync.WaitGroup
+
 	// notifyBusy prevents goroutine pile-up from rapid OSC 9/777 sequences.
 	// Only one notification runs at a time; extras are dropped.
 	notifyBusy atomic.Bool
@@ -158,6 +163,13 @@ type Term struct {
 	searchRegex   bool          // true: match via re instead of plain text
 	searchRE      *regexp.Regexp
 	searchREErr   error
+
+	// searchCacheVer/Query/Regex track the last drawVersion + query + mode
+	// combination for which searchMatches was computed. When all three match
+	// the current frame, the expensive ViewportMatches call is skipped.
+	searchCacheVer   uint64
+	searchCacheQuery string
+	searchCacheRegex bool
 
 	// Bell flash state. Both fields are main-thread only (written inside
 	// QueueCommand callbacks and read in onDraw). bellSeenCount tracks
@@ -293,6 +305,9 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	}
 	t.hoverR.Store(-1)
 	t.hoverC.Store(-1)
+	// os.File.Write holds an internal mutex, so concurrent calls from
+	// readLoop (parser replies) and the GUI goroutine (key/mouse input)
+	// are safe without an extra lock here.
 	t.writeHost = func(b []byte) error {
 		_, err := t.pty.Write(b)
 		return err
@@ -332,6 +347,7 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	}
 	w.SetIDFocus(focusID)
 	go t.readLoop()
+	t.loopWg.Add(3)
 	go t.blinkLoop()
 	go t.autoScrollLoop()
 	go t.momentumLoop()
@@ -343,6 +359,7 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 // states (steady cursor, scrolled-back view, hidden cursor) need no
 // periodic redraw and the loop simply skips.
 func (t *Term) blinkLoop() {
+	defer t.loopWg.Done()
 	tk := time.NewTicker(cursorBlinkPeriod)
 	defer tk.Stop()
 	for {
@@ -369,6 +386,7 @@ func (t *Term) blinkLoop() {
 // Handles the case where onMouseMove stops firing when the mouse leaves
 // the window (e.g. above the title bar). Exits when blinkDone is closed.
 func (t *Term) autoScrollLoop() {
+	defer t.loopWg.Done()
 	const rate = 80 * time.Millisecond
 	tk := time.NewTicker(rate)
 	defer tk.Stop()
@@ -386,6 +404,9 @@ func (t *Term) autoScrollLoop() {
 			t.grid.Mu.Unlock()
 			t.bumpVersion()
 			t.win.QueueCommand(func(w *gui.Window) {
+				if t.closed.Load() {
+					return
+				}
 				t.showScrollbar()
 				w.UpdateWindow()
 			})
@@ -573,6 +594,8 @@ func (t *Term) View(w *gui.Window) gui.View {
 		Content:   []gui.View{canvas},
 	}
 	if len(t.themeMenuItems) > 0 {
+		colCfg.Width = float32(ww)
+		colCfg.Height = float32(wh)
 		colCfg.Sizing = gui.FillFill
 		return gui.ContextMenu(w, gui.ContextMenuCfg{
 			ID:      "term-theme-menu",
@@ -616,6 +639,9 @@ func (t *Term) Close() error {
 	case <-t.readDone:
 	case <-readTimer.C:
 	}
+	// Wait for auxiliary goroutines to exit cleanly so they cannot
+	// reference t.win or other state after we return.
+	t.loopWg.Wait()
 	if t.resizeTimer != nil {
 		t.resizeTimer.Stop()
 	}

@@ -12,6 +12,7 @@ func (g *Grid) Put(ch rune) {
 	if w == 0 {
 		return
 	}
+	justWrapped := false
 	if !g.AutoWrap {
 		if g.CursorC >= g.Cols {
 			g.CursorC = g.Cols - 1
@@ -23,9 +24,13 @@ func (g *Grid) Put(ch rune) {
 		g.RowWrapped[g.CursorR] = true
 		g.Newline()
 		g.CursorC = 0
+		justWrapped = true
 	}
 
-	if g.AutoWrap && w == 2 && g.CursorC+1 >= g.Cols {
+	// Guard with justWrapped: if we already wrapped once (cursor is now at
+	// col 0), the wide-char check would fire again when Cols==1, producing a
+	// second spurious Newline for a single Put call.
+	if !justWrapped && g.AutoWrap && w == 2 && g.CursorC+1 >= g.Cols {
 		if c := g.At(g.CursorR, g.CursorC); c != nil {
 			*c = blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 		}

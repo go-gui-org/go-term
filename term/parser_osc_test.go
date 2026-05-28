@@ -482,6 +482,32 @@ func TestParser_OSC7_ControlCharsStripped(t *testing.T) {
 	}
 }
 
+func TestParser_OSC7_PathTraversalCleaned(t *testing.T) {
+	g, p := newParserGrid(1, 5)
+	feed(t, g, p, []byte("\x1b]7;/foo/../etc/passwd\x07"))
+	if g.Cwd != "/etc/passwd" {
+		t.Errorf("bare path traversal not cleaned: got %q, want %q", g.Cwd, "/etc/passwd")
+	}
+}
+
+func TestParser_OSC7_FileURIPathTraversalCleaned(t *testing.T) {
+	g, p := newParserGrid(1, 5)
+	feed(t, g, p, []byte("\x1b]7;file://localhost/home/user/../../etc/passwd\x07"))
+	const want = "file://localhost/etc/passwd"
+	if g.Cwd != want {
+		t.Errorf("file:// traversal not cleaned: got %q, want %q", g.Cwd, want)
+	}
+}
+
+func TestParser_OSC7_FileURIEmptyHostPathTraversalCleaned(t *testing.T) {
+	g, p := newParserGrid(1, 5)
+	feed(t, g, p, []byte("\x1b]7;file:///work/../etc/passwd\x07"))
+	const want = "file:///etc/passwd"
+	if g.Cwd != want {
+		t.Errorf("file:/// traversal not cleaned: got %q, want %q", g.Cwd, want)
+	}
+}
+
 // --- sanitizeOSCString ---
 
 func TestSanitizeOSCString_CleanPassthrough(t *testing.T) {

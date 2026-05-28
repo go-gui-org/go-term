@@ -325,6 +325,43 @@ func TestGrid_ViewportMatches_CapsAtMaxHighlights(t *testing.T) {
 	}
 }
 
+// rowRunesBuf must truncate the returned slice when the reused buf is larger
+// than the current row, so callers never see stale runes from a prior (wider)
+// row.
+func TestGrid_RowRunesBuf_ReuseWithShrinkingRow(t *testing.T) {
+	g := NewGrid(3, 5)
+	// Row 0: 5 cols of 'a'
+	for range 5 {
+		g.Put('a')
+	}
+	g.Newline()
+	g.CursorC = 0
+
+	// Shrink to 3 cols so we can have a narrower live row.
+	// Instead, use the scrollback path: make scrollback row have 5 cells and
+	// live row have 3 cells by testing with a smaller grid.
+	g2 := NewGrid(2, 3)
+	g2.Put('x')
+	g2.Put('y')
+	g2.Put('z')
+
+	// Reuse a buf that was sized for 5 runes from g, then apply to g2 (3 cols).
+	buf := make([]rune, 5)
+	for i := range buf {
+		buf[i] = 'S' // sentinel
+	}
+	got := g2.rowRunesBuf(g2.Scrollback.Len(), buf) // first live row
+	if len(got) != 3 {
+		t.Fatalf("len(got)=%d, want 3", len(got))
+	}
+	// Verify sentinels do not bleed into the returned slice.
+	for i, r := range got {
+		if r == 'S' {
+			t.Errorf("stale sentinel at index %d", i)
+		}
+	}
+}
+
 func TestGrid_ViewportMatchesRegex_CapsAtMaxHighlights(t *testing.T) {
 	// 6 rows × 90 cols = 540 cells; regex matching every cell exceeds cap.
 	const rows, cols = 6, 90

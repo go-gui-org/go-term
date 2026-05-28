@@ -160,11 +160,32 @@ func NewParser(g *Grid) *Parser {
 func (p *Parser) Feed(b []byte) {
 
 	if p.utfLen > 0 {
-		buf := make([]byte, p.utfLen+len(b))
-		copy(buf, p.utf[:p.utfLen])
-		copy(buf[p.utfLen:], b)
-		p.utfLen = 0
-		b = buf
+		// Complete the partial UTF-8 sequence carried over from the previous
+		// Feed call using bytes from b, without allocating. A UTF-8 sequence
+		// is at most 4 bytes, so this loop runs at most 3 times.
+		for len(b) > 0 {
+			p.utf[p.utfLen] = b[0]
+			p.utfLen++
+			b = b[1:]
+			if utf8.FullRune(p.utf[:p.utfLen]) {
+				r, size := utf8.DecodeRune(p.utf[:p.utfLen])
+				p.g.Put(r)
+				// DecodeRune may consume fewer bytes than we accumulated (invalid
+				// sequence). The unconsumed bytes were already removed from b —
+				// prepend them back so the main loop sees them.
+				if size < p.utfLen {
+					tail := make([]byte, p.utfLen-size+len(b))
+					copy(tail, p.utf[size:p.utfLen])
+					copy(tail[p.utfLen-size:], b)
+					b = tail
+				}
+				p.utfLen = 0
+				break
+			}
+		}
+		if p.utfLen > 0 {
+			return // still incomplete; wait for more bytes
+		}
 	}
 	for i := 0; i < len(b); {
 		c := b[i]

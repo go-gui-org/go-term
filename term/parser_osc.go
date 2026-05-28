@@ -2,6 +2,7 @@ package term
 
 import (
 	"encoding/base64"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -88,9 +89,20 @@ func (p *Parser) dispatchOSC() {
 	case 7:
 		// Accept standard file:// URIs and bare absolute paths (common in
 		// zsh/fish integrations). Other schemes are rejected. Control
-		// characters are stripped by sanitizeOSCString.
+		// characters are stripped by sanitizeOSCString. Both forms are
+		// path-cleaned so embedders don't receive traversal strings.
 		if strings.HasPrefix(pt, "file://") || strings.HasPrefix(pt, "/") {
-			p.g.Cwd = sanitizeOSCString(pt)
+			cwd := sanitizeOSCString(pt)
+			if strings.HasPrefix(cwd, "file://") {
+				// file://[host]/path — clean the path portion only.
+				rest := cwd[len("file://"):]
+				if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+					cwd = "file://" + rest[:slash] + path.Clean(rest[slash:])
+				}
+			} else if strings.HasPrefix(cwd, "/") {
+				cwd = path.Clean(cwd)
+			}
+			p.g.Cwd = cwd
 		}
 	case 10, 11, 12:
 

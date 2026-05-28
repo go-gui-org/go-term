@@ -10,6 +10,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	"image/png"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -357,6 +358,11 @@ func hlsToRGB(h, l, s int) color.NRGBA {
 // backends (metal/gl/sdl2) load images via filesystem path; data:
 // URLs aren't decoded by those backends, so the on-disk hop is
 // required. Returns "" on encode/write failure.
+//
+// The hash is computed via io.MultiWriter during the encode pass so no
+// second open/read round-trip is needed. Previously the function
+// re-opened the temp file to hash it; on Open failure it returned the
+// unregistered temp path, leaking the file permanently.
 func encodePNGFile(img *image.NRGBA, dir string) string {
 	if img == nil || img.Bounds().Empty() {
 		return ""
@@ -370,7 +376,7 @@ func encodePNGFile(img *image.NRGBA, dir string) string {
 	}
 	tmpPath := tmp.Name()
 	h := sha1.New()
-	if err := png.Encode(tmp, img); err != nil {
+	if err := png.Encode(io.MultiWriter(tmp, h), img); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
 		return ""
@@ -379,24 +385,6 @@ func encodePNGFile(img *image.NRGBA, dir string) string {
 		_ = os.Remove(tmpPath)
 		return ""
 	}
-	// Re-open to compute a stable content hash for dedup.
-	f, err := os.Open(tmpPath)
-	if err != nil {
-		return tmpPath
-	}
-	if _, err := f.Seek(0, 0); err == nil {
-		buf := make([]byte, 4096)
-		for {
-			n, rerr := f.Read(buf)
-			if n > 0 {
-				h.Write(buf[:n])
-			}
-			if rerr != nil {
-				break
-			}
-		}
-	}
-	_ = f.Close()
 	hash := hex.EncodeToString(h.Sum(nil))
 	finalPath := filepath.Join(dir, "term-sixel-"+hash+".png")
 	if finalPath == tmpPath {

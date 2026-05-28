@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mike-ward/go-gui/gui"
@@ -336,13 +337,24 @@ func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 }
 
 // openURL opens url with the OS default browser/handler.
-func openURL(url string) {
+// Only http, https, and mailto schemes are permitted; other URI schemes
+// (file://, custom handlers, javascript:) are silently dropped to prevent
+// a malicious OSC 8 hyperlink from invoking arbitrary OS handlers.
+func openURL(rawURL string) {
+	switch {
+	case strings.HasPrefix(rawURL, "https://"),
+		strings.HasPrefix(rawURL, "http://"),
+		strings.HasPrefix(rawURL, "mailto:"):
+		// permitted
+	default:
+		return
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.Command("open", rawURL)
 	default:
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.Command("xdg-open", rawURL)
 	}
 	_ = cmd.Start()
 }
@@ -454,6 +466,7 @@ func (t *Term) kickMomentum() {
 // finger. Ticks at ~60 fps; each tick passes the decaying pixel velocity
 // to ScrollViewPx for sub-cell-accurate smooth scrolling.
 func (t *Term) momentumLoop() {
+	defer t.loopWg.Done()
 	const (
 		tickDur       = 16 * time.Millisecond
 		frictionFast  = 0.90 // decelerate at high speed — avoids linear feel
@@ -493,6 +506,9 @@ func (t *Term) momentumLoop() {
 				t.grid.Mu.Unlock()
 				t.bumpVersion()
 				t.win.QueueCommand(func(w *gui.Window) {
+					if t.closed.Load() {
+						return
+					}
 					t.showScrollbar()
 					w.UpdateWindow()
 				})

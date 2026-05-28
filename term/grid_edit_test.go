@@ -387,6 +387,18 @@ func TestGrid_Put_WideWrapsAtRightEdge(t *testing.T) {
 	}
 }
 
+// Regression: in a 1-column grid a wide char must trigger at most one Newline.
+// Before the justWrapped guard, Put would fire the pending-wrap Newline and then
+// immediately fire the wide-at-right-margin Newline — advancing two rows for one
+// character.
+func TestGrid_Put_WideCharInOneColumnGrid_NoPanic(t *testing.T) {
+	g := NewGrid(4, 1)
+	g.Put('你') // wide char; Cols==1 means it can never fit, but must not double-newline
+	if g.CursorR > 1 {
+		t.Errorf("wide char in 1-col grid advanced %d rows, want ≤1", g.CursorR)
+	}
+}
+
 func TestGrid_Put_OverwriteWideHeadClearsContinuation(t *testing.T) {
 	g := NewGrid(1, 5)
 	g.Put('好')

@@ -26,7 +26,9 @@ func (p *Parser) replyDECRQSS(body []byte) {
 		return
 	}
 
-	if len(body) > 4 {
+	// Valid bodies are at most 2 bytes (" q") — guard rejects obvious
+	// garbage quickly; the default case below handles any unrecognized body.
+	if len(body) > 2 {
 		p.onReply(appendReply(nil, []byte("0$r")))
 		return
 	}

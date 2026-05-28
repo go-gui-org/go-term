@@ -66,9 +66,7 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
 
 	// KKP flag 8: report all printable keys as CSI u escape codes.
 	// The codepoint is the base (unshifted) form; Shift is in the modifier.
-	t.grid.Mu.Lock()
-	kkpFlags := t.grid.KittyKeyFlags
-	t.grid.Mu.Unlock()
+	kkpFlags := t.keyModes().kittyKeyFlags
 	if kkpFlags&8 != 0 {
 		cp := int(r)
 		if r >= 'A' && r <= 'Z' && e.Modifiers.Has(gui.ModShift) {

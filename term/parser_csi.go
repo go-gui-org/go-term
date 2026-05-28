@@ -58,10 +58,10 @@ func (p *Parser) dispatchCSI(final byte) {
 		p.g.CursorForward(p.param(0, 1))
 	case 'D':
 		p.g.CursorBack(p.param(0, 1))
-	case 'E':
+	case 'E': // CNL — Cursor Next Line; column always resets to 0, not to scroll-region margin
 		p.g.CursorDown(p.param(0, 1))
 		p.g.MoveCursor(p.g.CursorR, 0)
-	case 'F':
+	case 'F': // CPL — Cursor Preceding Line; same: column 0, not origin-mode relative
 		p.g.CursorUp(p.param(0, 1))
 		p.g.MoveCursor(p.g.CursorR, 0)
 	case 'G', '`':

@@ -8,6 +8,18 @@ import (
 	"github.com/rivo/uniseg"
 )
 
+// ContentPos is a stable content-row coordinate, independent of ViewOffset.
+// Rows 0..len(Scrollback)-1 index scrollback oldest-first;
+// rows len(Scrollback)..len(Scrollback)+Rows-1 index the live grid.
+type ContentPos struct{ Row, Col int }
+
+// SearchMatch pairs a content position with the column-span of the match.
+// Len is in rune columns (not bytes), matching the Cell column space.
+type SearchMatch struct {
+	ContentPos
+	Len int
+}
+
 // runeWidth returns the display width of r in cells: 0 (drop / combining),
 // 1 (normal), or 2 (east-asian wide, emoji). ASCII fast-paths to 1
 // without entering uniseg. Non-ASCII allocates a 1- to 4-byte string for
@@ -937,10 +949,10 @@ func (g *Grid) partialTopRow() []Cell {
 	return g.Scrollback.Row(idx)
 }
 
-// rowRunes returns the rune slice for a content row with length == g.Cols,
-// so rune index == cell column. Continuation cells (Width==0, Ch==0) appear
-// as NUL runes and will never match printable query characters.
-func (g *Grid) rowRunes(contentRow int) []rune {
+// rowRunesBuf returns the rune slice for a content row with length == g.Cols,
+// so rune index == cell column. Writes into buf (growing it if necessary) to
+// avoid a heap allocation on every row when the caller holds a reusable slice.
+func (g *Grid) rowRunesBuf(contentRow int, buf []rune) []rune {
 	sb := g.Scrollback.Len()
 	var src []Cell
 	if contentRow < sb {
@@ -956,9 +968,12 @@ func (g *Grid) rowRunes(contentRow int) []rune {
 		base := liveRow * g.Cols
 		src = g.Cells[base : base+g.Cols]
 	}
-	rr := make([]rune, len(src))
-	for i, cell := range src {
-		rr[i] = cell.Ch
+	if cap(buf) < len(src) {
+		buf = make([]rune, len(src))
 	}
-	return rr
+	buf = buf[:len(src)]
+	for i, cell := range src {
+		buf[i] = cell.Ch
+	}
+	return buf
 }

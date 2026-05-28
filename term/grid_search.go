@@ -6,18 +6,6 @@ import (
 	"unicode/utf8"
 )
 
-// ContentPos is a stable content-row coordinate, independent of ViewOffset.
-// Rows 0..len(Scrollback)-1 index scrollback oldest-first;
-// rows len(Scrollback)..len(Scrollback)+Rows-1 index the live grid.
-type ContentPos struct{ Row, Col int }
-
-// SearchMatch pairs a content position with the column-span of the match.
-// Len is in rune columns (not bytes), matching the Cell column space.
-type SearchMatch struct {
-	ContentPos
-	Len int
-}
-
 // equalFoldRune reports whether a and b are equal under Unicode case-folding.
 func equalFoldRune(a, b rune) bool {
 	return unicode.ToLower(a) == unicode.ToLower(b)
@@ -95,6 +83,7 @@ func (g *Grid) Find(query string, start ContentPos, forward bool) (ContentPos, b
 		return ContentPos{}, false
 	}
 	start.Row = clamp(start.Row, 0, total-1)
+	var rrBuf []rune
 	for i := 0; i < total; i++ {
 		var row int
 		if forward {
@@ -102,7 +91,8 @@ func (g *Grid) Find(query string, start ContentPos, forward bool) (ContentPos, b
 		} else {
 			row = (start.Row - i + total) % total
 		}
-		rr := g.rowRunes(row)
+		rr := g.rowRunesBuf(row, rrBuf)
+		rrBuf = rr
 		if forward {
 			fromCol := 0
 			if i == 0 {
@@ -145,6 +135,7 @@ func (g *Grid) ViewportMatches(query string) []SearchMatch {
 	off := clamp(g.ViewOffset, 0, sb)
 	n := min(off, g.Rows)
 	var matches []SearchMatch
+	var rrBuf []rune
 	for vr := range g.Rows {
 		var contentRow int
 		if vr < n {
@@ -152,7 +143,8 @@ func (g *Grid) ViewportMatches(query string) []SearchMatch {
 		} else {
 			contentRow = sb + (vr - n)
 		}
-		rr := g.rowRunes(contentRow)
+		rr := g.rowRunesBuf(contentRow, rrBuf)
+		rrBuf = rr
 		col := 0
 		for {
 			idx := runeSliceSearch(rr, qRunes, col)
@@ -169,11 +161,10 @@ func (g *Grid) ViewportMatches(query string) []SearchMatch {
 	return matches
 }
 
-// regexSearchForward returns the first regex match in rr with rune column >=
-// fromCol. Returns the column, match length in rune columns, and true on
-// success.
-func regexSearchForward(rr []rune, re *regexp.Regexp, fromCol int) (col, matchLen int, found bool) {
-	s := string(rr)
+// regexSearchForward returns the first regex match in s with rune column >=
+// fromCol. s must be string(rowRunes). Returns column, match length in rune
+// columns, and true on success.
+func regexSearchForward(s string, re *regexp.Regexp, fromCol int) (col, matchLen int, found bool) {
 	for _, loc := range re.FindAllStringIndex(s, -1) {
 		c := utf8.RuneCountInString(s[:loc[0]])
 		if c >= fromCol {
@@ -183,10 +174,9 @@ func regexSearchForward(rr []rune, re *regexp.Regexp, fromCol int) (col, matchLe
 	return 0, 0, false
 }
 
-// regexSearchLast returns the last regex match in rr with rune column <
-// upToCol.
-func regexSearchLast(rr []rune, re *regexp.Regexp, upToCol int) (col, matchLen int, found bool) {
-	s := string(rr)
+// regexSearchLast returns the last regex match in s with rune column <
+// upToCol. s must be string(rowRunes).
+func regexSearchLast(s string, re *regexp.Regexp, upToCol int) (col, matchLen int, found bool) {
 	col = -1
 	for _, loc := range re.FindAllStringIndex(s, -1) {
 		c := utf8.RuneCountInString(s[:loc[0]])
@@ -214,6 +204,7 @@ func (g *Grid) FindRegex(re *regexp.Regexp, start ContentPos, forward bool) (Con
 		return ContentPos{}, 0, false
 	}
 	start.Row = clamp(start.Row, 0, total-1)
+	var rrBuf []rune
 	for i := range total {
 		var row int
 		if forward {
@@ -221,21 +212,23 @@ func (g *Grid) FindRegex(re *regexp.Regexp, start ContentPos, forward bool) (Con
 		} else {
 			row = (start.Row - i + total) % total
 		}
-		rr := g.rowRunes(row)
+		rr := g.rowRunesBuf(row, rrBuf)
+		rrBuf = rr
+		s := string(rr)
 		if forward {
 			fromCol := 0
 			if i == 0 {
 				fromCol = start.Col + 1
 			}
-			if c, l, ok := regexSearchForward(rr, re, fromCol); ok {
+			if c, l, ok := regexSearchForward(s, re, fromCol); ok {
 				return ContentPos{Row: row, Col: c}, l, true
 			}
 		} else {
-			upToCol := len(rr) + 1
+			upToCol := utf8.RuneCountInString(s) + 1
 			if i == 0 {
 				upToCol = start.Col
 			}
-			if c, l, ok := regexSearchLast(rr, re, upToCol); ok {
+			if c, l, ok := regexSearchLast(s, re, upToCol); ok {
 				return ContentPos{Row: row, Col: c}, l, true
 			}
 		}
@@ -254,6 +247,7 @@ func (g *Grid) ViewportMatchesRegex(re *regexp.Regexp) []SearchMatch {
 	off := clamp(g.ViewOffset, 0, sb)
 	n := min(off, g.Rows)
 	var matches []SearchMatch
+	var rrBuf []rune
 	for vr := range g.Rows {
 		var contentRow int
 		if vr < n {
@@ -261,10 +255,12 @@ func (g *Grid) ViewportMatchesRegex(re *regexp.Regexp) []SearchMatch {
 		} else {
 			contentRow = sb + (vr - n)
 		}
-		rr := g.rowRunes(contentRow)
+		rr := g.rowRunesBuf(contentRow, rrBuf)
+		rrBuf = rr
+		s := string(rr)
 		col := 0
 		for {
-			c, l, ok := regexSearchForward(rr, re, col)
+			c, l, ok := regexSearchForward(s, re, col)
 			if !ok {
 				break
 			}

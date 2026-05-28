@@ -230,14 +230,20 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			}
 		}
 		vMatchesByRow = t.vMatchBuf
-		var matches []SearchMatch
-		if t.searchRegex && t.searchRE != nil {
-			matches = g.ViewportMatchesRegex(t.searchRE)
-		} else if !t.searchRegex {
-			matches = g.ViewportMatches(t.searchQuery)
+		curVer := t.drawVersion.Load()
+		if curVer != t.searchCacheVer || t.searchQuery != t.searchCacheQuery || t.searchRegex != t.searchCacheRegex {
+			var matches []SearchMatch
+			if t.searchRegex && t.searchRE != nil {
+				matches = g.ViewportMatchesRegex(t.searchRE)
+			} else if !t.searchRegex {
+				matches = g.ViewportMatches(t.searchQuery)
+			}
+			t.searchMatches = matches
+			t.searchCacheVer = curVer
+			t.searchCacheQuery = t.searchQuery
+			t.searchCacheRegex = t.searchRegex
 		}
-		t.searchMatches = matches
-		for _, m := range matches {
+		for _, m := range t.searchMatches {
 			if vr, ok := g.ContentRowToViewport(m.Row); ok && vr < rows {
 				vMatchesByRow[vr] = append(vMatchesByRow[vr], vMatch{m.Col, m.Len})
 			}

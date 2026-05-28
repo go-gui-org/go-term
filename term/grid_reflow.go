@@ -8,16 +8,28 @@ import "slices"
 // active cell buffer and (when alt-active) the saved main buffer.
 func reflowBuffer(src []Cell, oldRows, oldCols, newRows, newCols int) []Cell {
 	next := make([]Cell, newRows*newCols)
-	for i := range next {
-		next[i] = defaultCell()
-	}
 	if len(src) == 0 || oldRows <= 0 || oldCols <= 0 {
+		for i := range next {
+			next[i] = defaultCell()
+		}
 		return next
 	}
 	rcopy := min(newRows, oldRows)
 	ccopy := min(newCols, oldCols)
+	// Copy the overlap first so those cells never need defaultCell init.
 	for r := range rcopy {
 		copy(next[r*newCols:r*newCols+ccopy], src[r*oldCols:r*oldCols+ccopy])
+	}
+	// Initialize only cells not covered by the copy above.
+	// Right strip within copy rows (columns ccopy..newCols-1):
+	for r := range rcopy {
+		for c := ccopy; c < newCols; c++ {
+			next[r*newCols+c] = defaultCell()
+		}
+	}
+	// Rows beyond the copy region (rows rcopy..newRows-1):
+	for i := rcopy * newCols; i < len(next); i++ {
+		next[i] = defaultCell()
 	}
 	return next
 }
