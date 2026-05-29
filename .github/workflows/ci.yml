@@ -60,6 +60,56 @@ jobs:
         working-directory: go-term
         run: go test -race -count=1 ./...
 
+  macos-test:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout go-term
+        uses: actions/checkout@v5
+        with:
+          path: go-term
+
+      - name: Checkout go-glyph
+        uses: actions/checkout@v5
+        with:
+          repository: mike-ward/go-glyph
+          path: go-glyph
+
+      - name: Checkout go-gui
+        uses: actions/checkout@v5
+        with:
+          repository: mike-ward/go-gui
+          path: go-gui
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
+
+      - name: Install system deps
+        run: |
+          brew install \
+            sdl2 \
+            freetype \
+            harfbuzz \
+            pango \
+            fontconfig \
+            glib \
+            hunspell
+
+      - name: Vet
+        working-directory: go-term
+        run: go vet ./...
+
+      - name: Build demo
+        working-directory: go-term
+        run: go build ./examples/demo
+
+      - name: Test
+        working-directory: go-term
+        run: go test -race -count=1 ./...
+
   lint:
     runs-on: ubuntu-latest
     steps:

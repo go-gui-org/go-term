@@ -108,7 +108,8 @@ purpose and may still shift. See [CHANGELOG.md](CHANGELOG.md).
 - macOS or Linux
 - Sibling working trees of [`go-gui`](https://github.com/mike-ward/go-gui)
   and [`go-glyph`](https://github.com/mike-ward/go-glyph) at `../go-gui`
-  and `../go-glyph` (referenced via `replace` directives in `go.mod`)
+  and `../go-glyph`. Copy `go.work.example` to `go.work` to wire the
+  local siblings into the module graph (Go workspace mode).
 
 ---
 

@@ -106,6 +106,86 @@ const scrollbarWidth float32 = 4
 // scroll event while the viewport is back at the live bottom.
 const scrollbarDuration = 1500 * time.Millisecond
 
+// resizeState coalesces live-resize requests so continuous mouse-drag
+// frames don't trigger a full grid reflow (and its allocations) on every
+// redraw. The actual resize is deferred until the target dims have been
+// stable for resizeDebounce. Main-thread only (onDraw is the sole writer).
+type resizeState struct {
+	pendingRows  int
+	pendingCols  int
+	pendingSince time.Time
+	timer        *time.Timer // wakes main thread to apply after debounce
+}
+
+// momentumState drives the two-phase friction deceleration after a trackpad
+// scroll gesture ends. vel/coasting protected by mu; timer and kick owned
+// by the GUI goroutine (onMouseScroll) except for the timer callback which
+// only touches mu-protected fields.
+type momentumState struct {
+	mu       sync.Mutex
+	vel      float64       // EMA of recent scroll deltas (pixels)
+	cellH    float32       // cellH snapshot at last scroll event
+	coasting bool          // true while goroutine is decelerating
+	kick     chan struct{} // buffered 1; wakes momentumLoop
+	timer    *time.Timer   // reset on each scroll; fires kickMomentum
+}
+
+// searchState holds the interactive search bar state. All fields accessed
+// on the GUI goroutine only (onChar, onKeyDown, onDraw) — no lock required.
+type searchState struct {
+	active     bool
+	query      string
+	matches    []searchMatch // viewport matches refreshed each onDraw
+	idx        int           // index of last jump target in matches
+	regex      bool          // true: match via re instead of plain text
+	re         *regexp.Regexp
+	reErr      error
+	cacheVer   uint64 // last drawVersion for which matches was computed
+	cacheQuery string
+	cacheRegex bool
+}
+
+// bellState tracks visual-bell flash timing. Main-thread only except for
+// readCount which is only accessed from readLoop.
+type bellState struct {
+	seenCount uint64
+	flashUntil time.Time
+	readCount uint64 // tracks BellCount seen by readLoop; no sync needed
+}
+
+// scrollbarState manages the auto-hide scrollbar thumb timer. Main-thread
+// only (created lazily in showScrollbar).
+type scrollbarState struct {
+	until time.Time
+	timer *time.Timer
+}
+
+// mouseState tracks pointer state for selection drags, host-side mouse
+// reports, and hyperlink hover highlighting. All fields on the GUI main
+// thread. hoverR/hoverC are atomic for race-detector safety in case the
+// framework ever dispatches callbacks concurrently.
+type mouseState struct {
+	dragging   bool
+	dragButton gui.MouseButton
+	dragReport bool // true when this drag is being reported to the pty
+	lastR      int  // dedupe motion reports under ?1003
+	lastC      int
+	hoverR     atomic.Int32 // sentinel -1 = not yet set
+	hoverC     atomic.Int32
+}
+
+// drawBufs holds per-frame scratch buffers reused across onDraw calls.
+// All fields are main-thread only.
+type drawBufs struct {
+	runBuf      strings.Builder
+	runeCache   map[rune]string // caches string(r) for non-ASCII runes
+	vMatchBuf   [][]vMatch      // pre-allocated search-highlight rows
+	selBuf      []rowBounds     // pre-allocated selection-bound rows
+	bidiVisRows [][]cell        // visual-reordered rows for current frame
+	bidiV2LRows [][]int         // visual→logical column maps
+	bidiScratch []cell          // reused per-row cell buffer for BiDi pre-pass
+}
+
 // Term is a terminal-emulator widget bound to a single pty-backed shell.
 // Use New to construct, View to embed in a layout, Close to tear down.
 type Term struct {
@@ -118,27 +198,14 @@ type Term struct {
 	// zero until the first OnDraw.
 	cellW, cellH float32
 
-	// dragging tracks the button-held state set in onClick, extended
-	// in onMouseMove, finalized in onMouseUp. Used both for local
-	// selection drag and host-side drag reports — distinguished by
-	// dragReport.
-	dragging   bool
-	dragButton gui.MouseButton
-	dragReport bool // true when this drag is being reported to the pty
-
-	// lastMouseR/C dedupe motion reports under ?1003 so a still
-	// pointer doesn't flood the pty with identical coordinates each
-	// frame. Set to (-1, -1) when no prior report.
-	lastMouseR int
-	lastMouseC int
-
-	// hoverR/hoverC track the cell under the pointer for hyperlink hover
-	// highlighting. Updated in onMouseMove and read in onDraw — both on
-	// the GUI main thread. Atomics satisfy the race detector in case the
-	// framework ever dispatches these callbacks concurrently.
-	// Sentinel -1 means "not yet set"; initialized via Store in New.
-	hoverR atomic.Int32
-	hoverC atomic.Int32
+	// embedded grouped state — see each struct's doc comment.
+	resize    resizeState
+	momentum  momentumState
+	search    searchState
+	bell      bellState
+	scrollbar scrollbarState
+	mouse     mouseState
+	draw      drawBufs
 
 	// closed guards Close so multiple calls are safe.
 	closed atomic.Bool
@@ -188,42 +255,6 @@ type Term struct {
 	// desktopNotifier (osascript / notify-send). Tests replace with a no-op.
 	notif notifier
 
-	// Search state. All fields accessed on the GUI goroutine only (onChar,
-	// onKeyDown, onDraw) — no lock required.
-	searchActive  bool
-	searchQuery   string
-	searchMatches []searchMatch // viewport matches refreshed each onDraw
-	searchIdx     int           // index of last jump target in searchMatches
-	searchRegex   bool          // true: match via re instead of plain text
-	searchRE      *regexp.Regexp
-	searchREErr   error
-
-	// searchCacheVer/Query/Regex track the last drawVersion + query + mode
-	// combination for which searchMatches was computed. When all three match
-	// the current frame, the expensive ViewportMatches call is skipped.
-	searchCacheVer   uint64
-	searchCacheQuery string
-	searchCacheRegex bool
-
-	// Bell flash state. Both fields are main-thread only (written inside
-	// QueueCommand callbacks and read in onDraw). bellSeenCount tracks
-	// the last BellCount observed so new bells are detected exactly once.
-	bellSeenCount  uint64
-	bellFlashUntil time.Time
-
-	// readBellCount tracks the BellCount seen by the readLoop goroutine so
-	// bell events (which dirty no cells) still trigger a version bump.
-	// Only accessed from readLoop; no synchronization needed.
-	readBellCount uint64
-
-	// scrollbarUntil is the deadline until which the scrollbar thumb is
-	// rendered, even after ViewOffset returns to 0. Main-thread only.
-	scrollbarUntil time.Time
-	// scrollbarTimer is the single debounce timer that schedules the hide
-	// redraw. Reset on each scroll event; avoids spawning a goroutine per
-	// event. Main-thread only (created lazily in showScrollbar).
-	scrollbarTimer *time.Timer
-
 	// themeMenuItems is the precomputed ContextMenu item list for runtime
 	// theme switching. Built once in New; nil when no themes are configured.
 	themeMenuItems []gui.MenuItemCfg
@@ -232,57 +263,6 @@ type Term struct {
 	// Created lazily in New; removed (best-effort) in Close so a long
 	// session that prints many graphics doesn't pollute /tmp forever.
 	gfxDir string
-
-	// Momentum scroll state. momentumVel/Acc/CellH/Coasting protected by
-	// momentumMu. momentumTimer and momentumKick owned by the GUI goroutine
-	// (onMouseScroll) except for the timer callback, which only touches
-	// momentumMu-protected fields.
-	momentumMu       sync.Mutex
-	momentumVel      float64       // EMA of recent scroll deltas (pixels)
-	momentumCellH    float32       // cellH snapshot at last scroll event
-	momentumCoasting bool          // true while goroutine is decelerating
-	momentumKick     chan struct{} // buffered 1; wakes momentumLoop
-	momentumTimer    *time.Timer   // reset on each scroll; fires kickMomentum
-
-	// runBuf reused across onDraw calls; grows once, never freed.
-	runBuf strings.Builder
-
-	// runeStrCache caches string(r) for non-ASCII runes so wide-char
-	// and cursor cells don't allocate per frame. Populated lazily;
-	// bounded by the set of distinct runes rendered in a session.
-	runeStrCache map[rune]string
-
-	// vMatchBuf/selBuf are pre-allocated slices reused across onDraw
-	// calls for search highlights and selection bounds, replacing per-
-	// frame make([][]vMatch, rows) / make([]rowBounds, rows) calls.
-	vMatchBuf [][]vMatch
-	selBuf    []rowBounds
-
-	// bidiVisRows/bidiV2LRows cache visual-reordered rows and their
-	// visual→logical column maps for the current frame. Pre-allocated to
-	// avoid per-frame heap pressure; grown on resize, never shrunk.
-	// Main-thread only (onDraw).
-	bidiVisRows [][]cell
-	bidiV2LRows [][]int
-	// bidiScratch is a reused per-row cell buffer for the BiDi pre-pass,
-	// replacing the per-RTL-row make([]cell, cols) allocation.
-	bidiScratch []cell
-
-	// Pending-resize state. Live mouse drags fire onDraw at the display
-	// refresh rate with continuously changing dims; running grid.Resize
-	// (full scrollback reflow) on every frame allocates ~24 MB per call
-	// at the default 5000-row scrollback and starves the main thread on
-	// grid.Mu, eventually appearing to hang. We coalesce by deferring
-	// the actual reflow until the target dims have been stable for
-	// resizeDebounce. Main-thread only (onDraw is the sole writer).
-	pendingResizeRows  int
-	pendingResizeCols  int
-	pendingResizeSince time.Time
-	// resizeTimer wakes the main thread to apply a pending resize after
-	// the debounce window even if the mouse stops moving (no further
-	// onDraw events would otherwise fire). Single shared timer reset
-	// each pending frame to avoid spawning goroutines.
-	resizeTimer *time.Timer
 
 	// pendingReplies buffers parser-originated reply bytes (DA, DECRQSS,
 	// XTGETTCAP, ...) emitted during parser.Feed. Drained by readLoop
@@ -350,16 +330,16 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		pw:             pty,
 		cmd:            w,
 		notif:          desktopNotifier{},
-		lastMouseR:     -1,
-		lastMouseC:     -1,
 		cursorEpoch:    time.Now(),
 		blinkDone:      make(chan struct{}),
 		readDone:       make(chan struct{}),
-		momentumKick:   make(chan struct{}, 1),
 		themeMenuItems: themeMenuItems,
 	}
-	t.hoverR.Store(-1)
-	t.hoverC.Store(-1)
+		t.mouse.lastR = -1
+		t.mouse.lastC = -1
+		t.momentum.kick = make(chan struct{}, 1)
+	t.mouse.hoverR.Store(-1)
+	t.mouse.hoverC.Store(-1)
 	if dir, err := os.MkdirTemp("", "go-term-gfx-*"); err == nil {
 		t.gfxDir = dir
 		t.parser.SetGraphicsDir(dir)
@@ -513,11 +493,11 @@ func (t *Term) scheduleResizeWake(d time.Duration) {
 		t.bumpVersion()
 		t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
 	}
-	if t.resizeTimer == nil {
-		t.resizeTimer = time.AfterFunc(d, wake)
+	if t.resize.timer == nil {
+		t.resize.timer = time.AfterFunc(d, wake)
 		return
 	}
-	t.resizeTimer.Reset(d)
+	t.resize.timer.Reset(d)
 }
 
 // onParserReply queues parser-originated bytes (e.g. DA1 reply) for
@@ -703,8 +683,8 @@ func (t *Term) Close() error {
 	// Wait for auxiliary goroutines to exit cleanly so they cannot
 	// reference t.cmd or other state after we return.
 	t.loopWg.Wait()
-	if t.resizeTimer != nil {
-		t.resizeTimer.Stop()
+	if t.resize.timer != nil {
+		t.resize.timer.Stop()
 	}
 	if t.gfxDir != "" {
 		_ = os.RemoveAll(t.gfxDir)
@@ -730,9 +710,9 @@ func (t *Term) readLoop() {
 				// (HasDirtyRows) or a new BEL (which marks no cells but needs a
 				// flash). Pure no-op sequences (swallowed queries, etc.) skip the
 				// version bump so the tessellation cache stays valid.
-				dirty := t.grid.HasDirtyRows() || bellCount != t.readBellCount
+				dirty := t.grid.HasDirtyRows() || bellCount != t.bell.readCount
 				if redraw && dirty {
-					t.readBellCount = bellCount
+					t.bell.readCount = bellCount
 					t.bumpVersion()
 				}
 				return bellCount, redraw, dirty
@@ -743,9 +723,9 @@ func (t *Term) readLoop() {
 			t.flushPendingReplies()
 			if redraw && dirty {
 				t.cmd.QueueCommand(func(w *gui.Window) {
-					if bellCount > t.bellSeenCount {
-						t.bellSeenCount = bellCount
-						t.bellFlashUntil = time.Now().Add(bellFlashDuration)
+					if bellCount > t.bell.seenCount {
+						t.bell.seenCount = bellCount
+						t.bell.flashUntil = time.Now().Add(bellFlashDuration)
 						// Schedule a redraw to clear the flash overlay.
 						// Use a select goroutine so blinkDone cancellation
 						// prevents QueueCommand from firing after Close.

@@ -1,7 +1,5 @@
 package term
 
-import "slices"
-
 // reflowBuffer copies src (oldRows×oldCols) into a freshly allocated
 // newRows×newCols buffer, preserving the top-left intersection and
 // padding the rest with default cells. Used by Resize for both the
@@ -132,8 +130,7 @@ func logicalReflow(
 		phys[i] = physRow{cells: row, wrapped: w}
 	}
 	for r := 0; r < oldRows; r++ {
-		row := make([]cell, oldCols)
-		copy(row, cells[r*oldCols:(r+1)*oldCols])
+		row := cells[r*oldCols : (r+1)*oldCols]  // slice into live buffer; safe under Mu
 		w := false
 		if r < len(rowWrapped) {
 			w = rowWrapped[r]
@@ -193,9 +190,19 @@ func logicalReflow(
 	}
 
 	// --- Re-wrap all logical lines ---
-	var allNew []physRow
+	// Capacity estimate: each logical line produces at least one physical
+	// row at newCols; long lines produce oldCols/newCols+1 rows. The
+	// ceiling avoids overallocation from wrapping every row individually.
+	estRows := len(lines) + (nSB*oldCols+oldRows*oldCols)/newCols
+	if estRows < total {
+		estRows = total
+	}
+	allNew := make([]physRow, 0, estRows)
 	cursorNewPhysStart := 0
 	var cursorLineRewrapped []physRow
+
+	// lineCells is reused across logical lines to avoid per-line allocation.
+	var lineCells []cell
 
 	for li, ll := range lines {
 		// Collect cells for this logical line. Trim trailing default
@@ -205,7 +212,7 @@ func logicalReflow(
 		// the row bounds (cursorC < len(row)). When cursorC >= len(row)
 		// (pending-wrap state past the right margin), don't preserve blanks
 		// — the cursor position will be clamped to the rewrapped line's end.
-		var lineCells []cell
+		lineCells = lineCells[:0]
 		for pi := ll.start; pi <= ll.end; pi++ {
 			row := phys[pi].cells
 			trimTo := len(row)
@@ -347,7 +354,7 @@ func (g *grid) Resize(rows, cols int) {
 	sbRows := make([][]cell, oldSbLen)
 	sbWrap := make([]bool, oldSbLen)
 	for i := range oldSbLen {
-		sbRows[i] = slices.Clone(g.Scrollback.Row(i))
+		sbRows[i] = g.Scrollback.Row(i) // aliases backing buffer; safe under Mu
 		sbWrap[i] = g.Scrollback.Wrapped(i)
 	}
 

@@ -166,10 +166,10 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		}
 		cb := base + mouseModBits(e.Modifiers)
 		t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
-		t.dragging = true
-		t.dragButton = e.MouseButton
-		t.dragReport = true
-		t.lastMouseR, t.lastMouseC = r, c
+		t.mouse.dragging = true
+		t.mouse.dragButton = e.MouseButton
+		t.mouse.dragReport = true
+		t.mouse.lastR, t.mouse.lastC = r, c
 		e.IsHandled = true
 		return
 	}
@@ -184,9 +184,9 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		t.grid.SelHead = contentPos{Row: contentR, Col: c}
 		t.grid.SelActive = false
 	}()
-	t.dragging = true
-	t.dragButton = e.MouseButton
-	t.dragReport = false
+	t.mouse.dragging = true
+	t.mouse.dragButton = e.MouseButton
+	t.mouse.dragReport = false
 	w.MouseLock(gui.MouseLockCfg{
 		MouseMove: t.onMouseMove,
 		MouseUp:   t.onMouseUp,
@@ -203,9 +203,9 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// Any pointer motion means the user's hand is on the input device again;
 	// cancel a coasting momentum scroll so they get immediate control.
-	t.momentumMu.Lock()
-	coasting := t.momentumCoasting
-	t.momentumMu.Unlock()
+	t.momentum.mu.Lock()
+	coasting := t.momentum.coasting
+	t.momentum.mu.Unlock()
 	if coasting {
 		t.cancelMomentum()
 	}
@@ -213,31 +213,31 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	snap := t.mouseSnap()
 	if snap.sgr && snap.live {
 		// Dedupe: only emit when crossing a cell boundary.
-		if r == t.lastMouseR && c == t.lastMouseC {
-			if t.dragReport {
+		if r == t.mouse.lastR && c == t.mouse.lastC {
+			if t.mouse.dragReport {
 				return
 			}
 			// Local-selection drag: still fall through to update
 			// SelHead at unchanged coords (cheap; avoids stale state).
 		}
 		switch {
-		case t.dragReport && snap.drag:
-			base, ok := mouseSGRBaseButton(t.dragButton)
+		case t.mouse.dragReport && snap.drag:
+			base, ok := mouseSGRBaseButton(t.mouse.dragButton)
 			if !ok {
 				return
 			}
 			cb := base + mouseModBits(e.Modifiers) + 32
 			t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
-			t.lastMouseR, t.lastMouseC = r, c
+			t.mouse.lastR, t.mouse.lastC = r, c
 			return
-		case !t.dragging && snap.any:
+		case !t.mouse.dragging && snap.any:
 			cb := 35 + mouseModBits(e.Modifiers) // 3+32 = motion, no button
 			t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
-			t.lastMouseR, t.lastMouseC = r, c
+			t.mouse.lastR, t.mouse.lastC = r, c
 			return
 		}
 	}
-	if !t.dragging || t.dragReport {
+	if !t.mouse.dragging || t.mouse.dragReport {
 		// Update hover for hyperlink highlighting even when not dragging.
 		t.updateHover(r, c, w)
 		return
@@ -273,12 +273,12 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 // updateHover updates t.hoverR/C and requests a redraw when entering or
 // leaving a hyperlinked cell run.
 func (t *Term) updateHover(r, c int, w *gui.Window) {
-	oldR, oldC := int(t.hoverR.Load()), int(t.hoverC.Load())
+	oldR, oldC := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
 	if oldR == r && oldC == c {
 		return
 	}
-	t.hoverR.Store(int32(r))
-	t.hoverC.Store(int32(c))
+	t.mouse.hoverR.Store(int32(r))
+	t.mouse.hoverC.Store(int32(c))
 	prevLink, curLink := func() (uint16, uint16) {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
@@ -299,27 +299,27 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 // emits a release report regardless of whether the mode is still on
 // (the host expects every press to be paired with a release).
 func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-	if !t.dragging {
+	if !t.mouse.dragging {
 		return
 	}
 	t.autoScrollDir.Store(0)
 	w.MouseUnlock()
 	r, c := t.posToCell(e.MouseX, e.MouseY)
-	if t.dragReport {
+	if t.mouse.dragReport {
 		snap := t.mouseSnap()
 		if snap.sgr {
-			base, ok := mouseSGRBaseButton(t.dragButton)
+			base, ok := mouseSGRBaseButton(t.mouse.dragButton)
 			if ok {
 				cb := base + mouseModBits(e.Modifiers)
 				t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, false)
 			}
 		}
-		t.dragging = false
-		t.dragReport = false
+		t.mouse.dragging = false
+		t.mouse.dragReport = false
 		e.IsHandled = true
 		return
 	}
-	t.dragging = false
+	t.mouse.dragging = false
 	// Single click (no drag) with Cmd/Ctrl on a hyperlink → open URL.
 	if !t.grid.SelActive {
 		if e.Modifiers&gui.ModSuper != 0 || e.Modifiers&gui.ModCtrl != 0 {
@@ -440,42 +440,42 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		coastDelay    = 40 * time.Millisecond
 	)
 	func() {
-		t.momentumMu.Lock()
-		defer t.momentumMu.Unlock()
+		t.momentum.mu.Lock()
+		defer t.momentum.mu.Unlock()
 		newVel := math.Max(-momentumCap, math.Min(momentumCap, float64(e.ScrollY)*momentumScale))
-		if math.Abs(newVel) >= math.Abs(t.momentumVel) || (t.momentumVel > 0) != (newVel > 0) {
-			t.momentumVel = newVel
+		if math.Abs(newVel) >= math.Abs(t.momentum.vel) || (t.momentum.vel > 0) != (newVel > 0) {
+			t.momentum.vel = newVel
 		}
-		t.momentumCellH = t.cellH
-		t.momentumCoasting = false
+		t.momentum.cellH = t.cellH
+		t.momentum.coasting = false
 	}()
-	if t.momentumTimer == nil {
-		t.momentumTimer = time.AfterFunc(coastDelay, t.kickMomentum)
+	if t.momentum.timer == nil {
+		t.momentum.timer = time.AfterFunc(coastDelay, t.kickMomentum)
 	} else {
-		t.momentumTimer.Reset(coastDelay)
+		t.momentum.timer.Reset(coastDelay)
 	}
 	e.IsHandled = true
 }
 
 // cancelMomentum stops any in-progress momentum coast immediately.
 func (t *Term) cancelMomentum() {
-	if t.momentumTimer != nil {
-		t.momentumTimer.Stop()
+	if t.momentum.timer != nil {
+		t.momentum.timer.Stop()
 	}
-	t.momentumMu.Lock()
-	defer t.momentumMu.Unlock()
-	t.momentumVel = 0
-	t.momentumCoasting = false
+	t.momentum.mu.Lock()
+	defer t.momentum.mu.Unlock()
+	t.momentum.vel = 0
+	t.momentum.coasting = false
 }
 
 // kickMomentum is the AfterFunc callback fired 80 ms after the last scroll
 // event. It marks the momentum state as coasting and wakes momentumLoop.
 func (t *Term) kickMomentum() {
-	t.momentumMu.Lock()
-	defer t.momentumMu.Unlock()
-	t.momentumCoasting = true
+	t.momentum.mu.Lock()
+	defer t.momentum.mu.Unlock()
+	t.momentum.coasting = true
 	select {
-	case t.momentumKick <- struct{}{}:
+	case t.momentum.kick <- struct{}{}:
 	default:
 	}
 }
@@ -498,26 +498,26 @@ func (t *Term) momentumLoop() {
 		select {
 		case <-t.blinkDone:
 			return
-		case <-t.momentumKick:
+		case <-t.momentum.kick:
 			// coasting flag already set; next tick starts the coast
 		case <-tk.C:
 			deltaPx, cellH, coasting := func() (float32, float32, bool) {
-				t.momentumMu.Lock()
-				defer t.momentumMu.Unlock()
-				if !t.momentumCoasting {
+				t.momentum.mu.Lock()
+				defer t.momentum.mu.Unlock()
+				if !t.momentum.coasting {
 					return 0, 0, false
 				}
 				friction := frictionCoast
-				if math.Abs(t.momentumVel) > phaseVel {
+				if math.Abs(t.momentum.vel) > phaseVel {
 					friction = frictionFast
 				}
-				t.momentumVel *= friction
-				cellH := t.momentumCellH
-				if math.Abs(t.momentumVel) < minVel {
-					t.momentumCoasting = false
-					t.momentumVel = 0
+				t.momentum.vel *= friction
+				cellH := t.momentum.cellH
+				if math.Abs(t.momentum.vel) < minVel {
+					t.momentum.coasting = false
+					t.momentum.vel = 0
 				}
-				return float32(t.momentumVel), cellH, t.momentumCoasting
+				return float32(t.momentum.vel), cellH, t.momentum.coasting
 			}()
 			if !coasting {
 				continue

@@ -38,11 +38,11 @@ func (t *Term) keyModes() keyModes {
 // active. Clears searchRE and searchREErr when not in regex mode or when the
 // query is empty.
 func (t *Term) recompileSearchRE() {
-	if t.searchRegex && t.searchQuery != "" {
-		t.searchRE, t.searchREErr = regexp.Compile(t.searchQuery)
+	if t.search.regex && t.search.query != "" {
+		t.search.re, t.search.reErr = regexp.Compile(t.search.query)
 	} else {
-		t.searchRE = nil
-		t.searchREErr = nil
+		t.search.re = nil
+		t.search.reErr = nil
 	}
 }
 
@@ -51,9 +51,9 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
 	if e.CharCode == 0 {
 		return
 	}
-	if t.searchActive {
-		if utf8.RuneCountInString(t.searchQuery) < MaxGridDim {
-			t.searchQuery += string(rune(e.CharCode))
+	if t.search.active {
+		if utf8.RuneCountInString(t.search.query) < MaxGridDim {
+			t.search.query += string(rune(e.CharCode))
 			t.recompileSearchRE()
 		}
 		e.IsHandled = true
@@ -338,10 +338,10 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 
 	// Search: Cmd+F opens the search bar.
 	if e.KeyCode == gui.KeyF && cmd {
-		t.searchActive = true
-		t.searchQuery = ""
-		t.searchMatches = nil
-		t.searchIdx = 0
+		t.search.active = true
+		t.search.query = ""
+		t.search.matches = nil
+		t.search.idx = 0
 		e.IsHandled = true
 		t.bumpVersion()
 		w.UpdateWindow()
@@ -356,27 +356,27 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	}
 
 	// While in search mode, intercept navigation and editing keys.
-	if t.searchActive {
+	if t.search.active {
 		switch e.KeyCode {
 		case gui.KeyEnter, gui.KeyKPEnter:
 			t.searchJump(!shift, w)
 		case gui.KeyBackspace:
-			if len(t.searchQuery) > 0 {
-				rr := []rune(t.searchQuery)
-				t.searchQuery = string(rr[:len(rr)-1])
+			if len(t.search.query) > 0 {
+				rr := []rune(t.search.query)
+				t.search.query = string(rr[:len(rr)-1])
 				t.recompileSearchRE()
 				t.bumpVersion()
 				w.UpdateWindow()
 			}
 		case gui.KeyEscape:
-			t.searchActive = false
-			t.searchQuery = ""
-			t.searchMatches = nil
+			t.search.active = false
+			t.search.query = ""
+			t.search.matches = nil
 			t.bumpVersion()
 			w.UpdateWindow()
 		case gui.KeyR:
 			if ctrl {
-				t.searchRegex = !t.searchRegex
+				t.search.regex = !t.search.regex
 				t.recompileSearchRE()
 				t.bumpVersion()
 				w.UpdateWindow()

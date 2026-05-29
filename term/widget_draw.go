@@ -39,14 +39,14 @@ func (t *Term) termRuneStr(r rune) string {
 	if uint32(r) < 128 {
 		return asciiStr[r]
 	}
-	if s, ok := t.runeStrCache[r]; ok {
+	if s, ok := t.draw.runeCache[r]; ok {
 		return s
 	}
 	s := string(r)
-	if t.runeStrCache == nil {
-		t.runeStrCache = make(map[rune]string, 64)
+	if t.draw.runeCache == nil {
+		t.draw.runeCache = make(map[rune]string, 64)
 	}
-	t.runeStrCache[r] = s
+	t.draw.runeCache[r] = s
 	return s
 }
 
@@ -165,7 +165,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	}
 	cols := clampDim(int(dc.Width / t.cellW))
 	rows := clampDim(int(dc.Height / t.cellH))
-	t.runBuf.Grow(cols * 4) // one row of text, worst-case UTF-8; no-op when cap sufficient
+	t.draw.runBuf.Grow(cols * 4) // one row of text, worst-case UTF-8; no-op when cap sufficient
 
 	var doResize bool // set when grid.Resize fires; pty.Resize deferred to after Mu unlock
 	func() {
@@ -173,24 +173,24 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		defer t.grid.Mu.Unlock()
 		if rows != t.grid.Rows || cols != t.grid.Cols {
 			now := time.Now()
-			if rows != t.pendingResizeRows ||
-				cols != t.pendingResizeCols ||
-				t.pendingResizeSince.IsZero() {
-				t.pendingResizeRows = rows
-				t.pendingResizeCols = cols
-				t.pendingResizeSince = now
+			if rows != t.resize.pendingRows ||
+				cols != t.resize.pendingCols ||
+				t.resize.pendingSince.IsZero() {
+				t.resize.pendingRows = rows
+				t.resize.pendingCols = cols
+				t.resize.pendingSince = now
 			}
-			if elapsed := now.Sub(t.pendingResizeSince); elapsed >= resizeDebounce {
+			if elapsed := now.Sub(t.resize.pendingSince); elapsed >= resizeDebounce {
 				t.grid.Resize(rows, cols)
 				doResize = true
-				t.pendingResizeSince = time.Time{}
+				t.resize.pendingSince = time.Time{}
 			} else {
 				// Schedule a wake so the apply still happens after the
 				// mouse stops moving (no further frame events would fire).
 				t.scheduleResizeWake(resizeDebounce - elapsed)
 			}
-		} else if !t.pendingResizeSince.IsZero() {
-			t.pendingResizeSince = time.Time{}
+		} else if !t.resize.pendingSince.IsZero() {
+			t.resize.pendingSince = time.Time{}
 		}
 		// Publish cell size in device pixels so image footprint math matches the
 		// device-pixel dimensions stored in image files. dc.Scale is the backing
@@ -209,36 +209,36 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		g := t.grid
 		rows, cols = g.Rows, g.Cols
 		renderYOff := g.ViewSubPx
-		live := g.ViewOffset == 0 && renderYOff == 0 && !g.SelActive && !t.searchActive
+		live := g.ViewOffset == 0 && renderYOff == 0 && !g.SelActive && !t.search.active
 		cells := g.Cells
 
 		// Pre-map search matches and selection to viewport rows to avoid O(N)
 		// checks inside the per-cell loop.
 		var vMatchesByRow [][]vMatch
-		if t.searchActive && t.searchQuery != "" {
-			if cap(t.vMatchBuf) < rows {
-				t.vMatchBuf = make([][]vMatch, rows)
+		if t.search.active && t.search.query != "" {
+			if cap(t.draw.vMatchBuf) < rows {
+				t.draw.vMatchBuf = make([][]vMatch, rows)
 			} else {
-				t.vMatchBuf = t.vMatchBuf[:rows]
-				for i := range t.vMatchBuf {
-					t.vMatchBuf[i] = t.vMatchBuf[i][:0]
+				t.draw.vMatchBuf = t.draw.vMatchBuf[:rows]
+				for i := range t.draw.vMatchBuf {
+					t.draw.vMatchBuf[i] = t.draw.vMatchBuf[i][:0]
 				}
 			}
-			vMatchesByRow = t.vMatchBuf
+			vMatchesByRow = t.draw.vMatchBuf
 			curVer := t.drawVersion.Load()
-			if curVer != t.searchCacheVer || t.searchQuery != t.searchCacheQuery || t.searchRegex != t.searchCacheRegex {
+			if curVer != t.search.cacheVer || t.search.query != t.search.cacheQuery || t.search.regex != t.search.cacheRegex {
 				var matches []searchMatch
-				if t.searchRegex && t.searchRE != nil {
-					matches = g.ViewportMatchesRegex(t.searchRE)
-				} else if !t.searchRegex {
-					matches = g.ViewportMatches(t.searchQuery)
+				if t.search.regex && t.search.re != nil {
+					matches = g.ViewportMatchesRegex(t.search.re)
+				} else if !t.search.regex {
+					matches = g.ViewportMatches(t.search.query)
 				}
-				t.searchMatches = matches
-				t.searchCacheVer = curVer
-				t.searchCacheQuery = t.searchQuery
-				t.searchCacheRegex = t.searchRegex
+				t.search.matches = matches
+				t.search.cacheVer = curVer
+				t.search.cacheQuery = t.search.query
+				t.search.cacheRegex = t.search.regex
 			}
-			for _, m := range t.searchMatches {
+			for _, m := range t.search.matches {
 				if vr, ok := g.ContentRowToViewport(m.Row); ok && vr < rows {
 					vMatchesByRow[vr] = append(vMatchesByRow[vr], vMatch{m.Col, m.Len})
 				}
@@ -247,13 +247,13 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 
 		var rowSel []rowBounds
 		if g.SelActive {
-			if cap(t.selBuf) < rows {
-				t.selBuf = make([]rowBounds, rows)
+			if cap(t.draw.selBuf) < rows {
+				t.draw.selBuf = make([]rowBounds, rows)
 			} else {
-				t.selBuf = t.selBuf[:rows]
-				clear(t.selBuf)
+				t.draw.selBuf = t.draw.selBuf[:rows]
+				clear(t.draw.selBuf)
 			}
-			rowSel = t.selBuf
+			rowSel = t.draw.selBuf
 			s, e := g.selOrder()
 			for r := range rows {
 				cr := g.viewportToContent(r)
@@ -295,7 +295,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		// When the search bar is active it owns the last row — skip that row in
 		// both cell passes so terminal text doesn't bleed through the overlay.
 		renderRows := rows
-		if t.searchActive {
+		if t.search.active {
 			renderRows = rows - 1
 			if renderRows < 0 {
 				renderRows = 0
@@ -305,15 +305,15 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		// BiDi pre-pass: compute visual-reordered rows for any viewport row
 		// containing RTL characters. For live LTR-only terminals (the common
 		// case) rowHasRTL returns false immediately — zero allocations.
-		if cap(t.bidiVisRows) < renderRows {
-			t.bidiVisRows = make([][]cell, renderRows)
-			t.bidiV2LRows = make([][]int, renderRows)
+		if cap(t.draw.bidiVisRows) < renderRows {
+			t.draw.bidiVisRows = make([][]cell, renderRows)
+			t.draw.bidiV2LRows = make([][]int, renderRows)
 		}
-		t.bidiVisRows = t.bidiVisRows[:renderRows]
-		t.bidiV2LRows = t.bidiV2LRows[:renderRows]
-		for i := range t.bidiVisRows {
-			t.bidiVisRows[i] = nil
-			t.bidiV2LRows[i] = nil
+		t.draw.bidiVisRows = t.draw.bidiVisRows[:renderRows]
+		t.draw.bidiV2LRows = t.draw.bidiV2LRows[:renderRows]
+		for i := range t.draw.bidiVisRows {
+			t.draw.bidiVisRows[i] = nil
+			t.draw.bidiV2LRows[i] = nil
 		}
 		for r := range renderRows {
 			var hasRTL bool
@@ -330,19 +330,19 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			if !hasRTL {
 				continue
 			}
-			if cap(t.bidiScratch) < cols {
-				t.bidiScratch = make([]cell, cols)
+			if cap(t.draw.bidiScratch) < cols {
+				t.draw.bidiScratch = make([]cell, cols)
 			} else {
-				t.bidiScratch = t.bidiScratch[:cols]
+				t.draw.bidiScratch = t.draw.bidiScratch[:cols]
 			}
 			for c := range cols {
-				t.bidiScratch[c] = resolveCell(r, c)
+				t.draw.bidiScratch[c] = resolveCell(r, c)
 			}
-			t.bidiVisRows[r], t.bidiV2LRows[r] = visualReorder(t.bidiScratch, cols)
+			t.draw.bidiVisRows[r], t.draw.bidiV2LRows[r] = visualReorder(t.draw.bidiScratch, cols)
 		}
 		resolveVisual := func(r, c int) cell {
-			if t.bidiVisRows[r] != nil {
-				return t.bidiVisRows[r][c]
+			if t.draw.bidiVisRows[r] != nil {
+				return t.draw.bidiVisRows[r][c]
 			}
 			return resolveCell(r, c)
 		}
@@ -395,8 +395,8 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		// (right half of a wide char, Width==0 Ch==0) are skipped without
 		// breaking the current run. Plain spaces with no attrs or link don't
 		// start a new run but extend an existing same-style one.
-		hR, hC := int(t.hoverR.Load()), int(t.hoverC.Load())
-		t.runBuf.Reset()
+		hR, hC := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
+		t.draw.runBuf.Reset()
 		var (
 			runStart int
 			runCols  int // columns spanned by the open run (for underline width)
@@ -404,11 +404,11 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			runOpen  bool
 		)
 		flushRun := func(r int) {
-			if !runOpen || t.runBuf.Len() == 0 {
+			if !runOpen || t.draw.runBuf.Len() == 0 {
 				runOpen = false
 				return
 			}
-			text := t.runBuf.String()
+			text := t.draw.runBuf.String()
 			// Trim trailing spaces when no decoration spans them: "abc   " and
 			// "abc" share a layout-cache entry, so trimming keeps cache hits
 			// stable as tail padding wobbles frame to frame.
@@ -416,7 +416,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 				text = strings.TrimRight(text, " ")
 				if text == "" {
 					runOpen = false
-					t.runBuf.Reset()
+					t.draw.runBuf.Reset()
 					runCols = 0
 					return
 				}
@@ -435,7 +435,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 					runStyle.ulStyle, runStyle.ulColor)
 			}
 			runOpen = false
-			t.runBuf.Reset()
+			t.draw.runBuf.Reset()
 			runCols = 0
 		}
 		// Partial top row foreground pass: per-cell (no run coalescing).
@@ -455,7 +455,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		}
 		for r := range renderRows {
 			runOpen = false
-			t.runBuf.Reset()
+			t.draw.runBuf.Reset()
 			runCols = 0
 			for c := range cols {
 				cell := resolveVisual(r, c)
@@ -471,7 +471,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 				}
 				if isPlainSpace {
 					if runOpen && k == runStyle {
-						t.runBuf.WriteRune(' ')
+						t.draw.runBuf.WriteRune(' ')
 						runCols++
 					} else {
 						flushRun(r)
@@ -479,7 +479,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 					continue
 				}
 				if runOpen && k == runStyle {
-					t.runBuf.WriteRune(cell.Ch)
+					t.draw.runBuf.WriteRune(cell.Ch)
 					runCols++
 				} else {
 					flushRun(r)
@@ -487,7 +487,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 					runStart = c
 					runCols = 1
 					runStyle = k
-					t.runBuf.WriteRune(cell.Ch)
+					t.draw.runBuf.WriteRune(cell.Ch)
 				}
 			}
 			flushRun(r)
@@ -529,8 +529,8 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			}
 			// When the cursor's row has bidi reordering, find the visual column
 			// that corresponds to the logical cursor column.
-			if cr := g.CursorR; cr >= 0 && cr < renderRows && t.bidiV2LRows[cr] != nil {
-				for v, l := range t.bidiV2LRows[cr] {
+			if cr := g.CursorR; cr >= 0 && cr < renderRows && t.draw.bidiV2LRows[cr] != nil {
+				for v, l := range t.draw.bidiV2LRows[cr] {
 					if l == g.CursorC {
 						cc = v
 						break
@@ -542,19 +542,19 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			}
 		}
 
-		if t.searchActive {
+		if t.search.active {
 			t.drawSearchBar(dc, rows, cols, style)
 		}
 
 		// Visual bell: brief semi-transparent overlay that fades within bellFlashDuration.
-		if now.Before(t.bellFlashUntil) {
+		if now.Before(t.bell.flashUntil) {
 			dc.FilledRect(0, 0, dc.Width, dc.Height, gui.RGBA(255, 255, 255, 40))
 		}
 
 		// Scrollbar: pill-shaped thumb on the right edge. Visible while scrolled
 		// back or within scrollbarDuration of the last scroll event.
 		sb := g.Scrollback.Len()
-		if (now.Before(t.scrollbarUntil) || g.ViewOffset > 0 || g.ViewSubPx > 0) && sb > 0 && dc.Width >= scrollbarWidth {
+		if (now.Before(t.scrollbar.until) || g.ViewOffset > 0 || g.ViewSubPx > 0) && sb > 0 && dc.Width >= scrollbarWidth {
 			viewOffsetVal := float32(g.ViewOffset) + g.ViewSubPx/t.cellH
 			thumbY, thumbH := scrollbarGeometry(sb, g.Rows, viewOffsetVal, dc.Height)
 			dc.FilledRoundedRect(dc.Width-scrollbarWidth, thumbY, scrollbarWidth, thumbH,
@@ -708,7 +708,7 @@ func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yO
 // showing the active search query. Called under Mu (inside onDraw).
 func (t *Term) drawSearchBar(dc *gui.DrawContext, rows, cols int, style gui.TextStyle) {
 	y := float32(rows-1) * t.cellH
-	noMatch := t.searchQuery != "" && len(t.searchMatches) == 0
+	noMatch := t.search.query != "" && len(t.search.matches) == 0
 	bgColor := gui.RGB(40, 40, 90)
 	if noMatch {
 		bgColor = gui.RGB(90, 20, 20)
@@ -716,12 +716,12 @@ func (t *Term) drawSearchBar(dc *gui.DrawContext, rows, cols int, style gui.Text
 	dc.FilledRect(0, y, float32(cols)*t.cellW, t.cellH, bgColor)
 	var label string
 	switch {
-	case t.searchRegex && t.searchREErr != nil:
-		label = "/re/ " + t.searchQuery + " [invalid]▌"
-	case t.searchRegex:
-		label = "/re/ " + t.searchQuery + "▌"
+	case t.search.regex && t.search.reErr != nil:
+		label = "/re/ " + t.search.query + " [invalid]▌"
+	case t.search.regex:
+		label = "/re/ " + t.search.query + "▌"
 	default:
-		label = "Find (^R=regex): " + t.searchQuery + "▌"
+		label = "Find (^R=regex): " + t.search.query + "▌"
 	}
 	cs := style
 	cs.Color = gui.RGB(220, 220, 220)

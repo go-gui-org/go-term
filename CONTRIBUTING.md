@@ -5,15 +5,9 @@ narrow project — please read this file before opening a PR.
 
 ## Development setup
 
-`go-term` depends on sibling working trees, wired up via `replace`
-directives in `go.mod`:
-
-```
-replace (
-    github.com/mike-ward/go-glyph => ../go-glyph
-    github.com/mike-ward/go-gui   => ../go-gui
-)
-```
+`go-term` depends on sibling working trees. Copy `go.work.example` to
+`go.work` to wire them into the module graph via Go workspace mode
+(the `go.work` file is gitignored — each developer opts in).
 
 Clone all three repos as siblings:
 

@@ -68,11 +68,16 @@ const maxCSIParams = 32
 // values above this.
 const maxCSIParamValue = 1 << 20
 
-// parser is a minimal VT/xterm subset: CR, LF, BS, TAB, BEL plus CSI ... m
-// (SGR) for color + attribute state, and a handful of CSI cursor/erase
-// commands. SGR supports the 16-color, 256-color (38/48 ;5;n) and 24-bit
-// truecolor (38/48 ;2;r;g;b) forms. All other escape sequences are
-// silently consumed so they don't print as garbage.
+// parser is a VT/xterm-compatible state machine. It handles C0 controls;
+// ESC sequences (cursor save/restore, IND/RI/NEL, charset selection, tab
+// stops, keypad mode); CSI (SGR with 16/256/truecolor fg/bg, underline
+// color/extended underlines, cursor movement/positioning, erase in
+// line/display, scroll regions, IL/DL/ICH/DCH, DECSCUSR, DA1, DECSC/DECRC,
+// tab clear, Kitty Keyboard Protocol, mode set/reset/query); OSC (window
+// title, CWD, hyperlinks, desktop notifications, dynamic colors, clipboard,
+// semantic shell marks, iTerm2 inline images); DCS (DECRQSS, XTGETTCAP,
+// sixel graphics, synchronized updates); and APC (Kitty Graphics Protocol).
+// Unrecognized escape sequences are silently consumed.
 type parser struct {
 	g            *grid
 	state        parserState

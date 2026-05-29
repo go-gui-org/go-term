@@ -10,16 +10,16 @@ import (
 // the main thread whenever the viewport scrolls. Uses a single debounced
 // timer so rapid scroll events don't accumulate goroutines.
 func (t *Term) showScrollbar() {
-	t.scrollbarUntil = time.Now().Add(scrollbarDuration)
-	if t.scrollbarTimer == nil {
-		t.scrollbarTimer = time.AfterFunc(scrollbarDuration+time.Millisecond, func() {
+	t.scrollbar.until = time.Now().Add(scrollbarDuration)
+	if t.scrollbar.timer == nil {
+		t.scrollbar.timer = time.AfterFunc(scrollbarDuration+time.Millisecond, func() {
 			if !t.closed.Load() {
 				t.bumpVersion()
 				t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
 			}
 		})
 	} else {
-		t.scrollbarTimer.Reset(scrollbarDuration + time.Millisecond)
+		t.scrollbar.timer.Reset(scrollbarDuration + time.Millisecond)
 	}
 }
 
@@ -113,7 +113,7 @@ func (t *Term) jumpToMark(backward bool, w *gui.Window) {
 // searchJump finds the next (forward=true) or previous (forward=false) match
 // for the current search query and scrolls the viewport to show it.
 func (t *Term) searchJump(forward bool, w *gui.Window) {
-	if t.searchQuery == "" {
+	if t.search.query == "" {
 		return
 	}
 	ok := func() bool {
@@ -122,8 +122,8 @@ func (t *Term) searchJump(forward bool, w *gui.Window) {
 		defer g.Mu.Unlock()
 		sb := g.Scrollback.Len()
 		var start contentPos
-		if len(t.searchMatches) > 0 && t.searchIdx < len(t.searchMatches) {
-			start = t.searchMatches[t.searchIdx].contentPos
+		if len(t.search.matches) > 0 && t.search.idx < len(t.search.matches) {
+			start = t.search.matches[t.search.idx].contentPos
 		} else {
 			start = contentPos{Row: sb - clamp(g.ViewOffset, 0, sb)}
 		}
@@ -131,10 +131,10 @@ func (t *Term) searchJump(forward bool, w *gui.Window) {
 			pos contentPos
 			ok  bool
 		)
-		if t.searchRegex && t.searchRE != nil {
-			pos, _, ok = g.FindRegex(t.searchRE, start, forward)
-		} else if !t.searchRegex {
-			pos, ok = g.Find(t.searchQuery, start, forward)
+		if t.search.regex && t.search.re != nil {
+			pos, _, ok = g.FindRegex(t.search.re, start, forward)
+		} else if !t.search.regex {
+			pos, ok = g.Find(t.search.query, start, forward)
 		}
 		if ok {
 			liveRow := pos.Row - sb

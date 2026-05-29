@@ -293,7 +293,7 @@ func (f notifierFunc) Notify(title, body string) { f(title, body) }
 
 func newTestTermCapture() (*Term, *[]byte) {
 	buf := make([]byte, 0, 64)
-	t := &Term{grid: newGrid(4, 8), lastMouseR: -1, lastMouseC: -1}
+	t := &Term{grid: newGrid(4, 8)}; t.mouse.lastR = -1; t.mouse.lastC = -1
 	t.pw = writerFunc(func(b []byte) (int, error) {
 		buf = append(buf, b...)
 		return len(b), nil
@@ -778,12 +778,12 @@ func TestTerm_PosToCell_NaNInfCollapseToZero(t *testing.T) {
 func TestTerm_OnChar_SearchMode_AppendAndCap(t *testing.T) {
 	term, _ := newTestTermCapture()
 	term.cmd = &gui.Window{}
-	term.searchActive = true
+	term.search.active = true
 
 	e := &gui.Event{CharCode: 'a'}
 	term.onChar(nil, e, nil)
-	if term.searchQuery != "a" {
-		t.Fatalf("query = %q, want \"a\"", term.searchQuery)
+	if term.search.query != "a" {
+		t.Fatalf("query = %q, want \"a\"", term.search.query)
 	}
 	if !e.IsHandled {
 		t.Error("event must be handled in search mode")
@@ -793,14 +793,14 @@ func TestTerm_OnChar_SearchMode_AppendAndCap(t *testing.T) {
 	for i := 1; i < MaxGridDim; i++ {
 		term.onChar(nil, &gui.Event{CharCode: 'x'}, nil)
 	}
-	if utf8.RuneCountInString(term.searchQuery) != MaxGridDim {
-		t.Fatalf("query rune count = %d, want %d", utf8.RuneCountInString(term.searchQuery), MaxGridDim)
+	if utf8.RuneCountInString(term.search.query) != MaxGridDim {
+		t.Fatalf("query rune count = %d, want %d", utf8.RuneCountInString(term.search.query), MaxGridDim)
 	}
 	// Next char must be rejected (at cap).
-	before := term.searchQuery
+	before := term.search.query
 	term.onChar(nil, &gui.Event{CharCode: 'z'}, nil)
-	if term.searchQuery != before {
-		t.Errorf("query grew past MaxGridDim cap: len now %d", utf8.RuneCountInString(term.searchQuery))
+	if term.search.query != before {
+		t.Errorf("query grew past MaxGridDim cap: len now %d", utf8.RuneCountInString(term.search.query))
 	}
 }
 
@@ -808,7 +808,7 @@ func TestTerm_SearchJump_ForwardFindsMatch(t *testing.T) {
 	term, _ := newTestTermCapture()
 	term.cmd = &gui.Window{}
 	putRow(term.grid, "hello")
-	term.searchQuery = "hello"
+	term.search.query = "hello"
 	term.searchJump(true, &gui.Window{})
 	term.grid.Mu.Lock()
 	off := term.grid.ViewOffset
@@ -821,14 +821,14 @@ func TestTerm_SearchJump_ForwardFindsMatch(t *testing.T) {
 func TestTerm_SearchJump_NoMatchDoesNotPanic(t *testing.T) {
 	term, _ := newTestTermCapture()
 	term.cmd = &gui.Window{}
-	term.searchQuery = "xyzzy_not_present"
+	term.search.query = "xyzzy_not_present"
 	term.searchJump(true, &gui.Window{}) // must not panic
 }
 
 func TestTerm_SearchJump_EmptyQuery_Nop(t *testing.T) {
 	term, _ := newTestTermCapture()
 	term.cmd = &gui.Window{}
-	term.searchQuery = ""
+	term.search.query = ""
 	term.searchJump(true, &gui.Window{}) // early return, must not panic
 }
 
@@ -1354,7 +1354,7 @@ func TestTermRuneStr_NonASCIICachesOnMiss(t *testing.T) {
 	if s != string(r) {
 		t.Errorf("got %q, want %q", s, string(r))
 	}
-	if tm.runeStrCache == nil || tm.runeStrCache[r] == "" {
+	if tm.draw.runeCache == nil || tm.draw.runeCache[r] == "" {
 		t.Error("rune not stored in cache after first call")
 	}
 }
@@ -1555,11 +1555,9 @@ func TestClose_FullIntegration(t *testing.T) {
 		notif:      desktopNotifier{},
 		blinkDone:  make(chan struct{}),
 		readDone:   make(chan struct{}),
-		lastMouseR: -1,
-		lastMouseC: -1,
 	}
-	tm.hoverR.Store(-1)
-	tm.hoverC.Store(-1)
+	tm.mouse.hoverR.Store(-1)
+	tm.mouse.hoverC.Store(-1)
 
 	// Start readLoop so Close can observe it drain.
 	go tm.readLoop()
@@ -1672,15 +1670,15 @@ func TestFlushPendingReplies_ErrorPath(t *testing.T) {
 
 func TestScheduleResizeWake_FirstCallCreatesTimer(t *testing.T) {
 	term := &Term{}
-	if term.resizeTimer != nil {
+	if term.resize.timer != nil {
 		t.Fatal("resizeTimer should start nil")
 	}
 	// Use a long duration so the timer doesn't fire during the test.
 	term.scheduleResizeWake(time.Hour)
-	if term.resizeTimer == nil {
+	if term.resize.timer == nil {
 		t.Fatal("resizeTimer should be created on first call")
 	}
-	term.resizeTimer.Stop()
+	term.resize.timer.Stop()
 }
 
 func TestScheduleResizeWake_ClosedSkipsBump(t *testing.T) {
@@ -1693,8 +1691,8 @@ func TestScheduleResizeWake_ClosedSkipsBump(t *testing.T) {
 	if term.drawVersion.Load() != prev {
 		t.Error("closed term: drawVersion must not change")
 	}
-	if term.resizeTimer != nil {
-		term.resizeTimer.Stop()
+	if term.resize.timer != nil {
+		term.resize.timer.Stop()
 	}
 }
 
