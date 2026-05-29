@@ -326,6 +326,31 @@ func TestHLSToRGB_Cardinals(t *testing.T) {
 	}
 }
 
+func BenchmarkSixel_Decode(b *testing.B) {
+	// Realistic sixel payload: 80 columns × 24 rows (4 bands), with two
+	// colors and run-length encoding.
+	// Color 0 = red, color 1 = green.
+	var payload []byte
+	for band := range 4 {
+		if band > 0 {
+			payload = append(payload, '-')
+		}
+		payload = append(payload, "#0;2;100;0;0"...)
+		payload = append(payload, "#0!40~"...)
+		payload = append(payload, "#1;2;0;100;0"...)
+		payload = append(payload, "#1!40~"...)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		img := decodeSixel(payload)
+		if img == nil {
+			b.Fatal("decodeSixel returned nil")
+		}
+	}
+}
+
 func TestClamp100(t *testing.T) {
 	tests := []struct {
 		v, want int

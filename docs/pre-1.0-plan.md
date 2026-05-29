@@ -14,18 +14,19 @@
 | Item | Status |
 |------|--------|
 | 1. CI Alignment | ✅ Done |
-| 2. Dependency Cleanup | 🔶 Partial — `go.work.example` exists, waiting on go-gui/go-glyph tags |
+| 2. Dependency Cleanup | ✅ Done — go-gui@v0.20.2, go-glyph@v1.8.0, no `replace` directives |
 | 3. Public API Audit | ✅ Done — chose unexport over `internal/` |
 | 4. Package Docs/Examples | ✅ Done |
-| 5. Integration Replay Fixtures | 🔶 Mostly done — 7 JSON fixtures, missing real-terminal capture docs |
+| 5. Integration Replay Fixtures | ✅ Done — 7 JSON fixtures, fixture capture docs |
 | 6. Term Boundary Refactor | 🔶 Mostly done — helpers extracted, tests added, no formal interfaces |
 | 7. Roadmap Refresh | ✅ Done |
-| 8. Benchmark Tracking | 🔶 Partial — CI bench job exists, missing 3 specific benchmarks |
+| 8. Benchmark Tracking | ✅ Done — 9 benchmarks, CI bench job, Makefile `bench` target |
 
-Remaining work: tag go-gui/go-glyph (Item 2), real-terminal fixture docs (Item 5), 3 benchmarks (Item 8). Items 2, 5, 8 are ~2h total.
+Remaining work: none. Item 6 (formal interfaces) is optional — current test coverage is adequate via `writeHost` func field.
+
 | Replay tests | 4 hardcoded cases + 7 JSON fixtures, `TestCaptureFixture` helper |
-| Package docs | `doc.go` + `example_test.go` added |
-| Benchmarks | 7 (parser feed, scrollback push, foreground pass, search, ensureGeom, draw prep dirty rows) |
+| Package docs | `doc.go` + `example_test.go` added, `docs/fixture-capture.md` |
+| Benchmarks | 9 (parser feed ×2, scrollback push, ensureGeom, foreground pass, search ×2, draw prep dirty rows, sixel decode) |
 | ROADMAP.md | Refreshed: archived Phases 0–38, Phase 39 split into 39a–39e, architecture diagram, verification steps |
 
 ---
@@ -140,9 +141,9 @@ The replay test has 4 hardcoded cases. Real fixtures give confidence for protoco
 - [x] Refactor `TestEmulatorReplay` into table-driven + `TestEmulatorReplayFixtures` that reads `.json` fixtures
 - [x] Each fixture includes expected assertions: final grid lines, cursor position, title, cwd
 - [x] `TestCaptureFixture` helper to record new fixtures from Go test code
-- [ ] Document how to capture new fixtures from real terminal sessions
+- [x] Document how to capture new fixtures from real terminal sessions
 
-**Status:** Mostly done. Fixtures are JSON (base64-encoded input) rather than raw terminal dumps. `TestCaptureFixture` records from Go, not from real terminals.
+**Status:** Done. Fixture capture documentation in `docs/fixture-capture.md` covers `script` command usage, `TestCaptureFixture` helper, manual conversion, and JSON format reference.
 
 ---
 
@@ -190,14 +191,14 @@ Introduce internal interfaces so `Term` lifecycle can be tested without a GUI wi
 - [x] Add benchmarks:
   - `BenchmarkDrawPrep_DirtyRows` — `HasDirtyRows` + `ClearDirty` cycle
   - `BenchmarkForegroundPass` — run-key computation for full 80×24 screen
-- [ ] Add `BenchmarkResize_Reflow_DeepScrollback` — resize with 10k scrollback lines
-- [ ] Add `BenchmarkSixel_Decode` — sixel decode path
-- [ ] Add `BenchmarkGrid_Search_LargeScrollback` — search over 50k lines
+- [x] Add `BenchmarkResize_Reflow_DeepScrollback` — resize with 10k scrollback lines
+- [x] Add `BenchmarkSixel_Decode` — sixel decode path
+- [x] Add `BenchmarkGrid_Search_LargeScrollback` — search over 50k lines
 - [x] Document: `go test -bench=. -count=5 -benchmem ./term` (CI bench job exists)
 - [x] Add scheduled CI step that runs benchmarks and archives results as artifacts
-- [ ] Add `make bench` target or `justfile` entry
+- [x] Add `make bench` target (Makefile with `bench`, `bench-verbose`, `test`, `test-race`, `vet`, `lint`, `build`, `build-demo`, `clean`)
 
-**Status:** Partially done. CI bench job runs on schedule. Missing deep-scrollback resize, sixel decode, and large-scrollback search benchmarks.
+**Status:** Done. 9 benchmarks total. `make bench` runs all with `-run='^$'` to avoid stale test-timer panics.
 
 ---
 
@@ -220,6 +221,6 @@ Introduce internal interfaces so `Term` lifecycle can be tested without a GUI wi
 
 2. **`internal/` or just unexport?** Moving Grid/Parser/PTY to `term/internal/` is cleaner but breaks all internal import paths. Un-exporting keeps tests in-package. Preference?
 
-3. **Fixture capture method.** `script` captures terminal output with timing but includes control chars. `ttyrec` is heavier. Could also write Go test helpers that record `Parser` output to files. How would you prefer to capture real terminal streams?
+3. **Fixture capture method.** Resolved: `docs/fixture-capture.md` documents `script` → manual JSON conversion. A `script2fixture` Go helper is referenced but not yet implemented — could add if capture becomes frequent.
 
-4. **Scheduled CI for fuzz/benchmarks.** Worth setting up now, or defer until after the other items land?
+4. **Scheduled CI for fuzz/benchmarks.** Done. Fuzz and bench jobs run on schedule.
