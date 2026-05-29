@@ -32,6 +32,35 @@ func isRTLRune(r rune) bool {
 	return cls == bidi.R || cls == bidi.AL
 }
 
+// entry maps a bidi-paragraph rune index to its source cell index.
+type entry struct{ cellIdx int }
+
+// scanBidiCells makes a single pass over cells[0:cols], collecting non-null
+// cells into an entry list and building the bidi-paragraph string while
+// simultaneously detecting strong RTL content (bidi class R or AL).
+// hasRTL=false when no RTL content is found — the common LTR-only case —
+// enabling early exit without further bidi processing.
+func scanBidiCells(cells []cell, cols int) (entries []entry, bidiStr string, hasRTL bool) {
+	if cols <= 0 {
+		return
+	}
+	var sb strings.Builder
+	sb.Grow(cols * 4) // UTF-8 max per rune; avoids intermediate reallocations
+	entries = make([]entry, 0, cols)
+	for i := range cols {
+		c := cells[i]
+		if c.Ch == 0 {
+			continue
+		}
+		if !hasRTL {
+			hasRTL = isRTLRune(c.Ch)
+		}
+		entries = append(entries, entry{cellIdx: i})
+		sb.WriteRune(c.Ch)
+	}
+	return entries, sb.String(), hasRTL
+}
+
 // visualReorder applies the Unicode Bidirectional Algorithm (UAX#9) to
 // cells[0:cols] and returns a visual (screen-order, left-to-right) copy.
 //
@@ -47,30 +76,13 @@ func visualReorder(cells []cell, cols int) (visual []cell, v2l []int) {
 	if cols > len(cells) {
 		cols = len(cells)
 	}
-	if !rowHasRTL(cells, cols) {
-		return nil, nil
-	}
-
-	// Collect non-null cells into entries; each entry adds exactly one rune
-	// to the bidi string, so entries[j] ↔ rune j in the bidi paragraph.
-	// bidi.Run.Pos() returns rune indices (0-based, end INCLUSIVE).
-	type entry struct{ cellIdx int }
-	var sb strings.Builder
-	entries := make([]entry, 0, cols)
-	for i := range cols {
-		c := cells[i]
-		if c.Ch == 0 {
-			continue // skip null (continuation / empty / uninitialized)
-		}
-		entries = append(entries, entry{i})
-		sb.WriteRune(c.Ch)
-	}
-	if len(entries) == 0 {
+	entries, bidiStr, hasRTL := scanBidiCells(cells, cols)
+	if !hasRTL {
 		return nil, nil
 	}
 
 	var p bidi.Paragraph
-	if _, err := p.SetString(sb.String()); err != nil {
+	if _, err := p.SetString(bidiStr); err != nil {
 		return nil, nil
 	}
 	order, err := p.Order()
