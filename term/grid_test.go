@@ -71,6 +71,9 @@ func TestGrid_ClearAll(t *testing.T) {
 	g.Put('x')
 	g.Put('y')
 	g.ClearAll()
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after ClearAll")
+	}
 	if g.CursorR != 0 || g.CursorC != 0 {
 		t.Errorf("clear should home cursor")
 	}
@@ -92,8 +95,17 @@ func TestGrid_ScrollbackFillTrim(t *testing.T) {
 	}
 
 	g.scrollUpRegion(1)
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after scrollUpRegion")
+	}
 	g.scrollUpRegion(1)
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after scrollUpRegion")
+	}
 	g.scrollUpRegion(1)
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after scrollUpRegion")
+	}
 	if g.Scrollback.Len() != 2 {
 		t.Fatalf("len(Scrollback) = %d, want 2 (trim)", g.Scrollback.Len())
 	}
@@ -118,6 +130,9 @@ func TestGrid_ViewCellAt(t *testing.T) {
 		g.At(0, c).Ch = 'L'
 	}
 	g.scrollUpRegion(1)
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after scrollUpRegion")
+	}
 
 	g.ViewOffset = 1
 	for c := range g.Cols {
@@ -159,6 +174,9 @@ func TestGrid_PartialTopRow_ReturnsScrollbackRow(t *testing.T) {
 	g.ScrollbackCap = 10
 	fillRow(g, 0, 'X')
 	g.scrollUpRegion(1)
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after scrollUpRegion")
+	}
 	row := g.partialTopRow()
 	if row == nil {
 		t.Fatal("partialTopRow returned nil, want scrollback row")
@@ -180,6 +198,9 @@ func TestGrid_PartialTopRow_AtTopReturnsNil(t *testing.T) {
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
+		if !g.HasDirtyRows() {
+			t.Fatal("expected dirty after scrollUpRegion")
+		}
 	}
 	g.ViewOffset = g.Scrollback.Len()
 	if g.partialTopRow() != nil {
@@ -248,10 +269,16 @@ func TestGrid_EnterExitAlt_RestoresMain(t *testing.T) {
 	g.CurFG = paletteColor(3)
 
 	g.EnterAlt()
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after EnterAlt")
+	}
 	g.Put('A')
 	g.MoveCursor(2, 3)
 
 	g.ExitAlt()
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after ExitAlt")
+	}
 	if g.AltActive {
 		t.Fatal("AltActive should be false after ExitAlt")
 	}
@@ -483,6 +510,9 @@ func TestGrid_DirtyTracking_ScrollUpRegionMarksAll(t *testing.T) {
 	g := NewGrid(5, 10)
 	g.ClearDirty()
 	g.scrollUpRegion(1)
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after scrollUpRegion")
+	}
 	for r := range g.Rows {
 		if !g.Dirty[r] {
 			t.Errorf("row %d should be dirty after scrollUpRegion", r)
@@ -494,6 +524,9 @@ func TestGrid_DirtyTracking_ClearAllMarksAll(t *testing.T) {
 	g := NewGrid(5, 10)
 	g.ClearDirty()
 	g.ClearAll()
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after ClearAll")
+	}
 	for r := range g.Rows {
 		if !g.Dirty[r] {
 			t.Errorf("row %d should be dirty after ClearAll", r)
@@ -505,6 +538,9 @@ func TestGrid_DirtyTracking_ResizeReallocates(t *testing.T) {
 	g := NewGrid(5, 10)
 	g.ClearDirty()
 	g.Resize(8, 10)
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after Resize")
+	}
 	if len(g.Dirty) != 8 {
 		t.Fatalf("Dirty len = %d, want 8", len(g.Dirty))
 	}
@@ -519,6 +555,9 @@ func TestGrid_DirtyTracking_EnterExitAltMarksAll(t *testing.T) {
 	g := NewGrid(5, 10)
 	g.ClearDirty()
 	g.EnterAlt()
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after EnterAlt")
+	}
 	for r := range g.Rows {
 		if !g.Dirty[r] {
 			t.Errorf("row %d should be dirty after EnterAlt", r)
@@ -526,9 +565,80 @@ func TestGrid_DirtyTracking_EnterExitAltMarksAll(t *testing.T) {
 	}
 	g.ClearDirty()
 	g.ExitAlt()
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after ExitAlt")
+	}
 	for r := range g.Rows {
 		if !g.Dirty[r] {
 			t.Errorf("row %d should be dirty after ExitAlt", r)
 		}
+	}
+}
+
+func TestDynColorRGB_AllPaths(t *testing.T) {
+	g := NewGrid(4, 8)
+	g.Theme = DefaultTheme
+
+	// ps=10: foreground
+	r, gr, b := g.dynColorRGB(10)
+	if r != g.Theme.DefaultFG.R || gr != g.Theme.DefaultFG.G || b != g.Theme.DefaultFG.B {
+		t.Errorf("dynColorRGB(10) = (%d,%d,%d), want DefaultFG", r, gr, b)
+	}
+
+	// ps=11: background
+	r, gr, b = g.dynColorRGB(11)
+	if r != g.Theme.DefaultBG.R || gr != g.Theme.DefaultBG.G || b != g.Theme.DefaultBG.B {
+		t.Errorf("dynColorRGB(11) = (%d,%d,%d), want DefaultBG", r, gr, b)
+	}
+
+	// ps=12 with CursorColor unset: falls back to DefaultFG
+	r, gr, b = g.dynColorRGB(12)
+	if r != g.Theme.DefaultFG.R || gr != g.Theme.DefaultFG.G || b != g.Theme.DefaultFG.B {
+		t.Errorf("dynColorRGB(12) unset = (%d,%d,%d), want DefaultFG", r, gr, b)
+	}
+
+	// ps=12 with CursorColor set
+	g.CursorColor = rgbColor(11, 22, 33)
+	r, gr, b = g.dynColorRGB(12)
+	if r != 11 || gr != 22 || b != 33 {
+		t.Errorf("dynColorRGB(12) set = (%d,%d,%d), want (11,22,33)", r, gr, b)
+	}
+
+	// Unknown ps (e.g., 99) with CursorColor set
+	r, gr, b = g.dynColorRGB(99)
+	if r != 11 || gr != 22 || b != 33 {
+		t.Errorf("dynColorRGB(99) with cursor set = (%d,%d,%d), want (11,22,33)", r, gr, b)
+	}
+
+	// Unknown ps with CursorColor unset (not present — restore and re-test)
+	g.CursorColor = DefaultColor
+	r, gr, b = g.dynColorRGB(99)
+	if r != g.Theme.DefaultFG.R || gr != g.Theme.DefaultFG.G || b != g.Theme.DefaultFG.B {
+		t.Errorf("dynColorRGB(99) unset = (%d,%d,%d), want DefaultFG", r, gr, b)
+	}
+}
+
+func TestGrid_DirtyTracking_DoubleMarkNoDoubleCount(t *testing.T) {
+	g := NewGrid(5, 10)
+	g.ClearDirty()
+
+	// Mark the same row 10 times. The guard should prevent dirtyCount
+	// from inflating beyond 1.
+	for range 10 {
+		g.markDirty(2)
+	}
+
+	// Still dirty after repeated marks.
+	if !g.HasDirtyRows() {
+		t.Fatal("expected dirty after repeated markDirty on same row")
+	}
+
+	// One ClearDirty should bring us back to clean — if dirtyCount
+	// were inflated (e.g., 10 instead of 1), a single ClearDirty
+	// would still correctly reset to 0, but the guard is the defense
+	// against other consumers that might inspect dirtyCount directly.
+	g.ClearDirty()
+	if g.HasDirtyRows() {
+		t.Fatal("expected clean after ClearDirty")
 	}
 }

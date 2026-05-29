@@ -554,3 +554,27 @@ func TestSanitizeOSCString_AllControlChars(t *testing.T) {
 		t.Errorf("all-control: got %q, want empty", got)
 	}
 }
+
+func TestFromHexNibble(t *testing.T) {
+	tests := []struct {
+		b    byte
+		want int
+	}{
+		{'0', 0},
+		{'9', 9},
+		{'a', 10},
+		{'f', 15},
+		{'A', 10},
+		{'F', 15},
+		{'g', -1},
+		{'@', -1},
+		{' ', -1},
+		{0x00, -1},
+	}
+	for _, tt := range tests {
+		got := fromHexNibble(tt.b)
+		if got != tt.want {
+			t.Errorf("fromHexNibble(%q) = %d, want %d", tt.b, got, tt.want)
+		}
+	}
+}

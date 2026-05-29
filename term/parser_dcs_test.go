@@ -128,3 +128,42 @@ func TestSplitSemis_CapsAtMax(t *testing.T) {
 		t.Errorf("splitSemis returned %d parts, want ≤%d", len(parts), maxXTGETTCAPParts)
 	}
 }
+
+func TestXTGETTCAPValue_AllCaps(t *testing.T) {
+	tests := []struct {
+		cap  string
+		want string
+		ok   bool
+	}{
+		{"TN", "xterm-256color", true},
+		{"name", "xterm-256color", true},
+		{"Co", "256", true},
+		{"colors", "256", true},
+		{"RGB", "8/8/8", true},
+		{"kcuu1", "\x1b[A", true},
+		{"kcud1", "\x1b[B", true},
+		{"kcub1", "\x1b[D", true},
+		{"kcuf1", "\x1b[C", true},
+		{"khome", "\x1b[H", true},
+		{"kend", "\x1b[F", true},
+		{"kich1", "\x1b[2~", true},
+		{"kdch1", "\x1b[3~", true},
+		{"kpp", "\x1b[5~", true},
+		{"knp", "\x1b[6~", true},
+		{"indn", "\x1b[%p1%dS", true},
+		{"query-os-name", "\x1b]0;?\x07", true},
+		{"smkx", "\x1b[?1h\x1b=", true},
+		{"rmkx", "\x1b[?1l\x1b>", true},
+		{"nonexistent", "", false},
+		{"", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := xtgettcapValue(tt.cap)
+		if ok != tt.ok {
+			t.Errorf("xtgettcapValue(%q) ok=%v, want %v", tt.cap, ok, tt.ok)
+		}
+		if ok && got != tt.want {
+			t.Errorf("xtgettcapValue(%q) = %q, want %q", tt.cap, got, tt.want)
+		}
+	}
+}

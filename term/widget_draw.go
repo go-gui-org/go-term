@@ -173,6 +173,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	}
 	cols := clampDim(int(dc.Width / t.cellW))
 	rows := clampDim(int(dc.Height / t.cellH))
+	t.runBuf.Grow(cols * 4) // one row of text, worst-case UTF-8; no-op when cap sufficient
 
 	var doResize bool // set when grid.Resize fires; pty.Resize deferred to after Mu unlock
 	func() {

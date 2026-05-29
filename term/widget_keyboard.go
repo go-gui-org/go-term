@@ -90,7 +90,7 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
 // kittyKeySeq encodes a key in Kitty Keyboard Protocol format: CSI codepoint u
 // or CSI codepoint ; modifiers u. Returns nil when flags == 0 (legacy mode).
 // The modifier parameter follows the KKP spec: 1=none, 2=shift, 3=shift+alt,
-// 5=ctrl, 6=shift+ctrl, 9=super, … (1 + sum of modifier bits).
+// 5=ctrl, 6=shift+ctrl, 9=super, ... (1 + sum of modifier bits).
 // When release is true, generates a key release sequence (event-type 3):
 // CSI codepoint ; modifiers : 3 u. The modifier field is mandatory when
 // event-type is present, even when mod==1 (no modifiers).
@@ -122,6 +122,90 @@ func kittyKeySeq(codepoint int, mods gui.Modifier, flags uint32, release bool) [
 	}
 	b = append(b, 'u')
 	return b
+}
+
+// kkpCodepoint returns the KKP codepoint for k, or (0, false) when k has none.
+// Modifier keys map to private-use-area codepoints; ASCII keys A–Z return 'a'–'z',
+// 0–9 return '0'–'9'. KKP spec §7 table.
+func kkpCodepoint(k gui.KeyCode) (int, bool) {
+	switch k {
+	case gui.KeyLeftShift:
+		return 57441, true
+	case gui.KeyRightShift:
+		return 57447, true
+	case gui.KeyLeftControl:
+		return 57442, true
+	case gui.KeyRightControl:
+		return 57448, true
+	case gui.KeyLeftAlt:
+		return 57443, true
+	case gui.KeyRightAlt:
+		return 57449, true
+	case gui.KeyLeftSuper:
+		return 57444, true
+	case gui.KeyRightSuper:
+		return 57450, true
+	case gui.KeyEnter, gui.KeyKPEnter:
+		return 13, true
+	case gui.KeyBackspace:
+		return 127, true
+	case gui.KeyTab:
+		return 9, true
+	case gui.KeyEscape:
+		return 27, true
+	case gui.KeyInsert:
+		return 57348, true
+	case gui.KeyDelete:
+		return 57349, true
+	case gui.KeyLeft:
+		return 57350, true
+	case gui.KeyRight:
+		return 57351, true
+	case gui.KeyUp:
+		return 57352, true
+	case gui.KeyDown:
+		return 57353, true
+	case gui.KeyPageUp:
+		return 57354, true
+	case gui.KeyPageDown:
+		return 57355, true
+	case gui.KeyHome:
+		return 57356, true
+	case gui.KeyEnd:
+		return 57357, true
+	case gui.KeyF1:
+		return 57364, true
+	case gui.KeyF2:
+		return 57365, true
+	case gui.KeyF3:
+		return 57366, true
+	case gui.KeyF4:
+		return 57367, true
+	case gui.KeyF5:
+		return 57368, true
+	case gui.KeyF6:
+		return 57369, true
+	case gui.KeyF7:
+		return 57370, true
+	case gui.KeyF8:
+		return 57371, true
+	case gui.KeyF9:
+		return 57372, true
+	case gui.KeyF10:
+		return 57373, true
+	case gui.KeyF11:
+		return 57374, true
+	case gui.KeyF12:
+		return 57375, true
+	default:
+		if k >= gui.KeyA && k <= gui.KeyZ {
+			return int('a') + int(k-gui.KeyA), true
+		}
+		if k >= gui.Key0 && k <= gui.Key9 {
+			return int('0') + int(k-gui.Key0), true
+		}
+		return 0, false
+	}
 }
 
 func keypadSeq(k gui.KeyCode) []byte {
@@ -498,90 +582,11 @@ func (t *Term) onKeyUp(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
 	if modes.kittyKeyFlags&2 == 0 {
 		return
 	}
-
-	// KKP private-use-area codepoints (spec §7 table) for left/right modifiers,
-	// functional keys, nav keys, and F-keys. ASCII codepoints for printable keys.
-	var codepoint int
-	switch e.KeyCode {
-	case gui.KeyLeftShift:
-		codepoint = 57441
-	case gui.KeyRightShift:
-		codepoint = 57447
-	case gui.KeyLeftControl:
-		codepoint = 57442
-	case gui.KeyRightControl:
-		codepoint = 57448
-	case gui.KeyLeftAlt:
-		codepoint = 57443
-	case gui.KeyRightAlt:
-		codepoint = 57449
-	case gui.KeyLeftSuper:
-		codepoint = 57444
-	case gui.KeyRightSuper:
-		codepoint = 57450
-	case gui.KeyEnter, gui.KeyKPEnter:
-		codepoint = 13
-	case gui.KeyBackspace:
-		codepoint = 127
-	case gui.KeyTab:
-		codepoint = 9
-	case gui.KeyEscape:
-		codepoint = 27
-	case gui.KeyInsert:
-		codepoint = 57348
-	case gui.KeyDelete:
-		codepoint = 57349
-	case gui.KeyLeft:
-		codepoint = 57350
-	case gui.KeyRight:
-		codepoint = 57351
-	case gui.KeyUp:
-		codepoint = 57352
-	case gui.KeyDown:
-		codepoint = 57353
-	case gui.KeyPageUp:
-		codepoint = 57354
-	case gui.KeyPageDown:
-		codepoint = 57355
-	case gui.KeyHome:
-		codepoint = 57356
-	case gui.KeyEnd:
-		codepoint = 57357
-	case gui.KeyF1:
-		codepoint = 57364
-	case gui.KeyF2:
-		codepoint = 57365
-	case gui.KeyF3:
-		codepoint = 57366
-	case gui.KeyF4:
-		codepoint = 57367
-	case gui.KeyF5:
-		codepoint = 57368
-	case gui.KeyF6:
-		codepoint = 57369
-	case gui.KeyF7:
-		codepoint = 57370
-	case gui.KeyF8:
-		codepoint = 57371
-	case gui.KeyF9:
-		codepoint = 57372
-	case gui.KeyF10:
-		codepoint = 57373
-	case gui.KeyF11:
-		codepoint = 57374
-	case gui.KeyF12:
-		codepoint = 57375
-	default:
-		if e.KeyCode >= gui.KeyA && e.KeyCode <= gui.KeyZ {
-			codepoint = int('a') + int(e.KeyCode-gui.KeyA)
-		} else if e.KeyCode >= gui.Key0 && e.KeyCode <= gui.Key9 {
-			codepoint = int('0') + int(e.KeyCode-gui.Key0)
-		} else {
-			return
-		}
+	cp, ok := kkpCodepoint(e.KeyCode)
+	if !ok {
+		return
 	}
-
-	if seq := kittyKeySeq(codepoint, e.Modifiers, modes.kittyKeyFlags, true); seq != nil {
+	if seq := kittyKeySeq(cp, e.Modifiers, modes.kittyKeyFlags, true); seq != nil {
 		t.writeBytes(seq)
 		e.IsHandled = true
 	}

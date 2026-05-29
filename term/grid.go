@@ -315,8 +315,11 @@ type Grid struct {
 	// Dirty[r] is set whenever row r has a cell-level mutation since the
 	// last render. The widget's readLoop reads this (under Mu) to decide
 	// whether to bump drawVersion; onDraw calls ClearDirty at the start
-	// of each render cycle. Allocation mirrors RowWrapped: len = Rows.
-	Dirty []bool
+	// of each render cycle. dirtyCount tracks how many rows are dirty,
+	// letting HasDirtyRows avoid a linear scan. Allocation mirrors
+	// RowWrapped: len = Rows.
+	Dirty      []bool
+	dirtyCount int
 
 	// TabStops[c] is true when column c has a tab stop set. Initialized to
 	// every 8 columns (xterm default). ESC H sets; CSI g clears. Tab()
@@ -425,8 +428,9 @@ func (g *Grid) MouseReporting() bool {
 func (g *Grid) Bell() { g.BellCount++ }
 
 func (g *Grid) markDirty(r int) {
-	if r >= 0 && r < len(g.Dirty) {
+	if r >= 0 && r < len(g.Dirty) && !g.Dirty[r] {
 		g.Dirty[r] = true
+		g.dirtyCount++
 	}
 }
 
@@ -530,6 +534,7 @@ func (g *Grid) markAllDirty() {
 	for i := range g.Dirty {
 		g.Dirty[i] = true
 	}
+	g.dirtyCount = len(g.Dirty)
 }
 
 // SetDynColor updates the OSC dynamic color for ps (10=foreground,
@@ -571,14 +576,7 @@ func (g *Grid) dynColorRGB(ps int) (r, gr, b uint8) {
 
 // HasDirtyRows reports whether any row is marked dirty since the last
 // ClearDirty call. Called under Mu by the widget's readLoop.
-func (g *Grid) HasDirtyRows() bool {
-	for _, d := range g.Dirty {
-		if d {
-			return true
-		}
-	}
-	return false
-}
+func (g *Grid) HasDirtyRows() bool { return g.dirtyCount > 0 }
 
 // ClearDirty resets all dirty flags. Called by onDraw under Mu at the
 // start of each render cycle so new mutations are captured next frame.
@@ -586,6 +584,7 @@ func (g *Grid) ClearDirty() {
 	for i := range g.Dirty {
 		g.Dirty[i] = false
 	}
+	g.dirtyCount = 0
 }
 
 // clamp bounds v to [lo, hi]. lo <= hi assumed.

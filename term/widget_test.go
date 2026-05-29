@@ -1342,3 +1342,84 @@ func TestTermRuneStr_CacheHitNoAlloc(t *testing.T) {
 		t.Errorf("cache hit should not allocate, got %v allocs/op", avg)
 	}
 }
+
+func TestKeypadSeq_All(t *testing.T) {
+	tests := []struct {
+		k    gui.KeyCode
+		want string
+	}{
+		{gui.KeyKP0, "\x1bOp"},
+		{gui.KeyKP1, "\x1bOq"},
+		{gui.KeyKP2, "\x1bOr"},
+		{gui.KeyKP3, "\x1bOs"},
+		{gui.KeyKP4, "\x1bOt"},
+		{gui.KeyKP5, "\x1bOu"},
+		{gui.KeyKP6, "\x1bOv"},
+		{gui.KeyKP7, "\x1bOw"},
+		{gui.KeyKP8, "\x1bOx"},
+		{gui.KeyKP9, "\x1bOy"},
+		{gui.KeyKPDecimal, "\x1bOn"},
+		{gui.KeyKPDivide, "\x1bOo"},
+		{gui.KeyKPMultiply, "\x1bOj"},
+		{gui.KeyKPSubtract, "\x1bOm"},
+		{gui.KeyKPAdd, "\x1bOk"},
+		{gui.KeyKPEqual, "\x1bOX"},
+		{gui.KeyA, ""},
+		{gui.KeyKPEnter, ""},
+		{gui.KeyCode(9999), ""},
+	}
+	for _, tt := range tests {
+		got := keypadSeq(tt.k)
+		if string(got) != tt.want {
+			t.Errorf("keypadSeq(%v) = %q, want %q", tt.k, got, tt.want)
+		}
+	}
+}
+
+func TestKKPCodepoint_AllKeys(t *testing.T) {
+	tests := []struct {
+		k    gui.KeyCode
+		want int
+		ok   bool
+	}{
+		{gui.KeyLeftShift, 57441, true},
+		{gui.KeyRightShift, 57447, true},
+		{gui.KeyLeftControl, 57442, true},
+		{gui.KeyRightControl, 57448, true},
+		{gui.KeyLeftAlt, 57443, true},
+		{gui.KeyRightAlt, 57449, true},
+		{gui.KeyLeftSuper, 57444, true},
+		{gui.KeyRightSuper, 57450, true},
+		{gui.KeyEnter, 13, true},
+		{gui.KeyKPEnter, 13, true},
+		{gui.KeyBackspace, 127, true},
+		{gui.KeyTab, 9, true},
+		{gui.KeyEscape, 27, true},
+		{gui.KeyInsert, 57348, true},
+		{gui.KeyDelete, 57349, true},
+		{gui.KeyLeft, 57350, true},
+		{gui.KeyRight, 57351, true},
+		{gui.KeyUp, 57352, true},
+		{gui.KeyDown, 57353, true},
+		{gui.KeyPageUp, 57354, true},
+		{gui.KeyPageDown, 57355, true},
+		{gui.KeyHome, 57356, true},
+		{gui.KeyEnd, 57357, true},
+		{gui.KeyF1, 57364, true},
+		{gui.KeyF12, 57375, true},
+		{gui.KeyA, int('a'), true},
+		{gui.KeyZ, int('z'), true},
+		{gui.Key0, int('0'), true},
+		{gui.Key9, int('9'), true},
+		{gui.KeyCode(9999), 0, false},
+	}
+	for _, tt := range tests {
+		got, ok := kkpCodepoint(tt.k)
+		if ok != tt.ok {
+			t.Errorf("kkpCodepoint(%v) ok=%v, want %v", tt.k, ok, tt.ok)
+		}
+		if ok && got != tt.want {
+			t.Errorf("kkpCodepoint(%v) = %d, want %d", tt.k, got, tt.want)
+		}
+	}
+}

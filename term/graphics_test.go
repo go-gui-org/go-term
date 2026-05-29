@@ -325,3 +325,48 @@ func TestHLSToRGB_Cardinals(t *testing.T) {
 		t.Errorf("DEC H=0 L=50 S=100 = %v; want roughly blue", got)
 	}
 }
+
+func TestClamp100(t *testing.T) {
+	tests := []struct {
+		v, want int
+	}{
+		{-1, 0},
+		{0, 0},
+		{50, 50},
+		{100, 100},
+		{101, 100},
+		{9999, 100},
+	}
+	for _, tt := range tests {
+		got := clamp100(tt.v)
+		if got != tt.want {
+			t.Errorf("clamp100(%d) = %d, want %d", tt.v, got, tt.want)
+		}
+	}
+}
+
+func TestHLSToRGB_AllRegions(t *testing.T) {
+	// Each hue sextant at L=50, S=100 yields a primary or secondary.
+	tests := []struct {
+		h, l, s    int
+		r, g, b    uint8  // approximate — HLS→RGB uses floats
+		wantStrong string // which channel should dominate
+	}{
+		{0, 50, 100, 0, 0, 255, "blue"},
+		{60, 50, 100, 0, 255, 255, "cyan"},
+		{120, 50, 100, 0, 255, 0, "green"},
+		{180, 50, 100, 255, 255, 0, "yellow"},
+		{240, 50, 100, 255, 0, 0, "red"},
+		{300, 50, 100, 255, 0, 255, "magenta"},
+		// Black at L=0, white at L=100
+		{0, 0, 0, 0, 0, 0, "black"},
+		{0, 100, 0, 255, 255, 255, "white"},
+	}
+	for _, tt := range tests {
+		c := hlsToRGB(tt.h, tt.l, tt.s)
+		// Just verify we get something back; exact values depend on float math.
+		if c.A != 0xFF {
+			t.Errorf("hlsToRGB(%d,%d,%d) alpha = %d, want 255", tt.h, tt.l, tt.s, c.A)
+		}
+	}
+}

@@ -440,3 +440,43 @@ func BenchmarkParserFeed_SGR(b *testing.B) {
 		g.Mu.Unlock()
 	}
 }
+
+func TestCurrentSGRString_AllPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		fg   uint32
+		bg   uint32
+		attr uint8
+		want string
+	}{
+		{"default", DefaultColor, DefaultColor, 0, "0m"},
+		{"bold", DefaultColor, DefaultColor, AttrBold, "1m"},
+		{"underline", DefaultColor, DefaultColor, AttrUnderline, "4m"},
+		{"inverse", DefaultColor, DefaultColor, AttrInverse, "7m"},
+		{"bold+underline", DefaultColor, DefaultColor, AttrBold | AttrUnderline, "1;4m"},
+		{"fg_pal0", paletteColor(0), DefaultColor, 0, "30m"},
+		{"fg_pal7", paletteColor(7), DefaultColor, 0, "37m"},
+		{"fg_pal8", paletteColor(8), DefaultColor, 0, "90m"},
+		{"fg_pal15", paletteColor(15), DefaultColor, 0, "97m"},
+		{"fg_256", paletteColor(200), DefaultColor, 0, "38;5;200m"},
+		{"fg_rgb", rgbColor(10, 20, 30), DefaultColor, 0, "38;2;10;20;30m"},
+		{"bg_pal0", DefaultColor, paletteColor(0), 0, "40m"},
+		{"bg_pal7", DefaultColor, paletteColor(7), 0, "47m"},
+		{"bg_pal8", DefaultColor, paletteColor(8), 0, "100m"},
+		{"bg_pal15", DefaultColor, paletteColor(15), 0, "107m"},
+		{"bg_256", DefaultColor, paletteColor(200), 0, "48;5;200m"},
+		{"bg_rgb", DefaultColor, rgbColor(10, 20, 30), 0, "48;2;10;20;30m"},
+		{"fg_rgb_bold", rgbColor(10, 20, 30), DefaultColor, AttrBold, "1;38;2;10;20;30m"},
+	}
+	for _, tt := range tests {
+		g := NewGrid(2, 10)
+		g.CurFG = tt.fg
+		g.CurBG = tt.bg
+		g.CurAttrs = tt.attr
+		p := NewParser(g)
+		got := p.currentSGRString()
+		if got != tt.want {
+			t.Errorf("currentSGRString %s: got %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
