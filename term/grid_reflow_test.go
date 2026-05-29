@@ -3,7 +3,7 @@ package term
 import "testing"
 
 func TestGrid_Resize_Shrink(t *testing.T) {
-	g := NewGrid(3, 3)
+	g := newGrid(3, 3)
 	g.Put('a')
 	g.Put('b')
 	g.Put('c')
@@ -15,7 +15,7 @@ func TestGrid_Resize_Shrink(t *testing.T) {
 }
 
 func TestGrid_Resize_Grow(t *testing.T) {
-	g := NewGrid(2, 2)
+	g := newGrid(2, 2)
 	g.Put('x')
 	g.Resize(4, 5)
 	if g.At(0, 0).Ch != 'x' {
@@ -27,7 +27,7 @@ func TestGrid_Resize_Grow(t *testing.T) {
 }
 
 func TestGrid_Resize_Clamp(t *testing.T) {
-	g := NewGrid(2, 2)
+	g := newGrid(2, 2)
 	g.Resize(MaxGridDim+5, MaxGridDim+5)
 	if g.Rows != MaxGridDim || g.Cols != MaxGridDim {
 		t.Errorf("resize not clamped: %dx%d", g.Rows, g.Cols)
@@ -35,7 +35,7 @@ func TestGrid_Resize_Clamp(t *testing.T) {
 }
 
 func TestGrid_Resize_ClampsCursor(t *testing.T) {
-	g := NewGrid(10, 10)
+	g := newGrid(10, 10)
 	g.MoveCursor(9, 9)
 	g.Resize(5, 5)
 	if g.CursorR != 4 || g.CursorC != 4 {
@@ -45,7 +45,7 @@ func TestGrid_Resize_ClampsCursor(t *testing.T) {
 
 func TestGrid_Resize_ReflowsScrollback(t *testing.T) {
 
-	g := NewGrid(2, 4)
+	g := newGrid(2, 4)
 	g.ScrollbackCap = 10
 
 	for _, r := range "abcd" {
@@ -86,10 +86,10 @@ func TestGrid_Resize_ReflowsScrollback(t *testing.T) {
 
 func TestGrid_Resize_AdjustsSelectionByScrollbackDelta(t *testing.T) {
 
-	g := NewGrid(4, 4)
+	g := newGrid(4, 4)
 	g.ScrollbackCap = 10
-	g.SelAnchor = ContentPos{Row: 0, Col: 0}
-	g.SelHead = ContentPos{Row: 3, Col: 3}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 3, Col: 3}
 	g.SelActive = true
 	g.Resize(2, 2)
 	if !g.SelActive {
@@ -106,7 +106,7 @@ func TestGrid_Resize_AdjustsSelectionByScrollbackDelta(t *testing.T) {
 }
 
 func TestGrid_ResizeResetsRegion(t *testing.T) {
-	g := NewGrid(10, 4)
+	g := newGrid(10, 4)
 	g.SetScrollRegion(2, 5)
 	g.Resize(8, 4)
 	if g.Top != 0 || g.Bottom != 7 {
@@ -116,7 +116,7 @@ func TestGrid_ResizeResetsRegion(t *testing.T) {
 
 func TestGrid_Resize_Reflow_GrowWidth(t *testing.T) {
 
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	for _, r := range "helloworld" {
 		g.Put(r)
 	}
@@ -143,7 +143,7 @@ func TestGrid_Resize_Reflow_GrowWidth(t *testing.T) {
 
 func TestGrid_Resize_Reflow_ShrinkWidth(t *testing.T) {
 
-	g := NewGrid(3, 10)
+	g := newGrid(3, 10)
 	for _, r := range "helloworld" {
 		g.Put(r)
 	}
@@ -163,7 +163,7 @@ func TestGrid_Resize_Reflow_ShrinkWidth(t *testing.T) {
 
 func TestGrid_Resize_Reflow_ExplicitNewline(t *testing.T) {
 
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	for _, r := range "hello" {
 		g.Put(r)
 	}
@@ -193,7 +193,7 @@ func TestGrid_Resize_Reflow_ExplicitNewline(t *testing.T) {
 
 func TestGrid_Resize_Reflow_CursorTracking(t *testing.T) {
 
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	for _, r := range "abcde" {
 		g.Put(r)
 	}
@@ -206,7 +206,7 @@ func TestGrid_Resize_Reflow_CursorTracking(t *testing.T) {
 
 func TestGrid_Resize_Reflow_WideChar(t *testing.T) {
 
-	g := NewGrid(2, 4)
+	g := newGrid(2, 4)
 
 	for _, r := range "abc" {
 		g.Put(r)
@@ -236,7 +236,7 @@ func TestGrid_Resize_Reflow_DeepScrollbackNarrow_CursorSurvives(t *testing.T) {
 	// Each wide row explodes into oldCols new rows; the allNew trim must
 	// keep the cursor row valid and scrollback within its cap.
 	const rows, cols = 5, 20
-	g := NewGrid(rows, cols)
+	g := newGrid(rows, cols)
 	g.ScrollbackCap = 50
 	for range 20 {
 		for c := range cols {
@@ -264,7 +264,7 @@ func TestGrid_Resize_Reflow_DeepScrollbackNarrow_CursorSurvives(t *testing.T) {
 }
 
 func TestGrid_Resize_ZerosViewSubPx(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
@@ -275,4 +275,34 @@ func TestGrid_Resize_ZerosViewSubPx(t *testing.T) {
 	if g.ViewSubPx != 0 {
 		t.Errorf("ViewSubPx = %v after Resize, want 0", g.ViewSubPx)
 	}
+}
+
+// --- benchmarks ---
+
+func BenchmarkResize_Reflow_DeepScrollback(b *testing.B) {
+	const rows, cols = 24, 80
+	const scrollbackLines = 10000
+
+	g := newGrid(rows, cols)
+	g.ScrollbackCap = scrollbackLines
+
+	// Fill scrollback with content.
+	p := newParser(g)
+	for range scrollbackLines {
+		feedBench(b, g, p, []byte("filling scrollback with content to reflow later\n"))
+	}
+
+	b.ResetTimer()
+	for b.Loop() {
+		g.Resize(30, 100) // grow
+		g.Resize(24, 80)  // shrink back
+	}
+}
+
+// feedBench is like feed but for benchmarks (no test error helpers).
+func feedBench(b *testing.B, g *grid, p *parser, data []byte) {
+	b.Helper()
+	g.Mu.Lock()
+	defer g.Mu.Unlock()
+	p.Feed(data)
 }

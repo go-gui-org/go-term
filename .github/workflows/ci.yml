@@ -5,24 +5,26 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "7 3 * * 1"  # weekly, Monday 03:07 UTC
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout go-term
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: go-term
 
       - name: Checkout go-glyph
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: mike-ward/go-glyph
           path: go-glyph
 
       - name: Checkout go-gui
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: mike-ward/go-gui
           path: go-gui
@@ -31,6 +33,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
 
       - name: Install system deps
         run: |
@@ -46,28 +50,32 @@ jobs:
 
       - name: Vet
         working-directory: go-term
-        run: go vet ./term
+        run: go vet ./...
+
+      - name: Build demo
+        working-directory: go-term
+        run: go build ./cmd/demo
 
       - name: Test
         working-directory: go-term
-        run: go test -race -count=1 ./term
+        run: go test -race -count=1 ./...
 
   lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout go-term
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: go-term
 
       - name: Checkout go-glyph
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: mike-ward/go-glyph
           path: go-glyph
 
       - name: Checkout go-gui
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: mike-ward/go-gui
           path: go-gui
@@ -76,6 +84,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
 
       - name: Install system deps
         run: |
@@ -94,3 +104,97 @@ jobs:
         with:
           working-directory: go-term
           version: v2.12
+
+  fuzz:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Checkout go-term
+        uses: actions/checkout@v5
+        with:
+          path: go-term
+
+      - name: Checkout go-glyph
+        uses: actions/checkout@v5
+        with:
+          repository: mike-ward/go-glyph
+          path: go-glyph
+
+      - name: Checkout go-gui
+        uses: actions/checkout@v5
+        with:
+          repository: mike-ward/go-gui
+          path: go-gui
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsdl2-dev \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libpango1.0-dev \
+            libfontconfig1-dev \
+            libglib2.0-dev \
+            libhunspell-dev
+
+      - name: Fuzz
+        working-directory: go-term
+        run: go test -fuzz=. -fuzztime=120s ./term
+
+  bench:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Checkout go-term
+        uses: actions/checkout@v5
+        with:
+          path: go-term
+
+      - name: Checkout go-glyph
+        uses: actions/checkout@v5
+        with:
+          repository: mike-ward/go-glyph
+          path: go-glyph
+
+      - name: Checkout go-gui
+        uses: actions/checkout@v5
+        with:
+          repository: mike-ward/go-gui
+          path: go-gui
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsdl2-dev \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libpango1.0-dev \
+            libfontconfig1-dev \
+            libglib2.0-dev \
+            libhunspell-dev
+
+      - name: Bench
+        working-directory: go-term
+        run: go test -bench=. -count=5 -benchmem ./term | tee bench.txt
+
+      - name: Archive bench results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: go-term/bench.txt

@@ -8,13 +8,13 @@ import (
 	"github.com/mike-ward/go-gui/gui"
 )
 
-// maxPasteBytes caps clipboard payloads written to the PTY. Multi-MB
+// maxPasteBytes caps clipboard payloads written to the pty. Multi-MB
 // pastes can wedge the shell and stall the reader goroutine; truncate
 // silently — nothing useful types thousands of lines at once.
 const maxPasteBytes = 1 << 20
 
 // truncatePaste caps s at max bytes, backing up to the start of any
-// trailing partial UTF-8 sequence so the PTY never receives a split
+// trailing partial UTF-8 sequence so the pty never receives a split
 // rune. Returns s unchanged when already within budget.
 func truncatePaste(s string, max int) string {
 	if max <= 0 {
@@ -42,7 +42,7 @@ func stripPasteEnd(s string) string {
 }
 
 // pasteFromClipboard reads the clipboard, strips paste-end markers, and
-// writes the payload to the PTY — wrapped in bracketed-paste markers
+// writes the payload to the pty — wrapped in bracketed-paste markers
 // when the application has enabled DEC ?2004.
 func (t *Term) pasteFromClipboard(w *gui.Window) {
 	text := w.GetClipboard()

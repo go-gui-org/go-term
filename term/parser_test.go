@@ -4,16 +4,16 @@ import (
 	"testing"
 )
 
-func feed(t *testing.T, g *Grid, p *Parser, b []byte) {
+func feed(t *testing.T, g *grid, p *parser, b []byte) {
 	t.Helper()
 	g.Mu.Lock()
 	defer g.Mu.Unlock()
 	p.Feed(b)
 }
 
-func newParserGrid(rows, cols int) (*Grid, *Parser) {
-	g := NewGrid(rows, cols)
-	return g, NewParser(g)
+func newParserGrid(rows, cols int) (*grid, *parser) {
+	g := newGrid(rows, cols)
+	return g, newParser(g)
 }
 
 func TestParser_C0Bytes(t *testing.T) {
@@ -127,7 +127,7 @@ func TestParser_RestoreWithoutSaveResets(t *testing.T) {
 	g, p := newParserGrid(5, 10)
 	g.MoveCursor(2, 3)
 	g.CurFG = paletteColor(5)
-	g.CurAttrs = AttrUnderline
+	g.CurAttrs = attrUnderline
 	feed(t, g, p, []byte("\x1b8"))
 	if g.CursorR != 0 || g.CursorC != 0 {
 		t.Errorf("home: r=%d c=%d", g.CursorR, g.CursorC)
@@ -406,8 +406,8 @@ func TestParser_KittyKeyQueryZero(t *testing.T) {
 // ---- Benchmarks ----
 
 func BenchmarkParserFeed_PlainText(b *testing.B) {
-	g := NewGrid(24, 80)
-	p := NewParser(g)
+	g := newGrid(24, 80)
+	p := newParser(g)
 	input := make([]byte, 4096)
 	for i := range input {
 		input[i] = byte('a' + i%26)
@@ -423,8 +423,8 @@ func BenchmarkParserFeed_PlainText(b *testing.B) {
 }
 
 func BenchmarkParserFeed_SGR(b *testing.B) {
-	g := NewGrid(24, 80)
-	p := NewParser(g)
+	g := newGrid(24, 80)
+	p := newParser(g)
 	// interleave SGR color sequences with text
 	input := make([]byte, 0, 4096)
 	for len(input) < 4000 {
@@ -450,10 +450,10 @@ func TestCurrentSGRString_AllPaths(t *testing.T) {
 		want string
 	}{
 		{"default", DefaultColor, DefaultColor, 0, "0m"},
-		{"bold", DefaultColor, DefaultColor, AttrBold, "1m"},
-		{"underline", DefaultColor, DefaultColor, AttrUnderline, "4m"},
-		{"inverse", DefaultColor, DefaultColor, AttrInverse, "7m"},
-		{"bold+underline", DefaultColor, DefaultColor, AttrBold | AttrUnderline, "1;4m"},
+		{"bold", DefaultColor, DefaultColor, attrBold, "1m"},
+		{"underline", DefaultColor, DefaultColor, attrUnderline, "4m"},
+		{"inverse", DefaultColor, DefaultColor, attrInverse, "7m"},
+		{"bold+underline", DefaultColor, DefaultColor, attrBold | attrUnderline, "1;4m"},
 		{"fg_pal0", paletteColor(0), DefaultColor, 0, "30m"},
 		{"fg_pal7", paletteColor(7), DefaultColor, 0, "37m"},
 		{"fg_pal8", paletteColor(8), DefaultColor, 0, "90m"},
@@ -466,14 +466,14 @@ func TestCurrentSGRString_AllPaths(t *testing.T) {
 		{"bg_pal15", DefaultColor, paletteColor(15), 0, "107m"},
 		{"bg_256", DefaultColor, paletteColor(200), 0, "48;5;200m"},
 		{"bg_rgb", DefaultColor, rgbColor(10, 20, 30), 0, "48;2;10;20;30m"},
-		{"fg_rgb_bold", rgbColor(10, 20, 30), DefaultColor, AttrBold, "1;38;2;10;20;30m"},
+		{"fg_rgb_bold", rgbColor(10, 20, 30), DefaultColor, attrBold, "1;38;2;10;20;30m"},
 	}
 	for _, tt := range tests {
-		g := NewGrid(2, 10)
+		g := newGrid(2, 10)
 		g.CurFG = tt.fg
 		g.CurBG = tt.bg
 		g.CurAttrs = tt.attr
-		p := NewParser(g)
+		p := newParser(g)
 		got := p.currentSGRString()
 		if got != tt.want {
 			t.Errorf("currentSGRString %s: got %q, want %q", tt.name, got, tt.want)

@@ -4,10 +4,10 @@ import "testing"
 
 // ---- helpers ----
 
-func makeRow(s string) []Cell {
-	r := make([]Cell, len(s))
+func makeRow(s string) []cell {
+	r := make([]cell, len(s))
 	for i, ch := range s {
-		r[i] = Cell{Ch: ch, Width: 1}
+		r[i] = cell{Ch: ch, Width: 1}
 	}
 	return r
 }
@@ -169,7 +169,7 @@ func TestScrollbackRing_Push_ShortRow(t *testing.T) {
 func TestScrollbackRing_Push_LongRow(t *testing.T) {
 	r := scrollbackRing{}
 	r.SetGeom(2, 3)
-	long := []Cell{{Ch: 'a'}, {Ch: 'b'}, {Ch: 'c'}, {Ch: 'd'}}
+	long := []cell{{Ch: 'a'}, {Ch: 'b'}, {Ch: 'c'}, {Ch: 'd'}}
 	r.Push(long, false)
 
 	row := r.Row(0)
@@ -369,9 +369,9 @@ func TestScrollbackRing_EnsureGeom_NegativeClamp(t *testing.T) {
 func BenchmarkScrollback_Push(b *testing.B) {
 	r := scrollbackRing{}
 	r.SetGeom(10000, 80)
-	row := make([]Cell, 80)
+	row := make([]cell, 80)
 	for i := range row {
-		row[i] = Cell{Ch: 'x', Width: 1}
+		row[i] = cell{Ch: 'x', Width: 1}
 	}
 	// pre-fill to capacity so every Push evicts
 	for range r.cap {
@@ -387,9 +387,9 @@ func BenchmarkScrollback_Push(b *testing.B) {
 func BenchmarkScrollback_EnsureGeom(b *testing.B) {
 	r := scrollbackRing{}
 	r.SetGeom(1000, 80)
-	row := make([]Cell, 80)
+	row := make([]cell, 80)
 	for i := range row {
-		row[i] = Cell{Ch: 'x', Width: 1}
+		row[i] = cell{Ch: 'x', Width: 1}
 	}
 	for range r.cap {
 		r.Push(row, false)

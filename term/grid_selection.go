@@ -3,7 +3,7 @@ package term
 import "strings"
 
 // selOrder returns the selection bounds in forward order (start <= end).
-func (g *Grid) selOrder() (start, end ContentPos) {
+func (g *grid) selOrder() (start, end contentPos) {
 	a, b := g.SelAnchor, g.SelHead
 	if b.Row < a.Row || (b.Row == a.Row && b.Col < a.Col) {
 		a, b = b, a
@@ -15,7 +15,7 @@ func (g *Grid) selOrder() (start, end ContentPos) {
 // r is a viewport row; it is converted to content coordinates internally
 // so the highlight follows content regardless of ViewOffset. False when
 // SelActive is off.
-func (g *Grid) InSelection(r, c int) bool {
+func (g *grid) InSelection(r, c int) bool {
 	if !g.SelActive {
 		return false
 	}
@@ -38,7 +38,7 @@ func (g *Grid) InSelection(r, c int) bool {
 // Returns "" when nothing is selected. Coordinates are content-relative
 // and are clamped to [0, len(Scrollback)+Rows-1] so stale coords from
 // a Resize never produce a negative span.
-func (g *Grid) SelectedText() string {
+func (g *grid) SelectedText() string {
 	if !g.SelActive || g.Rows <= 0 || g.Cols <= 0 {
 		return ""
 	}
@@ -77,8 +77,8 @@ func (g *Grid) SelectedText() string {
 }
 
 // ClearSelection drops any active selection.
-func (g *Grid) ClearSelection() {
+func (g *grid) ClearSelection() {
 	g.SelActive = false
-	g.SelAnchor = ContentPos{}
-	g.SelHead = ContentPos{}
+	g.SelAnchor = contentPos{}
+	g.SelHead = contentPos{}
 }

@@ -14,17 +14,17 @@ import (
 
 // apcHelper wraps a fresh parser+grid for APC/KGP tests.
 type apcHelper struct {
-	g       *Grid
-	p       *Parser
+	g       *grid
+	p       *parser
 	replies [][]byte
 	dir     string
 }
 
 func newAPCHelper(t *testing.T) *apcHelper {
 	t.Helper()
-	g := NewGrid(24, 80)
+	g := newGrid(24, 80)
 	g.CellPxW, g.CellPxH = 8, 16
-	p := NewParser(g)
+	p := newParser(g)
 	p.SetGraphicsDir(t.TempDir())
 	h := &apcHelper{g: g, p: p, dir: p.graphicsDir}
 	p.SetReplyHandler(func(b []byte) {
@@ -468,7 +468,7 @@ func TestParser_APC_KittyStore_EvictsFallback_AllVisible(t *testing.T) {
 		path := f.Name()
 		_ = f.Close()
 		h.p.kittyStore[i] = kittyEntry{path: path, w: 1, h: 1}
-		h.p.g.Graphics = append(h.p.g.Graphics, Graphic{Src: path})
+		h.p.g.Graphics = append(h.p.g.Graphics, graphic{Src: path})
 	}
 
 	_, b64 := makePNG(t)

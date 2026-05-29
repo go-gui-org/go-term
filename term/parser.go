@@ -68,13 +68,13 @@ const maxCSIParams = 32
 // values above this.
 const maxCSIParamValue = 1 << 20
 
-// Parser is a minimal VT/xterm subset: CR, LF, BS, TAB, BEL plus CSI ... m
+// parser is a minimal VT/xterm subset: CR, LF, BS, TAB, BEL plus CSI ... m
 // (SGR) for color + attribute state, and a handful of CSI cursor/erase
 // commands. SGR supports the 16-color, 256-color (38/48 ;5;n) and 24-bit
 // truecolor (38/48 ;2;r;g;b) forms. All other escape sequences are
 // silently consumed so they don't print as garbage.
-type Parser struct {
-	g            *Grid
+type parser struct {
+	g            *grid
 	state        parserState
 	params       []int   // SGR params accumulated in current CSI
 	paramSub     []bool  // paramSub[i] true when params[i] was colon-separated from params[i-1]
@@ -107,7 +107,7 @@ type Parser struct {
 	// bytes back toward the application (e.g. DA1 response).
 	// onClipboard, if non-nil, is invoked for OSC 52 clipboard-write
 	// requests. onNotify, if non-nil, is invoked for OSC 9 and OSC 777
-	// desktop-notification requests. All run while Grid.Mu is held —
+	// desktop-notification requests. All run while grid.Mu is held —
 	// handlers must not re-enter the grid.
 	onTitle             func(string)
 	onReply             func([]byte)
@@ -124,46 +124,46 @@ type Parser struct {
 // SetGraphicsDir tells the parser where to write decoded Sixel images.
 // Empty string falls back to os.TempDir(). The widget creates a private
 // subdir per Term so cleanup on Close removes only its own files.
-func (p *Parser) SetGraphicsDir(dir string) { p.graphicsDir = dir }
+func (p *parser) SetGraphicsDir(dir string) { p.graphicsDir = dir }
 
-func (p *Parser) oscReset() {
+func (p *parser) oscReset() {
 	p.osc = p.osc[:0]
 	p.oscIsImage = false
 }
 
 // SetTitleHandler registers a callback for OSC 0/1/2. Pass nil to
-// disable. Called while Grid.Mu is held.
-func (p *Parser) SetTitleHandler(fn func(string)) { p.onTitle = fn }
+// disable. Called while grid.Mu is held.
+func (p *parser) SetTitleHandler(fn func(string)) { p.onTitle = fn }
 
 // SetReplyHandler registers a callback for parser-originated host
 // writes (DA1 today; future: cursor position reports, etc.). Called
-// while Grid.Mu is held.
-func (p *Parser) SetReplyHandler(fn func([]byte)) { p.onReply = fn }
+// while grid.Mu is held.
+func (p *parser) SetReplyHandler(fn func([]byte)) { p.onReply = fn }
 
 // SetClipboardHandler registers a callback for OSC 52 clipboard-write
 // requests. data is the decoded (raw) clipboard payload. Pass nil to
-// disable. Called while Grid.Mu is held. OSC 52 writes are ignored unless
+// disable. Called while grid.Mu is held. OSC 52 writes are ignored unless
 // SetClipboardWriteAllowed(true) is also called.
-func (p *Parser) SetClipboardHandler(fn func([]byte)) { p.onClipboard = fn }
+func (p *parser) SetClipboardHandler(fn func([]byte)) { p.onClipboard = fn }
 
 // SetClipboardWriteAllowed controls whether OSC 52 write requests may invoke
 // the registered clipboard handler. Disabled by default.
-func (p *Parser) SetClipboardWriteAllowed(ok bool) { p.allowClipboardWrite = ok }
+func (p *parser) SetClipboardWriteAllowed(ok bool) { p.allowClipboardWrite = ok }
 
 // SetNotifyHandler registers a callback for OSC 9 and OSC 777 desktop
 // notifications. title may be empty (OSC 9 carries body only). Called
-// while Grid.Mu is held — the handler must not block; fire a goroutine
+// while grid.Mu is held — the handler must not block; fire a goroutine
 // for any slow work (e.g. exec).
-func (p *Parser) SetNotifyHandler(fn func(title, body string)) { p.onNotify = fn }
+func (p *parser) SetNotifyHandler(fn func(title, body string)) { p.onNotify = fn }
 
-// NewParser binds a parser to a grid. Callers must hold g.Mu while calling
+// newParser binds a parser to a grid. Callers must hold g.Mu while calling
 // Feed.
-func NewParser(g *Grid) *Parser {
-	return &Parser{g: g, params: make([]int, 0, 8), paramSub: make([]bool, 0, 8)}
+func newParser(g *grid) *parser {
+	return &parser{g: g, params: make([]int, 0, 8), paramSub: make([]bool, 0, 8)}
 }
 
 // Feed processes b, mutating the grid. Caller holds g.Mu.
-func (p *Parser) Feed(b []byte) {
+func (p *parser) Feed(b []byte) {
 
 	if p.utfLen > 0 {
 		// Complete the partial UTF-8 sequence carried over from the previous
@@ -434,7 +434,7 @@ func appendReply(out []byte, body []byte) []byte {
 	return out
 }
 
-func (p *Parser) currentSGRString() string {
+func (p *parser) currentSGRString() string {
 	if p.g.CurFG == DefaultColor && p.g.CurBG == DefaultColor && p.g.CurAttrs == 0 {
 		return "0m"
 	}
@@ -445,13 +445,13 @@ func (p *Parser) currentSGRString() string {
 		}
 		params = append(params, s...)
 	}
-	if p.g.CurAttrs&AttrBold != 0 {
+	if p.g.CurAttrs&attrBold != 0 {
 		appendParam("1")
 	}
-	if p.g.CurAttrs&AttrUnderline != 0 {
+	if p.g.CurAttrs&attrUnderline != 0 {
 		appendParam("4")
 	}
-	if p.g.CurAttrs&AttrInverse != 0 {
+	if p.g.CurAttrs&attrInverse != 0 {
 		appendParam("7")
 	}
 	switch p.g.CurFG >> 24 {

@@ -17,8 +17,8 @@ func FuzzParserFeed(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		g := NewGrid(24, 80)
-		p := NewParser(g)
+		g := newGrid(24, 80)
+		p := newParser(g)
 		g.Mu.Lock()
 		defer g.Mu.Unlock()
 		p.Feed(data)
@@ -39,8 +39,8 @@ func FuzzCSIDispatch(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		g := NewGrid(24, 80)
-		p := NewParser(g)
+		g := newGrid(24, 80)
+		p := newParser(g)
 		buf := make([]byte, 0, len(data)+2)
 		buf = append(buf, '\x1b', '[')
 		buf = append(buf, data...)
@@ -64,8 +64,8 @@ func FuzzOSCDispatch(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		g := NewGrid(24, 80)
-		p := NewParser(g)
+		g := newGrid(24, 80)
+		p := newParser(g)
 		buf := make([]byte, 0, len(data)+3)
 		buf = append(buf, '\x1b', ']')
 		buf = append(buf, data...)
@@ -88,8 +88,8 @@ func FuzzKittyAPC(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		g := NewGrid(24, 80)
-		p := NewParser(g)
+		g := newGrid(24, 80)
+		p := newParser(g)
 		buf := make([]byte, 0, len(data)+4)
 		buf = append(buf, '\x1b', '_')
 		buf = append(buf, data...)

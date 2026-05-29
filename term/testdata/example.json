@@ -1,0 +1,13 @@
+{
+  "name": "example",
+  "rows": 3,
+  "cols": 20,
+  "input_b64": "aGVsbG8bWzI7M0hYG1tL",
+  "want_lines": [
+    "hello               ",
+    "  X                 ",
+    "                    "
+  ],
+  "want_row": 1,
+  "want_col": 3
+}

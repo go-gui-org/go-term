@@ -89,7 +89,7 @@ func (t *Term) mouseSnap() mouseSnap {
 	}
 }
 
-// shouldReport reports whether mouse events should encode to the PTY
+// shouldReport reports whether mouse events should encode to the pty
 // rather than drive local selection. Requires reporting on, SGR
 // encoding on, and a live viewport.
 func (m mouseSnap) shouldReport() bool { return m.report && m.sgr && m.live }
@@ -135,6 +135,15 @@ func (t *Term) writeMouse(cb, col, row int, pixX, pixY float32, pixels, press bo
 	var buf [32]byte
 	var out []byte
 	if pixels {
+		// Guard against NaN/Inf pixel coords before int() conversion.
+		// posToCell sanitizes x/y for cell-mode paths; pixel-mode paths
+		// receive raw MouseX/MouseY from the GUI framework directly.
+		if !realNumber(pixX) {
+			pixX = 0
+		}
+		if !realNumber(pixY) {
+			pixY = 0
+		}
 		out = encodeMouseSGR(buf[:0], cb, int(pixX), int(pixY), press)
 	} else {
 		out = encodeMouseSGR(buf[:0], cb, col, row, press)
@@ -171,8 +180,8 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
 		contentR := t.grid.viewportToContent(r)
-		t.grid.SelAnchor = ContentPos{Row: contentR, Col: c}
-		t.grid.SelHead = ContentPos{Row: contentR, Col: c}
+		t.grid.SelAnchor = contentPos{Row: contentR, Col: c}
+		t.grid.SelHead = contentPos{Row: contentR, Col: c}
 		t.grid.SelActive = false
 	}()
 	t.dragging = true
@@ -242,26 +251,18 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 			switch {
 			case e.MouseY < 0:
 				t.grid.ScrollView(1)
-			case e.MouseY > widgetH:
-				t.grid.ScrollView(-1)
-			}
-		}
-		contentR := t.grid.viewportToContent(r)
-		t.grid.SelHead = ContentPos{Row: contentR, Col: c}
-		if t.grid.SelHead != t.grid.SelAnchor {
-			t.grid.SelActive = true
-		}
-		// Persist scroll direction so autoScrollLoop keeps scrolling if
-		// onMouseMove stops firing (mouse above title bar / window edge).
-		if t.cellH > 0 {
-			switch {
-			case e.MouseY < 0:
 				t.autoScrollDir.Store(1)
 			case e.MouseY > widgetH:
+				t.grid.ScrollView(-1)
 				t.autoScrollDir.Store(-1)
 			default:
 				t.autoScrollDir.Store(0)
 			}
+		}
+		contentR := t.grid.viewportToContent(r)
+		t.grid.SelHead = contentPos{Row: contentR, Col: c}
+		if t.grid.SelHead != t.grid.SelAnchor {
+			t.grid.SelActive = true
 		}
 	}()
 	t.bumpVersion()

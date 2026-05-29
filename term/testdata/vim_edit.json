@@ -1,0 +1,13 @@
+{
+  "name": "vim_edit",
+  "rows": 3,
+  "cols": 10,
+  "input_b64": "G1s/MTA0OWgbWzJKG1tIfhtbMjszSBtbNG10ZXN0G1swbRtbPzEwNDls",
+  "want_lines": [
+    "          ",
+    "          ",
+    "          "
+  ],
+  "want_row": 0,
+  "want_col": 0
+}

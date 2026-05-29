@@ -6,7 +6,7 @@ import (
 )
 
 func TestGrid_ScrollUp(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	for r := range g.Rows {
 		for c := range g.Cols {
 			g.At(r, c).Ch = rune('a' + r)
@@ -23,7 +23,7 @@ func TestGrid_ScrollUp(t *testing.T) {
 }
 
 func TestGrid_ScrollViewClamp(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 
 	for range 4 {
@@ -55,7 +55,7 @@ func TestGrid_ScrollViewClamp(t *testing.T) {
 }
 
 func TestGrid_ScrollView_SaturatingAdd(t *testing.T) {
-	g := NewGrid(2, 2)
+	g := newGrid(2, 2)
 	g.ScrollbackCap = 10
 	for range 5 {
 		g.scrollUpRegion(1)
@@ -84,7 +84,7 @@ func TestGrid_ScrollView_SaturatingAdd(t *testing.T) {
 }
 
 func TestGrid_SetScrollRegion(t *testing.T) {
-	g := NewGrid(10, 4)
+	g := newGrid(10, 4)
 	g.SetScrollRegion(2, 5)
 	if g.Top != 2 || g.Bottom != 5 {
 		t.Errorf("region = %d..%d, want 2..5", g.Top, g.Bottom)
@@ -109,7 +109,7 @@ func TestGrid_SetScrollRegion(t *testing.T) {
 }
 
 func TestGrid_ScrollUpRegion_Partial(t *testing.T) {
-	g := NewGrid(5, 2)
+	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
 		fillRow(g, i, ch)
 	}
@@ -129,7 +129,7 @@ func TestGrid_ScrollUpRegion_Partial(t *testing.T) {
 }
 
 func TestGrid_ScrollUpRegion_FullScreenScrollback(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for i, ch := range []rune{'A', 'B', 'C'} {
 		fillRow(g, i, ch)
@@ -142,7 +142,7 @@ func TestGrid_ScrollUpRegion_FullScreenScrollback(t *testing.T) {
 }
 
 func TestGrid_ScrollUpRegion_OverHeight(t *testing.T) {
-	g := NewGrid(5, 2)
+	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
 		fillRow(g, i, ch)
 	}
@@ -157,7 +157,7 @@ func TestGrid_ScrollUpRegion_OverHeight(t *testing.T) {
 }
 
 func TestGrid_ScrollDownRegion_Partial(t *testing.T) {
-	g := NewGrid(5, 2)
+	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
 		fillRow(g, i, ch)
 	}
@@ -176,7 +176,7 @@ func TestGrid_ScrollDownRegion_Partial(t *testing.T) {
 }
 
 func TestGrid_ScrollUp_ShiftsWrappedFlags(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.ScrollbackCap = 10
 
 	g.RowWrapped[0] = true
@@ -195,7 +195,7 @@ func TestGrid_ScrollUp_ShiftsWrappedFlags(t *testing.T) {
 }
 
 func TestGrid_ScrollUp_TrimsScrollbackWrapped(t *testing.T) {
-	g := NewGrid(2, 2)
+	g := newGrid(2, 2)
 	g.ScrollbackCap = 2
 	for range 4 {
 		g.RowWrapped[0] = true
@@ -208,7 +208,7 @@ func TestGrid_ScrollUp_TrimsScrollbackWrapped(t *testing.T) {
 }
 
 func TestGrid_ScrollDown_ShiftsWrappedFlags(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.RowWrapped[0] = true
 	g.RowWrapped[1] = false
 	g.RowWrapped[2] = false
@@ -224,7 +224,7 @@ func TestGrid_ScrollDown_ShiftsWrappedFlags(t *testing.T) {
 }
 
 func TestGrid_ScrollViewTop_PinsToOldestRow(t *testing.T) {
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	g.ScrollbackCap = 10
 	for range 5 {
 		g.scrollUpRegion(1)
@@ -238,7 +238,7 @@ func TestGrid_ScrollViewTop_PinsToOldestRow(t *testing.T) {
 		t.Errorf("ViewOffset = %d, want %d (len(Scrollback))", g.ViewOffset, sb)
 	}
 
-	g2 := NewGrid(3, 5)
+	g2 := newGrid(3, 5)
 	g2.ScrollViewTop()
 	if g2.ViewOffset != 0 {
 		t.Errorf("empty scrollback: ViewOffset = %d, want 0", g2.ViewOffset)
@@ -246,7 +246,7 @@ func TestGrid_ScrollViewTop_PinsToOldestRow(t *testing.T) {
 }
 
 func TestGrid_ScrollViewPx_SubRow(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
@@ -263,7 +263,7 @@ func TestGrid_ScrollViewPx_SubRow(t *testing.T) {
 }
 
 func TestGrid_ScrollViewPx_MultiRow(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
@@ -280,7 +280,7 @@ func TestGrid_ScrollViewPx_MultiRow(t *testing.T) {
 }
 
 func TestGrid_ScrollViewPx_ClampAtZero(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
@@ -297,7 +297,7 @@ func TestGrid_ScrollViewPx_ClampAtZero(t *testing.T) {
 }
 
 func TestGrid_ScrollViewPx_ClampAtTop(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
@@ -314,7 +314,7 @@ func TestGrid_ScrollViewPx_ClampAtTop(t *testing.T) {
 }
 
 func TestGrid_ScrollViewPx_ResetView(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
@@ -327,7 +327,7 @@ func TestGrid_ScrollViewPx_ResetView(t *testing.T) {
 }
 
 func TestGrid_ScrollViewTop_ZerosViewSubPx(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
@@ -340,7 +340,7 @@ func TestGrid_ScrollViewTop_ZerosViewSubPx(t *testing.T) {
 }
 
 func TestGrid_ScrollViewPx_NaNDeltaIsNoOp(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
@@ -354,7 +354,7 @@ func TestGrid_ScrollViewPx_NaNDeltaIsNoOp(t *testing.T) {
 }
 
 func TestGrid_ScrollViewPx_ZeroCellHIsNoOp(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
@@ -368,7 +368,7 @@ func TestGrid_ScrollViewPx_ZeroCellHIsNoOp(t *testing.T) {
 }
 
 func TestGrid_ScrollViewPx_ScrollView_ZerosSubPx(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)

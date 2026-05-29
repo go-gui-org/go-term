@@ -3,15 +3,15 @@ package term
 import "testing"
 
 func TestGrid_SelectedText_RowRange(t *testing.T) {
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	for c, r := range "hello" {
 		g.At(0, c).Ch = r
 	}
 	for c, r := range "world" {
 		g.At(1, c).Ch = r
 	}
-	g.SelAnchor = ContentPos{Row: 0, Col: 0}
-	g.SelHead = ContentPos{Row: 1, Col: 4}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 4}
 	g.SelActive = true
 	if got := g.SelectedText(); got != "hello\nworld" {
 		t.Errorf("got %q, want %q", got, "hello\nworld")
@@ -19,15 +19,15 @@ func TestGrid_SelectedText_RowRange(t *testing.T) {
 }
 
 func TestGrid_SelectedText_TrailingBlankTrim(t *testing.T) {
-	g := NewGrid(2, 8)
+	g := newGrid(2, 8)
 	for c, r := range "abc" {
 		g.At(0, c).Ch = r
 	}
 	for c, r := range "de" {
 		g.At(1, c).Ch = r
 	}
-	g.SelAnchor = ContentPos{Row: 0, Col: 0}
-	g.SelHead = ContentPos{Row: 1, Col: 7}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 7}
 	g.SelActive = true
 
 	if got := g.SelectedText(); got != "abc\nde" {
@@ -36,12 +36,12 @@ func TestGrid_SelectedText_TrailingBlankTrim(t *testing.T) {
 }
 
 func TestGrid_SelectedText_ColumnRangeWithinRow(t *testing.T) {
-	g := NewGrid(1, 10)
+	g := newGrid(1, 10)
 	for c, r := range "abcdefghij" {
 		g.At(0, c).Ch = r
 	}
-	g.SelAnchor = ContentPos{Row: 0, Col: 3}
-	g.SelHead = ContentPos{Row: 0, Col: 6}
+	g.SelAnchor = contentPos{Row: 0, Col: 3}
+	g.SelHead = contentPos{Row: 0, Col: 6}
 	g.SelActive = true
 	if got := g.SelectedText(); got != "defg" {
 		t.Errorf("got %q, want %q", got, "defg")
@@ -49,7 +49,7 @@ func TestGrid_SelectedText_ColumnRangeWithinRow(t *testing.T) {
 }
 
 func TestGrid_SelectedText_BackwardDragNormalized(t *testing.T) {
-	g := NewGrid(2, 4)
+	g := newGrid(2, 4)
 	for c, r := range "ab" {
 		g.At(0, c).Ch = r
 	}
@@ -57,8 +57,8 @@ func TestGrid_SelectedText_BackwardDragNormalized(t *testing.T) {
 		g.At(1, c).Ch = r
 	}
 
-	g.SelAnchor = ContentPos{Row: 1, Col: 1}
-	g.SelHead = ContentPos{Row: 0, Col: 0}
+	g.SelAnchor = contentPos{Row: 1, Col: 1}
+	g.SelHead = contentPos{Row: 0, Col: 0}
 	g.SelActive = true
 	if got := g.SelectedText(); got != "ab\ncd" {
 		t.Errorf("got %q, want %q", got, "ab\ncd")
@@ -66,12 +66,12 @@ func TestGrid_SelectedText_BackwardDragNormalized(t *testing.T) {
 }
 
 func TestGrid_SelectedText_InactiveOrEmpty(t *testing.T) {
-	g := NewGrid(1, 3)
+	g := newGrid(1, 3)
 	if got := g.SelectedText(); got != "" {
 		t.Errorf("inactive selection returned %q", got)
 	}
-	g.SelAnchor = ContentPos{Row: 0, Col: 1}
-	g.SelHead = ContentPos{Row: 0, Col: 1}
+	g.SelAnchor = contentPos{Row: 0, Col: 1}
+	g.SelHead = contentPos{Row: 0, Col: 1}
 	g.SelActive = true
 	if got := g.SelectedText(); got != "" {
 		t.Errorf("zero-width selection returned %q", got)
@@ -79,7 +79,7 @@ func TestGrid_SelectedText_InactiveOrEmpty(t *testing.T) {
 }
 
 func TestGrid_SelectedText_AcrossScrollbackBoundary(t *testing.T) {
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	g.ScrollbackCap = 5
 
 	for c, r := range "abc" {
@@ -91,8 +91,8 @@ func TestGrid_SelectedText_AcrossScrollbackBoundary(t *testing.T) {
 		g.At(0, c).Ch = r
 	}
 
-	g.SelAnchor = ContentPos{Row: 0, Col: 0}
-	g.SelHead = ContentPos{Row: 1, Col: 2}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 2}
 	g.SelActive = true
 	if got := g.SelectedText(); got != "abc\nxyz" {
 		t.Errorf("ViewOffset=0: got %q, want %q", got, "abc\nxyz")
@@ -105,9 +105,9 @@ func TestGrid_SelectedText_AcrossScrollbackBoundary(t *testing.T) {
 }
 
 func TestGrid_InSelection(t *testing.T) {
-	g := NewGrid(3, 5)
-	g.SelAnchor = ContentPos{Row: 0, Col: 2}
-	g.SelHead = ContentPos{Row: 1, Col: 1}
+	g := newGrid(3, 5)
+	g.SelAnchor = contentPos{Row: 0, Col: 2}
+	g.SelHead = contentPos{Row: 1, Col: 1}
 	g.SelActive = true
 	cases := []struct {
 		r, c int
@@ -131,15 +131,15 @@ func TestGrid_InSelection(t *testing.T) {
 
 func TestGrid_SelectedText_ClampsOutOfRangeCoords(t *testing.T) {
 
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	for c, r := range "abc" {
 		g.At(0, c).Ch = r
 	}
 	for c, r := range "xyz" {
 		g.At(1, c).Ch = r
 	}
-	g.SelAnchor = ContentPos{Row: -10, Col: -10}
-	g.SelHead = ContentPos{Row: 99, Col: 99}
+	g.SelAnchor = contentPos{Row: -10, Col: -10}
+	g.SelHead = contentPos{Row: 99, Col: 99}
 	g.SelActive = true
 	got := g.SelectedText()
 	if got != "abc\nxyz" {
@@ -149,12 +149,12 @@ func TestGrid_SelectedText_ClampsOutOfRangeCoords(t *testing.T) {
 
 func TestGrid_SelectedText_RowWithEmptySpan(t *testing.T) {
 
-	g := NewGrid(1, 3)
+	g := newGrid(1, 3)
 	g.At(0, 0).Ch = 'a'
 	g.At(0, 1).Ch = 'b'
 	g.At(0, 2).Ch = 'c'
-	g.SelAnchor = ContentPos{Row: 0, Col: 0}
-	g.SelHead = ContentPos{Row: 0, Col: 2}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 0, Col: 2}
 	g.SelActive = true
 	if got := g.SelectedText(); got != "abc" {
 		t.Errorf("baseline: got %q want %q", got, "abc")
@@ -163,7 +163,7 @@ func TestGrid_SelectedText_RowWithEmptySpan(t *testing.T) {
 
 func TestGrid_InSelection_SurvivesViewOffsetChange(t *testing.T) {
 
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	g.ScrollbackCap = 5
 	for c, ch := range "abc" {
 		g.At(0, c).Ch = ch
@@ -173,8 +173,8 @@ func TestGrid_InSelection_SurvivesViewOffsetChange(t *testing.T) {
 		g.At(0, c).Ch = ch
 	}
 
-	g.SelAnchor = ContentPos{Row: 0, Col: 0}
-	g.SelHead = ContentPos{Row: 1, Col: 2}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 2}
 	g.SelActive = true
 
 	g.ViewOffset = 0
@@ -196,7 +196,7 @@ func TestGrid_InSelection_SurvivesViewOffsetChange(t *testing.T) {
 
 func TestGrid_SelectedText_ContentCoords_IndependentOfViewOffset(t *testing.T) {
 
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	g.ScrollbackCap = 5
 	for c, ch := range "abc" {
 		g.At(0, c).Ch = ch
@@ -205,8 +205,8 @@ func TestGrid_SelectedText_ContentCoords_IndependentOfViewOffset(t *testing.T) {
 	for c, ch := range "xyz" {
 		g.At(0, c).Ch = ch
 	}
-	g.SelAnchor = ContentPos{Row: 0, Col: 0}
-	g.SelHead = ContentPos{Row: 1, Col: 2}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 2}
 	g.SelActive = true
 
 	for _, off := range []int{0, 1} {

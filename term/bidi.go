@@ -9,7 +9,7 @@ import (
 // rowHasRTL returns true if any non-null, non-continuation cell in
 // cells[0:cols] carries a strong RTL codepoint (bidi class R or AL).
 // Zero allocations.
-func rowHasRTL(cells []Cell, cols int) bool {
+func rowHasRTL(cells []cell, cols int) bool {
 	if cols > len(cells) {
 		cols = len(cells)
 	}
@@ -43,7 +43,7 @@ func isRTLRune(r rune) bool {
 // Null cells (Ch==0: continuation or empty) are excluded from the bidi
 // string to prevent trailing blank cells from being reordered in RTL
 // paragraphs. Space characters (Ch==' ') are included as content.
-func visualReorder(cells []Cell, cols int) (visual []Cell, v2l []int) {
+func visualReorder(cells []cell, cols int) (visual []cell, v2l []int) {
 	if cols > len(cells) {
 		cols = len(cells)
 	}
@@ -78,8 +78,8 @@ func visualReorder(cells []Cell, cols int) (visual []Cell, v2l []int) {
 		return nil, nil
 	}
 
-	blank := Cell{Width: 1, FG: DefaultColor, BG: DefaultColor}
-	visual = make([]Cell, 0, cols)
+	blank := cell{Width: 1, FG: DefaultColor, BG: DefaultColor}
+	visual = make([]cell, 0, cols)
 	v2l = make([]int, 0, cols)
 
 	for i := range order.NumRuns() {
@@ -118,7 +118,7 @@ func visualReorder(cells []Cell, cols int) (visual []Cell, v2l []int) {
 
 // appendVisualCell appends cells[cellIdx] — and its continuation cell when
 // Width==2 — to the visual/v2l slices, stopping at the cols capacity limit.
-func appendVisualCell(visual []Cell, v2l []int, cells []Cell, cellIdx int, blank Cell, cols int) ([]Cell, []int) {
+func appendVisualCell(visual []cell, v2l []int, cells []cell, cellIdx int, blank cell, cols int) ([]cell, []int) {
 	if len(visual) >= cols {
 		return visual, v2l
 	}

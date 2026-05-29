@@ -25,9 +25,9 @@ func TestClampWinsize(t *testing.T) {
 }
 
 func TestPTY_StartResizeClose(t *testing.T) {
-	p, err := Start(24, 80)
+	p, err := startPTY(24, 80)
 	if err != nil {
-		t.Skipf("Start failed (no shell available?): %v", err)
+		t.Skipf("startPTY failed (no shell available?): %v", err)
 	}
 	if err := p.Resize(30, 100); err != nil {
 		t.Errorf("Resize: %v", err)

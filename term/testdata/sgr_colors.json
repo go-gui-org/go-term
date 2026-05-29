@@ -1,0 +1,12 @@
+{
+  "name": "sgr_colors",
+  "rows": 2,
+  "cols": 20,
+  "input_b64": "G1szMW1yZWQbWzBtIBtbMTszMm1ib2xkIGdyZWVuG1swbQ==",
+  "want_lines": [
+    "red bold green      ",
+    "                    "
+  ],
+  "want_row": 0,
+  "want_col": 14
+}

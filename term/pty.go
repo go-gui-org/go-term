@@ -7,8 +7,8 @@ import (
 	"github.com/creack/pty"
 )
 
-// PTY wraps a pseudoterminal master and the child shell process.
-type PTY struct {
+// ptyDev wraps a pseudoterminal master and the child shell process.
+type ptyDev struct {
 	cmd  *exec.Cmd
 	file *os.File
 }
@@ -26,10 +26,10 @@ func clampWinsize(n int) uint16 {
 	return uint16(n)
 }
 
-// Start spawns $SHELL (fallback /bin/sh) attached to a new PTY sized
+// startPTY spawns $SHELL (fallback /bin/sh) attached to a new pty sized
 // rows×cols. TERM is forced to xterm-256color so apps emit standard
 // SGR sequences.
-func Start(rows, cols int) (*PTY, error) {
+func startPTY(rows, cols int) (*ptyDev, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -43,26 +43,26 @@ func Start(rows, cols int) (*PTY, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &PTY{cmd: cmd, file: f}, nil
+	return &ptyDev{cmd: cmd, file: f}, nil
 }
 
-// Read forwards from the PTY master.
-func (p *PTY) Read(b []byte) (int, error) { return p.file.Read(b) }
+// Read forwards from the pty master.
+func (p *ptyDev) Read(b []byte) (int, error) { return p.file.Read(b) }
 
-// Write forwards to the PTY master.
-func (p *PTY) Write(b []byte) (int, error) { return p.file.Write(b) }
+// Write forwards to the pty master.
+func (p *ptyDev) Write(b []byte) (int, error) { return p.file.Write(b) }
 
-// Resize updates the PTY winsize so child processes see the new
+// Resize updates the pty winsize so child processes see the new
 // rows/cols on their next stty/SIGWINCH.
-func (p *PTY) Resize(rows, cols int) error {
+func (p *ptyDev) Resize(rows, cols int) error {
 	return pty.Setsize(p.file, &pty.Winsize{
 		Rows: clampWinsize(rows),
 		Cols: clampWinsize(cols),
 	})
 }
 
-// Close releases the PTY master and reaps the child if still alive.
-func (p *PTY) Close() error {
+// Close releases the pty master and reaps the child if still alive.
+func (p *ptyDev) Close() error {
 	err := p.file.Close()
 	if p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()

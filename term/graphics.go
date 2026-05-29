@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 )
 
-// Graphic is a decoded image (e.g. Sixel) anchored at a content-row
+// graphic is a decoded image (e.g. Sixel) anchored at a content-row
 // origin. The origin row is in *content* coordinates (same space as
 // Marks and selection: 0..Scrollback.Len()-1 indexes scrollback,
 // rows above that index the live grid). Origin is adjusted by the
@@ -26,7 +26,7 @@ import (
 // Cells covered by the image are blanked at AddGraphic time so the
 // text passes don't overstrike the image; the rendering pass paints
 // the image on top of background fill.
-type Graphic struct {
+type graphic struct {
 	Src      string // file path passed to dc.Image (PNG on disk)
 	OriginR  int    // content-row index
 	OriginC  int    // column at origin row
@@ -42,7 +42,7 @@ const (
 	// caps a single decode at ~64 MB of intermediate NRGBA buffer.
 	maxSixelWidth  = 4096
 	maxSixelHeight = 4096
-	// Cap on Graphics retained by a Grid. Oldest are evicted first.
+	// Cap on Graphics retained by a grid. Oldest are evicted first.
 	maxGraphics = 256
 )
 

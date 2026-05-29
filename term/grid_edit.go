@@ -6,7 +6,7 @@ package term
 // current cell and the cell to its right (the "continuation"), and
 // wraps early if only one column remains. Width-0 runes (combining
 // marks, ZWJ, etc.) are dropped — Phase 11 doesn't model combining.
-func (g *Grid) Put(ch rune) {
+func (g *grid) Put(ch rune) {
 	ch = g.translateRune(ch)
 	w := runeWidth(ch)
 	if w == 0 {
@@ -47,7 +47,7 @@ func (g *Grid) Put(ch rune) {
 		g.eraseWideAt(g.CursorR, g.CursorC+1)
 	}
 	if c := g.At(g.CursorR, g.CursorC); c != nil {
-		*c = Cell{
+		*c = cell{
 			Ch: ch, FG: g.CurFG, BG: g.CurBG,
 			Attrs: g.CurAttrs, Width: uint8(w), LinkID: g.CurLinkID,
 			ULStyle: g.CurULStyle, ULColor: g.CurULColor,
@@ -55,7 +55,7 @@ func (g *Grid) Put(ch rune) {
 	}
 	if w == 2 {
 		if c := g.At(g.CursorR, g.CursorC+1); c != nil {
-			*c = Cell{
+			*c = cell{
 				Ch: 0, FG: g.CurFG, BG: g.CurBG,
 				Attrs: g.CurAttrs, Width: 0, LinkID: g.CurLinkID,
 				ULStyle: g.CurULStyle, ULColor: g.CurULColor,
@@ -73,7 +73,7 @@ func (g *Grid) Put(ch rune) {
 // a subsequent overwrite doesn't leave half a glyph behind. If (r,c)
 // is a wide head, blanks the continuation to its right. If it's a
 // continuation, blanks the head to its left. No-op for normal cells.
-func (g *Grid) eraseWideAt(r, c int) {
+func (g *grid) eraseWideAt(r, c int) {
 	cell := g.At(r, c)
 	if cell == nil {
 		return
@@ -97,7 +97,7 @@ func (g *Grid) eraseWideAt(r, c int) {
 // shrink the active area (less, vim status line) don't blow away
 // untouched rows below. When the cursor is below Bottom (outside the
 // region), it advances toward Rows-1 without scrolling.
-func (g *Grid) Newline() {
+func (g *grid) Newline() {
 	switch {
 	case g.CursorR == g.Bottom:
 		g.scrollUpRegion(1)
@@ -109,16 +109,16 @@ func (g *Grid) Newline() {
 }
 
 // NextLine implements ESC E (NEL): CR + LF.
-func (g *Grid) NextLine() {
+func (g *grid) NextLine() {
 	g.CarriageReturn()
 	g.Newline()
 }
 
 // CarriageReturn moves to column 0.
-func (g *Grid) CarriageReturn() { g.CursorC = 0 }
+func (g *grid) CarriageReturn() { g.CursorC = 0 }
 
 // Backspace moves cursor left one column. No erase.
-func (g *Grid) Backspace() {
+func (g *grid) Backspace() {
 	if g.CursorC > 0 {
 		g.CursorC--
 	}
@@ -126,7 +126,7 @@ func (g *Grid) Backspace() {
 
 // Tab advances the cursor to the next tab stop. Scans TabStops from
 // CursorC+1; if no stop exists within the row, clamps to Cols-1.
-func (g *Grid) Tab() {
+func (g *grid) Tab() {
 	if g.CursorC < 0 {
 		g.CursorC = 0
 	}
@@ -140,7 +140,7 @@ func (g *Grid) Tab() {
 }
 
 // SetTabStop sets a tab stop at the current cursor column. Implements ESC H (HTS).
-func (g *Grid) SetTabStop() {
+func (g *grid) SetTabStop() {
 	if g.CursorC >= 0 && g.CursorC < MaxGridDim {
 		g.TabStops[g.CursorC] = true
 	}
@@ -148,7 +148,7 @@ func (g *Grid) SetTabStop() {
 
 // ClearTabStop clears the tab stop at the current cursor column (all==false)
 // or clears all tab stops (all==true). Implements CSI g (TBC).
-func (g *Grid) ClearTabStop(all bool) {
+func (g *grid) ClearTabStop(all bool) {
 	if all {
 		g.TabStops = [MaxGridDim]bool{}
 		return
@@ -161,7 +161,7 @@ func (g *Grid) ClearTabStop(all bool) {
 // EraseInLine implements CSI K. mode: 0 = cursor to EOL, 1 = SOL to
 // cursor, 2 = entire line. Cleared cells use current bg/attrs so
 // painted backgrounds persist.
-func (g *Grid) EraseInLine(mode int) {
+func (g *grid) EraseInLine(mode int) {
 	row := g.CursorR
 	if row < 0 || row >= g.Rows {
 		return
@@ -186,7 +186,7 @@ func (g *Grid) EraseInLine(mode int) {
 
 // EraseInDisplay implements CSI J. mode: 0 = cursor to end of screen,
 // 1 = start of screen to cursor, 2/3 = entire screen.
-func (g *Grid) EraseInDisplay(mode int) {
+func (g *grid) EraseInDisplay(mode int) {
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	switch mode {
 	case 0:
@@ -217,7 +217,7 @@ func (g *Grid) EraseInDisplay(mode int) {
 // cursor row, pushing existing rows toward Bottom; rows pushed past
 // Bottom are discarded. No-op when the cursor is outside the active
 // scroll region (DEC behavior).
-func (g *Grid) InsertLines(n int) {
+func (g *grid) InsertLines(n int) {
 	if n <= 0 || !g.regionValid() {
 		return
 	}
@@ -252,7 +252,7 @@ func (g *Grid) InsertLines(n int) {
 // DeleteLines implements CSI Ps M (DL): delete n lines starting at the
 // cursor row, shifting rows below up; blank rows fill the bottom of
 // the region. No-op when cursor is outside the region.
-func (g *Grid) DeleteLines(n int) {
+func (g *grid) DeleteLines(n int) {
 	if n <= 0 || !g.regionValid() {
 		return
 	}
@@ -285,7 +285,7 @@ func (g *Grid) DeleteLines(n int) {
 // InsertChars implements CSI Ps @ (ICH): insert n blanks at the cursor,
 // shifting existing cells right within the row; cells past the right
 // margin are discarded. Blanks use current SGR bg/attrs.
-func (g *Grid) InsertChars(n int) {
+func (g *grid) InsertChars(n int) {
 	if n <= 0 || g.CursorR < 0 || g.CursorR >= g.Rows {
 		return
 	}
@@ -309,7 +309,7 @@ func (g *Grid) InsertChars(n int) {
 
 // DeleteChars implements CSI Ps P (DCH): delete n cells at the cursor,
 // shifting cells from the right inward; blanks fill at the right edge.
-func (g *Grid) DeleteChars(n int) {
+func (g *grid) DeleteChars(n int) {
 	if n <= 0 || g.CursorR < 0 || g.CursorR >= g.Rows {
 		return
 	}

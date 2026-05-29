@@ -7,7 +7,7 @@ import "math"
 // full screen and ScrollbackCap > 0, the displaced top rows are pushed
 // to the scrollback ring (oldest first) and trimmed to cap. n is
 // clamped: n <= 0 is a no-op, n >= region height clears the region.
-func (g *Grid) scrollUpRegion(n int) {
+func (g *grid) scrollUpRegion(n int) {
 	if n <= 0 || !g.regionValid() {
 		return
 	}
@@ -52,7 +52,7 @@ func (g *Grid) scrollUpRegion(n int) {
 // scrollDownRegion shifts rows [Top..Bottom] down by n, clearing the
 // top n rows with default cells. Never writes to scrollback (down-scroll
 // reveals erased space, not displaced history).
-func (g *Grid) scrollDownRegion(n int) {
+func (g *grid) scrollDownRegion(n int) {
 	if n <= 0 || !g.regionValid() {
 		return
 	}
@@ -85,7 +85,7 @@ func (g *Grid) scrollDownRegion(n int) {
 // 0-based inclusive. Invalid or degenerate ranges (top >= bottom,
 // out of bounds) reset to full screen. Cursor is homed to (0, 0)
 // per DEC convention.
-func (g *Grid) SetScrollRegion(top, bottom int) {
+func (g *grid) SetScrollRegion(top, bottom int) {
 	if top < 0 || bottom >= g.Rows || top >= bottom {
 		g.Top = 0
 		g.Bottom = g.Rows - 1
@@ -102,10 +102,10 @@ func (g *Grid) SetScrollRegion(top, bottom int) {
 
 // ScrollUp implements CSI Ps S — scroll the region up by n rows,
 // cursor unchanged. Wrapper around scrollUpRegion.
-func (g *Grid) ScrollUp(n int) { g.scrollUpRegion(n) }
+func (g *grid) ScrollUp(n int) { g.scrollUpRegion(n) }
 
 // ScrollDown implements CSI Ps T — scroll the region down by n rows.
-func (g *Grid) ScrollDown(n int) { g.scrollDownRegion(n) }
+func (g *grid) ScrollDown(n int) { g.scrollDownRegion(n) }
 
 // ScrollView shifts the viewport by `delta` rows: positive = back into
 // scrollback (toward older content), negative = forward (toward live).
@@ -114,7 +114,7 @@ func (g *Grid) ScrollDown(n int) { g.scrollDownRegion(n) }
 // overflow ViewOffset+delta before clamp, so detect the wrap.
 // ViewSubPx is zeroed so integer jumps (PgUp/PgDn, jump-to-mark) land
 // cleanly on row boundaries.
-func (g *Grid) ScrollView(delta int) {
+func (g *grid) ScrollView(delta int) {
 	max := g.Scrollback.Len()
 	switch {
 	case delta > 0 && g.ViewOffset > max-delta:
@@ -131,7 +131,7 @@ func (g *Grid) ScrollView(delta int) {
 // position (ViewOffset*cellH + ViewSubPx + deltaPx) is converted back
 // into a whole-row ViewOffset and a fractional ViewSubPx remainder.
 // Clamped to [0, Scrollback.Len()*cellH]. cellH <= 0 is a no-op.
-func (g *Grid) ScrollViewPx(deltaPx, cellH float32) {
+func (g *grid) ScrollViewPx(deltaPx, cellH float32) {
 	if cellH <= 0 || math.IsNaN(float64(cellH)) || math.IsInf(float64(cellH), 0) || math.IsNaN(float64(deltaPx)) {
 		return
 	}
@@ -148,13 +148,13 @@ func (g *Grid) ScrollViewPx(deltaPx, cellH float32) {
 }
 
 // ResetView snaps the viewport back to the live grid.
-func (g *Grid) ResetView() {
+func (g *grid) ResetView() {
 	g.ViewOffset = 0
 	g.ViewSubPx = 0
 }
 
 // ScrollViewTop moves the viewport to the oldest scrollback row.
-func (g *Grid) ScrollViewTop() {
+func (g *grid) ScrollViewTop() {
 	g.ViewOffset = g.Scrollback.Len()
 	g.ViewSubPx = 0
 }

@@ -3,7 +3,7 @@ package term
 import "testing"
 
 func TestGrid_MoveCursorClamps(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.MoveCursor(-1, -1)
 	if g.CursorR != 0 || g.CursorC != 0 {
 		t.Errorf("clamp low: %d %d", g.CursorR, g.CursorC)
@@ -15,7 +15,7 @@ func TestGrid_MoveCursorClamps(t *testing.T) {
 }
 
 func TestGrid_CursorMoveByLargeNClamps(t *testing.T) {
-	g := NewGrid(5, 5)
+	g := newGrid(5, 5)
 	g.MoveCursor(2, 2)
 	g.CursorUp(100)
 	if g.CursorR != 0 {
@@ -40,7 +40,7 @@ func TestGrid_DECSCUSRParam_RoundTrip(t *testing.T) {
 		{1, 1}, {2, 2}, {3, 3}, {4, 4}, {5, 5}, {6, 6},
 	}
 	for _, c := range cases {
-		g := NewGrid(1, 5)
+		g := newGrid(1, 5)
 		g.ApplyDECSCUSR(c.ps)
 		if got := g.DECSCUSRParam(); got != c.want {
 			t.Errorf("ApplyDECSCUSR(%d) → DECSCUSRParam() = %d, want %d", c.ps, got, c.want)
@@ -49,7 +49,7 @@ func TestGrid_DECSCUSRParam_RoundTrip(t *testing.T) {
 }
 
 func TestGrid_MoveCursorOrigin_WhenOriginModeOff(t *testing.T) {
-	g := NewGrid(5, 8)
+	g := newGrid(5, 8)
 	g.SetScrollRegion(1, 3)
 
 	g.MoveCursorOrigin(2, 3)
@@ -59,17 +59,17 @@ func TestGrid_MoveCursorOrigin_WhenOriginModeOff(t *testing.T) {
 }
 
 func TestGrid_SaveRestoreCursor_ULState(t *testing.T) {
-	g := NewGrid(2, 10)
-	g.CurULStyle = ULDouble
+	g := newGrid(2, 10)
+	g.CurULStyle = ulDouble
 	g.CurULColor = rgbColor(0, 128, 255)
 	g.SaveCursor()
 
-	g.CurULStyle = ULDotted
+	g.CurULStyle = ulDotted
 	g.CurULColor = DefaultColor
 
 	g.RestoreCursor()
-	if g.CurULStyle != ULDouble {
-		t.Errorf("RestoreCursor: CurULStyle = %d, want ULDouble (%d)", g.CurULStyle, ULDouble)
+	if g.CurULStyle != ulDouble {
+		t.Errorf("RestoreCursor: CurULStyle = %d, want ulDouble (%d)", g.CurULStyle, ulDouble)
 	}
 	if g.CurULColor != rgbColor(0, 128, 255) {
 		t.Errorf("RestoreCursor: CurULColor = %#x, want %#x", g.CurULColor, rgbColor(0, 128, 255))
@@ -77,7 +77,7 @@ func TestGrid_SaveRestoreCursor_ULState(t *testing.T) {
 }
 
 func TestGrid_SaveRestoreCursor_CharsetState(t *testing.T) {
-	g := NewGrid(2, 10)
+	g := newGrid(2, 10)
 	g.CharsetG0 = 'B'
 	g.CharsetG1 = '0'
 	g.ActiveG = 1
@@ -94,7 +94,7 @@ func TestGrid_SaveRestoreCursor_CharsetState(t *testing.T) {
 }
 
 func TestGrid_CursorMovementMarksDirty(t *testing.T) {
-	g := NewGrid(10, 10)
+	g := newGrid(10, 10)
 	g.ClearDirty()
 
 	g.MoveCursor(5, 5)

@@ -36,7 +36,7 @@ func TestParser_SGR_Reset(t *testing.T) {
 	g, p := newParserGrid(1, 1)
 	g.CurFG = 5
 	g.CurBG = 6
-	g.CurAttrs = AttrBold | AttrUnderline
+	g.CurAttrs = attrBold | attrUnderline
 	feed(t, g, p, []byte("\x1b[m"))
 	if g.CurFG != DefaultColor || g.CurBG != DefaultColor || g.CurAttrs != 0 {
 		t.Errorf("SGR reset failed: fg=%d bg=%d attrs=%d",
@@ -47,7 +47,7 @@ func TestParser_SGR_Reset(t *testing.T) {
 func TestParser_SGR_BoldUnderlineInverse(t *testing.T) {
 	g, p := newParserGrid(1, 1)
 	feed(t, g, p, []byte("\x1b[1;4;7m"))
-	if g.CurAttrs != AttrBold|AttrUnderline|AttrInverse {
+	if g.CurAttrs != attrBold|attrUnderline|attrInverse {
 		t.Errorf("attrs: %d", g.CurAttrs)
 	}
 	feed(t, g, p, []byte("\x1b[22;24;27m"))
@@ -238,7 +238,7 @@ func TestParser_CursorSaveRestore_ESC78(t *testing.T) {
 func TestParser_CursorSaveRestore_CSIsu(t *testing.T) {
 	g, p := newParserGrid(5, 10)
 	g.MoveCursor(3, 7)
-	g.CurAttrs = AttrBold
+	g.CurAttrs = attrBold
 	feed(t, g, p, []byte("\x1b[s"))
 	g.MoveCursor(0, 0)
 	g.CurAttrs = 0
@@ -246,7 +246,7 @@ func TestParser_CursorSaveRestore_CSIsu(t *testing.T) {
 	if g.CursorR != 3 || g.CursorC != 7 {
 		t.Errorf("CSI u: r=%d c=%d", g.CursorR, g.CursorC)
 	}
-	if g.CurAttrs != AttrBold {
+	if g.CurAttrs != attrBold {
 		t.Errorf("CSI u attrs: %d", g.CurAttrs)
 	}
 }
@@ -614,7 +614,7 @@ func TestParser_DEC1049_SuppressesScrollback(t *testing.T) {
 
 func TestParser_DECRQSS_Replies(t *testing.T) {
 	g, p := newParserGrid(6, 8)
-	g.CurAttrs = AttrBold | AttrUnderline
+	g.CurAttrs = attrBold | attrUnderline
 	g.CurFG = paletteColor(2)
 	g.Top, g.Bottom = 1, 4
 	g.ApplyDECSCUSR(6)
@@ -641,17 +641,17 @@ func TestParser_DECRQSS_Replies(t *testing.T) {
 func TestParser_DECSCUSR_AllPs(t *testing.T) {
 	cases := []struct {
 		ps    int
-		shape CursorShape
+		shape cursorShape
 		blink bool
 	}{
-		{0, CursorBlock, true},
-		{1, CursorBlock, true},
-		{2, CursorBlock, false},
-		{3, CursorUnderline, true},
-		{4, CursorUnderline, false},
-		{5, CursorBar, true},
-		{6, CursorBar, false},
-		{99, CursorBlock, true},
+		{0, cursorBlock, true},
+		{1, cursorBlock, true},
+		{2, cursorBlock, false},
+		{3, cursorUnderline, true},
+		{4, cursorUnderline, false},
+		{5, cursorBar, true},
+		{6, cursorBar, false},
+		{99, cursorBlock, true},
 	}
 	for _, c := range cases {
 		g, p := newParserGrid(1, 5)
@@ -659,31 +659,31 @@ func TestParser_DECSCUSR_AllPs(t *testing.T) {
 		seq := append([]byte("\x1b["), []byte(strconv.Itoa(c.ps))...)
 		seq = append(seq, ' ', 'q')
 		feed(t, g, p, seq)
-		if g.CursorShape != c.shape || g.CursorBlink != c.blink {
+		if g.cursorShape != c.shape || g.CursorBlink != c.blink {
 			t.Errorf("Ps=%d: shape=%d blink=%v, want shape=%d blink=%v",
-				c.ps, g.CursorShape, g.CursorBlink, c.shape, c.blink)
+				c.ps, g.cursorShape, g.CursorBlink, c.shape, c.blink)
 		}
 	}
 }
 
 func TestParser_DECSCUSR_RequiresSpaceIntermediate(t *testing.T) {
 	g, p := newParserGrid(1, 5)
-	g.CursorShape = CursorBar
+	g.cursorShape = cursorBar
 	g.CursorBlink = false
 
 	feed(t, g, p, []byte("\x1b[2q"))
-	if g.CursorShape != CursorBar || g.CursorBlink != false {
+	if g.cursorShape != cursorBar || g.CursorBlink != false {
 		t.Errorf("CSI 2 q (no SP) clobbered shape=%d blink=%v",
-			g.CursorShape, g.CursorBlink)
+			g.cursorShape, g.CursorBlink)
 	}
 }
 
 func TestParser_DECSCUSR_DefaultParam(t *testing.T) {
 	g, p := newParserGrid(1, 5)
 	feed(t, g, p, []byte("\x1b[ q"))
-	if g.CursorShape != CursorBlock || !g.CursorBlink {
+	if g.cursorShape != cursorBlock || !g.CursorBlink {
 		t.Errorf("default DECSCUSR: shape=%d blink=%v",
-			g.CursorShape, g.CursorBlink)
+			g.cursorShape, g.CursorBlink)
 	}
 }
 
@@ -696,7 +696,7 @@ func TestCurrentSGRString_AllDefault(t *testing.T) {
 
 func TestCurrentSGRString_AttrInverse(t *testing.T) {
 	g, p := newParserGrid(1, 5)
-	g.CurAttrs = AttrInverse
+	g.CurAttrs = attrInverse
 	if got := p.currentSGRString(); got != "7m" {
 		t.Errorf("inverse = %q, want %q", got, "7m")
 	}
@@ -768,11 +768,11 @@ func TestParser_SGR_NewAttrs_Set(t *testing.T) {
 		seq  string
 		want uint8
 	}{
-		{"dim", "\x1b[2m", AttrDim},
-		{"italic", "\x1b[3m", AttrItalic},
-		{"strikethrough", "\x1b[9m", AttrStrikethrough},
-		{"bold+dim", "\x1b[1m\x1b[2m", AttrBold | AttrDim},
-		{"bold+italic", "\x1b[1m\x1b[3m", AttrBold | AttrItalic},
+		{"dim", "\x1b[2m", attrDim},
+		{"italic", "\x1b[3m", attrItalic},
+		{"strikethrough", "\x1b[9m", attrStrikethrough},
+		{"bold+dim", "\x1b[1m\x1b[2m", attrBold | attrDim},
+		{"bold+italic", "\x1b[1m\x1b[3m", attrBold | attrItalic},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -792,11 +792,11 @@ func TestParser_SGR_NewAttrs_Clear(t *testing.T) {
 		clearSeq string
 		bits     uint8
 	}{
-		{"dim via 22", "\x1b[2m", "\x1b[22m", AttrDim},
-		{"bold+dim via 22", "\x1b[1m\x1b[2m", "\x1b[22m", AttrBold | AttrDim},
-		{"italic via 23", "\x1b[3m", "\x1b[23m", AttrItalic},
-		{"strikethrough via 29", "\x1b[9m", "\x1b[29m", AttrStrikethrough},
-		{"all via SGR 0", "\x1b[1m\x1b[2m\x1b[3m\x1b[9m", "\x1b[0m", AttrBold | AttrDim | AttrItalic | AttrStrikethrough},
+		{"dim via 22", "\x1b[2m", "\x1b[22m", attrDim},
+		{"bold+dim via 22", "\x1b[1m\x1b[2m", "\x1b[22m", attrBold | attrDim},
+		{"italic via 23", "\x1b[3m", "\x1b[23m", attrItalic},
+		{"strikethrough via 29", "\x1b[9m", "\x1b[29m", attrStrikethrough},
+		{"all via SGR 0", "\x1b[1m\x1b[2m\x1b[3m\x1b[9m", "\x1b[0m", attrBold | attrDim | attrItalic | attrStrikethrough},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -816,11 +816,11 @@ func TestParser_SGR_NewAttrs_Clear(t *testing.T) {
 func TestParser_SGR4_NoSubparam_SingleUnderline(t *testing.T) {
 	g, p := newParserGrid(2, 10)
 	feed(t, g, p, []byte("\x1b[4m"))
-	if g.CurAttrs&AttrUnderline == 0 {
-		t.Error("SGR 4: AttrUnderline not set")
+	if g.CurAttrs&attrUnderline == 0 {
+		t.Error("SGR 4: attrUnderline not set")
 	}
-	if g.CurULStyle != ULSingle {
-		t.Errorf("SGR 4: CurULStyle = %d, want ULSingle (%d)", g.CurULStyle, ULSingle)
+	if g.CurULStyle != ulSingle {
+		t.Errorf("SGR 4: CurULStyle = %d, want ulSingle (%d)", g.CurULStyle, ulSingle)
 	}
 }
 
@@ -830,27 +830,27 @@ func TestParser_SGR4_ColonSubparam_Styles(t *testing.T) {
 		style   uint8
 		hasAttr bool
 	}{
-		{"\x1b[4:0m", ULNone, false},
-		{"\x1b[4:1m", ULSingle, true},
-		{"\x1b[4:2m", ULDouble, true},
-		{"\x1b[4:3m", ULCurly, true},
-		{"\x1b[4:4m", ULDotted, true},
-		{"\x1b[4:5m", ULDashed, true},
+		{"\x1b[4:0m", ulNone, false},
+		{"\x1b[4:1m", ulSingle, true},
+		{"\x1b[4:2m", ulDouble, true},
+		{"\x1b[4:3m", ulCurly, true},
+		{"\x1b[4:4m", ulDotted, true},
+		{"\x1b[4:5m", ulDashed, true},
 	}
 	for _, c := range cases {
 		g, p := newParserGrid(2, 10)
 
-		g.CurAttrs |= AttrUnderline
-		g.CurULStyle = ULSingle
+		g.CurAttrs |= attrUnderline
+		g.CurULStyle = ulSingle
 		feed(t, g, p, []byte(c.seq))
 		if g.CurULStyle != c.style {
 			t.Errorf("seq %q: CurULStyle = %d, want %d", c.seq, g.CurULStyle, c.style)
 		}
-		if c.hasAttr && g.CurAttrs&AttrUnderline == 0 {
-			t.Errorf("seq %q: AttrUnderline not set", c.seq)
+		if c.hasAttr && g.CurAttrs&attrUnderline == 0 {
+			t.Errorf("seq %q: attrUnderline not set", c.seq)
 		}
-		if !c.hasAttr && g.CurAttrs&AttrUnderline != 0 {
-			t.Errorf("seq %q: AttrUnderline should be cleared", c.seq)
+		if !c.hasAttr && g.CurAttrs&attrUnderline != 0 {
+			t.Errorf("seq %q: attrUnderline should be cleared", c.seq)
 		}
 	}
 }
@@ -858,24 +858,24 @@ func TestParser_SGR4_ColonSubparam_Styles(t *testing.T) {
 func TestParser_SGR21_DoubleUnderline(t *testing.T) {
 	g, p := newParserGrid(2, 10)
 	feed(t, g, p, []byte("\x1b[21m"))
-	if g.CurAttrs&AttrUnderline == 0 {
-		t.Error("SGR 21: AttrUnderline not set")
+	if g.CurAttrs&attrUnderline == 0 {
+		t.Error("SGR 21: attrUnderline not set")
 	}
-	if g.CurULStyle != ULDouble {
-		t.Errorf("SGR 21: CurULStyle = %d, want ULDouble (%d)", g.CurULStyle, ULDouble)
+	if g.CurULStyle != ulDouble {
+		t.Errorf("SGR 21: CurULStyle = %d, want ulDouble (%d)", g.CurULStyle, ulDouble)
 	}
 }
 
 func TestParser_SGR24_ClearsUnderline(t *testing.T) {
 	g, p := newParserGrid(2, 10)
-	g.CurAttrs |= AttrUnderline
-	g.CurULStyle = ULCurly
+	g.CurAttrs |= attrUnderline
+	g.CurULStyle = ulCurly
 	g.CurULColor = rgbColor(255, 0, 0)
 	feed(t, g, p, []byte("\x1b[24m"))
-	if g.CurAttrs&AttrUnderline != 0 {
-		t.Error("SGR 24: AttrUnderline should be cleared")
+	if g.CurAttrs&attrUnderline != 0 {
+		t.Error("SGR 24: attrUnderline should be cleared")
 	}
-	if g.CurULStyle != ULNone {
+	if g.CurULStyle != ulNone {
 		t.Errorf("SGR 24: CurULStyle = %d, want 0", g.CurULStyle)
 	}
 	if g.CurULColor != DefaultColor {
@@ -912,18 +912,18 @@ func TestParser_SGR59_ResetsULColor(t *testing.T) {
 
 func TestParser_SGRReset_ClearsULState(t *testing.T) {
 	g, p := newParserGrid(2, 10)
-	g.CurULStyle = ULCurly
+	g.CurULStyle = ulCurly
 	g.CurULColor = rgbColor(100, 200, 50)
-	g.CurAttrs |= AttrUnderline
+	g.CurAttrs |= attrUnderline
 	feed(t, g, p, []byte("\x1b[0m"))
-	if g.CurULStyle != ULNone {
+	if g.CurULStyle != ulNone {
 		t.Errorf("SGR 0: CurULStyle = %d, want 0", g.CurULStyle)
 	}
 	if g.CurULColor != DefaultColor {
 		t.Errorf("SGR 0: CurULColor = %#x, want DefaultColor", g.CurULColor)
 	}
-	if g.CurAttrs&AttrUnderline != 0 {
-		t.Error("SGR 0: AttrUnderline should be cleared")
+	if g.CurAttrs&attrUnderline != 0 {
+		t.Error("SGR 0: attrUnderline should be cleared")
 	}
 }
 
@@ -931,10 +931,10 @@ func TestParser_SGR4_Semicolon_NotSubparam(t *testing.T) {
 
 	g, p := newParserGrid(2, 10)
 	feed(t, g, p, []byte("\x1b[4;3m"))
-	if g.CurULStyle != ULSingle {
-		t.Errorf("4;3m: CurULStyle = %d, want ULSingle (semicolon ≠ colon)", g.CurULStyle)
+	if g.CurULStyle != ulSingle {
+		t.Errorf("4;3m: CurULStyle = %d, want ulSingle (semicolon ≠ colon)", g.CurULStyle)
 	}
-	if g.CurAttrs&AttrItalic == 0 {
-		t.Error("4;3m: AttrItalic should also be set")
+	if g.CurAttrs&attrItalic == 0 {
+		t.Error("4;3m: attrItalic should also be set")
 	}
 }

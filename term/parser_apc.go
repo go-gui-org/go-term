@@ -16,7 +16,7 @@ type kittyEntry struct {
 // dispatchAPC processes a completed APC sequence (ESC _ payload ESC \).
 // Only the Kitty Graphics Protocol (payload starting with 'G') is handled;
 // everything else is silently dropped.
-func (p *Parser) dispatchAPC() {
+func (p *parser) dispatchAPC() {
 	if len(p.apc) < 1 || p.apc[0] != 'G' {
 		return
 	}
@@ -38,7 +38,7 @@ type kgpParams struct {
 
 // handleKittyGraphics parses a Kitty Graphics Protocol payload (bytes after
 // the leading 'G') and dispatches the appropriate action.
-func (p *Parser) handleKittyGraphics(payload []byte) {
+func (p *parser) handleKittyGraphics(payload []byte) {
 	params, rawB64 := splitKGPPayload(payload)
 
 	switch params.action {
@@ -137,7 +137,7 @@ func splitKGPPayload(payload []byte) (kgpParams, []byte) {
 // Per the KGP spec, chunks are concatenated as base64 text then decoded
 // once at the end (m=0), so splits at arbitrary byte boundaries are valid.
 // When m=0, decodes the assembled base64, writes PNG, optionally places.
-func (p *Parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
+func (p *parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 	id := params.imageID
 	if p.kittyChunks == nil {
 		p.kittyChunks = make(map[uint32][]byte)
@@ -246,7 +246,7 @@ func (p *Parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 
 // kittyPlace retrieves a previously transmitted image by id and renders
 // it at the current cursor position.
-func (p *Parser) kittyPlace(id uint32, quiet int) {
+func (p *parser) kittyPlace(id uint32, quiet int) {
 	if p.kittyStore == nil {
 		p.kittyReply(id, quiet, false)
 		return
@@ -265,7 +265,7 @@ func (p *Parser) kittyPlace(id uint32, quiet int) {
 
 // kittyDeleteID removes an image from kittyStore. Op "a"/"A" clears all.
 // Empty op (no d= key) defaults to delete-by-ID per the KGP spec.
-func (p *Parser) kittyDeleteID(id uint32, op string) {
+func (p *parser) kittyDeleteID(id uint32, op string) {
 	if p.kittyStore == nil {
 		return
 	}
@@ -283,7 +283,7 @@ func (p *Parser) kittyDeleteID(id uint32, op string) {
 }
 
 // kittyReply sends a KGP response. quiet: 0=always, 1=suppress OK, 2=always suppress.
-func (p *Parser) kittyReply(id uint32, quiet int, ok bool) {
+func (p *parser) kittyReply(id uint32, quiet int, ok bool) {
 	if p.onReply == nil {
 		return
 	}
@@ -305,7 +305,7 @@ func (p *Parser) kittyReply(id uint32, quiet int, ok bool) {
 }
 
 // kittyDecodeImage converts raw bytes into NRGBA based on params.format.
-func (p *Parser) kittyDecodeImage(params kgpParams, raw []byte) *image.NRGBA {
+func (p *parser) kittyDecodeImage(params kgpParams, raw []byte) *image.NRGBA {
 	if len(raw) == 0 {
 		return nil
 	}

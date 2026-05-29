@@ -21,7 +21,7 @@ func splitSemis(b []byte) [][]byte {
 	return out
 }
 
-func (p *Parser) replyDECRQSS(body []byte) {
+func (p *parser) replyDECRQSS(body []byte) {
 	if p.onReply == nil {
 		return
 	}
@@ -89,7 +89,7 @@ func xtgettcapValue(name string) (string, bool) {
 	}
 }
 
-func (p *Parser) replyXTGETTCAP(body []byte) {
+func (p *parser) replyXTGETTCAP(body []byte) {
 	if p.onReply == nil {
 		return
 	}
@@ -121,7 +121,7 @@ func (p *Parser) replyXTGETTCAP(body []byte) {
 	p.onReply(appendReply(nil, payload))
 }
 
-func (p *Parser) dispatchDCS() {
+func (p *parser) dispatchDCS() {
 	if len(p.dcs) < 2 {
 
 		if len(p.dcs) == 1 && p.dcs[0] == 'q' {
@@ -168,10 +168,10 @@ func indexSixelFinal(dcs []byte) int {
 }
 
 // handleSixel decodes a Sixel payload (bytes after the 'q' introducer)
-// and stashes the resulting image as a Grid graphic anchored at the
+// and stashes the resulting image as a grid graphic anchored at the
 // cursor. Cursor advances past the image's vertical extent so following
 // text starts below it (xterm convention). Decode failures are silent.
-func (p *Parser) handleSixel(data []byte) {
+func (p *parser) handleSixel(data []byte) {
 	img := decodeSixel(data)
 	if img == nil {
 		return

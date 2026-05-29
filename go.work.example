@@ -1,0 +1,16 @@
+# Copy to go.work (gitignored) for local development with sibling repos.
+# go.work is not checked in — each developer opts in.
+#
+#   cp go.work.example go.work
+#
+# Requires go-glyph and go-gui checked out alongside go-term:
+#   ../go-glyph
+#   ../go-gui
+
+go 1.26.0
+
+use (
+	.
+	../go-glyph
+	../go-gui
+)

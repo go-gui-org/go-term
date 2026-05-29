@@ -17,7 +17,7 @@ func TestPalette_FGBG_Default(t *testing.T) {
 }
 
 func TestPalette_FGBG_Indexed(t *testing.T) {
-	c := Cell{Ch: ' ', FG: 1, BG: 2}
+	c := cell{Ch: ' ', FG: 1, BG: 2}
 	if got := DefaultTheme.fg(c); got != DefaultTheme.ANSI[1] {
 		t.Errorf("fg index 1: %+v want %+v", got, DefaultTheme.ANSI[1])
 	}
@@ -27,7 +27,7 @@ func TestPalette_FGBG_Indexed(t *testing.T) {
 }
 
 func TestPalette_Inverse_SwapsFGBG(t *testing.T) {
-	c := Cell{Ch: ' ', FG: 1, BG: 2, Attrs: AttrInverse}
+	c := cell{Ch: ' ', FG: 1, BG: 2, Attrs: attrInverse}
 	if got := DefaultTheme.fg(c); got != DefaultTheme.ANSI[2] {
 		t.Errorf("inverse fg should be bg color: %+v want %+v",
 			got, DefaultTheme.ANSI[2])
@@ -62,7 +62,7 @@ func TestPalette_256_Grayscale(t *testing.T) {
 }
 
 func TestPalette_TruecolorRoundtrip(t *testing.T) {
-	c := Cell{Ch: ' ', FG: rgbColor(255, 100, 0), BG: rgbColor(10, 20, 30)}
+	c := cell{Ch: ' ', FG: rgbColor(255, 100, 0), BG: rgbColor(10, 20, 30)}
 	if got, want := DefaultTheme.fg(c), gui.RGB(255, 100, 0); got != want {
 		t.Errorf("truecolor fg: got %+v want %+v", got, want)
 	}
@@ -85,11 +85,11 @@ func TestPalette_ResolveUnknownTagUsesPaletteByte(t *testing.T) {
 }
 
 func TestPalette_TruecolorInverse(t *testing.T) {
-	c := Cell{
+	c := cell{
 		Ch:    ' ',
 		FG:    rgbColor(1, 2, 3),
 		BG:    rgbColor(10, 20, 30),
-		Attrs: AttrInverse,
+		Attrs: attrInverse,
 	}
 	if got, want := DefaultTheme.fg(c), gui.RGB(10, 20, 30); got != want {
 		t.Errorf("inverse truecolor fg: got %+v want %+v", got, want)
@@ -100,7 +100,7 @@ func TestPalette_TruecolorInverse(t *testing.T) {
 }
 
 func TestPalette_Inverse_DefaultsSwap(t *testing.T) {
-	c := Cell{Ch: ' ', FG: DefaultColor, BG: DefaultColor, Attrs: AttrInverse}
+	c := cell{Ch: ' ', FG: DefaultColor, BG: DefaultColor, Attrs: attrInverse}
 	if got := DefaultTheme.fg(c); got != DefaultTheme.DefaultBG {
 		t.Errorf("inverse default fg: %+v", got)
 	}
@@ -116,12 +116,12 @@ func TestPalette_ThemeOverridesANSI(t *testing.T) {
 		DefaultBG: DefaultTheme.DefaultBG,
 	}
 	custom.ANSI[1] = gui.RGB(255, 0, 128) // override red
-	c := Cell{Ch: ' ', FG: 1}
+	c := cell{Ch: ' ', FG: 1}
 	if got, want := custom.fg(c), gui.RGB(255, 0, 128); got != want {
 		t.Errorf("theme ANSI override: got %+v want %+v", got, want)
 	}
 	// Extended colors (≥16) should be unaffected by ANSI override.
-	c2 := Cell{Ch: ' ', FG: paletteColor(196)}
+	c2 := cell{Ch: ' ', FG: paletteColor(196)}
 	if got, want := custom.fg(c2), palette[196]; got != want {
 		t.Errorf("extended color unchanged: got %+v want %+v", got, want)
 	}

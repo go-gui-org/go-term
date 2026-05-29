@@ -6,8 +6,8 @@ import "slices"
 // newRows×newCols buffer, preserving the top-left intersection and
 // padding the rest with default cells. Used by Resize for both the
 // active cell buffer and (when alt-active) the saved main buffer.
-func reflowBuffer(src []Cell, oldRows, oldCols, newRows, newCols int) []Cell {
-	next := make([]Cell, newRows*newCols)
+func reflowBuffer(src []cell, oldRows, oldCols, newRows, newCols int) []cell {
+	next := make([]cell, newRows*newCols)
 	if len(src) == 0 || oldRows <= 0 || oldCols <= 0 {
 		for i := range next {
 			next[i] = defaultCell()
@@ -38,14 +38,14 @@ func reflowBuffer(src []Cell, oldRows, oldCols, newRows, newCols int) []Cell {
 // wrapped == true means this row ended with an autowrap and the next
 // row is its soft-wrapped continuation.
 type physRow struct {
-	cells   []Cell
+	cells   []cell
 	wrapped bool
 }
 
 // isDefaultBlank reports whether c is an untouched default blank cell —
 // i.e., no content was ever written to it. Used by logicalReflow to trim
 // trailing padding from the last physical row of a logical line.
-func isDefaultBlank(c Cell) bool {
+func isDefaultBlank(c cell) bool {
 	return c.Ch == ' ' && c.FG == DefaultColor && c.BG == DefaultColor &&
 		c.Attrs == 0 && c.Width == 1 && c.LinkID == 0 && c.ULStyle == 0
 }
@@ -54,9 +54,9 @@ func isDefaultBlank(c Cell) bool {
 // line, with continuation cells already stripped) into physical rows of
 // newCols columns. All rows except the last are marked wrapped=true.
 // An empty input produces a single blank row.
-func rewrapLine(cells []Cell, newCols int) []physRow {
+func rewrapLine(cells []cell, newCols int) []physRow {
 	if len(cells) == 0 {
-		blank := make([]Cell, newCols)
+		blank := make([]cell, newCols)
 		for i := range blank {
 			blank[i] = defaultCell()
 		}
@@ -64,7 +64,7 @@ func rewrapLine(cells []Cell, newCols int) []physRow {
 	}
 
 	var rows []physRow
-	cur := make([]Cell, 0, newCols)
+	cur := make([]cell, 0, newCols)
 
 	for i := 0; i < len(cells); {
 		c := cells[i]
@@ -84,12 +84,12 @@ func rewrapLine(cells []Cell, newCols int) []physRow {
 				cur = append(cur, defaultCell())
 			}
 			rows = append(rows, physRow{cells: cur, wrapped: true})
-			cur = make([]Cell, 0, newCols)
+			cur = make([]cell, 0, newCols)
 		}
 		cur = append(cur, c)
 		if w == 2 {
 
-			cur = append(cur, Cell{Ch: 0, FG: c.FG, BG: c.BG, Attrs: c.Attrs, Width: 0, ULStyle: c.ULStyle, ULColor: c.ULColor})
+			cur = append(cur, cell{Ch: 0, FG: c.FG, BG: c.BG, Attrs: c.Attrs, Width: 0, ULStyle: c.ULStyle, ULColor: c.ULColor})
 		}
 		i++
 	}
@@ -114,12 +114,12 @@ func rewrapLine(cells []Cell, newCols int) []physRow {
 //   - cursorR, cursorC: cursor in the live buffer
 //   - scrollbackCap: maximum scrollback rows (0 = unlimited trim handled by caller)
 func logicalReflow(
-	cells []Cell, rowWrapped []bool,
-	scrollback [][]Cell, sbWrapped []bool,
+	cells []cell, rowWrapped []bool,
+	scrollback [][]cell, sbWrapped []bool,
 	oldRows, oldCols, newRows, newCols int,
 	cursorR, cursorC int,
 	scrollbackCap int,
-) (newCells []Cell, newRowWrapped []bool, newScrollback [][]Cell, newSbWrapped []bool, newCursorR, newCursorC int) {
+) (newCells []cell, newRowWrapped []bool, newScrollback [][]cell, newSbWrapped []bool, newCursorR, newCursorC int) {
 
 	nSB := len(scrollback)
 	total := nSB + oldRows
@@ -132,7 +132,7 @@ func logicalReflow(
 		phys[i] = physRow{cells: row, wrapped: w}
 	}
 	for r := 0; r < oldRows; r++ {
-		row := make([]Cell, oldCols)
+		row := make([]cell, oldCols)
 		copy(row, cells[r*oldCols:(r+1)*oldCols])
 		w := false
 		if r < len(rowWrapped) {
@@ -205,7 +205,7 @@ func logicalReflow(
 		// the row bounds (cursorC < len(row)). When cursorC >= len(row)
 		// (pending-wrap state past the right margin), don't preserve blanks
 		// — the cursor position will be clamped to the rewrapped line's end.
-		var lineCells []Cell
+		var lineCells []cell
 		for pi := ll.start; pi <= ll.end; pi++ {
 			row := phys[pi].cells
 			trimTo := len(row)
@@ -279,7 +279,7 @@ func logicalReflow(
 		liveStart = 0
 	}
 
-	newScrollback = make([][]Cell, 0, liveStart)
+	newScrollback = make([][]cell, 0, liveStart)
 	newSbWrapped = make([]bool, 0, liveStart)
 	for _, pr := range allNew[:liveStart] {
 		newScrollback = append(newScrollback, pr.cells)
@@ -291,7 +291,7 @@ func logicalReflow(
 		newSbWrapped = newSbWrapped[trim:]
 	}
 
-	newCells = make([]Cell, newRows*newCols)
+	newCells = make([]cell, newRows*newCols)
 	for i := range newCells {
 		newCells[i] = defaultCell()
 	}
@@ -335,7 +335,7 @@ func logicalReflow(
 //
 // The scroll region is reset after resize; apps re-issue DECSTBM after
 // SIGWINCH. Selection is dropped. ViewOffset is reset to the live view.
-func (g *Grid) Resize(rows, cols int) {
+func (g *grid) Resize(rows, cols int) {
 	rows = clampDim(rows)
 	cols = clampDim(cols)
 	if rows == g.Rows && cols == g.Cols {
@@ -344,7 +344,7 @@ func (g *Grid) Resize(rows, cols int) {
 
 	oldSbLen := g.Scrollback.Len()
 
-	sbRows := make([][]Cell, oldSbLen)
+	sbRows := make([][]cell, oldSbLen)
 	sbWrap := make([]bool, oldSbLen)
 	for i := range oldSbLen {
 		sbRows[i] = slices.Clone(g.Scrollback.Row(i))
@@ -427,7 +427,7 @@ func (g *Grid) Resize(rows, cols int) {
 // pushes the freshly reflowed rows back in oldest-first. Used by Resize
 // at the reflow boundary so a single backing allocation replaces the
 // per-row slices reflow produced.
-func (g *Grid) repopulateScrollback(rows [][]Cell, wrapped []bool, cols int) {
+func (g *grid) repopulateScrollback(rows [][]cell, wrapped []bool, cols int) {
 	g.Scrollback.SetGeom(g.ScrollbackCap, cols)
 	for i, row := range rows {
 		w := false

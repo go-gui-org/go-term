@@ -1,0 +1,13 @@
+{
+  "name": "shell_prompt",
+  "rows": 3,
+  "cols": 20,
+  "input_b64": "dXNlckBob3N0On4kIGxzG1tLDQpmaWxlMSAgZmlsZTINCnVzZXJAaG9zdDp+JCA=",
+  "want_lines": [
+    "user@host:~$ ls     ",
+    "file1  file2        ",
+    "user@host:~$        "
+  ],
+  "want_row": 2,
+  "want_col": 13
+}

@@ -4,14 +4,14 @@ import "testing"
 
 // makeTestRow builds a cols-wide row of cells from the given runes.
 // Cells beyond len(runes) are zero-initialized (Ch=0, Width=0), matching
-// the uninitialized state of a NewGrid cell buffer, so bidi ignores them.
-func makeTestRow(runes []rune, cols int) []Cell {
-	row := make([]Cell, cols) // zero-value: Ch=0, Width=0
+// the uninitialized state of a newGrid cell buffer, so bidi ignores them.
+func makeTestRow(runes []rune, cols int) []cell {
+	row := make([]cell, cols) // zero-value: Ch=0, Width=0
 	for i, r := range runes {
 		if i >= cols {
 			break
 		}
-		row[i] = Cell{Ch: r, Width: 1, FG: DefaultColor, BG: DefaultColor}
+		row[i] = cell{Ch: r, Width: 1, FG: DefaultColor, BG: DefaultColor}
 	}
 	return row
 }
@@ -43,7 +43,7 @@ func TestRowHasRTL(t *testing.T) {
 func TestRowHasRTL_SkipsContinuation(t *testing.T) {
 	// A row with only continuation cells (Width=0, Ch=0) should return false
 	// even though they occupy non-zero positions.
-	row := []Cell{
+	row := []cell{
 		{Width: 2, Ch: '日', FG: DefaultColor, BG: DefaultColor}, // wide LTR
 		{Width: 0, Ch: 0, FG: DefaultColor, BG: DefaultColor},   // continuation
 	}
@@ -187,7 +187,7 @@ func TestVisualReorder_V2L_Roundtrip(t *testing.T) {
 
 func TestRowHasRTL_ColsExceedsSliceLen(t *testing.T) {
 	// cols larger than the slice must not panic (scrollback-resize scenario).
-	row := []Cell{
+	row := []cell{
 		{Ch: 'ש', Width: 1, FG: DefaultColor, BG: DefaultColor},
 		{Ch: 'ל', Width: 1, FG: DefaultColor, BG: DefaultColor},
 	}
@@ -196,7 +196,7 @@ func TestRowHasRTL_ColsExceedsSliceLen(t *testing.T) {
 		t.Error("expected true: RTL chars present in the available cells")
 	}
 	// LTR slice narrower than cols must also not panic.
-	ltr := []Cell{{Ch: 'A', Width: 1, FG: DefaultColor, BG: DefaultColor}}
+	ltr := []cell{{Ch: 'A', Width: 1, FG: DefaultColor, BG: DefaultColor}}
 	if rowHasRTL(ltr, 50) {
 		t.Error("expected false: no RTL chars")
 	}
@@ -204,7 +204,7 @@ func TestRowHasRTL_ColsExceedsSliceLen(t *testing.T) {
 
 func TestVisualReorder_ColsExceedsSliceLen(t *testing.T) {
 	// cols larger than the slice must not panic and must still reorder correctly.
-	row := []Cell{
+	row := []cell{
 		{Ch: 'ש', Width: 1, FG: DefaultColor, BG: DefaultColor},
 		{Ch: 'ל', Width: 1, FG: DefaultColor, BG: DefaultColor},
 		{Ch: 'ו', Width: 1, FG: DefaultColor, BG: DefaultColor},
@@ -260,10 +260,10 @@ func TestVisualReorder_WideRTL(t *testing.T) {
 	// A Width==2 cell inside an RTL run exercises the appendVisualCell
 	// continuation-insertion branch. The continuation cell (Width==0) must
 	// follow immediately after the primary cell in visual output.
-	wide := Cell{Ch: 'ﺎ', Width: 2, FG: DefaultColor, BG: DefaultColor} // Arabic presentation form
-	cont := Cell{Ch: 0, Width: 0, FG: DefaultColor, BG: DefaultColor}
-	ltr := Cell{Ch: 'A', Width: 1, FG: DefaultColor, BG: DefaultColor}
-	row := []Cell{wide, cont, ltr}
+	wide := cell{Ch: 'ﺎ', Width: 2, FG: DefaultColor, BG: DefaultColor} // Arabic presentation form
+	cont := cell{Ch: 0, Width: 0, FG: DefaultColor, BG: DefaultColor}
+	ltr := cell{Ch: 'A', Width: 1, FG: DefaultColor, BG: DefaultColor}
+	row := []cell{wide, cont, ltr}
 
 	vis, v2l := visualReorder(row, 3)
 	if vis == nil {
@@ -292,7 +292,7 @@ func TestVisualReorder_WideRTL(t *testing.T) {
 
 func TestVisualReorder_WideLTR(t *testing.T) {
 	// Wide (Width=2) LTR cells produce nil — no RTL content.
-	row := []Cell{
+	row := []cell{
 		{Width: 2, Ch: '日', FG: DefaultColor, BG: DefaultColor},
 		{Width: 0, Ch: 0, FG: DefaultColor, BG: DefaultColor}, // continuation
 		{Width: 1, Ch: 'A', FG: DefaultColor, BG: DefaultColor},

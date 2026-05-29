@@ -2,7 +2,7 @@ package term
 
 import "strconv"
 
-func (p *Parser) dispatchCSI(final byte) {
+func (p *parser) dispatchCSI(final byte) {
 	if p.leader != 0 {
 		switch p.leader {
 		case '?':
@@ -123,7 +123,7 @@ func (p *Parser) dispatchCSI(final byte) {
 // applyDECMode handles DEC private mode set/reset (CSI ? Pn h / l).
 // Only the modes the widget honors are wired; unknown modes are
 // silently dropped so apps that probe many modes don't break.
-func (p *Parser) applyDECMode(set bool) {
+func (p *parser) applyDECMode(set bool) {
 	for _, n := range p.params {
 		switch n {
 		case 25:
@@ -178,7 +178,7 @@ func (p *Parser) applyDECMode(set bool) {
 	}
 }
 
-func (p *Parser) applyMode(set bool) {
+func (p *parser) applyMode(set bool) {
 	for _, n := range p.params {
 		switch n {
 		case 4:
@@ -189,7 +189,7 @@ func (p *Parser) applyMode(set bool) {
 
 // param returns params[i] or def if missing or zero (per VT semantics
 // where "0" often means "1" for cursor moves).
-func (p *Parser) param(i, def int) int {
+func (p *parser) param(i, def int) int {
 	if i >= len(p.params) {
 		return def
 	}
@@ -240,7 +240,7 @@ func clampU8(v int) uint8 {
 	return uint8(v)
 }
 
-func (p *Parser) applySGR() {
+func (p *parser) applySGR() {
 	g := p.g
 	if len(p.params) == 0 {
 
@@ -257,20 +257,20 @@ func (p *Parser) applySGR() {
 			g.CurULStyle = 0
 			g.CurULColor = DefaultColor
 		case n == 1:
-			g.CurAttrs |= AttrBold
+			g.CurAttrs |= attrBold
 		case n == 2:
-			g.CurAttrs |= AttrDim
+			g.CurAttrs |= attrDim
 		case n == 3:
-			g.CurAttrs |= AttrItalic
+			g.CurAttrs |= attrItalic
 		case n == 4:
 
-			ulStyle := ULSingle
+			ulStyle := ulSingle
 			if i+1 < len(p.params) && i+1 < len(p.paramSub) && p.paramSub[i+1] {
 				sub := p.params[i+1]
 				i++
 				if sub == 0 {
 
-					g.CurAttrs &^= AttrUnderline
+					g.CurAttrs &^= attrUnderline
 					g.CurULStyle = 0
 					continue
 				}
@@ -279,28 +279,28 @@ func (p *Parser) applySGR() {
 				}
 				ulStyle = uint8(sub)
 			}
-			g.CurAttrs |= AttrUnderline
+			g.CurAttrs |= attrUnderline
 			g.CurULStyle = ulStyle
 		case n == 7:
-			g.CurAttrs |= AttrInverse
+			g.CurAttrs |= attrInverse
 		case n == 9:
-			g.CurAttrs |= AttrStrikethrough
+			g.CurAttrs |= attrStrikethrough
 		case n == 21:
 
-			g.CurAttrs |= AttrUnderline
-			g.CurULStyle = ULDouble
+			g.CurAttrs |= attrUnderline
+			g.CurULStyle = ulDouble
 		case n == 22:
-			g.CurAttrs &^= AttrBold | AttrDim
+			g.CurAttrs &^= attrBold | attrDim
 		case n == 23:
-			g.CurAttrs &^= AttrItalic
+			g.CurAttrs &^= attrItalic
 		case n == 24:
-			g.CurAttrs &^= AttrUnderline
+			g.CurAttrs &^= attrUnderline
 			g.CurULStyle = 0
 			g.CurULColor = DefaultColor
 		case n == 27:
-			g.CurAttrs &^= AttrInverse
+			g.CurAttrs &^= attrInverse
 		case n == 29:
-			g.CurAttrs &^= AttrStrikethrough
+			g.CurAttrs &^= attrStrikethrough
 		case n >= 30 && n <= 37:
 			g.CurFG = paletteColor(uint8(n - 30))
 		case n == 39:

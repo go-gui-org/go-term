@@ -25,18 +25,18 @@ func TestClampDim(t *testing.T) {
 }
 
 func TestNewGrid_DefaultsAndClamping(t *testing.T) {
-	g := NewGrid(0, 0)
+	g := newGrid(0, 0)
 	if g.Rows != 1 || g.Cols != 1 {
 		t.Errorf("zero dims not clamped: %dx%d", g.Rows, g.Cols)
 	}
 	if g.CurFG != DefaultColor || g.CurBG != DefaultColor {
 		t.Errorf("default colors wrong: fg=%d bg=%d", g.CurFG, g.CurBG)
 	}
-	g = NewGrid(MaxGridDim+10, MaxGridDim+10)
+	g = newGrid(MaxGridDim+10, MaxGridDim+10)
 	if g.Rows != MaxGridDim || g.Cols != MaxGridDim {
 		t.Errorf("oversize dims not clamped: %dx%d", g.Rows, g.Cols)
 	}
-	g = NewGrid(2, 3)
+	g = newGrid(2, 3)
 	for i, c := range g.Cells {
 		if c.Ch != ' ' || c.FG != DefaultColor || c.BG != DefaultColor {
 			t.Fatalf("cell[%d] not default: %+v", i, c)
@@ -45,7 +45,7 @@ func TestNewGrid_DefaultsAndClamping(t *testing.T) {
 }
 
 func TestGrid_AtBounds(t *testing.T) {
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	if g.At(-1, 0) != nil || g.At(0, -1) != nil {
 		t.Error("negative index should return nil")
 	}
@@ -58,7 +58,7 @@ func TestGrid_AtBounds(t *testing.T) {
 }
 
 func TestGrid_CarriageReturn(t *testing.T) {
-	g := NewGrid(1, 5)
+	g := newGrid(1, 5)
 	g.CursorC = 3
 	g.CarriageReturn()
 	if g.CursorC != 0 {
@@ -67,7 +67,7 @@ func TestGrid_CarriageReturn(t *testing.T) {
 }
 
 func TestGrid_ClearAll(t *testing.T) {
-	g := NewGrid(2, 2)
+	g := newGrid(2, 2)
 	g.Put('x')
 	g.Put('y')
 	g.ClearAll()
@@ -85,7 +85,7 @@ func TestGrid_ClearAll(t *testing.T) {
 }
 
 func TestGrid_ScrollbackFillTrim(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.ScrollbackCap = 2
 
 	for i, r := range []rune{'A', 'B', 'C'} {
@@ -114,7 +114,7 @@ func TestGrid_ScrollbackFillTrim(t *testing.T) {
 			g.Scrollback.Row(0)[0].Ch, g.Scrollback.Row(1)[0].Ch)
 	}
 
-	g2 := NewGrid(2, 2)
+	g2 := newGrid(2, 2)
 	g2.At(0, 0).Ch = 'X'
 	g2.scrollUpRegion(1)
 	if g2.Scrollback.Len() != 0 {
@@ -123,7 +123,7 @@ func TestGrid_ScrollbackFillTrim(t *testing.T) {
 }
 
 func TestGrid_ViewCellAt(t *testing.T) {
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	g.ScrollbackCap = 5
 
 	for c := range g.Cols {
@@ -170,7 +170,7 @@ func TestClampScrollback_Bounds(t *testing.T) {
 }
 
 func TestGrid_PartialTopRow_ReturnsScrollbackRow(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	fillRow(g, 0, 'X')
 	g.scrollUpRegion(1)
@@ -187,14 +187,14 @@ func TestGrid_PartialTopRow_ReturnsScrollbackRow(t *testing.T) {
 }
 
 func TestGrid_PartialTopRow_EmptyScrollbackReturnsNil(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	if g.partialTopRow() != nil {
 		t.Error("empty scrollback: want nil")
 	}
 }
 
 func TestGrid_PartialTopRow_AtTopReturnsNil(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.ScrollbackCap = 10
 	for range 4 {
 		g.scrollUpRegion(1)
@@ -210,7 +210,7 @@ func TestGrid_PartialTopRow_AtTopReturnsNil(t *testing.T) {
 
 // fillRow writes ch into every cell of row r. Test helper for region
 // scroll/insert/delete coverage where each row needs a unique marker.
-func fillRow(g *Grid, r int, ch rune) {
+func fillRow(g *grid, r int, ch rune) {
 	for c := range g.Cols {
 		g.At(r, c).Ch = ch
 	}
@@ -218,10 +218,10 @@ func fillRow(g *Grid, r int, ch rune) {
 
 // rowChar returns the character at (r, 0) — sufficient since tests
 // fill rows with a single repeated rune.
-func rowChar(g *Grid, r int) rune { return g.At(r, 0).Ch }
+func rowChar(g *grid, r int) rune { return g.At(r, 0).Ch }
 
 func TestGrid_ReverseIndexAtTop(t *testing.T) {
-	g := NewGrid(5, 2)
+	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
 		fillRow(g, i, ch)
 	}
@@ -240,7 +240,7 @@ func TestGrid_ReverseIndexAtTop(t *testing.T) {
 }
 
 func TestGrid_NextLine(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.CursorR, g.CursorC = 1, 3
 	g.NextLine()
 	if g.CursorR != 2 || g.CursorC != 0 {
@@ -249,7 +249,7 @@ func TestGrid_NextLine(t *testing.T) {
 }
 
 // rowText concatenates non-blank cells in a row for readable assertions.
-func rowText(g *Grid, r int) string {
+func rowText(g *grid, r int) string {
 	var b []rune
 	for c := 0; c < g.Cols; c++ {
 		b = append(b, g.At(r, c).Ch)
@@ -258,14 +258,14 @@ func rowText(g *Grid, r int) string {
 }
 
 func TestGrid_EnterExitAlt_RestoresMain(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.Put('m')
 	g.Put('a')
 	g.Put('i')
 	g.Put('n')
 	g.SetScrollRegion(0, 1)
 	g.MoveCursor(2, 1)
-	g.CurAttrs = AttrUnderline
+	g.CurAttrs = attrUnderline
 	g.CurFG = paletteColor(3)
 
 	g.EnterAlt()
@@ -288,7 +288,7 @@ func TestGrid_EnterExitAlt_RestoresMain(t *testing.T) {
 	if g.CursorR != 2 || g.CursorC != 1 {
 		t.Errorf("main cursor not restored: %d,%d", g.CursorR, g.CursorC)
 	}
-	if g.CurAttrs != AttrUnderline {
+	if g.CurAttrs != attrUnderline {
 		t.Errorf("main attrs not restored: %d", g.CurAttrs)
 	}
 	if g.CurFG != paletteColor(3) {
@@ -300,7 +300,7 @@ func TestGrid_EnterExitAlt_RestoresMain(t *testing.T) {
 }
 
 func TestGrid_InternLink_Dedup(t *testing.T) {
-	g := NewGrid(5, 20)
+	g := newGrid(5, 20)
 	id1 := g.internLink("https://example.com")
 	id2 := g.internLink("https://example.com")
 	if id1 == 0 {
@@ -312,7 +312,7 @@ func TestGrid_InternLink_Dedup(t *testing.T) {
 }
 
 func TestGrid_InternLink_Counter(t *testing.T) {
-	g := NewGrid(5, 20)
+	g := newGrid(5, 20)
 	id1 := g.internLink("https://a.com")
 	id2 := g.internLink("https://b.com")
 	if id1 == 0 || id2 == 0 {
@@ -330,14 +330,14 @@ func TestGrid_InternLink_Counter(t *testing.T) {
 }
 
 func TestGrid_LinkURL_Zero(t *testing.T) {
-	g := NewGrid(5, 20)
+	g := newGrid(5, 20)
 	if got := g.LinkURL(0); got != "" {
 		t.Errorf("LinkURL(0) = %q, want empty", got)
 	}
 }
 
 // putRow writes a string of characters starting at column 0 of row 0 in g.
-func putRow(g *Grid, s string) {
+func putRow(g *grid, s string) {
 	g.CursorR, g.CursorC = 0, 0
 	for _, r := range s {
 		g.Put(r)
@@ -345,7 +345,7 @@ func putRow(g *Grid, s string) {
 }
 
 func TestGrid_ContentCellAt_Live(t *testing.T) {
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	putRow(g, "hello")
 	sb := g.Scrollback.Len()
 	cell := g.ContentCellAt(sb, 0)
@@ -359,7 +359,7 @@ func TestGrid_ContentCellAt_Live(t *testing.T) {
 }
 
 func TestGrid_ContentCellAt_OutOfRange(t *testing.T) {
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 
 	c := g.ContentCellAt(-1, 0)
 	if c.Ch != ' ' {
@@ -376,7 +376,7 @@ func TestGrid_ContentCellAt_OutOfRange(t *testing.T) {
 }
 
 func TestGrid_ContentRowToViewport_Live(t *testing.T) {
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	sb := g.Scrollback.Len()
 
 	vr, ok := g.ContentRowToViewport(sb)
@@ -390,7 +390,7 @@ func TestGrid_ContentRowToViewport_Live(t *testing.T) {
 }
 
 func TestGrid_ContentRowToViewport_OutOfView(t *testing.T) {
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	_, ok := g.ContentRowToViewport(-1)
 	if ok {
 		t.Error("content row -1 should be off-screen")
@@ -402,7 +402,7 @@ func TestGrid_ContentRowToViewport_OutOfView(t *testing.T) {
 }
 
 func TestGrid_ContentRowToScreen_AboveViewport(t *testing.T) {
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	g.ScrollbackCap = 10
 	g.CursorR = g.Bottom
 	g.Newline()
@@ -419,7 +419,7 @@ func TestGrid_ContentRowToScreen_AboveViewport(t *testing.T) {
 }
 
 func TestGrid_ContentRowToScreen_BelowViewport(t *testing.T) {
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	got := g.ContentRowToScreen(g.Rows)
 	if got < g.Rows {
 		t.Errorf("ContentRowToScreen(%d) = %d; want >= %d (below viewport)", g.Rows, got, g.Rows)
@@ -427,7 +427,7 @@ func TestGrid_ContentRowToScreen_BelowViewport(t *testing.T) {
 }
 
 func TestGrid_ContentRowToScreen_LiveRows(t *testing.T) {
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	for r := range g.Rows {
 		got := g.ContentRowToScreen(r)
 		if got != r {
@@ -437,7 +437,7 @@ func TestGrid_ContentRowToScreen_LiveRows(t *testing.T) {
 }
 
 func TestGrid_TranslateRune_DECGraphicsFullTable(t *testing.T) {
-	g := NewGrid(1, 1)
+	g := newGrid(1, 1)
 	g.CharsetG0 = '0'
 	g.ActiveG = 0
 	cases := []struct {
@@ -461,7 +461,7 @@ func TestGrid_TranslateRune_DECGraphicsFullTable(t *testing.T) {
 func TestGrid_DefaultCell_ULColor(t *testing.T) {
 
 	c := defaultCell()
-	if c.ULStyle != ULNone {
+	if c.ULStyle != ulNone {
 		t.Errorf("defaultCell: ULStyle = %d, want 0", c.ULStyle)
 	}
 	if c.ULColor != DefaultColor {
@@ -470,7 +470,7 @@ func TestGrid_DefaultCell_ULColor(t *testing.T) {
 }
 
 func TestGrid_InternLink_CapReturnsZero(t *testing.T) {
-	g := NewGrid(5, 20)
+	g := newGrid(5, 20)
 
 	for i := range maxLinkEntries {
 		url := "https://example.com/" + strconv.Itoa(i)
@@ -492,7 +492,7 @@ func TestGrid_InternLink_CapReturnsZero(t *testing.T) {
 }
 
 func TestGrid_DirtyTracking_HasDirtyRows(t *testing.T) {
-	g := NewGrid(5, 10)
+	g := newGrid(5, 10)
 	if g.HasDirtyRows() {
 		t.Fatal("new grid should have no dirty rows")
 	}
@@ -507,7 +507,7 @@ func TestGrid_DirtyTracking_HasDirtyRows(t *testing.T) {
 }
 
 func TestGrid_DirtyTracking_ScrollUpRegionMarksAll(t *testing.T) {
-	g := NewGrid(5, 10)
+	g := newGrid(5, 10)
 	g.ClearDirty()
 	g.scrollUpRegion(1)
 	if !g.HasDirtyRows() {
@@ -521,7 +521,7 @@ func TestGrid_DirtyTracking_ScrollUpRegionMarksAll(t *testing.T) {
 }
 
 func TestGrid_DirtyTracking_ClearAllMarksAll(t *testing.T) {
-	g := NewGrid(5, 10)
+	g := newGrid(5, 10)
 	g.ClearDirty()
 	g.ClearAll()
 	if !g.HasDirtyRows() {
@@ -535,7 +535,7 @@ func TestGrid_DirtyTracking_ClearAllMarksAll(t *testing.T) {
 }
 
 func TestGrid_DirtyTracking_ResizeReallocates(t *testing.T) {
-	g := NewGrid(5, 10)
+	g := newGrid(5, 10)
 	g.ClearDirty()
 	g.Resize(8, 10)
 	if !g.HasDirtyRows() {
@@ -552,7 +552,7 @@ func TestGrid_DirtyTracking_ResizeReallocates(t *testing.T) {
 }
 
 func TestGrid_DirtyTracking_EnterExitAltMarksAll(t *testing.T) {
-	g := NewGrid(5, 10)
+	g := newGrid(5, 10)
 	g.ClearDirty()
 	g.EnterAlt()
 	if !g.HasDirtyRows() {
@@ -576,7 +576,7 @@ func TestGrid_DirtyTracking_EnterExitAltMarksAll(t *testing.T) {
 }
 
 func TestDynColorRGB_AllPaths(t *testing.T) {
-	g := NewGrid(4, 8)
+	g := newGrid(4, 8)
 	g.Theme = DefaultTheme
 
 	// ps=10: foreground
@@ -619,10 +619,10 @@ func TestDynColorRGB_AllPaths(t *testing.T) {
 }
 
 func TestGrid_DirtyTracking_DoubleMarkNoDoubleCount(t *testing.T) {
-	g := NewGrid(5, 10)
+	g := newGrid(5, 10)
 	g.ClearDirty()
 
-	// Mark the same row 10 times. The guard should prevent dirtyCount
+	// mark the same row 10 times. The guard should prevent dirtyCount
 	// from inflating beyond 1.
 	for range 10 {
 		g.markDirty(2)

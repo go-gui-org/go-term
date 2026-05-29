@@ -69,7 +69,7 @@ const cursorBlinkPeriod = 500 * time.Millisecond
 const defaultScrollbackRows = 5000
 
 // resizeDebounce is the minimum stable interval before a pending size
-// change is actually applied to the grid + PTY. Picked to be longer
+// change is actually applied to the grid + pty. Picked to be longer
 // than a single 60Hz frame (16.7 ms) so a continuous mouse drag never
 // triggers a reflow mid-gesture, but short enough that the post-drag
 // apply feels instant.
@@ -85,16 +85,16 @@ const scrollbarWidth float32 = 4
 // scroll event while the viewport is back at the live bottom.
 const scrollbarDuration = 1500 * time.Millisecond
 
-// Term is a terminal-emulator widget bound to a single PTY-backed shell.
+// Term is a terminal-emulator widget bound to a single pty-backed shell.
 // Use New to construct, View to embed in a layout, Close to tear down.
 type Term struct {
 	cfg    Cfg
-	grid   *Grid
-	parser *Parser
-	pty    *PTY
+	grid   *grid
+	parser *parser
+	pty    *ptyDev
 	win    *gui.Window
 
-	// Cell metrics measured on first draw and reused thereafter. Both
+	// cell metrics measured on first draw and reused thereafter. Both
 	// zero until the first OnDraw.
 	cellW, cellH float32
 
@@ -104,10 +104,10 @@ type Term struct {
 	// dragReport.
 	dragging   bool
 	dragButton gui.MouseButton
-	dragReport bool // true when this drag is being reported to the PTY
+	dragReport bool // true when this drag is being reported to the pty
 
 	// lastMouseR/C dedupe motion reports under ?1003 so a still
-	// pointer doesn't flood the PTY with identical coordinates each
+	// pointer doesn't flood the pty with identical coordinates each
 	// frame. Set to (-1, -1) when no prior report.
 	lastMouseR int
 	lastMouseC int
@@ -155,15 +155,15 @@ type Term struct {
 	// both the main thread and the reader goroutine, hence atomic.
 	drawVersion atomic.Uint64
 
-	// writeHost forwards bytes to the PTY. Tests replace this with a
-	// buffer sink so key/focus behavior can be asserted without a live PTY.
+	// writeHost forwards bytes to the pty. Tests replace this with a
+	// buffer sink so key/focus behavior can be asserted without a live pty.
 	writeHost func([]byte) error
 
 	// Search state. All fields accessed on the GUI goroutine only (onChar,
 	// onKeyDown, onDraw) — no lock required.
 	searchActive  bool
 	searchQuery   string
-	searchMatches []SearchMatch // viewport matches refreshed each onDraw
+	searchMatches []searchMatch // viewport matches refreshed each onDraw
 	searchIdx     int           // index of last jump target in searchMatches
 	searchRegex   bool          // true: match via re instead of plain text
 	searchRE      *regexp.Regexp
@@ -233,17 +233,17 @@ type Term struct {
 	// visual→logical column maps for the current frame. Pre-allocated to
 	// avoid per-frame heap pressure; grown on resize, never shrunk.
 	// Main-thread only (onDraw).
-	bidiVisRows [][]Cell
+	bidiVisRows [][]cell
 	bidiV2LRows [][]int
-	// bidiScratch is a reused per-row Cell buffer for the BiDi pre-pass,
-	// replacing the per-RTL-row make([]Cell, cols) allocation.
-	bidiScratch []Cell
+	// bidiScratch is a reused per-row cell buffer for the BiDi pre-pass,
+	// replacing the per-RTL-row make([]cell, cols) allocation.
+	bidiScratch []cell
 
 	// Pending-resize state. Live mouse drags fire onDraw at the display
 	// refresh rate with continuously changing dims; running grid.Resize
 	// (full scrollback reflow) on every frame allocates ~24 MB per call
 	// at the default 5000-row scrollback and starves the main thread on
-	// Grid.Mu, eventually appearing to hang. We coalesce by deferring
+	// grid.Mu, eventually appearing to hang. We coalesce by deferring
 	// the actual reflow until the target dims have been stable for
 	// resizeDebounce. Main-thread only (onDraw is the sole writer).
 	pendingResizeRows  int
@@ -257,35 +257,17 @@ type Term struct {
 
 	// pendingReplies buffers parser-originated reply bytes (DA, DECRQSS,
 	// XTGETTCAP, ...) emitted during parser.Feed. Drained by readLoop
-	// after Grid.Mu is released so writeHost (which can block when the
-	// PTY slave-side input buffer is full) cannot deadlock against
+	// after grid.Mu is released so writeHost (which can block when the
+	// pty slave-side input buffer is full) cannot deadlock against
 	// onDraw waiting for the same lock. Owned by the readLoop goroutine
 	// — append (via onParserReply called from inside Feed) and drain
 	// both happen there.
 	pendingReplies [][]byte
 }
 
-// New starts a shell in a PTY and returns a Term widget. The reader
-// goroutine is spawned immediately; subsequent PTY output schedules a
-// redraw via win.QueueCommand.
-func New(w *gui.Window, cfg Cfg) (*Term, error) {
-	const initRows, initCols = 24, 80
-	pty, err := Start(initRows, initCols)
-	if err != nil {
-		return nil, err
-	}
-	g := NewGrid(initRows, initCols)
-	if len(cfg.Themes) > 0 {
-		g.Theme = cfg.Themes[0].Theme
-	}
-	var themeMenuItems []gui.MenuItemCfg
-	if len(cfg.Themes) > 0 {
-		themeMenuItems = make([]gui.MenuItemCfg, 0, len(cfg.Themes)+1)
-		themeMenuItems = append(themeMenuItems, gui.MenuSubtitle("Theme"))
-		for i, nt := range cfg.Themes {
-			themeMenuItems = append(themeMenuItems, gui.MenuItemCfg{ID: strconv.Itoa(i), Text: nt.Name})
-		}
-	}
+// applyScrollbackConfig sets ScrollbackCap based on cfg.ScrollbackRows.
+// Zero uses the default; positive clamps within bounds; negative disables.
+func applyScrollbackConfig(g *grid, cfg Cfg) {
 	switch {
 	case cfg.ScrollbackRows == 0:
 		g.ScrollbackCap = defaultScrollbackRows
@@ -294,10 +276,47 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	default:
 		// Negative: leave ScrollbackCap = 0 (scrollback disabled).
 	}
+}
+
+// buildThemeMenu builds a right-click context menu from cfg.Themes.
+// Returns nil when no themes are configured.
+func buildThemeMenu(cfg Cfg) []gui.MenuItemCfg {
+	if len(cfg.Themes) == 0 {
+		return nil
+	}
+	items := make([]gui.MenuItemCfg, 0, len(cfg.Themes)+1)
+	items = append(items, gui.MenuSubtitle("Theme"))
+	for i, nt := range cfg.Themes {
+		items = append(items, gui.MenuItemCfg{ID: strconv.Itoa(i), Text: nt.Name})
+	}
+	return items
+}
+
+// applyTheme sets the initial grid theme from cfg.Themes. When no
+// themes are configured the grid keeps its zero-value Theme.
+func applyTheme(g *grid, cfg Cfg) {
+	if len(cfg.Themes) > 0 {
+		g.Theme = cfg.Themes[0].Theme
+	}
+}
+
+// New starts a shell in a pty and returns a Term widget. The reader
+// goroutine and auxiliary loops (blink, auto-scroll, momentum) are
+// spawned before New returns. Call Close to tear down.
+func New(w *gui.Window, cfg Cfg) (*Term, error) {
+	const initRows, initCols = 24, 80
+	pty, err := startPTY(initRows, initCols)
+	if err != nil {
+		return nil, err
+	}
+	g := newGrid(initRows, initCols)
+	applyTheme(g, cfg)
+	applyScrollbackConfig(g, cfg)
+	themeMenuItems := buildThemeMenu(cfg)
 	t := &Term{
 		cfg:            cfg,
 		grid:           g,
-		parser:         NewParser(g),
+		parser:         newParser(g),
 		pty:            pty,
 		win:            w,
 		lastMouseR:     -1,
@@ -428,7 +447,7 @@ func (t *Term) autoScrollLoop() {
 
 // cursorBlinks reports whether the cursor should currently blink,
 // honoring the Cfg.CursorBlink override over the grid's DECSCUSR
-// state. Caller holds Grid.Mu.
+// state. Caller holds grid.Mu.
 func (t *Term) cursorBlinks() bool {
 	if t.cfg.CursorBlink != nil {
 		return *t.cfg.CursorBlink
@@ -437,7 +456,7 @@ func (t *Term) cursorBlinks() bool {
 }
 
 // onParserTitle is the OSC 0/1/2 handler. Runs on the reader goroutine
-// while Grid.Mu is held — must not touch *gui.Window state directly,
+// while grid.Mu is held — must not touch *gui.Window state directly,
 // hence the QueueCommand hop.
 func (t *Term) onParserTitle(title string) {
 	fn := t.cfg.OnTitle
@@ -455,7 +474,7 @@ func (t *Term) onParserTitle(title string) {
 // when a resize is being debounced — without this, no further onDraw
 // would fire once the mouse stops moving and the debounced size would
 // never be applied. Main-thread only (called from inside onDraw under
-// Grid.Mu, but only mutates resizeTimer which is main-thread owned).
+// grid.Mu, but only mutates resizeTimer which is main-thread owned).
 func (t *Term) scheduleResizeWake(d time.Duration) {
 	wake := func() {
 		if t.closed.Load() {
@@ -472,9 +491,9 @@ func (t *Term) scheduleResizeWake(d time.Duration) {
 }
 
 // onParserReply queues parser-originated bytes (e.g. DA1 reply) for
-// writing back to the PTY after readLoop releases Grid.Mu. Called from
+// writing back to the pty after readLoop releases grid.Mu. Called from
 // inside parser.Feed which runs under Mu on the readLoop goroutine —
-// writing to the PTY directly here would risk a deadlock when the
+// writing to the pty directly here would risk a deadlock when the
 // slave-side input buffer is full (shell not reading), since onDraw on
 // the main thread would be blocked waiting for the same Mu.
 func (t *Term) onParserReply(b []byte) {
@@ -486,36 +505,32 @@ func (t *Term) onParserReply(b []byte) {
 	t.pendingReplies = append(t.pendingReplies, cp)
 }
 
-// cleanNotifyStr removes null bytes, which would truncate C-string args
-// passed to subprocesses at the syscall boundary.
-func cleanNotifyStr(s string) string {
-	return strings.ReplaceAll(s, "\x00", "")
-}
-
 // sendDesktopNotify fires a native OS notification. Blocks briefly
-// (subprocess exec), so always call from a goroutine.
+// (subprocess exec), so always call from a goroutine. Null bytes are
+// removed to prevent truncation of C-string args at the syscall boundary.
 func sendDesktopNotify(title, body string) {
+	clean := func(s string) string { return strings.ReplaceAll(s, "\x00", "") }
 	switch runtime.GOOS {
 	case "darwin":
 		// Pass title/body as argv to avoid AppleScript string-literal injection.
 		stmt := `display notification (item 1 of argv)`
-		args := []string{"-e", "on run argv", "-e", stmt, "-e", "end run", cleanNotifyStr(body)}
+		args := []string{"-e", "on run argv", "-e", stmt, "-e", "end run", clean(body)}
 		if title != "" {
 			stmt = `display notification (item 1 of argv) with title (item 2 of argv)`
-			args = []string{"-e", "on run argv", "-e", stmt, "-e", "end run", cleanNotifyStr(body), cleanNotifyStr(title)}
+			args = []string{"-e", "on run argv", "-e", stmt, "-e", "end run", clean(body), clean(title)}
 		}
 		exec.Command("osascript", args...).Run() //nolint:errcheck
 	case "linux":
-		args := []string{cleanNotifyStr(body)}
+		args := []string{clean(body)}
 		if title != "" {
-			args = []string{cleanNotifyStr(title), cleanNotifyStr(body)}
+			args = []string{clean(title), clean(body)}
 		}
 		exec.Command("notify-send", args...).Run() //nolint:errcheck
 	}
 }
 
-// flushPendingReplies writes all queued parser replies to the PTY.
-// Called by readLoop after Grid.Mu is released. Errors are logged and
+// flushPendingReplies writes all queued parser replies to the pty.
+// Called by readLoop after grid.Mu is released. Errors are logged and
 // the queue is drained even on partial failure.
 func (t *Term) flushPendingReplies() {
 	if len(t.pendingReplies) == 0 {
@@ -645,7 +660,7 @@ func (t *Term) Close() error {
 	}
 	close(t.blinkDone)
 	err := t.pty.Close() // signals readLoop to exit via read error
-	// Wait for readLoop to drain, but don't hang forever if the PTY fd
+	// Wait for readLoop to drain, but don't hang forever if the pty fd
 	// is in a degraded state where close doesn't unblock an in-progress
 	// read. When this timeout fires, readLoop may still be alive and
 	// could call win.QueueCommand after we return. Callers must ensure
@@ -669,8 +684,8 @@ func (t *Term) Close() error {
 	return err
 }
 
-// readLoop forwards PTY output through the parser and schedules a
-// render. Exits when the PTY is closed or returns EOF.
+// readLoop forwards pty output through the parser and schedules a
+// render. Exits when the pty is closed or returns EOF.
 func (t *Term) readLoop() {
 	defer close(t.readDone)
 	buf := make([]byte, 4096)

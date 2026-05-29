@@ -3,7 +3,7 @@ package term
 import "testing"
 
 func TestGrid_PutBasic(t *testing.T) {
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	g.Put('a')
 	g.Put('b')
 	if g.At(0, 0).Ch != 'a' || g.At(0, 1).Ch != 'b' {
@@ -15,7 +15,7 @@ func TestGrid_PutBasic(t *testing.T) {
 }
 
 func TestGrid_PutWrapsAndScrollsAtBottomRight(t *testing.T) {
-	g := NewGrid(2, 2)
+	g := newGrid(2, 2)
 	g.Put('a')
 	g.Put('b')
 	g.Put('c')
@@ -30,7 +30,7 @@ func TestGrid_PutWrapsAndScrollsAtBottomRight(t *testing.T) {
 }
 
 func TestGrid_Newline(t *testing.T) {
-	g := NewGrid(3, 2)
+	g := newGrid(3, 2)
 	g.CursorC = 1
 	g.Newline()
 	if g.CursorR != 1 || g.CursorC != 1 {
@@ -46,7 +46,7 @@ func TestGrid_Newline(t *testing.T) {
 }
 
 func TestGrid_Backspace(t *testing.T) {
-	g := NewGrid(1, 5)
+	g := newGrid(1, 5)
 	g.Backspace()
 	if g.CursorC != 0 {
 		t.Errorf("backspace at 0 should noop: %d", g.CursorC)
@@ -59,7 +59,7 @@ func TestGrid_Backspace(t *testing.T) {
 }
 
 func TestGrid_Tab(t *testing.T) {
-	g := NewGrid(1, 20)
+	g := newGrid(1, 20)
 	g.Tab()
 	if g.CursorC != 8 {
 		t.Errorf("tab from 0: %d", g.CursorC)
@@ -77,7 +77,7 @@ func TestGrid_Tab(t *testing.T) {
 }
 
 func TestGrid_TabNegativeCursor(t *testing.T) {
-	g := NewGrid(1, 20)
+	g := newGrid(1, 20)
 	g.CursorC = -5
 	g.Tab()
 	if g.CursorC != 8 {
@@ -86,7 +86,7 @@ func TestGrid_TabNegativeCursor(t *testing.T) {
 }
 
 func TestGrid_EraseInLine_Modes(t *testing.T) {
-	g := NewGrid(1, 5)
+	g := newGrid(1, 5)
 	for i := range g.Cols {
 		g.At(0, i).Ch = rune('a' + i)
 	}
@@ -96,7 +96,7 @@ func TestGrid_EraseInLine_Modes(t *testing.T) {
 		t.Errorf("mode 0 wrong: %+v", g.Cells)
 	}
 
-	g = NewGrid(1, 5)
+	g = newGrid(1, 5)
 	for i := range g.Cols {
 		g.At(0, i).Ch = rune('a' + i)
 	}
@@ -106,7 +106,7 @@ func TestGrid_EraseInLine_Modes(t *testing.T) {
 		t.Errorf("mode 1 wrong: %+v", g.Cells)
 	}
 
-	g = NewGrid(1, 5)
+	g = newGrid(1, 5)
 	for i := range g.Cols {
 		g.At(0, i).Ch = rune('a' + i)
 	}
@@ -117,7 +117,7 @@ func TestGrid_EraseInLine_Modes(t *testing.T) {
 		}
 	}
 
-	g = NewGrid(1, 3)
+	g = newGrid(1, 3)
 	g.At(0, 0).Ch = 'z'
 	g.EraseInLine(99)
 	if g.At(0, 0).Ch != 'z' {
@@ -126,20 +126,20 @@ func TestGrid_EraseInLine_Modes(t *testing.T) {
 }
 
 func TestGrid_EraseInLine_UsesCurAttrs(t *testing.T) {
-	g := NewGrid(1, 3)
-	g.CurAttrs = AttrUnderline
+	g := newGrid(1, 3)
+	g.CurAttrs = attrUnderline
 	g.CurFG = 1
 	g.CurBG = 2
 	g.EraseInLine(2)
 	c := g.At(0, 0)
-	if c.Attrs != AttrUnderline || c.FG != 1 || c.BG != 2 {
+	if c.Attrs != attrUnderline || c.FG != 1 || c.BG != 2 {
 		t.Errorf("blank attrs not propagated: %+v", *c)
 	}
 }
 
 func TestGrid_EraseInDisplay_Modes(t *testing.T) {
-	mk := func() *Grid {
-		g := NewGrid(3, 3)
+	mk := func() *grid {
+		g := newGrid(3, 3)
 		for r := range g.Rows {
 			for c := range g.Cols {
 				g.At(r, c).Ch = 'x'
@@ -180,7 +180,7 @@ func TestGrid_EraseInDisplay_Modes(t *testing.T) {
 }
 
 func TestGrid_NewlineAtRegionBottom(t *testing.T) {
-	g := NewGrid(5, 2)
+	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
 		fillRow(g, i, ch)
 	}
@@ -200,7 +200,7 @@ func TestGrid_NewlineAtRegionBottom(t *testing.T) {
 }
 
 func TestGrid_NewlineBelowRegionDoesNotScroll(t *testing.T) {
-	g := NewGrid(5, 2)
+	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
 		fillRow(g, i, ch)
 	}
@@ -218,7 +218,7 @@ func TestGrid_NewlineBelowRegionDoesNotScroll(t *testing.T) {
 }
 
 func TestGrid_InsertLines(t *testing.T) {
-	g := NewGrid(5, 2)
+	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
 		fillRow(g, i, ch)
 	}
@@ -237,7 +237,7 @@ func TestGrid_InsertLines(t *testing.T) {
 }
 
 func TestGrid_InsertLines_OutsideRegion(t *testing.T) {
-	g := NewGrid(5, 2)
+	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
 		fillRow(g, i, ch)
 	}
@@ -252,7 +252,7 @@ func TestGrid_InsertLines_OutsideRegion(t *testing.T) {
 }
 
 func TestGrid_DeleteLines(t *testing.T) {
-	g := NewGrid(5, 2)
+	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
 		fillRow(g, i, ch)
 	}
@@ -268,7 +268,7 @@ func TestGrid_DeleteLines(t *testing.T) {
 }
 
 func TestGrid_InsertChars(t *testing.T) {
-	g := NewGrid(2, 6)
+	g := newGrid(2, 6)
 	for c := range g.Cols {
 		g.At(0, c).Ch = rune('a' + c)
 	}
@@ -287,7 +287,7 @@ func TestGrid_InsertChars(t *testing.T) {
 }
 
 func TestGrid_InsertChars_OverWidth(t *testing.T) {
-	g := NewGrid(1, 4)
+	g := newGrid(1, 4)
 	for c := range g.Cols {
 		g.At(0, c).Ch = rune('a' + c)
 	}
@@ -304,7 +304,7 @@ func TestGrid_InsertChars_OverWidth(t *testing.T) {
 }
 
 func TestGrid_DeleteChars(t *testing.T) {
-	g := NewGrid(1, 6)
+	g := newGrid(1, 6)
 	for c := range g.Cols {
 		g.At(0, c).Ch = rune('a' + c)
 	}
@@ -355,7 +355,7 @@ func TestRuneWidth_CJKAndEmoji(t *testing.T) {
 }
 
 func TestGrid_Put_WideAdvancesTwoColumns(t *testing.T) {
-	g := NewGrid(2, 8)
+	g := newGrid(2, 8)
 	g.Put('你')
 	if g.CursorC != 2 {
 		t.Errorf("after wide put, cursor C=%d, want 2", g.CursorC)
@@ -369,7 +369,7 @@ func TestGrid_Put_WideAdvancesTwoColumns(t *testing.T) {
 }
 
 func TestGrid_Put_WideWrapsAtRightEdge(t *testing.T) {
-	g := NewGrid(2, 4)
+	g := newGrid(2, 4)
 	g.Put('a')
 	g.Put('b')
 	g.Put('c')
@@ -392,7 +392,7 @@ func TestGrid_Put_WideWrapsAtRightEdge(t *testing.T) {
 // immediately fire the wide-at-right-margin Newline — advancing two rows for one
 // character.
 func TestGrid_Put_WideCharInOneColumnGrid_NoPanic(t *testing.T) {
-	g := NewGrid(4, 1)
+	g := newGrid(4, 1)
 	g.Put('你') // wide char; Cols==1 means it can never fit, but must not double-newline
 	if g.CursorR > 1 {
 		t.Errorf("wide char in 1-col grid advanced %d rows, want ≤1", g.CursorR)
@@ -400,7 +400,7 @@ func TestGrid_Put_WideCharInOneColumnGrid_NoPanic(t *testing.T) {
 }
 
 func TestGrid_Put_OverwriteWideHeadClearsContinuation(t *testing.T) {
-	g := NewGrid(1, 5)
+	g := newGrid(1, 5)
 	g.Put('好')
 	g.MoveCursor(0, 0)
 	g.Put('x')
@@ -413,7 +413,7 @@ func TestGrid_Put_OverwriteWideHeadClearsContinuation(t *testing.T) {
 }
 
 func TestGrid_Put_OverwriteContinuationClearsHead(t *testing.T) {
-	g := NewGrid(1, 5)
+	g := newGrid(1, 5)
 	g.Put('好')
 	g.MoveCursor(0, 1)
 	g.Put('y')
@@ -426,7 +426,7 @@ func TestGrid_Put_OverwriteContinuationClearsHead(t *testing.T) {
 }
 
 func TestGrid_Put_DropsZeroWidth(t *testing.T) {
-	g := NewGrid(1, 5)
+	g := newGrid(1, 5)
 	g.Put('a')
 	startC := g.CursorC
 	g.Put(0x0301)
@@ -440,7 +440,7 @@ func TestGrid_Put_DropsZeroWidth(t *testing.T) {
 }
 
 func TestGrid_Put_WideThenNarrowLayout(t *testing.T) {
-	g := NewGrid(1, 8)
+	g := newGrid(1, 8)
 	g.Put('你')
 	g.Put('好')
 	g.Put('!')
@@ -460,7 +460,7 @@ func TestGrid_Put_WideThenNarrowLayout(t *testing.T) {
 }
 
 func TestGrid_Put_SetsWrappedFlag(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 
 	for _, r := range "abcd" {
 		g.Put(r)
@@ -479,7 +479,7 @@ func TestGrid_Put_SetsWrappedFlag(t *testing.T) {
 }
 
 func TestGrid_Put_ExplicitNewlineNoWrappedFlag(t *testing.T) {
-	g := NewGrid(3, 10)
+	g := newGrid(3, 10)
 	g.Put('a')
 	g.Newline()
 	if g.RowWrapped[0] {
@@ -488,7 +488,7 @@ func TestGrid_Put_ExplicitNewlineNoWrappedFlag(t *testing.T) {
 }
 
 func TestGrid_InsertLines_ShiftsWrappedFlags(t *testing.T) {
-	g := NewGrid(4, 4)
+	g := newGrid(4, 4)
 	g.RowWrapped[0] = true
 	g.RowWrapped[1] = false
 	g.MoveCursor(0, 0)
@@ -504,7 +504,7 @@ func TestGrid_InsertLines_ShiftsWrappedFlags(t *testing.T) {
 }
 
 func TestGrid_DeleteLines_ShiftsWrappedFlags(t *testing.T) {
-	g := NewGrid(4, 4)
+	g := newGrid(4, 4)
 	g.RowWrapped[0] = true
 	g.RowWrapped[1] = false
 	g.MoveCursor(0, 0)
@@ -520,7 +520,7 @@ func TestGrid_DeleteLines_ShiftsWrappedFlags(t *testing.T) {
 }
 
 func TestGrid_Put_LinkID(t *testing.T) {
-	g := NewGrid(5, 20)
+	g := newGrid(5, 20)
 	id := g.internLink("https://example.com")
 	g.CurLinkID = id
 	g.Put('A')
@@ -530,7 +530,7 @@ func TestGrid_Put_LinkID(t *testing.T) {
 }
 
 func TestGrid_Put_LinkID_ZeroAfterReset(t *testing.T) {
-	g := NewGrid(5, 20)
+	g := newGrid(5, 20)
 	g.CurLinkID = 0
 	g.Put('A')
 	if got := g.At(0, 0).LinkID; got != 0 {
@@ -539,7 +539,7 @@ func TestGrid_Put_LinkID_ZeroAfterReset(t *testing.T) {
 }
 
 func TestGrid_Bell_IncrementsCount(t *testing.T) {
-	g := NewGrid(5, 20)
+	g := newGrid(5, 20)
 	if g.BellCount != 0 {
 		t.Fatalf("initial BellCount = %d, want 0", g.BellCount)
 	}
@@ -555,16 +555,16 @@ func TestGrid_Bell_IncrementsCount(t *testing.T) {
 }
 
 func TestGrid_Put_PropagatesULStyle(t *testing.T) {
-	g := NewGrid(2, 10)
-	g.CurULStyle = ULCurly
+	g := newGrid(2, 10)
+	g.CurULStyle = ulCurly
 	g.CurULColor = rgbColor(255, 0, 128)
 	g.Put('X')
 	cell := g.At(0, 0)
 	if cell == nil {
 		t.Fatal("At(0,0) returned nil")
 	}
-	if cell.ULStyle != ULCurly {
-		t.Errorf("Put: ULStyle = %d, want ULCurly (%d)", cell.ULStyle, ULCurly)
+	if cell.ULStyle != ulCurly {
+		t.Errorf("Put: ULStyle = %d, want ulCurly (%d)", cell.ULStyle, ulCurly)
 	}
 	if cell.ULColor != rgbColor(255, 0, 128) {
 		t.Errorf("Put: ULColor = %#x, want %#x", cell.ULColor, rgbColor(255, 0, 128))
@@ -573,22 +573,22 @@ func TestGrid_Put_PropagatesULStyle(t *testing.T) {
 
 func TestGrid_Put_BlankCellNoUL(t *testing.T) {
 
-	g := NewGrid(2, 10)
-	g.CurULStyle = ULDashed
+	g := newGrid(2, 10)
+	g.CurULStyle = ulDashed
 	g.EraseInLine(2)
 	for c := range 10 {
 		cell := g.At(0, c)
 		if cell == nil {
 			continue
 		}
-		if cell.ULStyle != ULNone {
+		if cell.ULStyle != ulNone {
 			t.Errorf("erased cell[0,%d]: ULStyle = %d, want 0", c, cell.ULStyle)
 		}
 	}
 }
 
 func TestGrid_TabDefaultStops(t *testing.T) {
-	g := NewGrid(1, 80)
+	g := newGrid(1, 80)
 
 	for _, want := range []int{8, 16, 24, 32} {
 		if !g.TabStops[want] {
@@ -602,7 +602,7 @@ func TestGrid_TabDefaultStops(t *testing.T) {
 }
 
 func TestGrid_Tab_AdvancesToNextStop(t *testing.T) {
-	g := NewGrid(1, 80)
+	g := newGrid(1, 80)
 	g.CursorC = 0
 	g.Tab()
 	if g.CursorC != 8 {
@@ -616,7 +616,7 @@ func TestGrid_Tab_AdvancesToNextStop(t *testing.T) {
 
 func TestGrid_Tab_ClampsWhenNoStop(t *testing.T) {
 
-	g := NewGrid(1, 5)
+	g := newGrid(1, 5)
 	g.CursorC = 0
 	g.Tab()
 	if g.CursorC != 4 {
@@ -625,7 +625,7 @@ func TestGrid_Tab_ClampsWhenNoStop(t *testing.T) {
 }
 
 func TestGrid_SetTabStop(t *testing.T) {
-	g := NewGrid(1, 80)
+	g := newGrid(1, 80)
 	g.CursorC = 5
 	g.SetTabStop()
 	if !g.TabStops[5] {
@@ -644,7 +644,7 @@ func TestGrid_SetTabStop(t *testing.T) {
 }
 
 func TestGrid_ClearTabStop_AtCursor(t *testing.T) {
-	g := NewGrid(1, 80)
+	g := newGrid(1, 80)
 
 	g.CursorC = 8
 	g.ClearTabStop(false)
@@ -660,7 +660,7 @@ func TestGrid_ClearTabStop_AtCursor(t *testing.T) {
 }
 
 func TestGrid_ClearTabStop_All(t *testing.T) {
-	g := NewGrid(1, 80)
+	g := newGrid(1, 80)
 	g.ClearTabStop(true)
 	for c := 0; c < MaxGridDim; c++ {
 		if g.TabStops[c] {
@@ -676,7 +676,7 @@ func TestGrid_ClearTabStop_All(t *testing.T) {
 }
 
 func TestGrid_DirtyTracking_PutMarksDirty(t *testing.T) {
-	g := NewGrid(5, 10)
+	g := newGrid(5, 10)
 	g.CursorR, g.CursorC = 2, 0
 	g.ClearDirty()
 	g.Put('A')
@@ -691,7 +691,7 @@ func TestGrid_DirtyTracking_PutMarksDirty(t *testing.T) {
 }
 
 func TestGrid_DirtyTracking_EraseInLineMarksDirty(t *testing.T) {
-	g := NewGrid(5, 10)
+	g := newGrid(5, 10)
 	g.CursorR, g.CursorC = 3, 0
 	g.ClearDirty()
 	g.EraseInLine(2)

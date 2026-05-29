@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/creack/pty v1.1.24
 	github.com/mike-ward/go-glyph v1.8.0
-	github.com/mike-ward/go-gui v0.0.0-00010101000000-000000000000
+	github.com/mike-ward/go-gui v0.20.2
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/text v0.34.0
 )
@@ -21,9 +21,4 @@ require (
 	github.com/yuin/goldmark v1.8.2 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	golang.org/x/sys v0.43.0 // indirect
-)
-
-replace (
-	github.com/mike-ward/go-glyph => ../go-glyph
-	github.com/mike-ward/go-gui => ../go-gui
 )

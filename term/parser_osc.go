@@ -54,7 +54,7 @@ func fromHexNibble(b byte) int {
 // dispatchOSC parses the accumulated OSC payload as "Ps;Pt" and
 // dispatches recognized commands. Anything malformed or unknown is
 // silently dropped (xterm behavior). Called with g.Mu held.
-func (p *Parser) dispatchOSC() {
+func (p *parser) dispatchOSC() {
 	if len(p.osc) == 0 {
 		return
 	}
@@ -137,13 +137,13 @@ func (p *Parser) dispatchOSC() {
 		}
 		switch pt[0] {
 		case 'A':
-			p.g.AddMark(MarkPromptStart)
+			p.g.AddMark(markPromptStart)
 		case 'B':
-			p.g.AddMark(MarkCommandStart)
+			p.g.AddMark(markCommandStart)
 		case 'C':
-			p.g.AddMark(MarkOutputStart)
+			p.g.AddMark(markOutputStart)
 		case 'D':
-			p.g.AddMark(MarkCommandEnd)
+			p.g.AddMark(markCommandEnd)
 		}
 	case 9:
 		// iTerm2-style notification: OSC 9 ; message BEL — body only, no title.
@@ -191,7 +191,7 @@ func (p *Parser) dispatchOSC() {
 // handleOSC1337 implements the iTerm2 inline image protocol.
 // Payload format: File=[key=value;...]:base64data
 // Only renders when inline=1 is present; all other cases drop silently.
-func (p *Parser) handleOSC1337(pt string) {
+func (p *parser) handleOSC1337(pt string) {
 	const prefix = "File="
 	if !strings.HasPrefix(pt, prefix) {
 		return
@@ -271,7 +271,7 @@ func parseXColor(s string) (uint32, bool) {
 }
 
 // sanitizeOSCString strips ASCII control characters (0x00–0x1F, 0x7F) from
-// an OSC payload string before storing it in a Grid field. Prevents hostile
+// an OSC payload string before storing it in a grid field. Prevents hostile
 // terminal sequences from embedding control bytes in caller-visible state.
 func sanitizeOSCString(s string) string {
 	for i := 0; i < len(s); i++ {

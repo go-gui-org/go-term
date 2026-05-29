@@ -1,0 +1,13 @@
+{
+  "name": "scroll_region",
+  "rows": 3,
+  "cols": 10,
+  "input_b64": "G1sxOzJyMQ0KMg0KMw0KNBtbcg==",
+  "want_lines": [
+    "3         ",
+    "4         ",
+    "          "
+  ],
+  "want_row": 0,
+  "want_col": 0
+}

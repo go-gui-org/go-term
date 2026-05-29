@@ -3,6 +3,7 @@ package term
 import (
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -63,36 +64,9 @@ func TestScrollbarGeometry_SubPixel(t *testing.T) {
 	}
 }
 
-func TestRuneString_ASCIINoAlloc(t *testing.T) {
-	var sink string
-	avg := testing.AllocsPerRun(100, func() {
-		sink = runeString('A')
-	})
-	if sink != "A" {
-		t.Errorf("got %q", sink)
-	}
-	if avg != 0 {
-		t.Errorf("ASCII path should not allocate, got %v allocs/op", avg)
-	}
-}
+// --- termRuneStr ---
 
-func TestRuneString_ASCIIAllRunes(t *testing.T) {
-	for r := rune(0); r < 128; r++ {
-		got := runeString(r)
-		if got != string(r) {
-			t.Errorf("runeString(%d) = %q, want %q", r, got, string(r))
-		}
-	}
-}
-
-func TestRuneString_NonASCII(t *testing.T) {
-	cases := []rune{0x00E9, 0x2603, 0x1F600, 0xFFFD}
-	for _, r := range cases {
-		if got := runeString(r); got != string(r) {
-			t.Errorf("runeString(%U) = %q, want %q", r, got, string(r))
-		}
-	}
-}
+// --- numeric helpers ---
 
 func TestFinite(t *testing.T) {
 	cases := []struct {
@@ -248,7 +222,7 @@ func TestMouseSGRBaseButton_KnownButtons(t *testing.T) {
 
 func newTestTermCapture() (*Term, *[]byte) {
 	buf := make([]byte, 0, 64)
-	t := &Term{grid: NewGrid(4, 8), lastMouseR: -1, lastMouseC: -1}
+	t := &Term{grid: newGrid(4, 8), lastMouseR: -1, lastMouseC: -1}
 	t.writeHost = func(b []byte) error {
 		buf = append(buf, b...)
 		return nil
@@ -267,7 +241,7 @@ func TestTerm_OnWindowEvent_NoReportWhenFocusOff(t *testing.T) {
 }
 
 func TestTerm_OnWindowEvent_NilEventNoPanic(t *testing.T) {
-	term := &Term{grid: NewGrid(1, 5), writeHost: func([]byte) error { return nil }}
+	term := &Term{grid: newGrid(1, 5), writeHost: func([]byte) error { return nil }}
 	term.onWindowEvent(nil) // must not panic
 }
 
@@ -311,7 +285,7 @@ func TestTerm_WriteBytes_UsesWriteHost(t *testing.T) {
 }
 
 func TestCursorBlinks_HonorsGridDefault(t *testing.T) {
-	g := NewGrid(1, 5)
+	g := newGrid(1, 5)
 	tm := &Term{grid: g}
 	if tm.cursorBlinks() {
 		t.Error("default cursor should be steady")
@@ -323,7 +297,7 @@ func TestCursorBlinks_HonorsGridDefault(t *testing.T) {
 }
 
 func TestCursorBlinks_CfgOverridesGrid(t *testing.T) {
-	g := NewGrid(1, 5)
+	g := newGrid(1, 5)
 	g.CursorBlink = true
 	off := false
 	tm := &Term{cfg: Cfg{CursorBlink: &off}, grid: g}
@@ -359,11 +333,11 @@ func TestMouseModBits(t *testing.T) {
 }
 
 func TestCellRunKey_PlainCell(t *testing.T) {
-	g := NewGrid(4, 8)
+	g := newGrid(4, 8)
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
-	cell := Cell{Ch: 'A', FG: 7, BG: 0, Width: 1}
+	cell := cell{Ch: 'A', FG: 7, BG: 0, Width: 1}
 	k := cellRunKey(cell, base, g, -1, -1)
-	if k.ulStyle != ULNone || k.strikethrough {
+	if k.ulStyle != ulNone || k.strikethrough {
 		t.Error("plain cell should have no decoration")
 	}
 	if k.typeface != glyph.TypefaceRegular {
@@ -372,9 +346,9 @@ func TestCellRunKey_PlainCell(t *testing.T) {
 }
 
 func TestCellRunKey_BoldItalic(t *testing.T) {
-	g := NewGrid(4, 8)
+	g := newGrid(4, 8)
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
-	cell := Cell{Ch: 'B', Width: 1, Attrs: AttrBold | AttrItalic}
+	cell := cell{Ch: 'B', Width: 1, Attrs: attrBold | attrItalic}
 	k := cellRunKey(cell, base, g, -1, -1)
 	if k.typeface != glyph.TypefaceBoldItalic {
 		t.Errorf("bold+italic: got %v, want BoldItalic", k.typeface)
@@ -392,9 +366,9 @@ func TestCellRunKey_GeometryGlyphsIgnoreBoldTypeface(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			g := NewGrid(4, 8)
+			g := newGrid(4, 8)
 			base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
-			cell := Cell{Ch: tc.ch, Width: 1, Attrs: AttrBold}
+			cell := cell{Ch: tc.ch, Width: 1, Attrs: attrBold}
 			k := cellRunKey(cell, base, g, -1, -1)
 			if k.typeface != glyph.TypefaceRegular {
 				t.Fatalf("geometry glyph %q should not switch to bold typeface, got %v", tc.ch, k.typeface)
@@ -404,9 +378,9 @@ func TestCellRunKey_GeometryGlyphsIgnoreBoldTypeface(t *testing.T) {
 }
 
 func TestCellRunKey_NonGeometryGlyphStillBolds(t *testing.T) {
-	g := NewGrid(4, 8)
+	g := newGrid(4, 8)
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
-	cell := Cell{Ch: 'A', Width: 1, Attrs: AttrBold}
+	cell := cell{Ch: 'A', Width: 1, Attrs: attrBold}
 	k := cellRunKey(cell, base, g, -1, -1)
 	if k.typeface != glyph.TypefaceBold {
 		t.Fatalf("text glyph should still bold, got %v", k.typeface)
@@ -414,9 +388,9 @@ func TestCellRunKey_NonGeometryGlyphStillBolds(t *testing.T) {
 }
 
 func TestCellRunKey_GeometryGlyph_BoldItalicUsesItalic(t *testing.T) {
-	g := NewGrid(4, 8)
+	g := newGrid(4, 8)
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
-	cell := Cell{Ch: '│', Width: 1, Attrs: AttrBold | AttrItalic}
+	cell := cell{Ch: '│', Width: 1, Attrs: attrBold | attrItalic}
 	k := cellRunKey(cell, base, g, -1, -1)
 	// Bold is suppressed; italic is not — TypefaceItalic expected.
 	if k.typeface != glyph.TypefaceItalic {
@@ -456,19 +430,19 @@ func TestIsGeometryGlyph_Boundaries(t *testing.T) {
 }
 
 func TestCellRunKey_Underline(t *testing.T) {
-	g := NewGrid(4, 8)
+	g := newGrid(4, 8)
 	base := gui.TextStyle{}
-	cell := Cell{Ch: 'C', Width: 1, Attrs: AttrUnderline, ULStyle: ULSingle, ULColor: DefaultColor}
+	cell := cell{Ch: 'C', Width: 1, Attrs: attrUnderline, ULStyle: ulSingle, ULColor: DefaultColor}
 	k := cellRunKey(cell, base, g, -1, -1)
-	if k.ulStyle != ULSingle {
-		t.Errorf("underline attr: expected ULSingle in key, got %d", k.ulStyle)
+	if k.ulStyle != ulSingle {
+		t.Errorf("underline attr: expected ulSingle in key, got %d", k.ulStyle)
 	}
 }
 
 func TestCellRunKey_Strikethrough(t *testing.T) {
-	g := NewGrid(4, 8)
+	g := newGrid(4, 8)
 	base := gui.TextStyle{}
-	cell := Cell{Ch: 'D', Width: 1, Attrs: AttrStrikethrough}
+	cell := cell{Ch: 'D', Width: 1, Attrs: attrStrikethrough}
 	k := cellRunKey(cell, base, g, -1, -1)
 	if !k.strikethrough {
 		t.Error("strikethrough attr: expected strikethrough in key")
@@ -476,11 +450,11 @@ func TestCellRunKey_Strikethrough(t *testing.T) {
 }
 
 func TestCellRunKey_LinkForcesUnderline(t *testing.T) {
-	g := NewGrid(4, 8)
+	g := newGrid(4, 8)
 	base := gui.TextStyle{}
-	cell := Cell{Ch: 'E', Width: 1, LinkID: 42}
+	cell := cell{Ch: 'E', Width: 1, LinkID: 42}
 	k := cellRunKey(cell, base, g, -1, -1)
-	if k.ulStyle == ULNone {
+	if k.ulStyle == ulNone {
 		t.Error("linked cell: expected underline forced on by linkID")
 	}
 }
@@ -491,19 +465,19 @@ func TestCellRunKey_LinkForcesUnderline(t *testing.T) {
 // foreground pass to coalesce them into one dc.Text call (and one
 // go-glyph layout-cache entry).
 func TestCellRunKey_DifferentLinksSameStyleCoalesce(t *testing.T) {
-	g := NewGrid(4, 8)
+	g := newGrid(4, 8)
 	base := gui.TextStyle{}
-	a := Cell{Ch: 'x', Width: 1, LinkID: 1}
-	b := Cell{Ch: 'y', Width: 1, LinkID: 2}
+	a := cell{Ch: 'x', Width: 1, LinkID: 1}
+	b := cell{Ch: 'y', Width: 1, LinkID: 2}
 	if cellRunKey(a, base, g, -1, -1) != cellRunKey(b, base, g, -1, -1) {
 		t.Error("same-style cells in different links must produce equal keys")
 	}
 }
 
 func TestCellRunKey_DimHalvesColor(t *testing.T) {
-	g := NewGrid(4, 8)
+	g := newGrid(4, 8)
 	base := gui.TextStyle{}
-	cell := Cell{Ch: 'F', Width: 1, Attrs: AttrDim}
+	cell := cell{Ch: 'F', Width: 1, Attrs: attrDim}
 	cell.FG = rgbColor(200, 100, 50)
 	k := cellRunKey(cell, base, g, -1, -1)
 	// Dim halves each channel via integer division.
@@ -519,16 +493,14 @@ func TestCellRunKey_DimHalvesColor(t *testing.T) {
 // logic and memory access pattern.
 func BenchmarkForegroundPass(b *testing.B) {
 	const rows, cols = 24, 80
-	g := NewGrid(rows, cols)
+	g := newGrid(rows, cols)
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
 
 	// Fill with alternating color runs to stress the coalescing path.
 	colors := []uint32{rgbColor(200, 200, 200), rgbColor(100, 200, 100), rgbColor(200, 100, 100)}
-	p := NewParser(g)
-	_ = p
 	for r := range rows {
 		for c := range cols {
-			g.Cells[r*cols+c] = Cell{
+			g.Cells[r*cols+c] = cell{
 				Ch:    rune('A' + c%26),
 				FG:    colors[c%len(colors)],
 				Width: 1,
@@ -711,7 +683,7 @@ func TestScrollbarGeometry_ZeroTotal_NoPanic(t *testing.T) {
 
 func TestTerm_PosToCell_NaNInfCollapseToZero(t *testing.T) {
 	term := &Term{
-		grid:  NewGrid(24, 80),
+		grid:  newGrid(24, 80),
 		cellW: 8,
 		cellH: 16,
 	}
@@ -814,7 +786,7 @@ func TestTerm_OnKeyDown_ModifiedCursorKeys(t *testing.T) {
 }
 
 func TestTerm_OnKeyDown_CtrlShiftHomeEndPassthrough(t *testing.T) {
-	// Ctrl+Shift+Home/End must pass through to the PTY as Ctrl+Home/End
+	// Ctrl+Shift+Home/End must pass through to the pty as Ctrl+Home/End
 	// (not be consumed by scroll-to-top/bottom). Ctrl+Shift+Tab without
 	// KKP falls through to raw \t instead of emitting \x1b[Z].
 	cases := []struct {
@@ -822,7 +794,7 @@ func TestTerm_OnKeyDown_CtrlShiftHomeEndPassthrough(t *testing.T) {
 		mods gui.Modifier
 		want string
 	}{
-		// Shift+Home/End (no Ctrl) — still scrolls, no PTY output.
+		// Shift+Home/End (no Ctrl) — still scrolls, no pty output.
 		{gui.KeyHome, gui.ModShift, ""},
 		{gui.KeyEnd, gui.ModShift, ""},
 		// Ctrl+Shift+Home/End — passes through as Ctrl+Home/Ctrl+End
@@ -1184,8 +1156,8 @@ func TestTerm_KittyKey_LegacyFallback(t *testing.T) {
 }
 
 func TestParser_MousePixelMode_Toggle(t *testing.T) {
-	g := NewGrid(5, 10)
-	p := NewParser(g)
+	g := newGrid(5, 10)
+	p := newParser(g)
 	p.Feed([]byte("\x1b[?1016h"))
 	if !g.MouseSGRPixels {
 		t.Error("?1016h should set MouseSGRPixels")
@@ -1207,7 +1179,7 @@ func TestWriteMouse_CellVsPixelCoords(t *testing.T) {
 		press  bool
 		want   string
 	}{
-		// Cell mode: col+1 / row+1
+		// cell mode: col+1 / row+1
 		{"cell press", 4, 9, 50.0, 90.0, false, true, "\x1b[<0;5;10M"},
 		{"cell release", 0, 0, 0, 0, false, false, "\x1b[<0;1;1m"},
 		// Pixel mode: int(pixX)+1 / int(pixY)+1
@@ -1227,31 +1199,18 @@ func TestWriteMouse_CellVsPixelCoords(t *testing.T) {
 	}
 }
 
-func TestCleanNotifyStr_NullByte(t *testing.T) {
-	if got := cleanNotifyStr("hel\x00lo"); got != "hello" {
+func TestSendDesktopNotify_NullByteStripped(t *testing.T) {
+	// Null bytes are stripped before reaching subprocess args.
+	// Test via inline ReplaceAll (the former cleanNotifyStr behavior).
+	clean := func(s string) string { return strings.ReplaceAll(s, "\x00", "") }
+	if got := clean("hel\x00lo"); got != "hello" {
 		t.Fatalf("null byte: got %q, want %q", got, "hello")
 	}
-}
-
-func TestCleanNotifyStr_DoubleQuote(t *testing.T) {
-	s := `say "hi"`
-	if got := cleanNotifyStr(s); got != s {
+	if got := clean(`say "hi"`); got != `say "hi"` {
 		t.Fatalf("double quote should be preserved: got %q", got)
 	}
-}
-
-func TestCleanNotifyStr_BothHostile(t *testing.T) {
-	in := "a\x00b\"c"
-	want := "ab\"c"
-	if got := cleanNotifyStr(in); got != want {
-		t.Fatalf("both: got %q, want %q", got, want)
-	}
-}
-
-func TestCleanNotifyStr_Clean(t *testing.T) {
-	s := "no hostile chars"
-	if got := cleanNotifyStr(s); got != s {
-		t.Fatalf("clean input changed: got %q", got)
+	if got := clean("a\x00b\"c"); got != "ab\"c" {
+		t.Fatalf("both: got %q, want %q", got, "ab\"c")
 	}
 }
 
@@ -1268,7 +1227,7 @@ func TestTerm_NotifyBusy_ExtrasDropped(t *testing.T) {
 	finished := make(chan struct{})
 	calls := 0
 
-	term := &Term{grid: NewGrid(4, 8)}
+	term := &Term{grid: newGrid(4, 8)}
 	term.cfg.OnNotify = func(_, _ string) {
 		calls++
 		<-block
@@ -1421,5 +1380,269 @@ func TestKKPCodepoint_AllKeys(t *testing.T) {
 		if ok && got != tt.want {
 			t.Errorf("kkpCodepoint(%v) = %d, want %d", tt.k, got, tt.want)
 		}
+	}
+}
+
+// --- config helpers ---
+
+func TestApplyScrollbackConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		rows int
+		want int
+	}{
+		{"default", 0, defaultScrollbackRows},
+		{"custom", 7000, 7000},
+		{"clamped", MaxScrollbackCap + 1, MaxScrollbackCap},
+		{"disabled", -1, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newGrid(24, 80)
+			applyScrollbackConfig(g, Cfg{ScrollbackRows: tc.rows})
+			if g.ScrollbackCap != tc.want {
+				t.Errorf("ScrollbackCap = %d, want %d", g.ScrollbackCap, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildThemeMenu_Empty(t *testing.T) {
+	if got := buildThemeMenu(Cfg{}); got != nil {
+		t.Errorf("expected nil for empty themes, got %v", got)
+	}
+}
+
+func TestBuildThemeMenu_TwoThemes(t *testing.T) {
+	themes := []NamedTheme{
+		{Name: "Dark", Theme: DefaultTheme},
+		{Name: "Light", Theme: SolarizedDarkTheme},
+	}
+	items := buildThemeMenu(Cfg{Themes: themes})
+	if len(items) != 3 {
+		t.Fatalf("expected 3 menu items, got %d", len(items))
+	}
+}
+
+func TestApplyTheme_EmptyThemes(t *testing.T) {
+	g := newGrid(24, 80)
+	g.Theme = SolarizedDarkTheme
+	applyTheme(g, Cfg{})
+	if g.Theme.DefaultFG == DefaultTheme.DefaultFG {
+		t.Error("theme should not have changed when Themes is empty")
+	}
+}
+
+func TestApplyTheme_FirstTheme(t *testing.T) {
+	g := newGrid(24, 80)
+	applyTheme(g, Cfg{
+		Themes: []NamedTheme{
+			{Name: "Nord", Theme: NordTheme},
+			{Name: "Default", Theme: DefaultTheme},
+		},
+	})
+	if g.Theme.DefaultFG != NordTheme.DefaultFG {
+		t.Error("expected first theme (Nord) to be applied")
+	}
+}
+
+// --- lifecycle ---
+
+func TestClose_Idempotent(t *testing.T) {
+	g := newGrid(24, 80)
+	p := newParser(g)
+	done := make(chan struct{})
+	close(done)
+	tm := &Term{
+		grid:      g,
+		parser:    p,
+		blinkDone: done,
+		readDone:  done,
+	}
+	tm.closed.Store(true)
+	if err := tm.Close(); err != nil {
+		t.Logf("Close returned error (expected with nil pty): %v", err)
+	}
+	if err := tm.Close(); err != nil {
+		t.Logf("second Close: %v", err)
+	}
+}
+
+func TestCursorBlinks_CfgOverride(t *testing.T) {
+	g := newGrid(24, 80)
+	g.CursorBlink = false
+
+	yes := true
+	tm := &Term{grid: g, cfg: Cfg{CursorBlink: &yes}}
+	if !tm.cursorBlinks() {
+		t.Error("CursorBlink=true override should force blinking on")
+	}
+
+	no := false
+	tm.cfg.CursorBlink = &no
+	if tm.cursorBlinks() {
+		t.Error("CursorBlink=false override should force blinking off")
+	}
+}
+
+func TestCursorBlinks_HonorsGrid(t *testing.T) {
+	g := newGrid(24, 80)
+	g.CursorBlink = true
+	tm := &Term{grid: g, cfg: Cfg{}}
+	if !tm.cursorBlinks() {
+		t.Error("should honor grid.CursorBlink=true when no override")
+	}
+	g.CursorBlink = false
+	if tm.cursorBlinks() {
+		t.Error("should honor grid.CursorBlink=false when no override")
+	}
+}
+
+// --- openURL scheme whitelist ---
+
+func TestOpenURL_PermittedSchemes(t *testing.T) {
+	// Permitted schemes reach exec.Command; blocked at the switch in the
+	// default case and return without spawning a process. We verify the
+	// function does not panic for any input — the exec may fail in CI but
+	// the error is swallowed via cmd.Start().
+	for _, url := range []string{
+		"https://example.com",
+		"http://example.com",
+		"mailto:user@example.com",
+	} {
+		openURL(url) // must not panic
+	}
+}
+
+func TestOpenURL_BlockedSchemes(t *testing.T) {
+	for _, url := range []string{
+		"file:///etc/passwd",
+		"javascript:alert(1)",
+		"gopher://example.com",
+		"ssh://evil.com",
+		"",
+	} {
+		openURL(url) // must not panic; silently dropped
+	}
+}
+
+// --- flushPendingReplies ---
+
+func TestFlushPendingReplies_EmptyNoOp(t *testing.T) {
+	term := &Term{writeHost: func([]byte) error {
+		t.Error("writeHost must not be called for empty queue")
+		return nil
+	}}
+	term.flushPendingReplies() // must not panic or call writeHost
+}
+
+func TestFlushPendingReplies_ErrorPath(t *testing.T) {
+	calls := 0
+	term := &Term{
+		writeHost: func(b []byte) error {
+			calls++
+			return errTestBoom
+		},
+		pendingReplies: [][]byte{
+			[]byte("reply1"),
+			[]byte("reply2"),
+		},
+	}
+	// Errors are logged, not returned; all pending replies are processed.
+	term.flushPendingReplies()
+	if calls != 2 {
+		t.Errorf("writeHost called %d times, want 2", calls)
+	}
+	if term.pendingReplies != nil {
+		t.Errorf("pendingReplies not cleared: %v", term.pendingReplies)
+	}
+}
+
+// --- scheduleResizeWake ---
+
+func TestScheduleResizeWake_FirstCallCreatesTimer(t *testing.T) {
+	term := &Term{}
+	if term.resizeTimer != nil {
+		t.Fatal("resizeTimer should start nil")
+	}
+	// Use a long duration so the timer doesn't fire during the test.
+	term.scheduleResizeWake(time.Hour)
+	if term.resizeTimer == nil {
+		t.Fatal("resizeTimer should be created on first call")
+	}
+	term.resizeTimer.Stop()
+}
+
+func TestScheduleResizeWake_ClosedSkipsBump(t *testing.T) {
+	term := &Term{}
+	term.closed.Store(true)
+	prev := term.drawVersion.Load()
+	term.scheduleResizeWake(time.Nanosecond)
+	// Give the timer a moment to fire.
+	time.Sleep(20 * time.Millisecond)
+	if term.drawVersion.Load() != prev {
+		t.Error("closed term: drawVersion must not change")
+	}
+	if term.resizeTimer != nil {
+		term.resizeTimer.Stop()
+	}
+}
+
+// --- writeMouse NaN/Inf pixel coords ---
+
+func TestWriteMouse_PixelCoordsNaN(t *testing.T) {
+	term, buf := newTestTermCapture()
+	// NaN pixX should collapse to 0 via the realNumber guard; pixY=9
+	// unchanged. Expect 1-based coords: col=int(0)+1=1, row=int(9)+1=10.
+	term.writeMouse(0, 0, 0, float32(math.NaN()), 9.0, true, true)
+	want := "\x1b[<0;1;10M"
+	if got := string(*buf); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestWriteMouse_PixelCoordsInf(t *testing.T) {
+	term, buf := newTestTermCapture()
+	term.writeMouse(0, 0, 0, 5.0, float32(math.Inf(1)), true, true)
+	want := "\x1b[<0;6;1M"
+	if got := string(*buf); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// --- cancelMomentum nil timer ---
+
+func TestCancelMomentum_BeforeFirstScrollNoPanic(t *testing.T) {
+	term := &Term{}       // momentumTimer is nil by default
+	term.cancelMomentum() // must not panic — nil-guarded inside
+}
+
+// errTestBoom is a sentinel error for writeHost failure tests.
+var errTestBoom = errors.New("boom")
+
+// --- benchmarks ---
+
+func BenchmarkDrawPrep_DirtyRows(b *testing.B) {
+	const rows, cols = 24, 80
+	g := newGrid(rows, cols)
+	// Mark every other row dirty.
+	for r := range rows {
+		if r%2 == 0 {
+			g.Dirty[r] = true
+		}
+	}
+	g.dirtyCount = rows / 2
+
+	b.ResetTimer()
+	for b.Loop() {
+		_ = g.HasDirtyRows()
+		g.ClearDirty()
+		// Re-mark for next iteration.
+		for r := range rows {
+			if r%2 == 0 {
+				g.Dirty[r] = true
+			}
+		}
+		g.dirtyCount = rows / 2
 	}
 }

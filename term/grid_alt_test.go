@@ -3,13 +3,13 @@ package term
 import "testing"
 
 func TestGrid_EnterAlt_BlanksAndSwaps(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.Put('m')
 	g.Put('a')
 	g.Put('i')
 	g.Put('n')
 	g.MoveCursor(1, 2)
-	g.CurAttrs = AttrBold
+	g.CurAttrs = attrBold
 	g.EnterAlt()
 	if !g.AltActive {
 		t.Fatal("AltActive should be true after EnterAlt")
@@ -29,7 +29,7 @@ func TestGrid_EnterAlt_BlanksAndSwaps(t *testing.T) {
 }
 
 func TestGrid_EnterAlt_Idempotent(t *testing.T) {
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	g.Put('x')
 	g.EnterAlt()
 	g.Put('Y')
@@ -44,7 +44,7 @@ func TestGrid_EnterAlt_Idempotent(t *testing.T) {
 }
 
 func TestGrid_ExitAlt_NoOpWhenInactive(t *testing.T) {
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	g.Put('x')
 	g.ExitAlt()
 	if g.AltActive {
@@ -56,7 +56,7 @@ func TestGrid_ExitAlt_NoOpWhenInactive(t *testing.T) {
 }
 
 func TestGrid_AltSuppressesScrollback(t *testing.T) {
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	g.ScrollbackCap = 100
 	g.EnterAlt()
 	for i := 0; i < 10; i++ {
@@ -79,7 +79,7 @@ func TestGrid_AltSuppressesScrollback(t *testing.T) {
 }
 
 func TestGrid_EnterAlt_ResetsView(t *testing.T) {
-	g := NewGrid(2, 3)
+	g := newGrid(2, 3)
 	g.ScrollbackCap = 10
 	for i := 0; i < 4; i++ {
 		g.Put('a')
@@ -96,7 +96,7 @@ func TestGrid_EnterAlt_ResetsView(t *testing.T) {
 }
 
 func TestGrid_AltResize_ReflowsMainBuffer(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.Put('a')
 	g.Put('b')
 	g.Put('c')
@@ -121,7 +121,7 @@ func TestGrid_AltResize_ReflowsMainBuffer(t *testing.T) {
 }
 
 func TestGrid_AltScreen_PreservesInsertOriginWrap(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.AutoWrap = false
 	g.OriginMode = true
 	g.InsertMode = true
@@ -150,7 +150,7 @@ func TestGrid_AltScreen_PreservesInsertOriginWrap(t *testing.T) {
 }
 
 func TestGrid_AltScreen_PreservesCharsetState(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.CharsetG0 = '0'
 	g.CharsetG1 = 'B'
 	g.ActiveG = 1
@@ -167,23 +167,23 @@ func TestGrid_AltScreen_PreservesCharsetState(t *testing.T) {
 }
 
 func TestGrid_AltDECSC_DoesNotClobberMainSave(t *testing.T) {
-	g := NewGrid(3, 4)
+	g := newGrid(3, 4)
 	g.MoveCursor(2, 3)
-	g.CurAttrs = AttrBold
+	g.CurAttrs = attrBold
 	g.SaveCursor()
 	g.EnterAlt()
 	g.MoveCursor(0, 1)
-	g.CurAttrs = AttrUnderline
+	g.CurAttrs = attrUnderline
 	g.SaveCursor()
 	g.MoveCursor(1, 2)
 	g.RestoreCursor()
-	if g.CursorR != 0 || g.CursorC != 1 || g.CurAttrs != AttrUnderline {
+	if g.CursorR != 0 || g.CursorC != 1 || g.CurAttrs != attrUnderline {
 		t.Errorf("alt DECRC: cursor=%d,%d attrs=%d",
 			g.CursorR, g.CursorC, g.CurAttrs)
 	}
 	g.ExitAlt()
 	g.RestoreCursor()
-	if g.CursorR != 2 || g.CursorC != 3 || g.CurAttrs != AttrBold {
+	if g.CursorR != 2 || g.CursorC != 3 || g.CurAttrs != attrBold {
 		t.Errorf("main DECRC after alt round-trip: cursor=%d,%d attrs=%d",
 			g.CursorR, g.CursorC, g.CurAttrs)
 	}

@@ -6,10 +6,10 @@ import (
 )
 
 func TestGrid_Find_Basic(t *testing.T) {
-	g := NewGrid(3, 10)
+	g := newGrid(3, 10)
 	putRow(g, "hello")
 	sb := g.Scrollback.Len()
-	pos, ok := g.Find("hello", ContentPos{Row: sb, Col: -1}, true)
+	pos, ok := g.Find("hello", contentPos{Row: sb, Col: -1}, true)
 	if !ok {
 		t.Fatal("Find did not find 'hello'")
 	}
@@ -19,10 +19,10 @@ func TestGrid_Find_Basic(t *testing.T) {
 }
 
 func TestGrid_Find_CaseInsensitive(t *testing.T) {
-	g := NewGrid(3, 10)
+	g := newGrid(3, 10)
 	putRow(g, "HELLO")
 	sb := g.Scrollback.Len()
-	pos, ok := g.Find("hello", ContentPos{Row: sb, Col: -1}, true)
+	pos, ok := g.Find("hello", contentPos{Row: sb, Col: -1}, true)
 	if !ok {
 		t.Fatal("Find case-insensitive did not match")
 	}
@@ -32,26 +32,26 @@ func TestGrid_Find_CaseInsensitive(t *testing.T) {
 }
 
 func TestGrid_Find_EmptyQuery_ReturnsFalse(t *testing.T) {
-	g := NewGrid(3, 10)
+	g := newGrid(3, 10)
 	putRow(g, "hello")
-	_, ok := g.Find("", ContentPos{}, true)
+	_, ok := g.Find("", contentPos{}, true)
 	if ok {
 		t.Error("Find with empty query should return false")
 	}
 }
 
 func TestGrid_Find_QueryWiderThanCols_ReturnsFalse(t *testing.T) {
-	g := NewGrid(3, 5)
-	_, ok := g.Find("toolong", ContentPos{}, true)
+	g := newGrid(3, 5)
+	_, ok := g.Find("toolong", contentPos{}, true)
 	if ok {
 		t.Error("Find with query wider than Cols should return false")
 	}
 }
 
 func TestGrid_Find_NoMatch(t *testing.T) {
-	g := NewGrid(3, 10)
+	g := newGrid(3, 10)
 	putRow(g, "hello")
-	_, ok := g.Find("xyz", ContentPos{}, true)
+	_, ok := g.Find("xyz", contentPos{}, true)
 	if ok {
 		t.Error("Find non-existent query should return false")
 	}
@@ -59,7 +59,7 @@ func TestGrid_Find_NoMatch(t *testing.T) {
 
 func TestGrid_Find_Wrap_Forward(t *testing.T) {
 
-	g := NewGrid(2, 10)
+	g := newGrid(2, 10)
 	putRow(g, "target")
 	g.CursorR = 1
 	g.CursorC = 0
@@ -68,7 +68,7 @@ func TestGrid_Find_Wrap_Forward(t *testing.T) {
 	}
 	sb := g.Scrollback.Len()
 
-	pos, ok := g.Find("target", ContentPos{Row: sb + 1, Col: 0}, true)
+	pos, ok := g.Find("target", contentPos{Row: sb + 1, Col: 0}, true)
 	if !ok {
 		t.Fatal("Find did not wrap forward to find 'target'")
 	}
@@ -78,7 +78,7 @@ func TestGrid_Find_Wrap_Forward(t *testing.T) {
 }
 
 func TestGrid_Find_Wrap_Backward(t *testing.T) {
-	g := NewGrid(2, 10)
+	g := newGrid(2, 10)
 
 	g.CursorR = 1
 	g.CursorC = 0
@@ -87,7 +87,7 @@ func TestGrid_Find_Wrap_Backward(t *testing.T) {
 	}
 	sb := g.Scrollback.Len()
 
-	pos, ok := g.Find("target", ContentPos{Row: sb, Col: 0}, false)
+	pos, ok := g.Find("target", contentPos{Row: sb, Col: 0}, false)
 	if !ok {
 		t.Fatal("Find did not wrap backward to find 'target'")
 	}
@@ -97,7 +97,7 @@ func TestGrid_Find_Wrap_Backward(t *testing.T) {
 }
 
 func TestGrid_ViewportMatches_All(t *testing.T) {
-	g := NewGrid(2, 20)
+	g := newGrid(2, 20)
 	putRow(g, "foo bar foo")
 	matches := g.ViewportMatches("foo")
 	if len(matches) != 2 {
@@ -112,7 +112,7 @@ func TestGrid_ViewportMatches_All(t *testing.T) {
 }
 
 func TestGrid_ViewportMatches_EmptyQuery(t *testing.T) {
-	g := NewGrid(2, 10)
+	g := newGrid(2, 10)
 	putRow(g, "hello")
 	if m := g.ViewportMatches(""); m != nil {
 		t.Errorf("ViewportMatches(\"\") = %v, want nil", m)
@@ -120,7 +120,7 @@ func TestGrid_ViewportMatches_EmptyQuery(t *testing.T) {
 }
 
 func TestGrid_ViewportMatches_AltActiveReturnsNil(t *testing.T) {
-	g := NewGrid(2, 10)
+	g := newGrid(2, 10)
 	putRow(g, "hello")
 	g.EnterAlt()
 	if m := g.ViewportMatches("hello"); m != nil {
@@ -129,11 +129,11 @@ func TestGrid_ViewportMatches_AltActiveReturnsNil(t *testing.T) {
 }
 
 func TestGrid_FindRegex_Forward(t *testing.T) {
-	g := NewGrid(3, 20)
+	g := newGrid(3, 20)
 	putRow(g, "hello world")
 	sb := g.Scrollback.Len()
 	re := regexp.MustCompile(`w\w+`)
-	pos, l, ok := g.FindRegex(re, ContentPos{Row: sb, Col: -1}, true)
+	pos, l, ok := g.FindRegex(re, contentPos{Row: sb, Col: -1}, true)
 	if !ok {
 		t.Fatal("FindRegex did not find 'w\\w+'")
 	}
@@ -146,12 +146,12 @@ func TestGrid_FindRegex_Forward(t *testing.T) {
 }
 
 func TestGrid_FindRegex_Backward(t *testing.T) {
-	g := NewGrid(3, 20)
+	g := newGrid(3, 20)
 	putRow(g, "foo bar foo")
 	sb := g.Scrollback.Len()
 	re := regexp.MustCompile(`foo`)
 
-	pos, _, ok := g.FindRegex(re, ContentPos{Row: sb, Col: 11}, false)
+	pos, _, ok := g.FindRegex(re, contentPos{Row: sb, Col: 11}, false)
 	if !ok {
 		t.Fatal("FindRegex backward did not find 'foo'")
 	}
@@ -161,17 +161,17 @@ func TestGrid_FindRegex_Backward(t *testing.T) {
 }
 
 func TestGrid_FindRegex_NoMatch(t *testing.T) {
-	g := NewGrid(3, 20)
+	g := newGrid(3, 20)
 	putRow(g, "hello world")
 	re := regexp.MustCompile(`\d+`)
-	_, _, ok := g.FindRegex(re, ContentPos{}, true)
+	_, _, ok := g.FindRegex(re, contentPos{}, true)
 	if ok {
 		t.Error("FindRegex should return false for no match")
 	}
 }
 
 func TestGrid_FindRegex_Wrap(t *testing.T) {
-	g := NewGrid(2, 20)
+	g := newGrid(2, 20)
 	putRow(g, "target99")
 	g.CursorR = 1
 	g.CursorC = 0
@@ -181,7 +181,7 @@ func TestGrid_FindRegex_Wrap(t *testing.T) {
 	sb := g.Scrollback.Len()
 	re := regexp.MustCompile(`target\d+`)
 
-	pos, _, ok := g.FindRegex(re, ContentPos{Row: sb + 1, Col: 0}, true)
+	pos, _, ok := g.FindRegex(re, contentPos{Row: sb + 1, Col: 0}, true)
 	if !ok {
 		t.Fatal("FindRegex did not wrap forward")
 	}
@@ -191,11 +191,11 @@ func TestGrid_FindRegex_Wrap(t *testing.T) {
 }
 
 func TestGrid_FindRegex_IPAddress(t *testing.T) {
-	g := NewGrid(3, 40)
+	g := newGrid(3, 40)
 	putRow(g, "addr 192.168.1.1 end")
 	sb := g.Scrollback.Len()
 	re := regexp.MustCompile(`[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}`)
-	pos, l, ok := g.FindRegex(re, ContentPos{Row: sb, Col: -1}, true)
+	pos, l, ok := g.FindRegex(re, contentPos{Row: sb, Col: -1}, true)
 	if !ok {
 		t.Fatal("FindRegex did not find IP address")
 	}
@@ -209,7 +209,7 @@ func TestGrid_FindRegex_IPAddress(t *testing.T) {
 
 func TestGrid_FindRegex_InScrollback(t *testing.T) {
 	const rows, cols = 3, 20
-	g := NewGrid(rows, cols)
+	g := newGrid(rows, cols)
 	g.ScrollbackCap = 10
 	putRow(g, "error: 42")
 	g.scrollUpRegion(1)
@@ -218,7 +218,7 @@ func TestGrid_FindRegex_InScrollback(t *testing.T) {
 	}
 	sb := g.Scrollback.Len()
 	re := regexp.MustCompile(`error: \d+`)
-	pos, _, ok := g.FindRegex(re, ContentPos{Row: sb, Col: -1}, true)
+	pos, _, ok := g.FindRegex(re, contentPos{Row: sb, Col: -1}, true)
 	if !ok {
 		t.Fatal("FindRegex did not find match in scrollback")
 	}
@@ -228,16 +228,16 @@ func TestGrid_FindRegex_InScrollback(t *testing.T) {
 }
 
 func TestGrid_FindRegex_NilPattern(t *testing.T) {
-	g := NewGrid(3, 20)
+	g := newGrid(3, 20)
 	putRow(g, "hello")
-	_, _, ok := g.FindRegex(nil, ContentPos{}, true)
+	_, _, ok := g.FindRegex(nil, contentPos{}, true)
 	if ok {
 		t.Error("FindRegex with nil pattern should return false")
 	}
 }
 
 func TestGrid_ViewportMatchesRegex_Basic(t *testing.T) {
-	g := NewGrid(2, 30)
+	g := newGrid(2, 30)
 	putRow(g, "foo 123 bar 456")
 	re := regexp.MustCompile(`\d+`)
 	matches := g.ViewportMatchesRegex(re)
@@ -253,7 +253,7 @@ func TestGrid_ViewportMatchesRegex_Basic(t *testing.T) {
 }
 
 func TestGrid_ViewportMatchesRegex_VariableLen(t *testing.T) {
-	g := NewGrid(2, 30)
+	g := newGrid(2, 30)
 	putRow(g, "a bb ccc")
 	re := regexp.MustCompile(`[a-z]+`)
 	matches := g.ViewportMatchesRegex(re)
@@ -269,7 +269,7 @@ func TestGrid_ViewportMatchesRegex_VariableLen(t *testing.T) {
 }
 
 func TestGrid_ViewportMatchesRegex_AltActiveReturnsNil(t *testing.T) {
-	g := NewGrid(2, 20)
+	g := newGrid(2, 20)
 	putRow(g, "hello")
 	g.EnterAlt()
 	re := regexp.MustCompile(`hello`)
@@ -279,7 +279,7 @@ func TestGrid_ViewportMatchesRegex_AltActiveReturnsNil(t *testing.T) {
 }
 
 func TestGrid_ViewportMatchesRegex_NilPatternReturnsNil(t *testing.T) {
-	g := NewGrid(2, 20)
+	g := newGrid(2, 20)
 	putRow(g, "hello")
 	if m := g.ViewportMatchesRegex(nil); m != nil {
 		t.Errorf("ViewportMatchesRegex(nil) = %v, want nil", m)
@@ -288,7 +288,7 @@ func TestGrid_ViewportMatchesRegex_NilPatternReturnsNil(t *testing.T) {
 
 func TestGrid_ViewportMatches_WithScrollback(t *testing.T) {
 	const rows, cols = 4, 10
-	g := NewGrid(rows, cols)
+	g := newGrid(rows, cols)
 	g.ScrollbackCap = 10
 	putRow(g, "hello")
 	g.scrollUpRegion(1)
@@ -312,7 +312,7 @@ func TestGrid_ViewportMatches_WithScrollback(t *testing.T) {
 func TestGrid_ViewportMatches_CapsAtMaxHighlights(t *testing.T) {
 	// 6 rows × 90 cols = 540 single-char cells; exceeds maxSearchHighlights (500).
 	const rows, cols = 6, 90
-	g := NewGrid(rows, cols)
+	g := newGrid(rows, cols)
 	for r := range rows {
 		g.CursorR, g.CursorC = r, 0
 		for range cols {
@@ -329,7 +329,7 @@ func TestGrid_ViewportMatches_CapsAtMaxHighlights(t *testing.T) {
 // than the current row, so callers never see stale runes from a prior (wider)
 // row.
 func TestGrid_RowRunesBuf_ReuseWithShrinkingRow(t *testing.T) {
-	g := NewGrid(3, 5)
+	g := newGrid(3, 5)
 	// Row 0: 5 cols of 'a'
 	for range 5 {
 		g.Put('a')
@@ -340,7 +340,7 @@ func TestGrid_RowRunesBuf_ReuseWithShrinkingRow(t *testing.T) {
 	// Shrink to 3 cols so we can have a narrower live row.
 	// Instead, use the scrollback path: make scrollback row have 5 cells and
 	// live row have 3 cells by testing with a smaller grid.
-	g2 := NewGrid(2, 3)
+	g2 := newGrid(2, 3)
 	g2.Put('x')
 	g2.Put('y')
 	g2.Put('z')
@@ -364,7 +364,7 @@ func TestGrid_RowRunesBuf_ReuseWithShrinkingRow(t *testing.T) {
 
 func BenchmarkGrid_Search(b *testing.B) {
 	const rows, cols = 100, 120
-	g := NewGrid(rows, cols)
+	g := newGrid(rows, cols)
 	g.ScrollbackCap = 200
 	for r := range rows {
 		g.CursorR, g.CursorC = r, 0
@@ -390,7 +390,7 @@ func BenchmarkGrid_Search(b *testing.B) {
 func TestGrid_ViewportMatchesRegex_CapsAtMaxHighlights(t *testing.T) {
 	// 6 rows × 90 cols = 540 cells; regex matching every cell exceeds cap.
 	const rows, cols = 6, 90
-	g := NewGrid(rows, cols)
+	g := newGrid(rows, cols)
 	re := regexp.MustCompile(`x`)
 	for r := range rows {
 		g.CursorR, g.CursorC = r, 0
@@ -401,5 +401,31 @@ func TestGrid_ViewportMatchesRegex_CapsAtMaxHighlights(t *testing.T) {
 	matches := g.ViewportMatchesRegex(re)
 	if len(matches) != maxSearchHighlights {
 		t.Errorf("ViewportMatchesRegex: got %d matches, want cap %d", len(matches), maxSearchHighlights)
+	}
+}
+
+func BenchmarkGrid_Search_LargeScrollback(b *testing.B) {
+	const rows, cols = 24, 80
+	g := newGrid(rows, cols)
+	g.ScrollbackCap = 10000
+
+	// Fill visible grid and push into scrollback.
+	for range 10000 {
+		for range cols {
+			g.Put('x')
+		}
+		g.scrollUpRegion(1)
+	}
+	// Place target in current visible row.
+	for _, ch := range "TARGET_987654321" {
+		g.Put(ch)
+	}
+
+	b.ResetTimer()
+	for b.Loop() {
+		matches := g.ViewportMatches("TARGET_987654321")
+		if len(matches) != 1 {
+			b.Fatalf("expected 1 match, got %d", len(matches))
+		}
 	}
 }

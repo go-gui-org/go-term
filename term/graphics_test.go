@@ -14,13 +14,13 @@ func sixelPayload(params, body string) string {
 }
 
 // feedSixel wraps payload in ESC P … ESC \ and feeds it through a
-// fresh Parser so tests exercise the DCS state machine end-to-end.
+// fresh parser so tests exercise the DCS state machine end-to-end.
 // Decoded PNGs land in t.TempDir() so they're cleaned up automatically.
-func feedSixel(t *testing.T, rows, cols int, params, body string) *Grid {
+func feedSixel(t *testing.T, rows, cols int, params, body string) *grid {
 	t.Helper()
-	g := NewGrid(rows, cols)
+	g := newGrid(rows, cols)
 	g.CellPxW, g.CellPxH = 8, 16
-	p := NewParser(g)
+	p := newParser(g)
 	p.SetGraphicsDir(t.TempDir())
 	p.Feed([]byte("\x1bP" + sixelPayload(params, body) + "\x1b\\"))
 	return g
@@ -174,7 +174,7 @@ func TestEncodePNGFile_WritesPNG(t *testing.T) {
 }
 
 func TestParser_DCS_SixelDispatch(t *testing.T) {
-	// End-to-end: ESC P q ~ ESC \ should produce one Graphic with a
+	// End-to-end: ESC P q ~ ESC \ should produce one graphic with a
 	// non-empty PNG data URL and advance the cursor below it.
 	g := feedSixel(t, 10, 80, "", "#0~")
 	if len(g.Graphics) != 1 {
@@ -238,11 +238,11 @@ func TestParser_DCS_SixelOversizedDropped(t *testing.T) {
 }
 
 func TestGrid_TrimGraphics_EvictsOffTop(t *testing.T) {
-	g := NewGrid(4, 10)
+	g := newGrid(4, 10)
 	g.CellPxW, g.CellPxH = 8, 16
 	// Inject two graphics: one anchored at content row 1 (height 1),
 	// another at row 5 (height 2).
-	g.Graphics = []Graphic{
+	g.Graphics = []graphic{
 		{OriginR: 1, Cols: 1, Rows: 1, Src: "x"},
 		{OriginR: 5, Cols: 1, Rows: 2, Src: "y"},
 	}
@@ -256,11 +256,11 @@ func TestGrid_TrimGraphics_EvictsOffTop(t *testing.T) {
 }
 
 func TestGrid_TrimGraphics_PartialKeep(t *testing.T) {
-	g := NewGrid(4, 10)
+	g := newGrid(4, 10)
 	// Image straddling the trim boundary (rows 1..3 at height 3, trim 2)
 	// keeps its visible tail: OriginR becomes -1, Rows=3 → still covers
 	// content row 1, so we keep it.
-	g.Graphics = []Graphic{{OriginR: 1, Cols: 1, Rows: 3, Src: "x"}}
+	g.Graphics = []graphic{{OriginR: 1, Cols: 1, Rows: 3, Src: "x"}}
 	g.trimGraphics(2)
 	if len(g.Graphics) != 1 {
 		t.Fatalf("expected to keep partially visible graphic")
@@ -271,8 +271,8 @@ func TestGrid_TrimGraphics_PartialKeep(t *testing.T) {
 }
 
 func TestGrid_ShiftGraphics_DropsOutOfRange(t *testing.T) {
-	g := NewGrid(4, 10)
-	g.Graphics = []Graphic{
+	g := newGrid(4, 10)
+	g.Graphics = []graphic{
 		{OriginR: 0, Cols: 1, Rows: 1, Src: "a"},
 		{OriginR: 5, Cols: 1, Rows: 1, Src: "b"},
 	}
@@ -287,7 +287,7 @@ func TestGrid_ShiftGraphics_DropsOutOfRange(t *testing.T) {
 }
 
 func TestGrid_AddGraphic_CapEvictsOldest(t *testing.T) {
-	g := NewGrid(4, 10)
+	g := newGrid(4, 10)
 	g.CellPxW, g.CellPxH = 8, 16
 	for i := 0; i <= maxGraphics; i++ {
 		g.AddGraphic("/tmp/fake.png", 8, 16)

@@ -1,0 +1,13 @@
+{
+  "name": "cursor_moves",
+  "rows": 3,
+  "cols": 10,
+  "input_b64": "G1syOzJIWBtbMzs1SFkbW0ha",
+  "want_lines": [
+    "Z         ",
+    " X        ",
+    "    Y     "
+  ],
+  "want_row": 0,
+  "want_col": 1
+}

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func gridLines(g *Grid) []string {
+func gridLines(g *grid) []string {
 	lines := make([]string, g.Rows)
 	for r := range g.Rows {
 		row := make([]rune, g.Cols)
@@ -36,7 +36,7 @@ func TestEmulatorReplay(t *testing.T) {
 		wantTitle   string
 		wantCwd     string
 		wantReply   []byte
-		assert      func(t *testing.T, g *Grid)
+		assert      func(t *testing.T, g *grid)
 	}{
 		{
 			name:        "cursor_move_and_erase_line",
@@ -64,7 +64,7 @@ func TestEmulatorReplay(t *testing.T) {
 			wantLines:   []string{"main  ", "      "},
 			wantCursorR: 0,
 			wantCursorC: 4,
-			assert: func(t *testing.T, g *Grid) {
+			assert: func(t *testing.T, g *grid) {
 				t.Helper()
 				if g.AltActive {
 					t.Fatal("alt screen should be inactive after ?1049l")
@@ -91,7 +91,7 @@ func TestEmulatorReplay(t *testing.T) {
 			wantLines:   []string{"    "},
 			wantCursorR: 0,
 			wantCursorC: 0,
-			assert: func(t *testing.T, g *Grid) {
+			assert: func(t *testing.T, g *grid) {
 				t.Helper()
 				if g.BracketedPaste || g.FocusReporting || g.MouseTrack || g.MouseSGR {
 					t.Fatalf("modes should be cleared: paste=%v focus=%v mouse=%v sgr=%v",
@@ -103,35 +103,64 @@ func TestEmulatorReplay(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			g := NewGrid(tc.rows, tc.cols)
-			p := NewParser(g)
-
-			var gotTitle string
-			var gotReply []byte
-			p.SetTitleHandler(func(s string) { gotTitle = s })
-			p.SetReplyHandler(func(b []byte) { gotReply = append(gotReply, b...) })
-
-			feed(t, g, p, []byte(tc.input))
-
-			if got := gridLines(g); !slices.Equal(got, tc.wantLines) {
-				t.Fatalf("grid = %#v, want %#v", got, tc.wantLines)
-			}
-			if g.CursorR != tc.wantCursorR || g.CursorC != tc.wantCursorC {
-				t.Fatalf("cursor = (%d,%d), want (%d,%d)",
-					g.CursorR, g.CursorC, tc.wantCursorR, tc.wantCursorC)
-			}
-			if gotTitle != tc.wantTitle {
-				t.Fatalf("title = %q, want %q", gotTitle, tc.wantTitle)
-			}
-			if g.Cwd != tc.wantCwd {
-				t.Fatalf("cwd = %q, want %q", g.Cwd, tc.wantCwd)
-			}
-			if !bytes.Equal(gotReply, tc.wantReply) {
-				t.Fatalf("reply = %q, want %q", gotReply, tc.wantReply)
-			}
-			if tc.assert != nil {
-				tc.assert(t, g)
-			}
+			runReplayCase(t, tc.rows, tc.cols, []byte(tc.input),
+				tc.wantLines, tc.wantCursorR, tc.wantCursorC,
+				tc.wantTitle, tc.wantCwd, tc.wantReply, tc.assert)
 		})
+	}
+}
+
+// TestEmulatorReplayFixtures replays fixture files from testdata/.
+// Each .json file is a serialised fixture (see fixture_test.go).
+func TestEmulatorReplayFixtures(t *testing.T) {
+	t.Parallel()
+
+	for _, f := range loadFixtures(t) {
+		t.Run(f.Name, func(t *testing.T) {
+			input := decodeFixtureInput(t, f)
+			runReplayCase(t, f.Rows, f.Cols, input,
+				f.WantLines, f.WantRow, f.WantCol,
+				f.WantTitle, f.WantCwd, nil, nil)
+		})
+	}
+}
+
+// runReplayCase runs a single replay scenario against a fresh grid and
+// parser, asserting the expected outputs.
+func runReplayCase(t *testing.T, rows, cols int, input []byte,
+	wantLines []string, wantR, wantC int,
+	wantTitle, wantCwd string, wantReply []byte,
+	assertFn func(t *testing.T, g *grid),
+) {
+	t.Helper()
+
+	g := newGrid(rows, cols)
+	p := newParser(g)
+
+	var gotTitle string
+	var gotReply []byte
+	p.SetTitleHandler(func(s string) { gotTitle = s })
+	p.SetReplyHandler(func(b []byte) { gotReply = append(gotReply, b...) })
+
+	feed(t, g, p, input)
+
+	if got := gridLines(g); !slices.Equal(got, wantLines) {
+		t.Fatalf("grid = %#v, want %#v", got, wantLines)
+	}
+	if g.CursorR != wantR || g.CursorC != wantC {
+		t.Fatalf("cursor = (%d,%d), want (%d,%d)",
+			g.CursorR, g.CursorC, wantR, wantC)
+	}
+	if gotTitle != wantTitle {
+		t.Fatalf("title = %q, want %q", gotTitle, wantTitle)
+	}
+	if g.Cwd != wantCwd {
+		t.Fatalf("cwd = %q, want %q", g.Cwd, wantCwd)
+	}
+	if !bytes.Equal(gotReply, wantReply) {
+		t.Fatalf("reply = %q, want %q", gotReply, wantReply)
+	}
+	if assertFn != nil {
+		assertFn(t, g)
 	}
 }

@@ -16,7 +16,7 @@ const (
 	pasteEnd   = "\x1b[201~"
 )
 
-// keyModes captures keyboard mode state read under Grid.Mu and used
+// keyModes captures keyboard mode state read under grid.Mu and used
 // in onKeyDown/onKeyUp without holding the lock.
 type keyModes struct {
 	appCursor     bool
@@ -327,7 +327,7 @@ func funcKeySeq(k gui.KeyCode, shift, ctrl bool) []byte {
 // onKeyDown receives non-character keys (arrows, Enter, Backspace,
 // Ctrl+letter combinations, etc.) and emits the corresponding terminal
 // byte sequence. Scrollback navigation keys (PgUp/PgDn, Shift+Home/End)
-// move the viewport instead of writing to the PTY; any other key snaps
+// move the viewport instead of writing to the pty; any other key snaps
 // the viewport back to live.
 func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	shift := e.Modifiers.Has(gui.ModShift)
@@ -394,7 +394,7 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 			return
 		}
 		if cmd {
-			// Cmd+C without selection is a no-op; never reaches PTY.
+			// Cmd+C without selection is a no-op; never reaches pty.
 			e.IsHandled = true
 			return
 		}

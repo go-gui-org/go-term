@@ -8,15 +8,15 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-// ContentPos is a stable content-row coordinate, independent of ViewOffset.
+// contentPos is a stable content-row coordinate, independent of ViewOffset.
 // Rows 0..len(Scrollback)-1 index scrollback oldest-first;
 // rows len(Scrollback)..len(Scrollback)+Rows-1 index the live grid.
-type ContentPos struct{ Row, Col int }
+type contentPos struct{ Row, Col int }
 
-// SearchMatch pairs a content position with the column-span of the match.
-// Len is in rune columns (not bytes), matching the Cell column space.
-type SearchMatch struct {
-	ContentPos
+// searchMatch pairs a content position with the column-span of the match.
+// Len is in rune columns (not bytes), matching the cell column space.
+type searchMatch struct {
+	contentPos
 	Len int
 }
 
@@ -42,14 +42,14 @@ func runeWidth(r rune) int {
 	return 1
 }
 
-// Cell attribute bits.
+// cell attribute bits.
 const (
-	AttrBold uint8 = 1 << iota
-	AttrUnderline
-	AttrInverse
-	AttrDim
-	AttrItalic
-	AttrStrikethrough
+	attrBold uint8 = 1 << iota
+	attrUnderline
+	attrInverse
+	attrDim
+	attrItalic
+	attrStrikethrough
 )
 
 // Charset designator bytes used in ESC ( F / ESC ) F sequences.
@@ -58,32 +58,32 @@ const (
 	charsetDECSpecial byte = '0' // DEC Special Graphics line-drawing set
 )
 
-// Underline style constants for Cell.ULStyle and Grid.CurULStyle.
-// ULNone means no underline. The others select the decoration shape.
+// Underline style constants for cell.ULStyle and grid.CurULStyle.
+// ulNone means no underline. The others select the decoration shape.
 const (
-	ULNone   uint8 = 0
-	ULSingle uint8 = 1
-	ULDouble uint8 = 2
-	ULCurly  uint8 = 3
-	ULDotted uint8 = 4
-	ULDashed uint8 = 5
+	ulNone   uint8 = 0
+	ulSingle uint8 = 1
+	ulDouble uint8 = 2
+	ulCurly  uint8 = 3
+	ulDotted uint8 = 4
+	ulDashed uint8 = 5
 )
 
 const (
-	CursorBlock CursorShape = iota
-	CursorUnderline
-	CursorBar
+	cursorBlock cursorShape = iota
+	cursorUnderline
+	cursorBar
 )
 
 // DECSCUSRParam returns the current cursor-style parameter for DECRQSS.
-func (g *Grid) DECSCUSRParam() int {
-	switch g.CursorShape {
-	case CursorUnderline:
+func (g *grid) DECSCUSRParam() int {
+	switch g.cursorShape {
+	case cursorUnderline:
 		if g.CursorBlink {
 			return 3
 		}
 		return 4
-	case CursorBar:
+	case cursorBar:
 		if g.CursorBlink {
 			return 5
 		}
@@ -129,7 +129,7 @@ func clampDim(n int) int {
 	return n
 }
 
-// Cell.FG and Cell.BG are packed uint32 values. The high byte is the
+// cell.FG and cell.BG are packed uint32 values. The high byte is the
 // encoding tag:
 //
 //	0x00       — palette index, low byte 0..255 (xterm 256-color table)
@@ -153,7 +153,7 @@ func rgbColor(r, g, b uint8) uint32 {
 	return colorRGB | uint32(r)<<16 | uint32(g)<<8 | uint32(b)
 }
 
-// Cell is one terminal grid cell.
+// cell is one terminal grid cell.
 //
 // Width encodes east-asian wide / emoji handling:
 //
@@ -164,20 +164,20 @@ func rgbColor(r, g, b uint8) uint32 {
 //
 // ULColor uses the same packed uint32 encoding as FG/BG. DefaultColor
 // means "use the cell's foreground color." ULStyle selects the decoration
-// shape; 0 (ULNone) means no underline regardless of ULColor.
-type Cell struct {
+// shape; 0 (ulNone) means no underline regardless of ULColor.
+type cell struct {
 	Ch      rune
 	FG      uint32 // packed Color (palette index, RGB, or DefaultColor)
 	BG      uint32
 	ULColor uint32 // packed underline color; DefaultColor = use FG
 	Attrs   uint8
 	Width   uint8
-	ULStyle uint8  // ULNone..ULDashed
-	LinkID  uint16 // 0 = no link; non-zero indexes Grid.links
+	ULStyle uint8  // ulNone..ulDashed
+	LinkID  uint16 // 0 = no link; non-zero indexes grid.links
 }
 
-func defaultCell() Cell {
-	return Cell{Ch: ' ', FG: DefaultColor, BG: DefaultColor, ULColor: DefaultColor, Width: 1}
+func defaultCell() cell {
+	return cell{Ch: ' ', FG: DefaultColor, BG: DefaultColor, ULColor: DefaultColor, Width: 1}
 }
 
 // blankCell returns a space-filled cell carrying the supplied SGR
@@ -185,8 +185,8 @@ func defaultCell() Cell {
 // runs to the *current* attributes (so e.g. an Erase under inverse
 // fills with inverse background). Blank cells never carry underline
 // decoration (invisible on spaces; ULStyle=0 signals that).
-func blankCell(fg, bg uint32, attrs uint8) Cell {
-	return Cell{Ch: ' ', FG: fg, BG: bg, ULColor: DefaultColor, Attrs: attrs, Width: 1}
+func blankCell(fg, bg uint32, attrs uint8) cell {
+	return cell{Ch: ' ', FG: fg, BG: bg, ULColor: DefaultColor, Attrs: attrs, Width: 1}
 }
 
 // altSavedScreen captures everything needed to restore the main screen
@@ -194,7 +194,7 @@ func blankCell(fg, bg uint32, attrs uint8) Cell {
 // state and the DECSC slot (so DECSC/DECRC inside the alt buffer don't
 // clobber the main-buffer save).
 type altSavedScreen struct {
-	cells            []Cell
+	cells            []cell
 	rowWrapped       []bool
 	cursorR, cursorC int
 	curFG, curBG     uint32
@@ -212,29 +212,29 @@ type altSavedScreen struct {
 }
 
 const (
-	MarkPromptStart  MarkKind = iota // OSC 133;A — beginning of prompt
-	MarkCommandStart                 // OSC 133;B — start of user input
-	MarkOutputStart                  // OSC 133;C — command submitted, output begins
-	MarkCommandEnd                   // OSC 133;D — command finished (optional exit code)
+	markPromptStart  markKind = iota // OSC 133;A — beginning of prompt
+	markCommandStart                 // OSC 133;B — start of user input
+	markOutputStart                  // OSC 133;C — command submitted, output begins
+	markCommandEnd                   // OSC 133;D — command finished (optional exit code)
 )
 
 // maxMarks caps the mark ring to avoid unbounded growth in very long sessions.
 const maxMarks = 10000
 
-// Grid is a fixed-size character grid. All public methods are safe for
+// grid is a fixed-size character grid. All public methods are safe for
 // concurrent callers via Mu; the parser writes under Mu, OnDraw reads
 // under Mu.
-type Grid struct {
+type grid struct {
 	Mu             sync.Mutex
 	Rows           int
 	Cols           int
-	Cells          []Cell // row-major, len = Rows*Cols
+	Cells          []cell // row-major, len = Rows*Cols
 	CursorR        int
 	CursorC        int
 	CurFG          uint32 // packed Color
 	CurBG          uint32
 	CurAttrs       uint8
-	CurULStyle     uint8  // current underline style (ULNone..ULDashed)
+	CurULStyle     uint8  // current underline style (ulNone..ulDashed)
 	CurULColor     uint32 // current underline color; DefaultColor = use fg
 	CharsetG0      byte   // ESC ( F — designated set for GL when ActiveG=0
 	CharsetG1      byte   // ESC ) F — designated set for GL when ActiveG=1
@@ -257,7 +257,7 @@ type Grid struct {
 	// Cursor shape + blink. Set via DECSCUSR (CSI Ps SP q). Default is
 	// a steady block. Embedders can override blink via
 	// Cfg.CursorBlink without overriding shape.
-	CursorShape CursorShape
+	cursorShape cursorShape
 	CursorBlink bool
 	// CursorColor is the fill color for the block cursor, set via OSC 12.
 	// DefaultColor means "invert the cell under the cursor" (the default).
@@ -280,8 +280,8 @@ type Grid struct {
 	Cwd string
 
 	// Hyperlink registry (OSC 8). CurLinkID is the active link applied
-	// by Put; 0 means no link. links/linkIDs are a sidecar map so Cell
-	// stays compact — URLs live here, not in each Cell. The maps grow
+	// by Put; 0 means no link. links/linkIDs are a sidecar map so cell
+	// stays compact — URLs live here, not in each cell. The maps grow
 	// only, never shrink; sessions are short and links are rare.
 	CurLinkID uint16
 	links     map[uint16]string
@@ -331,9 +331,9 @@ type Grid struct {
 	Theme Theme
 
 	// Marks records OSC 133 semantic shell-integration boundaries in
-	// content-row coordinates (same space as ContentPos). Appended by
+	// content-row coordinates (same space as contentPos). Appended by
 	// AddMark; adjusted by scrollback trim and Resize; capped at maxMarks.
-	Marks []Mark
+	Marks []mark
 
 	// Alt-screen state. EnterAlt swaps g.Cells with a fresh blank buffer
 	// and stashes main-screen state in mainSaved; ExitAlt restores it.
@@ -346,10 +346,10 @@ type Grid struct {
 	// Selection state in content coordinates (scrollback + live, stable across
 	// ViewOffset changes). SelActive == false means no selection (single-click
 	// position pre-drag). Anchor and Head may appear in any order; helpers
-	// normalize. ContentPos row: 0..len(Scrollback)-1 for scrollback rows,
+	// normalize. contentPos row: 0..len(Scrollback)-1 for scrollback rows,
 	// len(Scrollback)..len(Scrollback)+Rows-1 for live rows.
-	SelAnchor ContentPos
-	SelHead   ContentPos
+	SelAnchor contentPos
+	SelHead   contentPos
 	SelActive bool
 
 	// Kitty Keyboard Protocol state. KittyKeyFlags is the current effective
@@ -366,7 +366,7 @@ type Grid struct {
 	// Graphics holds decoded images (Phase 32). Origin is in content
 	// coordinates so images travel through scrollback alongside the
 	// text near them. Capped at maxGraphics; oldest evicted first.
-	Graphics []Graphic
+	Graphics []graphic
 
 	// CellPxW, CellPxH are advisory cell-pixel sizes set by the widget
 	// after its first measurement (under Mu in onDraw). Used to convert
@@ -378,7 +378,7 @@ type Grid struct {
 // PushKittyKeyFlags saves the current KittyKeyFlags on the stack and ORs in
 // the new flags. Called by CSI > flags u. The stack is capped at 8 entries
 // so runaway nesting can't grow it without bound.
-func (g *Grid) PushKittyKeyFlags(flags uint32) {
+func (g *grid) PushKittyKeyFlags(flags uint32) {
 	const maxStack = 8
 	if len(g.kittyFlagStack) < maxStack {
 		g.kittyFlagStack = append(g.kittyFlagStack, g.KittyKeyFlags)
@@ -389,7 +389,7 @@ func (g *Grid) PushKittyKeyFlags(flags uint32) {
 // PopKittyKeyFlags pops n entries from the KKP flag stack, restoring the
 // last pushed flags each time. Called by CSI < n u. Popping past an empty
 // stack sets flags to 0 (legacy mode).
-func (g *Grid) PopKittyKeyFlags(n int) {
+func (g *grid) PopKittyKeyFlags(n int) {
 	if n < 1 {
 		n = 1
 	}
@@ -406,11 +406,11 @@ func (g *Grid) PopKittyKeyFlags(n int) {
 
 // SetKittyKeyFlags sets KittyKeyFlags to flags without touching the stack.
 // Called by CSI = flags u.
-func (g *Grid) SetKittyKeyFlags(flags uint32) { g.KittyKeyFlags = flags }
+func (g *grid) SetKittyKeyFlags(flags uint32) { g.KittyKeyFlags = flags }
 
 // viewportToContent converts a viewport row (0..Rows-1) to its content row
 // (0..len(Scrollback)+Rows-1) at the current ViewOffset. Caller must hold Mu.
-func (g *Grid) viewportToContent(r int) int {
+func (g *grid) viewportToContent(r int) int {
 	sb := g.Scrollback.Len()
 	off := clamp(g.ViewOffset, 0, sb)
 	return sb - off + r
@@ -419,15 +419,15 @@ func (g *Grid) viewportToContent(r int) int {
 // MouseReporting reports whether any of the press/drag/any-motion
 // modes (?1000/?1002/?1003) are active. The widget consults this to
 // decide between local selection and host-side report emission.
-func (g *Grid) MouseReporting() bool {
+func (g *grid) MouseReporting() bool {
 	return g.MouseTrack || g.MouseTrackBtn || g.MouseTrackAny
 }
 
 // Bell increments BellCount. Called by the parser on 0x07 (BEL). Caller
 // holds Mu.
-func (g *Grid) Bell() { g.BellCount++ }
+func (g *grid) Bell() { g.BellCount++ }
 
-func (g *Grid) markDirty(r int) {
+func (g *grid) markDirty(r int) {
 	if r >= 0 && r < len(g.Dirty) && !g.Dirty[r] {
 		g.Dirty[r] = true
 		g.dirtyCount++
@@ -437,7 +437,7 @@ func (g *Grid) markDirty(r int) {
 // trimGraphics drops `extra` rows from the front of all graphic origins,
 // discarding any whose covered range falls entirely above row 0. Called
 // after scrollback is trimmed. Caller holds Mu.
-func (g *Grid) trimGraphics(extra int) {
+func (g *grid) trimGraphics(extra int) {
 	if extra <= 0 || len(g.Graphics) == 0 {
 		return
 	}
@@ -455,7 +455,7 @@ func (g *Grid) trimGraphics(extra int) {
 // shiftGraphics applies delta to all graphic origin rows, dropping those
 // that fall entirely outside [0, total). Called after a resize changes
 // scrollback depth. Caller holds Mu.
-func (g *Grid) shiftGraphics(delta, total int) {
+func (g *grid) shiftGraphics(delta, total int) {
 	if len(g.Graphics) == 0 {
 		return
 	}
@@ -475,7 +475,7 @@ func (g *Grid) shiftGraphics(delta, total int) {
 // most recent measurement determine the cell rectangle; if those are
 // zero (no frame drawn yet) a single-cell footprint is used. Caller
 // holds Mu.
-func (g *Grid) AddGraphic(src string, widthPx, heightPx int) (int, int) {
+func (g *grid) AddGraphic(src string, widthPx, heightPx int) (int, int) {
 	if src == "" || widthPx <= 0 || heightPx <= 0 {
 		return 0, 0
 	}
@@ -488,6 +488,9 @@ func (g *Grid) AddGraphic(src string, widthPx, heightPx int) (int, int) {
 		}
 		if rows < 1 {
 			rows = 1
+		}
+		if rows > MaxGridDim {
+			rows = MaxGridDim
 		}
 	}
 	originR := g.Scrollback.Len() + g.CursorR
@@ -502,7 +505,7 @@ func (g *Grid) AddGraphic(src string, widthPx, heightPx int) (int, int) {
 		copy(g.Graphics, g.Graphics[1:])
 		g.Graphics = g.Graphics[:maxGraphics-1]
 	}
-	g.Graphics = append(g.Graphics, Graphic{
+	g.Graphics = append(g.Graphics, graphic{
 		Src:      src,
 		OriginR:  originR,
 		OriginC:  originC,
@@ -530,7 +533,7 @@ func (g *Grid) AddGraphic(src string, widthPx, heightPx int) (int, int) {
 	return cols, rows
 }
 
-func (g *Grid) markAllDirty() {
+func (g *grid) markAllDirty() {
 	for i := range g.Dirty {
 		g.Dirty[i] = true
 	}
@@ -541,7 +544,7 @@ func (g *Grid) markAllDirty() {
 // 11=background, 12=cursor). c must be an rgbColor-tagged packed value.
 // Marks all rows dirty so the next render picks up the change.
 // Called from the parser while Mu is held.
-func (g *Grid) SetDynColor(ps int, c uint32) {
+func (g *grid) SetDynColor(ps int, c uint32) {
 	col := gui.RGB(uint8(c>>16), uint8(c>>8), uint8(c))
 	switch ps {
 	case 10:
@@ -557,7 +560,7 @@ func (g *Grid) SetDynColor(ps int, c uint32) {
 // dynColorRGB returns the r,g,b components of the dynamic color for ps.
 // 10=foreground, 11=background, 12=cursor (falls back to DefaultFG when
 // CursorColor is unset). Called from the parser while Mu is held.
-func (g *Grid) dynColorRGB(ps int) (r, gr, b uint8) {
+func (g *grid) dynColorRGB(ps int) (r, gr, b uint8) {
 	switch ps {
 	case 10:
 		c := g.Theme.DefaultFG
@@ -576,14 +579,12 @@ func (g *Grid) dynColorRGB(ps int) (r, gr, b uint8) {
 
 // HasDirtyRows reports whether any row is marked dirty since the last
 // ClearDirty call. Called under Mu by the widget's readLoop.
-func (g *Grid) HasDirtyRows() bool { return g.dirtyCount > 0 }
+func (g *grid) HasDirtyRows() bool { return g.dirtyCount > 0 }
 
 // ClearDirty resets all dirty flags. Called by onDraw under Mu at the
 // start of each render cycle so new mutations are captured next frame.
-func (g *Grid) ClearDirty() {
-	for i := range g.Dirty {
-		g.Dirty[i] = false
-	}
+func (g *grid) ClearDirty() {
+	clear(g.Dirty)
 	g.dirtyCount = 0
 }
 
@@ -598,14 +599,14 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-// NewGrid allocates a rows×cols grid filled with default cells.
-func NewGrid(rows, cols int) *Grid {
+// newGrid allocates a rows×cols grid filled with default cells.
+func newGrid(rows, cols int) *grid {
 	rows = clampDim(rows)
 	cols = clampDim(cols)
-	g := &Grid{
+	g := &grid{
 		Rows:          rows,
 		Cols:          cols,
-		Cells:         make([]Cell, rows*cols),
+		Cells:         make([]cell, rows*cols),
 		RowWrapped:    make([]bool, rows),
 		Dirty:         make([]bool, rows),
 		CurFG:         DefaultColor,
@@ -615,7 +616,7 @@ func NewGrid(rows, cols int) *Grid {
 		CharsetG1:     charsetASCII,
 		AutoWrap:      true,
 		CursorVisible: true,
-		CursorShape:   CursorBlock,
+		cursorShape:   cursorBlock,
 		CursorBlink:   false,
 		CursorColor:   DefaultColor,
 		Top:           0,
@@ -642,7 +643,7 @@ const maxLinkEntries = 4096
 // Returns 0 when the registry is full; those cells carry no link ID and become
 // non-clickable for the life of the session. This is intentional: the cap
 // prevents unbounded map growth during very long sessions.
-func (g *Grid) internLink(url string) uint16 {
+func (g *grid) internLink(url string) uint16 {
 	if id, ok := g.linkIDs[url]; ok {
 		return id
 	}
@@ -660,7 +661,7 @@ func (g *Grid) internLink(url string) uint16 {
 }
 
 // LinkURL returns the URL for the given link ID, or "" for ID 0 / unknown.
-func (g *Grid) LinkURL(id uint16) string {
+func (g *grid) LinkURL(id uint16) string {
 	if id == 0 {
 		return ""
 	}
@@ -668,7 +669,7 @@ func (g *Grid) LinkURL(id uint16) string {
 }
 
 // At returns a pointer to the cell at (r,c) or nil if out of range.
-func (g *Grid) At(r, c int) *Cell {
+func (g *grid) At(r, c int) *cell {
 	if r < 0 || c < 0 || r >= g.Rows || c >= g.Cols {
 		return nil
 	}
@@ -678,7 +679,7 @@ func (g *Grid) At(r, c int) *Cell {
 // translateRune maps printable bytes through the active GL charset.
 // Today we honor the DEC Special Graphics set (`0`), which TUIs use for
 // box-drawing via SI/SO or ESC ( 0 / ESC ) 0 designation.
-func (g *Grid) translateRune(ch rune) rune {
+func (g *grid) translateRune(ch rune) rune {
 	if ch < 0x20 || ch > 0x7e {
 		return ch
 	}
@@ -752,7 +753,7 @@ func (g *Grid) translateRune(ch rune) rune {
 // ReverseIndex moves the cursor up one row, scrolling the region down
 // when at Top. Above Top (outside region) the cursor moves up without
 // scrolling. Implements ESC M (RI).
-func (g *Grid) ReverseIndex() {
+func (g *grid) ReverseIndex() {
 	switch {
 	case g.CursorR == g.Top:
 		g.scrollDownRegion(1)
@@ -764,7 +765,7 @@ func (g *Grid) ReverseIndex() {
 }
 
 // ClearAll wipes every cell to default and homes the cursor.
-func (g *Grid) ClearAll() {
+func (g *grid) ClearAll() {
 	for i := range g.Cells {
 		g.Cells[i] = defaultCell()
 	}
@@ -775,7 +776,7 @@ func (g *Grid) ClearAll() {
 // regionValid reports whether Top/Bottom describe a usable region.
 // A degenerate region (Top > Bottom or out of bounds) is treated as
 // "no region active" so callers fall back to full-screen behavior.
-func (g *Grid) regionValid() bool {
+func (g *grid) regionValid() bool {
 	return g.Top >= 0 && g.Bottom < g.Rows && g.Top <= g.Bottom
 }
 
@@ -783,7 +784,7 @@ func (g *Grid) regionValid() bool {
 // Only full-screen scrolls push to scrollback (DEC convention shared
 // by xterm/iTerm/kitty); a status-line app shouldn't fill history with
 // its top pane every keystroke.
-func (g *Grid) regionFullScreen() bool {
+func (g *grid) regionFullScreen() bool {
 	return g.regionValid() && g.Top == 0 && g.Bottom == g.Rows-1
 }
 
@@ -792,7 +793,7 @@ func (g *Grid) regionFullScreen() bool {
 // that row's stored cells are returned. Outside-range coords yield a
 // default cell (never panics). Resize keeps scrollback row widths in
 // sync with Cols, so no per-row width clamp is needed here.
-func (g *Grid) ViewCellAt(r, c int) Cell {
+func (g *grid) ViewCellAt(r, c int) cell {
 	if r < 0 || r >= g.Rows || c < 0 || c >= g.Cols {
 		return defaultCell()
 	}
@@ -817,7 +818,7 @@ func (g *Grid) ViewCellAt(r, c int) Cell {
 // inside the alt buffer can't clobber the main-buffer save. ?1049
 // callers typically SaveCursor *before* EnterAlt; that save lands in
 // g.saved at call time and is correctly stashed here.
-func (g *Grid) EnterAlt() {
+func (g *grid) EnterAlt() {
 	if g.AltActive {
 		return
 	}
@@ -841,7 +842,7 @@ func (g *Grid) EnterAlt() {
 		bottom:     g.Bottom,
 		saved:      g.saved,
 	}
-	cells := make([]Cell, g.Rows*g.Cols)
+	cells := make([]cell, g.Rows*g.Cols)
 	blank := defaultCell()
 	for i := range cells {
 		cells[i] = blank
@@ -869,7 +870,7 @@ func (g *Grid) EnterAlt() {
 // ExitAlt restores the main-screen state captured by EnterAlt: cells,
 // cursor, SGR, scroll region, and DECSC slot. The alt buffer is dropped.
 // No-op if not currently in alt.
-func (g *Grid) ExitAlt() {
+func (g *grid) ExitAlt() {
 	if !g.AltActive {
 		return
 	}
@@ -897,12 +898,12 @@ func (g *Grid) ExitAlt() {
 }
 
 // ContentRows returns the total number of content rows (scrollback + live).
-func (g *Grid) ContentRows() int { return g.Scrollback.Len() + g.Rows }
+func (g *grid) ContentRows() int { return g.Scrollback.Len() + g.Rows }
 
 // ContentCellAt returns the cell at content-coordinate (row, col).
 // Bounds-safe: out-of-range inputs return a default cell (never panics).
 // Caller must hold Mu.
-func (g *Grid) ContentCellAt(row, col int) Cell {
+func (g *grid) ContentCellAt(row, col int) cell {
 	sb := g.Scrollback.Len()
 	if row < 0 || row >= sb+g.Rows || col < 0 || col >= g.Cols {
 		return defaultCell()
@@ -916,7 +917,7 @@ func (g *Grid) ContentCellAt(row, col int) Cell {
 // ContentRowToViewport maps a content row to its viewport row at the current
 // ViewOffset. Returns (vr, true) when the content row is visible, (0, false)
 // when it is off-screen.
-func (g *Grid) ContentRowToViewport(contentRow int) (int, bool) {
+func (g *grid) ContentRowToViewport(contentRow int) (int, bool) {
 	vr := g.ContentRowToScreen(contentRow)
 	if vr >= 0 && vr < g.Rows {
 		return vr, true
@@ -927,7 +928,7 @@ func (g *Grid) ContentRowToViewport(contentRow int) (int, bool) {
 // ContentRowToScreen maps a content row to its screen row without clamping.
 // The result may be negative (above viewport) or >= g.Rows (below viewport).
 // Use ContentRowToViewport for the ok-gated form.
-func (g *Grid) ContentRowToScreen(contentRow int) int {
+func (g *grid) ContentRowToScreen(contentRow int) int {
 	sb := g.Scrollback.Len()
 	off := clamp(g.ViewOffset, 0, sb)
 	n := min(off, g.Rows)
@@ -939,7 +940,7 @@ func (g *Grid) ContentRowToScreen(contentRow int) int {
 
 // partialTopRow returns the scrollback row just above the current viewport top —
 // visible when ViewSubPx > 0. Returns nil when no such row exists. Caller must hold Mu.
-func (g *Grid) partialTopRow() []Cell {
+func (g *grid) partialTopRow() []cell {
 	sb := g.Scrollback.Len()
 	idx := sb - clamp(g.ViewOffset, 0, sb) - 1
 	if idx < 0 {
@@ -951,9 +952,9 @@ func (g *Grid) partialTopRow() []Cell {
 // rowRunesBuf returns the rune slice for a content row with length == g.Cols,
 // so rune index == cell column. Writes into buf (growing it if necessary) to
 // avoid a heap allocation on every row when the caller holds a reusable slice.
-func (g *Grid) rowRunesBuf(contentRow int, buf []rune) []rune {
+func (g *grid) rowRunesBuf(contentRow int, buf []rune) []rune {
 	sb := g.Scrollback.Len()
-	var src []Cell
+	var src []cell
 	if contentRow < sb {
 		if contentRow < 0 {
 			return nil

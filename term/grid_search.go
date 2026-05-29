@@ -68,19 +68,19 @@ func runeSliceSearchLast(haystack, needle []rune, upToCol int) int {
 // Find searches for query (case-insensitive) starting at start, walking
 // forward or backward through all content rows (scrollback + live), wrapping
 // once. Multi-row spanning is not supported; matches must fit within one row.
-// Returns the ContentPos of the first cell of the match and true on success.
+// Returns the contentPos of the first cell of the match and true on success.
 // Called under Mu.
-func (g *Grid) Find(query string, start ContentPos, forward bool) (ContentPos, bool) {
+func (g *grid) Find(query string, start contentPos, forward bool) (contentPos, bool) {
 	if query == "" || g.Cols <= 0 {
-		return ContentPos{}, false
+		return contentPos{}, false
 	}
 	qRunes := []rune(query)
 	if len(qRunes) > g.Cols {
-		return ContentPos{}, false
+		return contentPos{}, false
 	}
 	total := g.ContentRows()
 	if total == 0 {
-		return ContentPos{}, false
+		return contentPos{}, false
 	}
 	start.Row = clamp(start.Row, 0, total-1)
 	var rrBuf []rune
@@ -99,7 +99,7 @@ func (g *Grid) Find(query string, start ContentPos, forward bool) (ContentPos, b
 				fromCol = start.Col + 1
 			}
 			if col := runeSliceSearch(rr, qRunes, fromCol); col >= 0 {
-				return ContentPos{Row: row, Col: col}, true
+				return contentPos{Row: row, Col: col}, true
 			}
 		} else {
 			upToCol := len(rr) + 1
@@ -107,11 +107,11 @@ func (g *Grid) Find(query string, start ContentPos, forward bool) (ContentPos, b
 				upToCol = start.Col
 			}
 			if col := runeSliceSearchLast(rr, qRunes, upToCol); col >= 0 {
-				return ContentPos{Row: row, Col: col}, true
+				return contentPos{Row: row, Col: col}, true
 			}
 		}
 	}
-	return ContentPos{}, false
+	return contentPos{}, false
 }
 
 // maxSearchHighlights caps the number of matches returned by viewport search
@@ -122,7 +122,7 @@ const maxSearchHighlights = 500
 // ViewportMatches returns all plain-text matches visible at the current
 // ViewOffset. Returns nil for an empty query, a zero-column grid, or while
 // the alt screen is active. Called under Mu.
-func (g *Grid) ViewportMatches(query string) []SearchMatch {
+func (g *grid) ViewportMatches(query string) []searchMatch {
 	if query == "" || g.Cols <= 0 || g.AltActive {
 		return nil
 	}
@@ -134,7 +134,7 @@ func (g *Grid) ViewportMatches(query string) []SearchMatch {
 	sb := g.Scrollback.Len()
 	off := clamp(g.ViewOffset, 0, sb)
 	n := min(off, g.Rows)
-	var matches []SearchMatch
+	var matches []searchMatch
 	var rrBuf []rune
 	for vr := range g.Rows {
 		var contentRow int
@@ -151,7 +151,7 @@ func (g *Grid) ViewportMatches(query string) []SearchMatch {
 			if idx < 0 {
 				break
 			}
-			matches = append(matches, SearchMatch{ContentPos: ContentPos{Row: contentRow, Col: idx}, Len: qLen})
+			matches = append(matches, searchMatch{contentPos: contentPos{Row: contentRow, Col: idx}, Len: qLen})
 			if len(matches) >= maxSearchHighlights {
 				return matches
 			}
@@ -193,15 +193,15 @@ func regexSearchLast(s string, re *regexp.Regexp, upToCol int) (col, matchLen in
 
 // FindRegex searches for the first match of re starting at start, walking
 // forward or backward through all content rows (scrollback + live), wrapping
-// once. Returns the ContentPos, match length in rune columns, and true on
+// once. Returns the contentPos, match length in rune columns, and true on
 // success. Called under Mu.
-func (g *Grid) FindRegex(re *regexp.Regexp, start ContentPos, forward bool) (ContentPos, int, bool) {
+func (g *grid) FindRegex(re *regexp.Regexp, start contentPos, forward bool) (contentPos, int, bool) {
 	if re == nil || g.Cols <= 0 {
-		return ContentPos{}, 0, false
+		return contentPos{}, 0, false
 	}
 	total := g.ContentRows()
 	if total == 0 {
-		return ContentPos{}, 0, false
+		return contentPos{}, 0, false
 	}
 	start.Row = clamp(start.Row, 0, total-1)
 	var rrBuf []rune
@@ -221,7 +221,7 @@ func (g *Grid) FindRegex(re *regexp.Regexp, start ContentPos, forward bool) (Con
 				fromCol = start.Col + 1
 			}
 			if c, l, ok := regexSearchForward(s, re, fromCol); ok {
-				return ContentPos{Row: row, Col: c}, l, true
+				return contentPos{Row: row, Col: c}, l, true
 			}
 		} else {
 			upToCol := utf8.RuneCountInString(s) + 1
@@ -229,24 +229,24 @@ func (g *Grid) FindRegex(re *regexp.Regexp, start ContentPos, forward bool) (Con
 				upToCol = start.Col
 			}
 			if c, l, ok := regexSearchLast(s, re, upToCol); ok {
-				return ContentPos{Row: row, Col: c}, l, true
+				return contentPos{Row: row, Col: c}, l, true
 			}
 		}
 	}
-	return ContentPos{}, 0, false
+	return contentPos{}, 0, false
 }
 
 // ViewportMatchesRegex returns all regex matches visible at the current
 // ViewOffset. Returns nil for a nil pattern or while the alt screen is active.
 // Called under Mu.
-func (g *Grid) ViewportMatchesRegex(re *regexp.Regexp) []SearchMatch {
+func (g *grid) ViewportMatchesRegex(re *regexp.Regexp) []searchMatch {
 	if re == nil || g.Cols <= 0 || g.AltActive {
 		return nil
 	}
 	sb := g.Scrollback.Len()
 	off := clamp(g.ViewOffset, 0, sb)
 	n := min(off, g.Rows)
-	var matches []SearchMatch
+	var matches []searchMatch
 	var rrBuf []rune
 	for vr := range g.Rows {
 		var contentRow int
@@ -264,7 +264,7 @@ func (g *Grid) ViewportMatchesRegex(re *regexp.Regexp) []SearchMatch {
 			if !ok {
 				break
 			}
-			matches = append(matches, SearchMatch{ContentPos: ContentPos{Row: contentRow, Col: c}, Len: l})
+			matches = append(matches, searchMatch{contentPos: contentPos{Row: contentRow, Col: c}, Len: l})
 			if len(matches) >= maxSearchHighlights {
 				return matches
 			}

@@ -55,7 +55,7 @@ func makePNGHeader(width, height uint32) []byte {
 }
 
 // feedOSC1337 constructs and feeds an OSC 1337 sequence via BEL terminator.
-func feedOSC1337(t *testing.T, g *Grid, p *Parser, args string, imgData []byte) {
+func feedOSC1337(t *testing.T, g *grid, p *parser, args string, imgData []byte) {
 	t.Helper()
 	b64 := base64.StdEncoding.EncodeToString(imgData)
 	seq := "\x1b]1337;File=" + args + ":" + b64 + "\x07"
@@ -105,7 +105,7 @@ func TestDecodeImageBytes_Invalid(t *testing.T) {
 
 // --- OSC 1337 dispatch tests ---
 
-func feedOSC1337Grid(t *testing.T, rows, cols int, args string, imgData []byte) *Grid {
+func feedOSC1337Grid(t *testing.T, rows, cols int, args string, imgData []byte) *grid {
 	t.Helper()
 	g, p := newParserGrid(rows, cols)
 	g.CellPxW, g.CellPxH = 8, 16

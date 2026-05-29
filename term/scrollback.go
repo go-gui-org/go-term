@@ -1,14 +1,14 @@
 package term
 
 // scrollbackRing stores scrolled-off rows in a fixed-capacity ring backed
-// by a single contiguous []Cell. Push overwrites the oldest slot when
+// by a single contiguous []cell. Push overwrites the oldest slot when
 // full, so steady-state scrolling allocates zero per-row memory.
 //
 // Row returns a slice that aliases the backing buffer; callers must not
 // retain it across a subsequent Push/SetGeom/Reset. All current readers
-// consume the returned cells immediately under Grid.Mu.
+// consume the returned cells immediately under grid.Mu.
 type scrollbackRing struct {
-	cells   []Cell // len = cap*cols (nil when disabled)
+	cells   []cell // len = cap*cols (nil when disabled)
 	wrapped []bool // len = cap     (nil when disabled)
 	cols    int
 	cap     int
@@ -20,7 +20,7 @@ func (r *scrollbackRing) Len() int { return r.size }
 
 func (r *scrollbackRing) slot(i int) int { return (r.head + i) % r.cap }
 
-func (r *scrollbackRing) Row(i int) []Cell {
+func (r *scrollbackRing) Row(i int) []cell {
 	if i < 0 || i >= r.size || r.cols <= 0 {
 		return nil
 	}
@@ -38,7 +38,7 @@ func (r *scrollbackRing) Wrapped(i int) bool {
 // Push appends src (cols wide) as the newest row. Returns true when an
 // existing row was evicted. Short src is zero-padded; over-long src is
 // truncated.
-func (r *scrollbackRing) Push(src []Cell, wrapped bool) bool {
+func (r *scrollbackRing) Push(src []cell, wrapped bool) bool {
 	if r.cap == 0 || r.cols == 0 {
 		return false
 	}
@@ -77,7 +77,7 @@ func (r *scrollbackRing) SetGeom(capacity, cols int) {
 	r.cap, r.cols = capacity, cols
 	r.head, r.size = 0, 0
 	if capacity > 0 && cols > 0 {
-		r.cells = make([]Cell, capacity*cols)
+		r.cells = make([]cell, capacity*cols)
 		r.wrapped = make([]bool, capacity)
 		return
 	}
@@ -104,7 +104,7 @@ func (r *scrollbackRing) EnsureGeom(capacity, cols int) {
 		return
 	}
 	keep := min(r.size, capacity)
-	newCells := make([]Cell, capacity*cols)
+	newCells := make([]cell, capacity*cols)
 	newWrap := make([]bool, capacity)
 	for i := range keep {
 		s := r.slot(r.size - keep + i)

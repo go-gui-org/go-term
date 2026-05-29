@@ -75,7 +75,7 @@ func (t *Term) scrollToBottom(w *gui.Window) {
 }
 
 // jumpToMark scrolls the viewport to the previous (backward=true) or next
-// (backward=false) MarkPromptStart mark. No-op when no marks exist or no
+// (backward=false) markPromptStart mark. No-op when no marks exist or no
 // mark is found in that direction. Suppressed while the alt screen is active.
 func (t *Term) jumpToMark(backward bool, w *gui.Window) {
 	var found bool
@@ -90,9 +90,9 @@ func (t *Term) jumpToMark(backward bool, w *gui.Window) {
 		viewTop := sb - off
 		var row int
 		if backward {
-			row, found = t.grid.PrevMark(viewTop, MarkPromptStart)
+			row, found = t.grid.PrevMark(viewTop, markPromptStart)
 		} else {
-			row, found = t.grid.NextMark(viewTop, MarkPromptStart)
+			row, found = t.grid.NextMark(viewTop, markPromptStart)
 		}
 		if found {
 			if row >= sb {
@@ -121,14 +121,14 @@ func (t *Term) searchJump(forward bool, w *gui.Window) {
 		g.Mu.Lock()
 		defer g.Mu.Unlock()
 		sb := g.Scrollback.Len()
-		var start ContentPos
+		var start contentPos
 		if len(t.searchMatches) > 0 && t.searchIdx < len(t.searchMatches) {
-			start = t.searchMatches[t.searchIdx].ContentPos
+			start = t.searchMatches[t.searchIdx].contentPos
 		} else {
-			start = ContentPos{Row: sb - clamp(g.ViewOffset, 0, sb)}
+			start = contentPos{Row: sb - clamp(g.ViewOffset, 0, sb)}
 		}
 		var (
-			pos ContentPos
+			pos contentPos
 			ok  bool
 		)
 		if t.searchRegex && t.searchRE != nil {

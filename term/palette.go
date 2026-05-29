@@ -11,7 +11,7 @@ type Theme struct {
 	DefaultBG gui.Color
 }
 
-// Predefined themes. DefaultTheme is applied when a new Grid is created.
+// Predefined themes. DefaultTheme is applied when a new grid is created.
 var (
 	DefaultTheme       Theme // VS Code Dark+ approximation
 	GruvboxTheme       Theme // Gruvbox Dark
@@ -161,16 +161,16 @@ func (th *Theme) resolve(c uint32, def gui.Color) gui.Color {
 }
 
 // fg resolves a cell's foreground to a Color, honoring inverse.
-func (th *Theme) fg(c Cell) gui.Color {
-	if c.Attrs&AttrInverse != 0 {
+func (th *Theme) fg(c cell) gui.Color {
+	if c.Attrs&attrInverse != 0 {
 		return th.resolve(c.BG, th.DefaultBG)
 	}
 	return th.resolve(c.FG, th.DefaultFG)
 }
 
 // bg resolves a cell's background to a Color, honoring inverse.
-func (th *Theme) bg(c Cell) gui.Color {
-	if c.Attrs&AttrInverse != 0 {
+func (th *Theme) bg(c cell) gui.Color {
+	if c.Attrs&attrInverse != 0 {
 		return th.resolve(c.FG, th.DefaultFG)
 	}
 	return th.resolve(c.BG, th.DefaultBG)

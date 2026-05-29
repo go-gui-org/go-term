@@ -237,8 +237,8 @@ func TestParser_OSC133_PromptStart(t *testing.T) {
 	if len(g.Marks) != 1 {
 		t.Fatalf("want 1 mark, got %d", len(g.Marks))
 	}
-	if g.Marks[0].Kind != MarkPromptStart {
-		t.Errorf("kind: got %d, want MarkPromptStart", g.Marks[0].Kind)
+	if g.Marks[0].Kind != markPromptStart {
+		t.Errorf("kind: got %d, want markPromptStart", g.Marks[0].Kind)
 	}
 
 	if g.Marks[0].Row != 0 {
@@ -249,19 +249,19 @@ func TestParser_OSC133_PromptStart(t *testing.T) {
 func TestParser_OSC133_AllKinds(t *testing.T) {
 	tests := []struct {
 		seq  string
-		kind MarkKind
+		kind markKind
 	}{
-		{"\x1b]133;A\x07", MarkPromptStart},
-		{"\x1b]133;B\x07", MarkCommandStart},
-		{"\x1b]133;C\x07", MarkOutputStart},
-		{"\x1b]133;D\x07", MarkCommandEnd},
+		{"\x1b]133;A\x07", markPromptStart},
+		{"\x1b]133;B\x07", markCommandStart},
+		{"\x1b]133;C\x07", markOutputStart},
+		{"\x1b]133;D\x07", markCommandEnd},
 	}
 	for _, tt := range tests {
 		g, p := newParserGrid(4, 80)
 		feed(t, g, p, []byte(tt.seq))
 		g.Mu.Lock()
 		n := len(g.Marks)
-		var kind MarkKind
+		var kind markKind
 		if n > 0 {
 			kind = g.Marks[0].Kind
 		}
@@ -292,8 +292,8 @@ func TestParser_OSC133_ExtraParamsIgnored(t *testing.T) {
 	feed(t, g, p, []byte("\x1b]133;D;exitcode=0\x07"))
 	g.Mu.Lock()
 	defer g.Mu.Unlock()
-	if len(g.Marks) != 1 || g.Marks[0].Kind != MarkCommandEnd {
-		t.Errorf("D with extra params: want 1 MarkCommandEnd, got %v", g.Marks)
+	if len(g.Marks) != 1 || g.Marks[0].Kind != markCommandEnd {
+		t.Errorf("D with extra params: want 1 markCommandEnd, got %v", g.Marks)
 	}
 }
 

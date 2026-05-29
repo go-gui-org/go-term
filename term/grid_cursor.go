@@ -1,28 +1,28 @@
 package term
 
-// CursorShape selects the cursor glyph: filled block, baseline
+// cursorShape selects the cursor glyph: filled block, baseline
 // underline, or vertical bar at the leading edge of the cell.
-type CursorShape uint8
+type cursorShape uint8
 
 // ApplyDECSCUSR applies the DECSCUSR (CSI Ps SP q) parameter,
 // setting cursor shape + blink. Unknown values fall back to the
 // xterm default (blinking block, matching Ps=0/1).
-func (g *Grid) ApplyDECSCUSR(ps int) {
+func (g *grid) ApplyDECSCUSR(ps int) {
 	switch ps {
 	case 0, 1:
-		g.CursorShape, g.CursorBlink = CursorBlock, true
+		g.cursorShape, g.CursorBlink = cursorBlock, true
 	case 2:
-		g.CursorShape, g.CursorBlink = CursorBlock, false
+		g.cursorShape, g.CursorBlink = cursorBlock, false
 	case 3:
-		g.CursorShape, g.CursorBlink = CursorUnderline, true
+		g.cursorShape, g.CursorBlink = cursorUnderline, true
 	case 4:
-		g.CursorShape, g.CursorBlink = CursorUnderline, false
+		g.cursorShape, g.CursorBlink = cursorUnderline, false
 	case 5:
-		g.CursorShape, g.CursorBlink = CursorBar, true
+		g.cursorShape, g.CursorBlink = cursorBar, true
 	case 6:
-		g.CursorShape, g.CursorBlink = CursorBar, false
+		g.cursorShape, g.CursorBlink = cursorBar, false
 	default:
-		g.CursorShape, g.CursorBlink = CursorBlock, true
+		g.cursorShape, g.CursorBlink = cursorBlock, true
 	}
 }
 
@@ -46,7 +46,7 @@ type savedCursor struct {
 
 // MoveCursor sets the cursor to (r,c), clamped to grid bounds. Used by
 // CSI cursor-position sequences which are 1-based; callers convert.
-func (g *Grid) MoveCursor(r, c int) {
+func (g *grid) MoveCursor(r, c int) {
 	if r < 0 {
 		r = 0
 	}
@@ -67,7 +67,7 @@ func (g *Grid) MoveCursor(r, c int) {
 // MoveCursorOrigin applies DECOM semantics: r is relative to Top when
 // OriginMode is enabled, and the row is clamped to the active scroll
 // region. Column handling remains full-width.
-func (g *Grid) MoveCursorOrigin(r, c int) {
+func (g *grid) MoveCursorOrigin(r, c int) {
 	if !g.OriginMode || !g.regionValid() {
 		g.MoveCursor(r, c)
 		return
@@ -91,7 +91,7 @@ func (g *Grid) MoveCursorOrigin(r, c int) {
 }
 
 // CursorUp/Down/Forward/Back move the cursor by n cells, clamped.
-func (g *Grid) CursorUp(n int) {
+func (g *grid) CursorUp(n int) {
 	r := g.CursorR - n
 	if g.OriginMode && g.regionValid() && g.CursorR >= g.Top && g.CursorR <= g.Bottom && r < g.Top {
 		r = g.Top
@@ -99,7 +99,7 @@ func (g *Grid) CursorUp(n int) {
 	g.MoveCursor(r, g.CursorC)
 }
 
-func (g *Grid) CursorDown(n int) {
+func (g *grid) CursorDown(n int) {
 	r := g.CursorR + n
 	if g.OriginMode && g.regionValid() && g.CursorR >= g.Top && g.CursorR <= g.Bottom && r > g.Bottom {
 		r = g.Bottom
@@ -107,13 +107,13 @@ func (g *Grid) CursorDown(n int) {
 	g.MoveCursor(r, g.CursorC)
 }
 
-func (g *Grid) CursorForward(n int) { g.MoveCursor(g.CursorR, g.CursorC+n) }
+func (g *grid) CursorForward(n int) { g.MoveCursor(g.CursorR, g.CursorC+n) }
 
-func (g *Grid) CursorBack(n int) { g.MoveCursor(g.CursorR, g.CursorC-n) }
+func (g *grid) CursorBack(n int) { g.MoveCursor(g.CursorR, g.CursorC-n) }
 
 // SaveCursor snapshots cursor position and SGR state. Implements
 // DECSC (ESC 7) and CSI s. Subsequent SaveCursor calls overwrite.
-func (g *Grid) SaveCursor() {
+func (g *grid) SaveCursor() {
 	g.saved = savedCursor{
 		r:          g.CursorR,
 		c:          g.CursorC,
@@ -134,7 +134,7 @@ func (g *Grid) SaveCursor() {
 
 // RestoreCursor restores the snapshot from SaveCursor. If no save has
 // occurred, homes the cursor and resets SGR per VT100 spec.
-func (g *Grid) RestoreCursor() {
+func (g *grid) RestoreCursor() {
 	if !g.saved.valid {
 		g.MoveCursor(0, 0)
 		g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, 0

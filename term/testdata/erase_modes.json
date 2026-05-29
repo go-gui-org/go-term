@@ -1,0 +1,13 @@
+{
+  "name": "erase_modes",
+  "rows": 3,
+  "cols": 10,
+  "input_b64": "eHh4eHh4eHh4eBtbMTszSBtbS3l5eRtbMjsxSBtbMksbWzM7MUgbWzFLenp6",
+  "want_lines": [
+    "xxyyy     ",
+    "          ",
+    "zzz       "
+  ],
+  "want_row": 2,
+  "want_col": 3
+}

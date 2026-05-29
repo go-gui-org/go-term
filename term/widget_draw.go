@@ -32,14 +32,6 @@ var asciiStr = func() [128]string {
 	return a
 }()
 
-// runeString returns a string for r without allocating in the ASCII case.
-func runeString(r rune) string {
-	if uint32(r) < 128 {
-		return asciiStr[r]
-	}
-	return string(r)
-}
-
 // termRuneStr returns string(r) without allocating for runes already in the
 // per-Term cache. Wide-char cells and the cursor call this once per distinct
 // rune seen, then reuse the cached string every subsequent frame.
@@ -103,26 +95,26 @@ type rowBounds struct {
 // --hyperlink, every filename has a unique link ID — keying on it
 // fragments runs that visually merge anyway. Hover-induced recolor
 // already lives in the color field, so hovered vs non-hovered cells
-// break the run correctly. Click hit-testing reads Cell.LinkID
+// break the run correctly. Click hit-testing reads cell.LinkID
 // directly via ViewCellAt and is unaffected.
 type runKey struct {
 	color         gui.Color
 	ulColor       gui.Color
 	typeface      glyph.Typeface
-	ulStyle       uint8 // ULNone..ULDashed; drives underline rendering
+	ulStyle       uint8 // ulNone..ulDashed; drives underline rendering
 	strikethrough bool
 }
 
 // cellRunKey computes the runKey for cell, applying attribute and
-// hyperlink-hover color transforms. Must be called under Grid.Mu.
-func cellRunKey(cell Cell, base gui.TextStyle, g *Grid, hoverR, hoverC int) runKey {
+// hyperlink-hover color transforms. Must be called under grid.Mu.
+func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int) runKey {
 	rawFG := g.Theme.fg(cell)
 	color := rawFG
-	if cell.Attrs&AttrDim != 0 {
+	if cell.Attrs&attrDim != 0 {
 		color = gui.RGB(rawFG.R/2, rawFG.G/2, rawFG.B/2)
 	}
 	tf := base.Typeface
-	bold, italic := cell.Attrs&AttrBold != 0, cell.Attrs&AttrItalic != 0
+	bold, italic := cell.Attrs&attrBold != 0, cell.Attrs&attrItalic != 0
 	if isGeometryGlyph(cell.Ch) {
 		bold = false
 	}
@@ -137,8 +129,8 @@ func cellRunKey(cell Cell, base gui.TextStyle, g *Grid, hoverR, hoverC int) runK
 	ulStyle := cell.ULStyle
 	ulColor := g.Theme.resolve(cell.ULColor, rawFG)
 	if cell.LinkID != 0 {
-		if ulStyle == ULNone {
-			ulStyle = ULSingle
+		if ulStyle == ulNone {
+			ulStyle = ulSingle
 		}
 		if hoverR >= 0 && hoverC >= 0 {
 			if g.ViewCellAt(hoverR, hoverC).LinkID == cell.LinkID {
@@ -152,12 +144,12 @@ func cellRunKey(cell Cell, base gui.TextStyle, g *Grid, hoverR, hoverC int) runK
 		ulColor:       ulColor,
 		typeface:      tf,
 		ulStyle:       ulStyle,
-		strikethrough: cell.Attrs&AttrStrikethrough != 0,
+		strikethrough: cell.Attrs&attrStrikethrough != 0,
 	}
 }
 
 // onDraw is the DrawCanvas callback. Measures cell size on first call,
-// reflows the grid + PTY when the canvas size changes, then paints the
+// reflows the grid + pty when the canvas size changes, then paints the
 // grid as a sequence of background rects + per-cell text + cursor.
 func (t *Term) onDraw(dc *gui.DrawContext) {
 	style := t.style()
@@ -235,7 +227,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			vMatchesByRow = t.vMatchBuf
 			curVer := t.drawVersion.Load()
 			if curVer != t.searchCacheVer || t.searchQuery != t.searchCacheQuery || t.searchRegex != t.searchCacheRegex {
-				var matches []SearchMatch
+				var matches []searchMatch
 				if t.searchRegex && t.searchRE != nil {
 					matches = g.ViewportMatchesRegex(t.searchRE)
 				} else if !t.searchRegex {
@@ -279,20 +271,20 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			}
 		}
 
-		resolveCell := func(r, c int) Cell {
+		resolveCell := func(r, c int) cell {
 			if live {
 				return cells[r*cols+c]
 			}
 			cell := g.ViewCellAt(r, c)
 			if rowSel != nil {
 				if rb := rowSel[r]; rb.active && c >= rb.c0 && c <= rb.c1 {
-					cell.Attrs ^= AttrInverse
+					cell.Attrs ^= attrInverse
 				}
 			}
 			if vMatchesByRow != nil {
 				for _, m := range vMatchesByRow[r] {
 					if c >= m.col && c < m.col+m.len {
-						cell.Attrs ^= AttrInverse
+						cell.Attrs ^= attrInverse
 						break
 					}
 				}
@@ -314,7 +306,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		// containing RTL characters. For live LTR-only terminals (the common
 		// case) rowHasRTL returns false immediately — zero allocations.
 		if cap(t.bidiVisRows) < renderRows {
-			t.bidiVisRows = make([][]Cell, renderRows)
+			t.bidiVisRows = make([][]cell, renderRows)
 			t.bidiV2LRows = make([][]int, renderRows)
 		}
 		t.bidiVisRows = t.bidiVisRows[:renderRows]
@@ -339,7 +331,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 				continue
 			}
 			if cap(t.bidiScratch) < cols {
-				t.bidiScratch = make([]Cell, cols)
+				t.bidiScratch = make([]cell, cols)
 			} else {
 				t.bidiScratch = t.bidiScratch[:cols]
 			}
@@ -348,7 +340,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			}
 			t.bidiVisRows[r], t.bidiV2LRows[r] = visualReorder(t.bidiScratch, cols)
 		}
-		resolveVisual := func(r, c int) Cell {
+		resolveVisual := func(r, c int) cell {
 			if t.bidiVisRows[r] != nil {
 				return t.bidiVisRows[r][c]
 			}
@@ -357,7 +349,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 
 		// Resolve partial top row once for both bg and fg passes.
 		// Nil when there is no scrollback row above the current viewport.
-		var partialRow []Cell
+		var partialRow []cell
 		if renderYOff > 0 {
 			partialRow = g.partialTopRow()
 			if partialRow != nil && rowHasRTL(partialRow, cols) {
@@ -420,7 +412,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			// Trim trailing spaces when no decoration spans them: "abc   " and
 			// "abc" share a layout-cache entry, so trimming keeps cache hits
 			// stable as tail padding wobbles frame to frame.
-			if runStyle.ulStyle == ULNone && !runStyle.strikethrough {
+			if runStyle.ulStyle == ulNone && !runStyle.strikethrough {
 				text = strings.TrimRight(text, " ")
 				if text == "" {
 					runOpen = false
@@ -436,7 +428,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			cs.Strikethrough = runStyle.strikethrough
 			rowY := float32(r)*t.cellH + renderYOff
 			dc.Text(float32(runStart)*t.cellW, rowY, text, cs)
-			if runStyle.ulStyle != ULNone {
+			if runStyle.ulStyle != ulNone {
 				t.drawUnderlineDecor(dc,
 					float32(runStart)*t.cellW, rowY,
 					float32(runCols)*t.cellW,
@@ -546,7 +538,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 				}
 			}
 			if cell := g.At(g.CursorR, g.CursorC); cell != nil {
-				t.drawCursor(dc, cc, g.CursorR, *cell, g.CursorShape, style)
+				t.drawCursor(dc, cc, g.CursorR, *cell, g.cursorShape, style)
 			}
 		}
 
@@ -571,7 +563,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 
 	}()
 
-	// Resize the PTY outside the lock: the ioctl can block if the PTY fd
+	// Resize the pty outside the lock: the ioctl can block if the pty fd
 	// is in a degraded state, and holding Mu would stall readLoop.
 	if doResize {
 		if err := t.pty.Resize(rows, cols); err != nil {
@@ -582,7 +574,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 
 // cursorBlinkOff reports whether the cursor is currently in the
 // hidden half of its blink cycle. Returns false (always visible) for
-// steady cursors. Caller holds Grid.Mu.
+// steady cursors. Caller holds grid.Mu.
 func (t *Term) cursorBlinkOff(now time.Time) bool {
 	if !t.cursorBlinks() {
 		return false
@@ -595,12 +587,12 @@ func (t *Term) cursorBlinkOff(now time.Time) bool {
 // current shape. Block inverts the cell (filled bg + cell glyph in
 // fg's color); underline/bar overlay a thin filled rect on top of the
 // regular foreground glyph already drawn in the foreground pass.
-func (t *Term) drawCursor(dc *gui.DrawContext, col, row int, cell Cell,
-	shape CursorShape, style gui.TextStyle) {
+func (t *Term) drawCursor(dc *gui.DrawContext, col, row int, cell cell,
+	shape cursorShape, style gui.TextStyle) {
 	x := float32(col) * t.cellW
 	y := float32(row) * t.cellH
 	switch shape {
-	case CursorUnderline:
+	case cursorUnderline:
 		// Bottom-aligned bar 1/8th of the cell height (min 2px) so it
 		// stays visible at smaller font sizes.
 		h := t.cellH / 8
@@ -608,13 +600,13 @@ func (t *Term) drawCursor(dc *gui.DrawContext, col, row int, cell Cell,
 			h = 2
 		}
 		dc.FilledRect(x, y+t.cellH-h, t.cellW, h, t.grid.Theme.fg(cell))
-	case CursorBar:
+	case cursorBar:
 		w := t.cellW / 6
 		if w < 2 {
 			w = 2
 		}
 		dc.FilledRect(x, y, w, t.cellH, t.grid.Theme.fg(cell))
-	default: // CursorBlock
+	default: // cursorBlock
 		fillColor := t.grid.Theme.fg(cell)
 		if t.grid.CursorColor != DefaultColor {
 			fillColor = gui.RGB(uint8(t.grid.CursorColor>>16), uint8(t.grid.CursorColor>>8), uint8(t.grid.CursorColor))
@@ -628,7 +620,7 @@ func (t *Term) drawCursor(dc *gui.DrawContext, col, row int, cell Cell,
 
 // drawUnderlineDecor renders underline decorations for a text run.
 // x,y are the top-left of the run; w is its pixel width. Handles all
-// ULStyle values including ULSingle (drawn as a rect so ulColor is honored).
+// ULStyle values including ulSingle (drawn as a rect so ulColor is honored).
 func (t *Term) drawUnderlineDecor(dc *gui.DrawContext, x, y, w float32, ulStyle uint8, ulColor gui.Color) {
 	thick := t.cellH / 14
 	if thick < 1 {
@@ -636,12 +628,12 @@ func (t *Term) drawUnderlineDecor(dc *gui.DrawContext, x, y, w float32, ulStyle 
 	}
 	baseY := y + t.cellH - 2*thick - 1
 	switch ulStyle {
-	case ULSingle:
+	case ulSingle:
 		dc.FilledRect(x, baseY, w, thick, ulColor)
-	case ULDouble:
+	case ulDouble:
 		dc.FilledRect(x, baseY-thick-1, w, thick, ulColor)
 		dc.FilledRect(x, baseY, w, thick, ulColor)
-	case ULCurly:
+	case ulCurly:
 		// Approximate curly as alternating up/down segments.
 		seg := t.cellW * 2
 		if seg < 4 {
@@ -662,7 +654,7 @@ func (t *Term) drawUnderlineDecor(dc *gui.DrawContext, x, y, w float32, ulStyle 
 			xi += ww
 			up = !up
 		}
-	case ULDotted:
+	case ulDotted:
 		step := thick * 3
 		if step < 3 {
 			step = 3
@@ -672,7 +664,7 @@ func (t *Term) drawUnderlineDecor(dc *gui.DrawContext, x, y, w float32, ulStyle 
 			dc.FilledRect(xi, baseY, thick, thick, ulColor)
 			xi += step
 		}
-	case ULDashed:
+	case ulDashed:
 		dash := t.cellW * 3
 		if dash < 6 {
 			dash = 6
@@ -690,14 +682,14 @@ func (t *Term) drawUnderlineDecor(dc *gui.DrawContext, x, y, w float32, ulStyle 
 	}
 }
 
-func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell Cell, k runKey, base gui.TextStyle) {
+func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell cell, k runKey, base gui.TextStyle) {
 	cs := base
 	cs.Color = k.color
 	cs.Typeface = k.typeface
 	cs.Underline = false
 	cs.Strikethrough = k.strikethrough
 	dc.Text(x, y, t.termRuneStr(cell.Ch), cs)
-	if k.ulStyle != ULNone {
+	if k.ulStyle != ulNone {
 		t.drawUnderlineDecor(dc, x, y, float32(cell.Width)*t.cellW, k.ulStyle, k.ulColor)
 	}
 }
