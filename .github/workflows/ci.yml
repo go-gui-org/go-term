@@ -41,7 +41,8 @@ jobs:
             libharfbuzz-dev \
             libpango1.0-dev \
             libfontconfig1-dev \
-            libglib2.0-dev
+            libglib2.0-dev \
+            libhunspell-dev
 
       - name: Vet
         working-directory: go-term
@@ -85,7 +86,8 @@ jobs:
             libharfbuzz-dev \
             libpango1.0-dev \
             libfontconfig1-dev \
-            libglib2.0-dev
+            libglib2.0-dev \
+            libhunspell-dev
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
