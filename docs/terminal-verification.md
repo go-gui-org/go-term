@@ -5,7 +5,7 @@ This project verifies terminal-emulator behavior in three layers:
 1. Pure unit tests for grid, parser, PTY, and widget helpers.
 2. Replay tests that feed realistic escape streams and assert the final
    screen state.
-3. Manual compatibility checks in `cmd/demo` for GUI-only behavior.
+3. Manual compatibility checks in `examples/demo` for GUI-only behavior.
 
 ## Automated Suites
 
@@ -43,7 +43,7 @@ go test ./term -run EmulatorReplay
 Start the demo:
 
 ```bash
-cd cmd/demo
+cd examples/demo
 go run .
 ```
 

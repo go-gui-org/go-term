@@ -54,7 +54,7 @@ jobs:
 
       - name: Build demo
         working-directory: go-term
-        run: go build ./cmd/demo
+        run: go build ./examples/demo
 
       - name: Test
         working-directory: go-term

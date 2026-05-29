@@ -116,7 +116,7 @@ purpose and may still shift. See [CHANGELOG.md](CHANGELOG.md).
 
 ```bash
 git clone https://github.com/mike-ward/go-term.git
-cd go-term/cmd/demo
+cd go-term/examples/demo
 go run .
 ```
 
@@ -185,7 +185,7 @@ Three layers; dependencies flow strictly downward. Each layer is split
 across multiple files by concern.
 
 ```
-cmd/demo/main.go         gui.NewWindow + term.New + backend.Run
+examples/demo/main.go         gui.NewWindow + term.New + backend.Run
         │
         ▼
 term/widget.go           Term struct, New, View, Close; reader goroutine.
@@ -241,7 +241,7 @@ Replay-style emulator tests feed realistic byte streams into the parser and
 assert final screen state, cursor position, OSC side-effects, and host
 replies. See [docs/terminal-verification.md](docs/terminal-verification.md).
 
-Visual verification should complement the automated suite: run `cmd/demo`
+Visual verification should complement the automated suite: run `examples/demo`
 and exercise resize, redraw, selection, paste, and application compatibility
 (`vim`, `htop`, `tmux`).
 

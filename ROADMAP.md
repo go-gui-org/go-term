@@ -12,14 +12,14 @@ Kitty Keyboard Protocol, and pixel-perfect scrollback.
 Work remaining: native split panes/tabs, then 1.0 API stabilisation.
 
 Each phase below is sized for one focused PR, demo-testable by running
-`cd cmd/demo && go run .` and exercising the new behavior.
+`cd examples/demo && go run .` and exercising the new behavior.
 
 ## Architecture
 
 Three layers; dependencies flow downward:
 
 ```
-cmd/demo/main.go         gui.NewWindow + term.New + backend.Run
+examples/demo/main.go         gui.NewWindow + term.New + backend.Run
         │
         ▼
 term/widget.go           Term struct, New, View, Close; reader goroutine.
@@ -170,9 +170,9 @@ until real-world memory pressure warrants it.
 1. `go vet ./...` clean.
 2. `go build ./...` clean.
 3. `go test -race -count=1 ./...` passes.
-4. `cd cmd/demo && go run .` and verify visually.
+4. `cd examples/demo && go run .` and verify visually.
 5. Smoke matrix: `ls --color`, `cat /etc/hosts`, `vim` + `:q!`, resize → `stty size`, Ctrl+C interrupts `sleep 100`.
-6. CI: `go vet`, `go build ./cmd/demo`, `go test -race -count=1 ./...`, `golangci-lint`.
+6. CI: `go vet`, `go build ./examples/demo`, `go test -race -count=1 ./...`, `golangci-lint`.
 
 
 ## Resolved decisions

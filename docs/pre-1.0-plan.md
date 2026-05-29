@@ -36,8 +36,8 @@ Current CI is close but has gaps. Changes:
 
 ### Tasks
 - [x] Run `go vet ./...` instead of `go vet ./term`
-- [x] Run `go test ./...` instead of `go test ./term` (covers `cmd/demo` if tests added later)
-- [x] Add `go build ./cmd/demo` as an explicit build step
+- [x] Run `go test ./...` instead of `go test ./term` (covers `examples/demo` if tests added later)
+- [x] Add `go build ./examples/demo` as an explicit build step
 - [x] Add `go test -race -count=1 ./...` — already present but only for `./term`
 - [x] Bump `actions/checkout` from v4 to v5
 - [x] Add Go module cache (`actions/cache` or `setup-go` `cache: true`) for speed
@@ -57,7 +57,7 @@ The `replace` directives prevent building from a clean clone without local sibli
 - [ ] Replace `go.mod` `replace` directives with real version requirements
 - [x] Run `go mod tidy`
 - [x] Create `go.work.example` documenting `go work use ../go-gui ../go-glyph` for local dev
-- [ ] Verify: `git clone` to `/tmp`, `go build ./cmd/demo` works
+- [ ] Verify: `git clone` to `/tmp`, `go build ./examples/demo` works
 
 **Status:** Partially done. `go.work.example` exists. `replace` directives still active — waiting on go-gui/go-glyph tags. CI uses multi-checkout workaround.
 
