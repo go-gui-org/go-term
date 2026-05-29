@@ -148,7 +148,7 @@ func (t *Term) writeMouse(cb, col, row int, pixX, pixY float32, pixels, press bo
 	} else {
 		out = encodeMouseSGR(buf[:0], cb, col, row, press)
 	}
-	if err := t.writeHost(out); err != nil {
+	if _, err := t.pw.Write(out); err != nil {
 		log.Printf("term: pty mouse: %v", err)
 	}
 }
@@ -529,7 +529,7 @@ func (t *Term) momentumLoop() {
 					t.grid.ScrollViewPx(deltaPx, cellH)
 				}()
 				t.bumpVersion()
-				t.win.QueueCommand(func(w *gui.Window) {
+				t.cmd.QueueCommand(func(w *gui.Window) {
 					if t.closed.Load() {
 						return
 					}

@@ -15,7 +15,7 @@ func (t *Term) showScrollbar() {
 		t.scrollbarTimer = time.AfterFunc(scrollbarDuration+time.Millisecond, func() {
 			if !t.closed.Load() {
 				t.bumpVersion()
-				t.win.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
+				t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
 			}
 		})
 	} else {

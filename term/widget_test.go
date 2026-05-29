@@ -4,12 +4,14 @@ import (
 	"errors"
 	"math"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
 
-	glyph "github.com/mike-ward/go-glyph"
 	"github.com/mike-ward/go-gui/gui"
+
+	glyph "github.com/mike-ward/go-glyph"
 )
 
 // scrollbarThumb delegates to scrollbarGeometry so tests share the production formula.
@@ -64,7 +66,60 @@ func TestScrollbarGeometry_SubPixel(t *testing.T) {
 	}
 }
 
-// --- termRuneStr ---
+// recordingNotifier captures Notify calls for assertion in tests.
+type recordingNotifier struct {
+	calls []struct{ title, body string }
+	mu    sync.Mutex
+}
+
+func (r *recordingNotifier) Notify(title, body string) {
+	r.mu.Lock()
+	r.calls = append(r.calls, struct{ title, body string }{title, body})
+	r.mu.Unlock()
+}
+
+func TestNotify_DesktopNotifier_NoCallback(t *testing.T) {
+	// When OnNotify is nil, OSC 9/777 must reach the notifier interface.
+	rec := &recordingNotifier{}
+	g := newGrid(4, 80)
+	p := newParser(g)
+	tm := &Term{
+		grid:   g,
+		parser: p,
+		cfg:    Cfg{}, // OnNotify nil
+		notif:  rec,
+	}
+	tm.registerNotifyHandler()
+
+	// Bounded channel replaces time.Sleep — deterministic and fast.
+	notified := make(chan struct{}, 2)
+
+	// Wrap notif so each Notify call signals the channel.
+	tm.notif = notifierFunc(func(title, body string) {
+		rec.Notify(title, body)
+		notified <- struct{}{}
+	})
+
+	feed(t, g, p, []byte("\x1b]9;hello world\x07"))
+	<-notified
+
+	feed(t, g, p, []byte("\x1b]777;notify;my title;my body\x07"))
+	<-notified
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.calls) != 2 {
+		t.Fatalf("got %d notify calls, want 2", len(rec.calls))
+	}
+	if rec.calls[0].title != "" || rec.calls[0].body != "hello world" {
+		t.Errorf("OSC 9: got title=%q body=%q, want title=\"\" body=\"hello world\"",
+			rec.calls[0].title, rec.calls[0].body)
+	}
+	if rec.calls[1].title != "my title" || rec.calls[1].body != "my body" {
+		t.Errorf("OSC 777: got title=%q body=%q, want title=\"my title\" body=\"my body\"",
+			rec.calls[1].title, rec.calls[1].body)
+	}
+}
 
 // --- numeric helpers ---
 
@@ -220,13 +275,29 @@ func TestMouseSGRBaseButton_KnownButtons(t *testing.T) {
 	}
 }
 
+// writerFunc adapts a function literal to io.Writer.
+// Used to capture or inspect bytes written to the PTY in tests.
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(b []byte) (int, error) {
+	if f == nil {
+		return 0, nil
+	}
+	return f(b)
+}
+
+// notifierFunc adapts a function literal to the notifier interface.
+type notifierFunc func(title, body string)
+
+func (f notifierFunc) Notify(title, body string) { f(title, body) }
+
 func newTestTermCapture() (*Term, *[]byte) {
 	buf := make([]byte, 0, 64)
 	t := &Term{grid: newGrid(4, 8), lastMouseR: -1, lastMouseC: -1}
-	t.writeHost = func(b []byte) error {
+	t.pw = writerFunc(func(b []byte) (int, error) {
 		buf = append(buf, b...)
-		return nil
-	}
+		return len(b), nil
+	})
 	return t, &buf
 }
 
@@ -241,7 +312,7 @@ func TestTerm_OnWindowEvent_NoReportWhenFocusOff(t *testing.T) {
 }
 
 func TestTerm_OnWindowEvent_NilEventNoPanic(t *testing.T) {
-	term := &Term{grid: newGrid(1, 5), writeHost: func([]byte) error { return nil }}
+	term := &Term{grid: newGrid(1, 5), pw: writerFunc(func([]byte) (int, error) { return 0, nil })}
 	term.onWindowEvent(nil) // must not panic
 }
 
@@ -280,7 +351,7 @@ func TestTerm_OnWindowEvent_FocusReporting(t *testing.T) {
 
 func TestTerm_WriteBytes_UsesWriteHost(t *testing.T) {
 	term := &Term{}
-	term.writeHost = func([]byte) error { return errors.New("boom") }
+	term.pw = writerFunc(func([]byte) (int, error) { return 0, errors.New("boom") })
 	term.writeBytes([]byte("x"))
 }
 
@@ -706,7 +777,7 @@ func TestTerm_PosToCell_NaNInfCollapseToZero(t *testing.T) {
 
 func TestTerm_OnChar_SearchMode_AppendAndCap(t *testing.T) {
 	term, _ := newTestTermCapture()
-	term.win = &gui.Window{}
+	term.cmd = &gui.Window{}
 	term.searchActive = true
 
 	e := &gui.Event{CharCode: 'a'}
@@ -735,7 +806,7 @@ func TestTerm_OnChar_SearchMode_AppendAndCap(t *testing.T) {
 
 func TestTerm_SearchJump_ForwardFindsMatch(t *testing.T) {
 	term, _ := newTestTermCapture()
-	term.win = &gui.Window{}
+	term.cmd = &gui.Window{}
 	putRow(term.grid, "hello")
 	term.searchQuery = "hello"
 	term.searchJump(true, &gui.Window{})
@@ -749,14 +820,14 @@ func TestTerm_SearchJump_ForwardFindsMatch(t *testing.T) {
 
 func TestTerm_SearchJump_NoMatchDoesNotPanic(t *testing.T) {
 	term, _ := newTestTermCapture()
-	term.win = &gui.Window{}
+	term.cmd = &gui.Window{}
 	term.searchQuery = "xyzzy_not_present"
 	term.searchJump(true, &gui.Window{}) // must not panic
 }
 
 func TestTerm_SearchJump_EmptyQuery_Nop(t *testing.T) {
 	term, _ := newTestTermCapture()
-	term.win = &gui.Window{}
+	term.cmd = &gui.Window{}
 	term.searchQuery = ""
 	term.searchJump(true, &gui.Window{}) // early return, must not panic
 }
@@ -1468,6 +1539,45 @@ func TestClose_Idempotent(t *testing.T) {
 	}
 }
 
+func TestClose_FullIntegration(t *testing.T) {
+	pty, err := startPTY(24, 80)
+	if err != nil {
+		t.Skipf("startPTY: %v", err)
+	}
+	g := newGrid(24, 80)
+	tm := &Term{
+		cfg:        Cfg{},
+		grid:       g,
+		parser:     newParser(g),
+		pty:        pty,
+		pw:         pty,
+		cmd:        &gui.Window{},
+		notif:      desktopNotifier{},
+		blinkDone:  make(chan struct{}),
+		readDone:   make(chan struct{}),
+		lastMouseR: -1,
+		lastMouseC: -1,
+	}
+	tm.hoverR.Store(-1)
+	tm.hoverC.Store(-1)
+
+	// Start readLoop so Close can observe it drain.
+	go tm.readLoop()
+
+	// Close must stop the reader, close the pty, and be idempotent.
+	if err := tm.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := tm.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+
+	// PTY writes must fail after close.
+	if _, err := pty.Write([]byte("x")); err == nil {
+		t.Error("pty.Write after Close should fail")
+	}
+}
+
 func TestCursorBlinks_CfgOverride(t *testing.T) {
 	g := newGrid(24, 80)
 	g.CursorBlink = false
@@ -1529,20 +1639,20 @@ func TestOpenURL_BlockedSchemes(t *testing.T) {
 // --- flushPendingReplies ---
 
 func TestFlushPendingReplies_EmptyNoOp(t *testing.T) {
-	term := &Term{writeHost: func([]byte) error {
-		t.Error("writeHost must not be called for empty queue")
-		return nil
-	}}
-	term.flushPendingReplies() // must not panic or call writeHost
+	term := &Term{pw: writerFunc(func([]byte) (int, error) {
+		t.Error("pw.Write must not be called for empty queue")
+		return 0, nil
+	})}
+	term.flushPendingReplies() // must not panic or call pw.Write
 }
 
 func TestFlushPendingReplies_ErrorPath(t *testing.T) {
 	calls := 0
 	term := &Term{
-		writeHost: func(b []byte) error {
+		pw: writerFunc(func(b []byte) (int, error) {
 			calls++
-			return errTestBoom
-		},
+			return 0, errTestBoom
+		}),
 		pendingReplies: [][]byte{
 			[]byte("reply1"),
 			[]byte("reply2"),
@@ -1551,7 +1661,7 @@ func TestFlushPendingReplies_ErrorPath(t *testing.T) {
 	// Errors are logged, not returned; all pending replies are processed.
 	term.flushPendingReplies()
 	if calls != 2 {
-		t.Errorf("writeHost called %d times, want 2", calls)
+		t.Errorf("pw.Write called %d times, want 2", calls)
 	}
 	if term.pendingReplies != nil {
 		t.Errorf("pendingReplies not cleared: %v", term.pendingReplies)
@@ -1617,7 +1727,7 @@ func TestCancelMomentum_BeforeFirstScrollNoPanic(t *testing.T) {
 	term.cancelMomentum() // must not panic — nil-guarded inside
 }
 
-// errTestBoom is a sentinel error for writeHost failure tests.
+// errTestBoom is a sentinel error for ptyWriter failure tests.
 var errTestBoom = errors.New("boom")
 
 // --- benchmarks ---

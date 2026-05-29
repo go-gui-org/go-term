@@ -18,11 +18,11 @@
 | 3. Public API Audit | ✅ Done — chose unexport over `internal/` |
 | 4. Package Docs/Examples | ✅ Done |
 | 5. Integration Replay Fixtures | ✅ Done — 7 JSON fixtures, fixture capture docs |
-| 6. Term Boundary Refactor | 🔶 Mostly done — helpers extracted, tests added, no formal interfaces |
+| 6. Term Boundary Refactor | ✅ Done — ptyWriter, cmdScheduler, notifier interfaces; Close integration test |
 | 7. Roadmap Refresh | ✅ Done |
 | 8. Benchmark Tracking | ✅ Done — 9 benchmarks, CI bench job, Makefile `bench` target |
 
-Remaining work: none. Item 6 (formal interfaces) is optional — current test coverage is adequate via `writeHost` func field.
+Remaining work: none. All 8 items complete.
 
 | Replay tests | 4 hardcoded cases + 7 JSON fixtures, `TestCaptureFixture` helper |
 | Package docs | `doc.go` + `example_test.go` added, `docs/fixture-capture.md` |
@@ -152,7 +152,7 @@ The replay test has 4 hardcoded cases. Real fixtures give confidence for protoco
 Introduce internal interfaces so `Term` lifecycle can be tested without a GUI window.
 
 ### Tasks
-- [ ] Define internal interfaces (`ptyWriter`, `commandScheduler`, `notificationSender`)
+- [x] Define internal interfaces (`ptyWriter`, `cmdScheduler`/`commandScheduler`, `notifier`/`notificationSender`)
 - [x] Extract `New`'s body into focused helpers: `startPTY`, `applyScrollbackConfig`, `buildThemeMenu`, `applyTheme`, `sendDesktopNotify`
 - [x] Add tests for:
   - Scrollback config bounds (default, custom, clamped, disabled)
@@ -160,11 +160,12 @@ Introduce internal interfaces so `Term` lifecycle can be tested without a GUI wi
   - Parser reply dispatch (DA1 covered by emulator replay tests)
   - OSC notification dedup (`TestTerm_NotifyBusy_ExtrasDropped`)
   - `Close` idempotency (`TestClose_Idempotent` — guard only, not full path)
+  - `Close` full integration (`TestClose_FullIntegration` — real PTY lifecycle)
   - Resize scheduling (`TestScheduleResizeWake_*`)
   - `flushPendingReplies` empty/error paths
 - [x] Public API unchanged: `New(w *gui.Window, cfg Cfg) (*Term, error)` kept
 
-**Status:** Mostly done. Internal interfaces not formally defined (`writeHost` func field already serves as ptyWriter/test seam). Full Close integration test needs a real pty — partial coverage.
+**Status:** Done. `ptyWriter`, `cmdScheduler`, and `notifier` interfaces extracted. `win` field removed — `*gui.Window` satisfies `cmdScheduler`. `writerFunc` adapter enables test capture. `desktopNotifier` wraps the osascript/notify-send calls.
 
 ---
 

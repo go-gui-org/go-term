@@ -1,6 +1,7 @@
 package term
 
 import (
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -14,6 +15,26 @@ import (
 
 	"github.com/mike-ward/go-gui/gui"
 )
+
+// cmdScheduler schedules callbacks on the GUI main thread. *gui.Window
+// satisfies this via its QueueCommand method. Tests replace it with a
+// synchronous executor so callbacks run inline and assertions work without
+// a real window.
+type cmdScheduler interface {
+	QueueCommand(func(*gui.Window))
+}
+
+// notifier sends desktop notifications. The production implementation
+// shells out to osascript (macOS) or notify-send (Linux). Tests replace it
+// with a no-op or recorder.
+type notifier interface {
+	Notify(title, body string)
+}
+
+// desktopNotifier is the production notifier backed by osascript / notify-send.
+type desktopNotifier struct{}
+
+func (desktopNotifier) Notify(title, body string) { sendDesktopNotify(title, body) }
 
 // Cfg configures a Term widget. All fields optional.
 type Cfg struct {
@@ -92,7 +113,6 @@ type Term struct {
 	grid   *grid
 	parser *parser
 	pty    *ptyDev
-	win    *gui.Window
 
 	// cell metrics measured on first draw and reused thereafter. Both
 	// zero until the first OnDraw.
@@ -140,7 +160,7 @@ type Term struct {
 	blinkDone chan struct{}
 
 	// readDone is closed by readLoop when it exits. Close waits on it so
-	// no further win.QueueCommand calls can arrive after Close returns.
+	// no further cmd.QueueCommand calls can arrive after Close returns.
 	readDone chan struct{}
 
 	// autoScrollDir drives the selection auto-scroll goroutine during a
@@ -155,9 +175,18 @@ type Term struct {
 	// both the main thread and the reader goroutine, hence atomic.
 	drawVersion atomic.Uint64
 
-	// writeHost forwards bytes to the pty. Tests replace this with a
-	// buffer sink so key/focus behavior can be asserted without a live pty.
-	writeHost func([]byte) error
+	// pw writes bytes to the pty slave. In production this is the *ptyDev
+	// itself (*os.File satisfies io.Writer). Tests replace it with a buffer
+	// sink so key/focus behavior can be asserted without a live pty.
+	pw io.Writer
+
+	// cmd schedules callbacks on the GUI main thread. In production this is
+	// the *gui.Window itself. Tests replace it with a synchronous executor.
+	cmd cmdScheduler
+
+	// notif sends desktop notifications (OSC 9 / OSC 777). Production uses
+	// desktopNotifier (osascript / notify-send). Tests replace with a no-op.
+	notif notifier
 
 	// Search state. All fields accessed on the GUI goroutine only (onChar,
 	// onKeyDown, onDraw) — no lock required.
@@ -257,7 +286,7 @@ type Term struct {
 
 	// pendingReplies buffers parser-originated reply bytes (DA, DECRQSS,
 	// XTGETTCAP, ...) emitted during parser.Feed. Drained by readLoop
-	// after grid.Mu is released so writeHost (which can block when the
+	// after grid.Mu is released so pw.Write (which can block when the
 	// pty slave-side input buffer is full) cannot deadlock against
 	// onDraw waiting for the same lock. Owned by the readLoop goroutine
 	// — append (via onParserReply called from inside Feed) and drain
@@ -318,7 +347,9 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		grid:           g,
 		parser:         newParser(g),
 		pty:            pty,
-		win:            w,
+		pw:             pty,
+		cmd:            w,
+		notif:          desktopNotifier{},
 		lastMouseR:     -1,
 		lastMouseC:     -1,
 		cursorEpoch:    time.Now(),
@@ -329,13 +360,6 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	}
 	t.hoverR.Store(-1)
 	t.hoverC.Store(-1)
-	// os.File.Write holds an internal mutex, so concurrent calls from
-	// readLoop (parser replies) and the GUI goroutine (key/mouse input)
-	// are safe without an extra lock here.
-	t.writeHost = func(b []byte) error {
-		_, err := t.pty.Write(b)
-		return err
-	}
 	if dir, err := os.MkdirTemp("", "go-term-gfx-*"); err == nil {
 		t.gfxDir = dir
 		t.parser.SetGraphicsDir(dir)
@@ -346,25 +370,12 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	if cfg.AllowOSC52Write {
 		t.parser.SetClipboardHandler(func(data []byte) {
 			text := string(data)
-			t.win.QueueCommand(func(w *gui.Window) {
+			t.cmd.QueueCommand(func(w *gui.Window) {
 				w.SetClipboard(text)
 			})
 		})
 	}
-	t.parser.SetNotifyHandler(func(title, body string) {
-		if !t.notifyBusy.CompareAndSwap(false, true) {
-			return
-		}
-		fn := t.cfg.OnNotify
-		go func() {
-			defer t.notifyBusy.Store(false)
-			if fn != nil {
-				fn(title, body)
-			} else {
-				sendDesktopNotify(title, body)
-			}
-		}()
-	})
+	t.registerNotifyHandler()
 	prevOnEvent := w.OnEvent
 	w.OnEvent = func(e *gui.Event, w *gui.Window) {
 		t.onWindowEvent(e)
@@ -403,7 +414,7 @@ func (t *Term) blinkLoop() {
 			}()
 			if redraw {
 				t.bumpVersion()
-				t.win.QueueCommand(func(w *gui.Window) {
+				t.cmd.QueueCommand(func(w *gui.Window) {
 					w.UpdateWindow()
 				})
 			}
@@ -434,7 +445,7 @@ func (t *Term) autoScrollLoop() {
 				t.grid.ScrollView(dir)
 			}()
 			t.bumpVersion()
-			t.win.QueueCommand(func(w *gui.Window) {
+			t.cmd.QueueCommand(func(w *gui.Window) {
 				if t.closed.Load() {
 					return
 				}
@@ -455,12 +466,31 @@ func (t *Term) cursorBlinks() bool {
 	return t.grid.CursorBlink
 }
 
+// registerNotifyHandler wires the OSC 9 / OSC 777 notification path.
+// Extracted so tests can reuse the same handler without copy-paste drift.
+func (t *Term) registerNotifyHandler() {
+	t.parser.SetNotifyHandler(func(title, body string) {
+		if !t.notifyBusy.CompareAndSwap(false, true) {
+			return
+		}
+		fn := t.cfg.OnNotify
+		go func() {
+			defer t.notifyBusy.Store(false)
+			if fn != nil {
+				fn(title, body)
+			} else {
+				t.notif.Notify(title, body)
+			}
+		}()
+	})
+}
+
 // onParserTitle is the OSC 0/1/2 handler. Runs on the reader goroutine
 // while grid.Mu is held — must not touch *gui.Window state directly,
 // hence the QueueCommand hop.
 func (t *Term) onParserTitle(title string) {
 	fn := t.cfg.OnTitle
-	t.win.QueueCommand(func(w *gui.Window) {
+	t.cmd.QueueCommand(func(w *gui.Window) {
 		if fn != nil {
 			fn(title)
 			return
@@ -481,7 +511,7 @@ func (t *Term) scheduleResizeWake(d time.Duration) {
 			return
 		}
 		t.bumpVersion()
-		t.win.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
+		t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
 	}
 	if t.resizeTimer == nil {
 		t.resizeTimer = time.AfterFunc(d, wake)
@@ -539,7 +569,7 @@ func (t *Term) flushPendingReplies() {
 	pending := t.pendingReplies
 	t.pendingReplies = nil
 	for _, b := range pending {
-		if err := t.writeHost(b); err != nil {
+		if _, err := t.pw.Write(b); err != nil {
 			log.Printf("term: pty reply: %v", err)
 		}
 	}
@@ -556,11 +586,9 @@ func (t *Term) onWindowEvent(e *gui.Event) {
 		t.cancelMomentum()
 	}
 	var report []byte
-	focus := func() bool {
-		t.grid.Mu.Lock()
-		defer t.grid.Mu.Unlock()
-		return t.grid.FocusReporting
-	}()
+	t.grid.Mu.Lock()
+	focus := t.grid.FocusReporting
+	t.grid.Mu.Unlock()
 	if !focus {
 		return
 	}
@@ -572,7 +600,7 @@ func (t *Term) onWindowEvent(e *gui.Event) {
 	default:
 		return
 	}
-	if err := t.writeHost(report); err != nil {
+	if _, err := t.pw.Write(report); err != nil {
 		log.Printf("term: pty focus report: %v", err)
 	}
 }
@@ -663,7 +691,7 @@ func (t *Term) Close() error {
 	// Wait for readLoop to drain, but don't hang forever if the pty fd
 	// is in a degraded state where close doesn't unblock an in-progress
 	// read. When this timeout fires, readLoop may still be alive and
-	// could call win.QueueCommand after we return. Callers must ensure
+	// could call cmd.QueueCommand after we return. Callers must ensure
 	// the window outlives any such late callback, or call Close only
 	// from the main thread immediately before window teardown.
 	readTimer := time.NewTimer(2 * time.Second)
@@ -673,7 +701,7 @@ func (t *Term) Close() error {
 	case <-readTimer.C:
 	}
 	// Wait for auxiliary goroutines to exit cleanly so they cannot
-	// reference t.win or other state after we return.
+	// reference t.cmd or other state after we return.
 	t.loopWg.Wait()
 	if t.resizeTimer != nil {
 		t.resizeTimer.Stop()
@@ -714,7 +742,7 @@ func (t *Term) readLoop() {
 			// stall onDraw waiting for the same lock.
 			t.flushPendingReplies()
 			if redraw && dirty {
-				t.win.QueueCommand(func(w *gui.Window) {
+				t.cmd.QueueCommand(func(w *gui.Window) {
 					if bellCount > t.bellSeenCount {
 						t.bellSeenCount = bellCount
 						t.bellFlashUntil = time.Now().Add(bellFlashDuration)
@@ -734,7 +762,7 @@ func (t *Term) readLoop() {
 								}
 							}
 							t.bumpVersion()
-							t.win.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
+							t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
 						}()
 					}
 					w.UpdateWindow()
@@ -760,7 +788,7 @@ func (t *Term) style() gui.TextStyle {
 func (t *Term) bumpVersion() { t.drawVersion.Add(1) }
 
 func (t *Term) writeBytes(out []byte) {
-	if err := t.writeHost(out); err != nil {
+	if _, err := t.pw.Write(out); err != nil {
 		log.Printf("term: pty write: %v", err)
 	}
 }
