@@ -23,6 +23,12 @@ Run only the replay-style emulator checks:
 go test ./term -run EmulatorReplay
 ```
 
+Run only the conformance smoke tests (vttest-parity checks):
+
+```bash
+go test ./term -run TestConformance
+```
+
 ## Capability Matrix
 
 | Capability | Verification |
@@ -37,6 +43,7 @@ go test ./term -run EmulatorReplay
 | Bracketed paste, focus reporting, mouse modes, sync output | `parser_test.go`, `widget_test.go`, `emulator_replay_test.go` |
 | PTY startup and resize plumbing | `pty_test.go` |
 | GUI-only selection, scrolling, clipboard, redraw behavior | `widget_test.go` plus manual demo runs |
+| Conformance smoke tests (vttest-parity) | `conformance_test.go` |
 
 ## Manual Checks
 
@@ -78,5 +85,6 @@ For broader compatibility work, use:
 - real application checks with `vim`, `less`, `tmux`, `htop`, and shell
   line editing
 
-Treat those as complementary to the Go tests here. They catch integration
-gaps that are hard to model with parser-only assertions.
+Treat those as complementary to the Go conformance tests in
+`conformance_test.go`. The conformance tests automate the most common
+vttest checks as replay-style assertions that run in CI on every push.

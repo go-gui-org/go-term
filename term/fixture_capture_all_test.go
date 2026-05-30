@@ -180,7 +180,7 @@ func bracketedPasteFixture() fixtureScenario {
 	var s strings.Builder
 
 	s.WriteString("\x1b[2J\x1b[H") // clear + home
-	s.WriteString("\x1b[32m")       // green prompt
+	s.WriteString("\x1b[32m")      // green prompt
 	s.WriteString("user@host:~$ ")
 	s.WriteString("\x1b[0m")
 	s.WriteString("\x1b[?2004h") // enable bracketed paste
@@ -231,9 +231,9 @@ func kittySixelFixture(t *testing.T) fixtureScenario {
 	// columns in two bands. cellPxH=16 → ceil(12/16)=1 cell row tall.
 	// cellPxW=8 → ceil(10/8)=2 cell cols wide.
 	sixelBody := "#1;2;100;0;0" // register 1 = pure red
-	sixelBody += "#1!10~"        // band 0: 10 columns
-	sixelBody += "-"             // next band
-	sixelBody += "#1!10~"        // band 1: 10 columns
+	sixelBody += "#1!10~"       // band 0: 10 columns
+	sixelBody += "-"            // next band
+	sixelBody += "#1!10~"       // band 1: 10 columns
 	sixelPayload := "0;0;0q" + sixelBody
 	s.WriteByte(0x1b)
 	s.WriteString("P" + sixelPayload)
@@ -277,7 +277,7 @@ func kittySixelFixture(t *testing.T) fixtureScenario {
 	// --- A second sixel right next to the first text line ---
 	// Blue sixel at row 5.
 	sixel2 := "#2;2;0;0;100" // register 2 = blue
-	sixel2 += "#2!15~"        // 15 columns wide
+	sixel2 += "#2!15~"       // 15 columns wide
 	sixel2 += "-"
 	sixel2 += "#2!15~"
 	s.WriteByte(0x1b)
@@ -324,9 +324,9 @@ func bidiFixture() fixtureScenario {
 	// Row 3: Mixed LTR/RTL on one line.
 	s.WriteString("\x1b[4;1H")
 	s.WriteString("Hello ")
-	s.WriteString("مرحبا")  // Arabic
+	s.WriteString("مرحبا") // Arabic
 	s.WriteString(" World ")
-	s.WriteString("שלום")   // Hebrew
+	s.WriteString("שלום") // Hebrew
 	s.WriteString(" !")
 
 	// Row 4: RTL text with Latin-script numbers.
