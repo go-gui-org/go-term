@@ -350,6 +350,82 @@ func newTestTermCapture() (*Term, *[]byte) {
 	return t, &buf
 }
 
+// syncScheduler runs QueueCommand callbacks immediately inline so tests
+// can observe side effects (UpdateWindow, display changes, etc.) without a
+// real GUI main loop.
+type syncScheduler struct{}
+
+func (syncScheduler) QueueCommand(fn func(*gui.Window)) { fn(&gui.Window{}) }
+
+// testTextMeasurer implements gui.TextMeasurer with fixed cell dimensions.
+// TextWidth returns cellW * len(text) so "M" measures as cellW.
+type testTextMeasurer struct {
+	cellW, cellH float32
+}
+
+func (m testTextMeasurer) TextWidth(text string, _ gui.TextStyle) float32 {
+	return m.cellW * float32(len(text))
+}
+func (m testTextMeasurer) TextHeight(_ string, _ gui.TextStyle) float32 { return m.cellH }
+func (m testTextMeasurer) FontHeight(_ gui.TextStyle) float32           { return m.cellH }
+func (m testTextMeasurer) FontAscent(_ gui.TextStyle) float32           { return m.cellH * 0.8 }
+func (m testTextMeasurer) LayoutText(_ string, _ gui.TextStyle, _ float32) (glyph.Layout, error) {
+	return glyph.Layout{}, nil
+}
+
+// newDrawTerm creates a Term ready for direct OnDraw testing. cellW and
+// cellH are preset so OnDraw's measurement guard passes. Returns the Term
+// and a DrawContext whose dimensions match the grid.
+func newDrawTerm(rows, cols int, cellW, cellH float32) (*Term, *gui.DrawContext) {
+	g := newGrid(rows, cols)
+	t := &Term{
+		grid:  g,
+		cellW: cellW,
+		cellH: cellH,
+		cmd:   syncScheduler{},
+	}
+	t.mouse.hoverR.Store(-1)
+	t.mouse.hoverC.Store(-1)
+	tm := testTextMeasurer{cellW: cellW, cellH: cellH}
+	dc := gui.NewDrawContext(float32(cols)*cellW, float32(rows)*cellH, tm)
+	return t, dc
+}
+
+// newMouseTerm creates a Term configured for mouse event testing.
+// cellW/cellH are set to 10/20 for coordinate-to-cell mapping.
+// Returns a capture buffer for asserting PTY bytes written by mouse reports.
+func newMouseTerm(rows, cols int) (*Term, *[]byte) {
+	buf := make([]byte, 0, 64)
+	t := &Term{
+		grid:  newGrid(rows, cols),
+		cellW: 10,
+		cellH: 20,
+		pw: writerFunc(func(b []byte) (int, error) {
+			buf = append(buf, b...)
+			return len(b), nil
+		}),
+		cmd: syncScheduler{},
+	}
+	t.mouse.lastR = -1
+	t.mouse.lastC = -1
+	t.mouse.hoverR.Store(-1)
+	t.mouse.hoverC.Store(-1)
+	return t, &buf
+}
+
+// newScrollTerm creates a Term configured for scroll handler testing,
+// using syncScheduler so QueueCommand callbacks execute immediately.
+func newScrollTerm(rows, cols int) *Term {
+	g := newGrid(rows, cols)
+	t := &Term{
+		grid:  g,
+		cellW: 10,
+		cellH: 20,
+		cmd:   syncScheduler{},
+	}
+	return t
+}
+
 func TestTerm_OnWindowEvent_NoReportWhenFocusOff(t *testing.T) {
 	term, buf := newTestTermCapture()
 	// FocusReporting defaults to false
@@ -1827,5 +1903,95 @@ func BenchmarkDrawPrep_DirtyRows(b *testing.B) {
 			}
 		}
 		g.dirtyCount = rows / 2
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle loop tests
+// ---------------------------------------------------------------------------
+
+func TestBlinkLoop_ExitsOnBlinkDone(t *testing.T) {
+	tm := &Term{
+		grid:      newGrid(24, 80),
+		blinkDone: make(chan struct{}),
+	}
+	tm.loopWg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		tm.blinkLoop()
+		close(done)
+	}()
+	close(tm.blinkDone)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("blinkLoop did not exit within timeout")
+	}
+}
+
+func TestAutoScrollLoop_ExitsOnBlinkDone(t *testing.T) {
+	tm := &Term{
+		grid:      newGrid(24, 80),
+		blinkDone: make(chan struct{}),
+	}
+	tm.loopWg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		tm.autoScrollLoop()
+		close(done)
+	}()
+	close(tm.blinkDone)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("autoScrollLoop did not exit within timeout")
+	}
+}
+
+func TestMomentumLoop_ExitsOnBlinkDone(t *testing.T) {
+	tm := &Term{
+		grid:      newGrid(24, 80),
+		blinkDone: make(chan struct{}),
+		momentum:  momentumState{kick: make(chan struct{}, 1)},
+	}
+	tm.loopWg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		tm.momentumLoop()
+		close(done)
+	}()
+	close(tm.blinkDone)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("momentumLoop did not exit within timeout")
+	}
+}
+
+func TestClose_StopsAuxiliaryGoroutines(t *testing.T) {
+	g := newGrid(24, 80)
+	tm := &Term{
+		grid:      g,
+		blinkDone: make(chan struct{}),
+		readDone:  make(chan struct{}),
+		momentum:  momentumState{kick: make(chan struct{}, 1)},
+		pw:        writerFunc(func([]byte) (int, error) { return 0, nil }),
+	}
+	tm.closed.Store(true)
+	close(tm.blinkDone)
+	close(tm.readDone)
+	tm.loopWg.Add(3)
+	go tm.blinkLoop()
+	go tm.autoScrollLoop()
+	go tm.momentumLoop()
+	done := make(chan struct{})
+	go func() {
+		tm.loopWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("loop goroutines did not exit within timeout")
 	}
 }
