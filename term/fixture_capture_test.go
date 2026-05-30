@@ -31,7 +31,7 @@ func TestCaptureFixture(t *testing.T) {
 	p.SetTitleHandler(func(s string) { gotTitle = s })
 	feed(t, g, p, input)
 
-	f := fixture{
+	f := Fixture{
 		Name:      name,
 		Rows:      rows,
 		Cols:      cols,

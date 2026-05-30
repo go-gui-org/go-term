@@ -8,28 +8,14 @@ import (
 	"testing"
 )
 
-// fixture is a replay-test scenario stored on disk. Input bytes are
-// base64-encoded so control characters survive any text editor round-trip.
-type fixture struct {
-	Name      string   `json:"name"`
-	Rows      int      `json:"rows"`
-	Cols      int      `json:"cols"`
-	InputB64  string   `json:"input_b64"`
-	WantLines []string `json:"want_lines"`
-	WantRow   int      `json:"want_row"`
-	WantCol   int      `json:"want_col"`
-	WantTitle string   `json:"want_title,omitempty"`
-	WantCwd   string   `json:"want_cwd,omitempty"`
-}
-
 // loadFixtures reads all .json fixture files from testdata/.
-func loadFixtures(t *testing.T) []fixture {
+func loadFixtures(t *testing.T) []Fixture {
 	t.Helper()
 	ents, err := os.ReadDir("testdata")
 	if err != nil {
 		t.Fatalf("read testdata: %v", err)
 	}
-	var out []fixture
+	var out []Fixture
 	for _, e := range ents {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
@@ -39,7 +25,7 @@ func loadFixtures(t *testing.T) []fixture {
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		var f fixture
+		var f Fixture
 		if err := json.Unmarshal(b, &f); err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}
@@ -58,7 +44,7 @@ func loadFixtures(t *testing.T) []fixture {
 }
 
 // decodeFixtureInput returns the decoded input bytes for a fixture.
-func decodeFixtureInput(t *testing.T, f fixture) []byte {
+func decodeFixtureInput(t *testing.T, f Fixture) []byte {
 	t.Helper()
 	input, err := base64.StdEncoding.DecodeString(f.InputB64)
 	if err != nil {

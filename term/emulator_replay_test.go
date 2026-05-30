@@ -6,22 +6,6 @@ import (
 	"testing"
 )
 
-func gridLines(g *grid) []string {
-	lines := make([]string, g.Rows)
-	for r := range g.Rows {
-		row := make([]rune, g.Cols)
-		for c := range g.Cols {
-			ch := g.At(r, c).Ch
-			if ch == 0 {
-				ch = ' '
-			}
-			row[c] = ch
-		}
-		lines[r] = string(row)
-	}
-	return lines
-}
-
 func TestEmulatorReplay(t *testing.T) {
 	t.Parallel()
 
