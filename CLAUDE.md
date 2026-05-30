@@ -42,20 +42,16 @@ GUI-bound, so keep validating visually by running `examples/demo` and trying
 `ls`, `cat`, ANSI color output, window resize, selection/copy, and
 full-screen apps such as `vim` or `less`.
 
-## Local replace dependency
+## Local dev with sibling dependencies
 
-`go.mod` uses `replace` directives pointing at sibling working trees:
+`go.mod` references published versions of `go-gui` and `go-glyph`.
+For local development against in-progress sibling changes, copy
+`go.work.example` to `go.work` at the repo root. The workspace file
+wires sibling working trees at `../go-gui` and `../go-glyph` into the
+module graph so `go build` picks up uncommitted edits immediately.
 
-```
-replace (
-    github.com/mike-ward/go-glyph => ../go-glyph
-    github.com/mike-ward/go-gui   => ../go-gui
-)
-```
-
-Both sibling repos must be present at `../go-gui` and `../go-glyph`
-relative to this repo's root. Edits in those trees are picked up
-immediately by `go build`.
+Both sibling repos must be present at those paths. Remove or unset
+`GOWORK` to switch back to the published versions.
 
 ## Architecture
 

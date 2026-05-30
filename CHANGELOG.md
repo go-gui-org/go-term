@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Fuzz testing for parser input on PRs that touch parser files.
+- Benchmark regression gates with a zero-allocation hard gate for the
+  foreground-pass hot path.
+- Conformance smoke tests for vttest-parity VT/xterm edge cases.
+- Whole-app replay fixtures covering tmux, paste, graphics, BiDi, and mouse.
+- `script2fixture` tool for capturing replay fixtures from `script(1)`
+  typescripts.
+
 ## [0.2.0-rc.1] - 2026-05-30
 
 ### Added

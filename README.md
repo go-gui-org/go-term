@@ -332,8 +332,7 @@ and exercise resize, redraw, selection, paste, and application compatibility
 |---|---|
 | IME composition / dead keys | Requires platform input-method integration |
 | Windows / ConPTY | PTY layer is POSIX-only |
-| Font ligatures | Requires a full text shaper (HarfBuzz / go-text) |
-| Native splits and tabs | Layout manager above `Term`; planned, not started |
+| Native splits and tabs | Phase 39 — active development (see ROADMAP.md) |
 
 ---
 
