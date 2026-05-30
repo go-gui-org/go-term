@@ -66,4 +66,3 @@ func decodeFixtureInput(t *testing.T, f fixture) []byte {
 	}
 	return input
 }
-

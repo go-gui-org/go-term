@@ -75,22 +75,20 @@ func scrollbarGeometry(sbLen, rows int, viewOffset float32, viewH float32) (thum
 	return
 }
 
-// searchRenderRows returns the number of rows available for terminal content
-// rendering. When the search bar is active it reserves 1 row for the overlay;
-// during sub-pixel scroll (renderYOff > 0) it reserves an additional row to
-// prevent foreground text from bleeding into the search bar background.
-func searchRenderRows(rows int, searchActive bool, renderYOff float32) int {
-	if !searchActive {
-		return rows
-	}
+// searchOverlap returns the number of grid rows whose text footprint
+// overlaps the search bar's pixel region. Row r's text footprint spans
+// [r*cellH+renderYOff, (r+1)*cellH+renderYOff). The search bar occupies
+// [canvasHeight-cellH, canvasHeight). go-gui renders all Text on top of
+// all FilledRects within a single frame, so terminal text in that region
+// would paint over the search bar background — we keep it out by
+// reserving overlapping rows.
+func searchOverlap(cellH, renderYOff, canvasHeight float32, rows int) int {
+	searchBarTop := canvasHeight - cellH
 	r := rows - 1
-	if renderYOff > 0 {
+	for r >= 0 && float32(r+1)*cellH+renderYOff > searchBarTop {
 		r--
 	}
-	if r < 0 {
-		return 0
-	}
-	return r
+	return rows - 1 - r
 }
 
 // vMatch records a single search-highlight span within a viewport row.
@@ -310,14 +308,18 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			return cell
 		}
 
-		// When the search bar is active it owns the last row. Skip that row
-		// in both passes. During sub-pixel scroll (renderYOff > 0) all
-		// content rows are shifted downward, so the last content row's
-		// foreground glyphs can bleed into the search bar — rendering
-		// text always happens after filled rects in go-gui, so the
-		// search bar background can't cover them. Reserve an extra row
-		// during scroll to keep terminal text out of the overlay.
-		renderRows := searchRenderRows(rows, t.search.active, renderYOff)
+		// When the search bar is active, reserve grid rows whose text
+		// footprint (shifted by sub-pixel scroll) overlaps the search
+		// bar's pixel region. go-gui renders all Text on top of all
+		// FilledRects, so terminal text in that region would paint over
+		// the search bar background.
+		renderRows := rows
+		if t.search.active {
+			renderRows -= searchOverlap(t.cellH, renderYOff, dc.Height, rows)
+			if renderRows < 0 {
+				renderRows = 0
+			}
+		}
 
 		// BiDi pre-pass: compute visual-reordered rows for any viewport row
 		// containing RTL characters. For live LTR-only terminals (the common
@@ -571,7 +573,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		}
 
 		if t.search.active {
-			t.drawSearchBar(dc, rows, style)
+			t.drawSearchBar(dc, style)
 		}
 
 		// Visual bell: brief semi-transparent overlay that fades within bellFlashDuration.
@@ -722,10 +724,10 @@ func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yO
 	dc.FilledRect(x, y, w, t.cellH, color)
 }
 
-// drawSearchBar paints a status bar over the bottom row of the canvas
-// showing the active search query. Called under Mu (inside onDraw).
-func (t *Term) drawSearchBar(dc *gui.DrawContext, rows int, style gui.TextStyle) {
-	y := float32(rows-1) * t.cellH
+// drawSearchBar paints a status bar over the bottom cellH pixels of the
+// canvas showing the active search query. Called under Mu (inside onDraw).
+func (t *Term) drawSearchBar(dc *gui.DrawContext, style gui.TextStyle) {
+	y := dc.Height - t.cellH
 	noMatch := t.search.query != "" && len(t.search.matches) == 0
 	bgColor := gui.RGB(40, 40, 90)
 	if noMatch {

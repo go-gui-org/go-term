@@ -148,9 +148,9 @@ type searchState struct {
 // bellState tracks visual-bell flash timing. Main-thread only except for
 // readCount which is only accessed from readLoop.
 type bellState struct {
-	seenCount uint64
+	seenCount  uint64
 	flashUntil time.Time
-	readCount uint64 // tracks BellCount seen by readLoop; no sync needed
+	readCount  uint64 // tracks BellCount seen by readLoop; no sync needed
 }
 
 // scrollbarState manages the auto-hide scrollbar thumb timer. Main-thread
@@ -335,9 +335,9 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		readDone:       make(chan struct{}),
 		themeMenuItems: themeMenuItems,
 	}
-		t.mouse.lastR = -1
-		t.mouse.lastC = -1
-		t.momentum.kick = make(chan struct{}, 1)
+	t.mouse.lastR = -1
+	t.mouse.lastC = -1
+	t.momentum.kick = make(chan struct{}, 1)
 	t.mouse.hoverR.Store(-1)
 	t.mouse.hoverC.Store(-1)
 	if dir, err := os.MkdirTemp("", "go-term-gfx-*"); err == nil {

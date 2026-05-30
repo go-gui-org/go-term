@@ -130,7 +130,7 @@ func logicalReflow(
 		phys[i] = physRow{cells: row, wrapped: w}
 	}
 	for r := 0; r < oldRows; r++ {
-		row := cells[r*oldCols : (r+1)*oldCols]  // slice into live buffer; safe under Mu
+		row := cells[r*oldCols : (r+1)*oldCols] // slice into live buffer; safe under Mu
 		w := false
 		if r < len(rowWrapped) {
 			w = rowWrapped[r]

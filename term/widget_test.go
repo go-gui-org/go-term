@@ -66,40 +66,51 @@ func TestScrollbarGeometry_SubPixel(t *testing.T) {
 	}
 }
 
-func TestSearchRenderRows_SearchInactive_ReturnsAll(t *testing.T) {
-	if got := searchRenderRows(24, false, 0); got != 24 {
-		t.Errorf("search inactive: got %d, want 24", got)
+func TestSearchOverlap_NoScroll_OneRow(t *testing.T) {
+	// 24 rows × 20px = 480px. Search bar at [460,480). Row 23's text
+	// footprint [460,480) overlaps → 1 row reserved.
+	if got := searchOverlap(20, 0, 480, 24); got != 1 {
+		t.Errorf("got %d, want 1", got)
 	}
 }
 
-func TestSearchRenderRows_SearchActive_ReservesOneRow(t *testing.T) {
-	if got := searchRenderRows(24, true, 0); got != 23 {
-		t.Errorf("search active, no scroll: got %d, want 23", got)
+func TestSearchOverlap_SubPixelMax_TwoRows(t *testing.T) {
+	// renderYOff=19 shifts row 22 to [459,479), overlapping search bar
+	// [460,480). Row 23 shifts to [479,499) also overlapping → 2 rows.
+	if got := searchOverlap(20, 19, 480, 24); got != 2 {
+		t.Errorf("got %d, want 2", got)
 	}
 }
 
-func TestSearchRenderRows_SubPixelScroll_ReservesTwoRows(t *testing.T) {
-	if got := searchRenderRows(24, true, 5.0); got != 22 {
-		t.Errorf("search active + sub-pixel scroll: got %d, want 22", got)
+func TestSearchOverlap_AlignedCanvas_Scroll_YieldsTwoRows(t *testing.T) {
+	// 480px canvas, 20px cellH → no fractional gap. Any renderYOff > 0
+	// shifts row 22's text bottom (460+renderYOff) past searchBarTop (460).
+	// Only renderYOff=0 produces 1 row; all positive values → 2.
+	if got := searchOverlap(20, 1, 480, 24); got != 2 {
+		t.Errorf("got %d, want 2", got)
 	}
 }
 
-func TestSearchRenderRows_SmallTerminal_ClampsToZero(t *testing.T) {
-	if got := searchRenderRows(0, true, 5.0); got != 0 {
-		t.Errorf("0 rows + search + scroll: got %d, want 0", got)
-	}
-	if got := searchRenderRows(1, true, 5.0); got != 0 {
-		t.Errorf("1 row + search + scroll: got %d, want 0", got)
-	}
-	if got := searchRenderRows(1, true, 0); got != 0 {
-		t.Errorf("1 row + search: got %d, want 0", got)
+func TestSearchOverlap_FractionalCanvas_OneRow(t *testing.T) {
+	// 485px canvas, 20px cellH → rows=24, 5px fractional gap at bottom.
+	// searchBarTop=465. renderYOff=3: row 22 at [443,463) doesn't
+	// overlap, row 23 at [463,483) does → 1. Old heuristic: always 2.
+	if got := searchOverlap(20, 3, 485, 24); got != 1 {
+		t.Errorf("got %d, want 1", got)
 	}
 }
 
-func TestSearchRenderRows_NaNSubPixel_TreatedAsNoScroll(t *testing.T) {
-	if got := searchRenderRows(24, true, float32(math.NaN())); got != 23 {
-		t.Errorf("search active + NaN scroll: got %d, want 23", got)
+func TestSearchOverlap_ZeroRows_ReturnsZero(t *testing.T) {
+	if got := searchOverlap(20, 5, 480, 0); got != 0 {
+		t.Errorf("got %d, want 0", got)
 	}
+}
+
+func TestSearchOverlap_NaNInput_NoInfiniteLoop(t *testing.T) {
+	// NaN comparisons always false → loop condition fails immediately.
+	// Return value is meaningless (NaN geometry is undefined); the
+	// assertion is just that the function returns without looping.
+	_ = searchOverlap(20, float32(math.NaN()), 480, 24)
 }
 
 // recordingNotifier captures Notify calls for assertion in tests.
@@ -329,7 +340,9 @@ func (f notifierFunc) Notify(title, body string) { f(title, body) }
 
 func newTestTermCapture() (*Term, *[]byte) {
 	buf := make([]byte, 0, 64)
-	t := &Term{grid: newGrid(4, 8)}; t.mouse.lastR = -1; t.mouse.lastC = -1
+	t := &Term{grid: newGrid(4, 8)}
+	t.mouse.lastR = -1
+	t.mouse.lastC = -1
 	t.pw = writerFunc(func(b []byte) (int, error) {
 		buf = append(buf, b...)
 		return len(b), nil
@@ -1608,15 +1621,15 @@ func TestClose_FullIntegration(t *testing.T) {
 	}
 	g := newGrid(24, 80)
 	tm := &Term{
-		cfg:        Cfg{},
-		grid:       g,
-		parser:     newParser(g),
-		pty:        pty,
-		pw:         pty,
-		cmd:        &gui.Window{},
-		notif:      desktopNotifier{},
-		blinkDone:  make(chan struct{}),
-		readDone:   make(chan struct{}),
+		cfg:       Cfg{},
+		grid:      g,
+		parser:    newParser(g),
+		pty:       pty,
+		pw:        pty,
+		cmd:       &gui.Window{},
+		notif:     desktopNotifier{},
+		blinkDone: make(chan struct{}),
+		readDone:  make(chan struct{}),
 	}
 	tm.mouse.hoverR.Store(-1)
 	tm.mouse.hoverC.Store(-1)
