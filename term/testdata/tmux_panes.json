@@ -1,0 +1,23 @@
+{
+  "name": "tmux_panes",
+  "rows": 12,
+  "cols": 70,
+  "input_b64": "G1s/MTA0OWgbWzJKG1tIG1szMm11c2VyQGhvc3Q6fi9zcmMkIGxzIC1sYRtbMG0bWzI7MUh0b3RhbCA0MhtbMzsxSGRyd3hyLXhyLXggIDUgdXNlciAgMTYwIE1heSAzMCAuG1s0OzFIZHJ3eHIteHIteCAyMCB1c2VyICA2NDAgTWF5IDMwIC4uG1s1OzFILXJ3LXItLXItLSAgMSB1c2VyICAxMjMgTWF5IDMwIG0bWzY7MUgtcnctci0tci0tICAxIHVzZXIgIDQ1NiBNYXkgMzAgcBtbNzsxSBtbMzJtdXNlckBob3N0On4vc3JjJCAbWzBtG1s3OzE3SBtbPzI1aBtbNSBxG1sxOzM2SBtbMzNtUElEIENPTU1BTkQgJUNQVSAlTUVNG1swbRtbMjszNkgxICAgbGF1bmNoZCAgIDAuMCAgMC4xG1szOzM2SDIzNCBXaW5kb3dTZXIgIDIuMSAgMS4yG1s0OzM2SBtbMW01NjcgVGVybWluYWwgICAwLjUgIDAuMxtbMG0bWzU7MzZIODkwIGdvLXRlcm0gICAgMy4yICAyLjEbWzY7MzZI4oCmG1sxOzM1SBtbMzZt4pSCG1swbRtbMjszNUgbWzM2beKUghtbMG0bWzM7MzVIG1szNm3ilIIbWzBtG1s0OzM1SBtbMzZt4pSCG1swbRtbNTszNUgbWzM2beKUghtbMG0bWzY7MzVIG1szNm3ilIIbWzBtG1s3OzM1SBtbMzZt4pSCG1swbRtbODszNUgbWzM2beKUghtbMG0bWzk7MzVIG1szNm3ilIIbWzBtG1sxMDszNUgbWzM2beKUghtbMG0bWzExOzM1SBtbMzZt4pSCG1swbRtbMTI7MUgbWzdtW3RtdXhdIDA6YmFzaCogMTpodG9wICAiaG9zdG5hbWUiIDE0OjMwICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMG0bXTA7dG11eDpzZXNzaW9uBxtbPzEwMDRoG1s3OzE3SA==",
+  "want_lines": [
+    "user@host:~/src$ ls -la           │PID COMMAND %CPU %MEM              ",
+    "total 42                          │1   launchd   0.0  0.1             ",
+    "drwxr-xr-x  5 user  160 May 30 .  │234 WindowSer  2.1  1.2            ",
+    "drwxr-xr-x 20 user  640 May 30 .. │567 Terminal   0.5  0.3            ",
+    "-rw-r--r--  1 user  123 May 30 m  │890 go-term    3.2  2.1            ",
+    "-rw-r--r--  1 user  456 May 30 p  │…                                  ",
+    "user@host:~/src$                  │                                   ",
+    "                                  │                                   ",
+    "                                  │                                   ",
+    "                                  │                                   ",
+    "                                  │                                   ",
+    "[tmux] 0:bash* 1:htop  \"hostname\" 14:30                               "
+  ],
+  "want_row": 6,
+  "want_col": 16,
+  "want_title": "tmux:session"
+}

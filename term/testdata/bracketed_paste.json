@@ -1,0 +1,20 @@
+{
+  "name": "bracketed_paste",
+  "rows": 10,
+  "cols": 60,
+  "input_b64": "G1syShtbSBtbMzJtdXNlckBob3N0On4kIBtbMG0bWz8yMDA0aGNhdCA8PCAnRU9GJw0KG1szM20+G1swbSBsaW5lIG9uZQ0KG1szM20+G1swbSBsaW5lIHR3bw0KG1szM20+G1swbSBFT0YNCmxpbmUgb25lDQpsaW5lIHR3bw0KG1szMm11c2VyQGhvc3Q6fiQgG1swbRtbPzIwMDRs",
+  "want_lines": [
+    "user@host:~$ cat \u003c\u003c 'EOF'                                   ",
+    "\u003e line one                                                  ",
+    "\u003e line two                                                  ",
+    "\u003e EOF                                                       ",
+    "line one                                                    ",
+    "line two                                                    ",
+    "user@host:~$                                                ",
+    "                                                            ",
+    "                                                            ",
+    "                                                            "
+  ],
+  "want_row": 6,
+  "want_col": 13
+}

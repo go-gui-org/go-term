@@ -1,0 +1,16 @@
+{
+  "name": "bidi_mixed",
+  "rows": 6,
+  "cols": 50,
+  "input_b64": "G1syShtbSBtbMTsxSEJpRGkgVGV4dCBEaXNwbGF5IOKAlCBNaXhlZCBMVFIgLyBSVEwbWzI7MUhBcmFiaWM6INmF2LHYrdio2Kcg2KjYp9mE2LnYp9mE2YUbWzM7MUhIZWJyZXc6INep15zXldedINei15XXnNedG1s0OzFISGVsbG8g2YXYsdit2KjYpyBXb3JsZCDXqdec15XXnSAhG1s1OzFIUlRMICsgbnVtczog2KfZhNiz2LnYsSDZodmi2aPZq9mk2aUg2K/YsdmH2YU=",
+  "want_lines": [
+    "BiDi Text Display — Mixed LTR / RTL               ",
+    "Arabic: مرحبا بالعالم                             ",
+    "Hebrew: שלום עולם                                 ",
+    "Hello مرحبا World שלום !                          ",
+    "RTL + nums: السعر ١٢٣٫٤٥ درهم                     ",
+    "                                                  "
+  ],
+  "want_row": 4,
+  "want_col": 29
+}

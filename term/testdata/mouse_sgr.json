@@ -1,0 +1,18 @@
+{
+  "name": "mouse_sgr",
+  "rows": 8,
+  "cols": 60,
+  "input_b64": "G1s/MTAwMGgbWz8xMDAyaBtbPzEwMDNoG1s/MTAwNmgbWz8xMDE2aBtbMkobW0gbWzdtICBGaWxlICBFZGl0ICBWaWV3ICBIZWxwICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIBtbMG0NChtbMW0gIOKGkiBOZXcgRmlsZSAgICAgICBDdHJsK04bWzBtDQogICAgT3BlbiBGaWxlLi4uICAgQ3RybCtPDQogICAgU2F2ZSAgICAgICAgICAgQ3RybCtTDQogICAgU2F2ZSBBcy4uLiAgICAgU2hpZnQrQ3RybCtTDQogICAg4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSADQogICAgRXhpdCAgICAgICAgICAgQWx0K0Y0DQobWz8yNWw=",
+  "want_lines": [
+    "  File  Edit  View  Help                                    ",
+    "  → New File       Ctrl+N                                   ",
+    "    Open File...   Ctrl+O                                   ",
+    "    Save           Ctrl+S                                   ",
+    "    Save As...     Shift+Ctrl+S                             ",
+    "    ───────────────────────                                 ",
+    "    Exit           Alt+F4                                   ",
+    "                                                            "
+  ],
+  "want_row": 7,
+  "want_col": 0
+}
