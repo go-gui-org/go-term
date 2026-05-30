@@ -66,6 +66,42 @@ func TestScrollbarGeometry_SubPixel(t *testing.T) {
 	}
 }
 
+func TestSearchRenderRows_SearchInactive_ReturnsAll(t *testing.T) {
+	if got := searchRenderRows(24, false, 0); got != 24 {
+		t.Errorf("search inactive: got %d, want 24", got)
+	}
+}
+
+func TestSearchRenderRows_SearchActive_ReservesOneRow(t *testing.T) {
+	if got := searchRenderRows(24, true, 0); got != 23 {
+		t.Errorf("search active, no scroll: got %d, want 23", got)
+	}
+}
+
+func TestSearchRenderRows_SubPixelScroll_ReservesTwoRows(t *testing.T) {
+	if got := searchRenderRows(24, true, 5.0); got != 22 {
+		t.Errorf("search active + sub-pixel scroll: got %d, want 22", got)
+	}
+}
+
+func TestSearchRenderRows_SmallTerminal_ClampsToZero(t *testing.T) {
+	if got := searchRenderRows(0, true, 5.0); got != 0 {
+		t.Errorf("0 rows + search + scroll: got %d, want 0", got)
+	}
+	if got := searchRenderRows(1, true, 5.0); got != 0 {
+		t.Errorf("1 row + search + scroll: got %d, want 0", got)
+	}
+	if got := searchRenderRows(1, true, 0); got != 0 {
+		t.Errorf("1 row + search: got %d, want 0", got)
+	}
+}
+
+func TestSearchRenderRows_NaNSubPixel_TreatedAsNoScroll(t *testing.T) {
+	if got := searchRenderRows(24, true, float32(math.NaN())); got != 23 {
+		t.Errorf("search active + NaN scroll: got %d, want 23", got)
+	}
+}
+
 // recordingNotifier captures Notify calls for assertion in tests.
 type recordingNotifier struct {
 	calls []struct{ title, body string }
@@ -807,8 +843,12 @@ func TestTerm_OnChar_SearchMode_AppendAndCap(t *testing.T) {
 func TestTerm_SearchJump_ForwardFindsMatch(t *testing.T) {
 	term, _ := newTestTermCapture()
 	term.cmd = &gui.Window{}
-	putRow(term.grid, "hello")
+	// putRow places at (0,0). Find skips start.Col+1 on the start row,
+	// so content at col 0 is invisible to a fresh search. Pad col 0
+	// so the matchable text starts at col 1.
+	putRow(term.grid, "xhello")
 	term.search.query = "hello"
+	verBefore := term.drawVersion.Load()
 	term.searchJump(true, &gui.Window{})
 	term.grid.Mu.Lock()
 	off := term.grid.ViewOffset
@@ -816,20 +856,42 @@ func TestTerm_SearchJump_ForwardFindsMatch(t *testing.T) {
 	if off != 0 {
 		t.Errorf("ViewOffset = %d after live match, want 0", off)
 	}
+	if term.drawVersion.Load() <= verBefore {
+		t.Error("drawVersion not incremented after search jump")
+	}
+	if !time.Now().Before(term.scrollbar.until) {
+		t.Error("scrollbar.until not set to future after search jump")
+	}
 }
 
 func TestTerm_SearchJump_NoMatchDoesNotPanic(t *testing.T) {
 	term, _ := newTestTermCapture()
 	term.cmd = &gui.Window{}
 	term.search.query = "xyzzy_not_present"
+	verBefore := term.drawVersion.Load()
+	scBefore := term.scrollbar.until
 	term.searchJump(true, &gui.Window{}) // must not panic
+	if term.drawVersion.Load() != verBefore {
+		t.Error("drawVersion changed on no-match jump")
+	}
+	if !term.scrollbar.until.Equal(scBefore) {
+		t.Error("scrollbar.until modified on no-match jump")
+	}
 }
 
 func TestTerm_SearchJump_EmptyQuery_Nop(t *testing.T) {
 	term, _ := newTestTermCapture()
 	term.cmd = &gui.Window{}
 	term.search.query = ""
+	verBefore := term.drawVersion.Load()
+	scBefore := term.scrollbar.until
 	term.searchJump(true, &gui.Window{}) // early return, must not panic
+	if term.drawVersion.Load() != verBefore {
+		t.Error("drawVersion changed on empty-query jump")
+	}
+	if !term.scrollbar.until.Equal(scBefore) {
+		t.Error("scrollbar.until modified on empty-query jump")
+	}
 }
 
 func TestTerm_OnKeyDown_ModifiedCursorKeys(t *testing.T) {

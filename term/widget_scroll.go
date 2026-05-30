@@ -148,6 +148,8 @@ func (t *Term) searchJump(forward bool, w *gui.Window) {
 		return ok
 	}()
 	if ok {
+		t.showScrollbar()
+		t.bumpVersion()
 		w.UpdateWindow()
 	}
 }

@@ -75,6 +75,24 @@ func scrollbarGeometry(sbLen, rows int, viewOffset float32, viewH float32) (thum
 	return
 }
 
+// searchRenderRows returns the number of rows available for terminal content
+// rendering. When the search bar is active it reserves 1 row for the overlay;
+// during sub-pixel scroll (renderYOff > 0) it reserves an additional row to
+// prevent foreground text from bleeding into the search bar background.
+func searchRenderRows(rows int, searchActive bool, renderYOff float32) int {
+	if !searchActive {
+		return rows
+	}
+	r := rows - 1
+	if renderYOff > 0 {
+		r--
+	}
+	if r < 0 {
+		return 0
+	}
+	return r
+}
+
 // vMatch records a single search-highlight span within a viewport row.
 type vMatch struct{ col, len int }
 
@@ -292,15 +310,14 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			return cell
 		}
 
-		// When the search bar is active it owns the last row — skip that row in
-		// both cell passes so terminal text doesn't bleed through the overlay.
-		renderRows := rows
-		if t.search.active {
-			renderRows = rows - 1
-			if renderRows < 0 {
-				renderRows = 0
-			}
-		}
+		// When the search bar is active it owns the last row. Skip that row
+		// in both passes. During sub-pixel scroll (renderYOff > 0) all
+		// content rows are shifted downward, so the last content row's
+		// foreground glyphs can bleed into the search bar — rendering
+		// text always happens after filled rects in go-gui, so the
+		// search bar background can't cover them. Reserve an extra row
+		// during scroll to keep terminal text out of the overlay.
+		renderRows := searchRenderRows(rows, t.search.active, renderYOff)
 
 		// BiDi pre-pass: compute visual-reordered rows for any viewport row
 		// containing RTL characters. For live LTR-only terminals (the common
@@ -522,7 +539,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		// entirely when DEC ?25 has hidden it OR when the viewport is
 		// scrolled back into history. Honor blink-off half-cycle when
 		// blinking is enabled.
-		if g.CursorVisible && g.ViewOffset == 0 && renderYOff == 0 && !t.cursorBlinkOff(now) {
+		if g.CursorVisible && g.CursorR < renderRows && g.ViewOffset == 0 && renderYOff == 0 && !t.cursorBlinkOff(now) {
 			cc := g.CursorC
 			if cc >= cols {
 				cc = cols - 1
@@ -542,23 +559,24 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			}
 		}
 
-		if t.search.active {
-			t.drawSearchBar(dc, rows, cols, style)
-		}
-
-		// Visual bell: brief semi-transparent overlay that fades within bellFlashDuration.
-		if now.Before(t.bell.flashUntil) {
-			dc.FilledRect(0, 0, dc.Width, dc.Height, gui.RGBA(255, 255, 255, 40))
-		}
-
 		// Scrollbar: pill-shaped thumb on the right edge. Visible while scrolled
-		// back or within scrollbarDuration of the last scroll event.
+		// back or within scrollbarDuration of the last scroll event. Drawn before
+		// the search bar so the thumb doesn't overdraw it.
 		sb := g.Scrollback.Len()
 		if (now.Before(t.scrollbar.until) || g.ViewOffset > 0 || g.ViewSubPx > 0) && sb > 0 && dc.Width >= scrollbarWidth {
 			viewOffsetVal := float32(g.ViewOffset) + g.ViewSubPx/t.cellH
 			thumbY, thumbH := scrollbarGeometry(sb, g.Rows, viewOffsetVal, dc.Height)
 			dc.FilledRoundedRect(dc.Width-scrollbarWidth, thumbY, scrollbarWidth, thumbH,
 				scrollbarWidth/2, gui.RGBA(128, 128, 128, 120))
+		}
+
+		if t.search.active {
+			t.drawSearchBar(dc, rows, style)
+		}
+
+		// Visual bell: brief semi-transparent overlay that fades within bellFlashDuration.
+		if now.Before(t.bell.flashUntil) {
+			dc.FilledRect(0, 0, dc.Width, dc.Height, gui.RGBA(255, 255, 255, 40))
 		}
 
 	}()
@@ -706,14 +724,14 @@ func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yO
 
 // drawSearchBar paints a status bar over the bottom row of the canvas
 // showing the active search query. Called under Mu (inside onDraw).
-func (t *Term) drawSearchBar(dc *gui.DrawContext, rows, cols int, style gui.TextStyle) {
+func (t *Term) drawSearchBar(dc *gui.DrawContext, rows int, style gui.TextStyle) {
 	y := float32(rows-1) * t.cellH
 	noMatch := t.search.query != "" && len(t.search.matches) == 0
 	bgColor := gui.RGB(40, 40, 90)
 	if noMatch {
 		bgColor = gui.RGB(90, 20, 20)
 	}
-	dc.FilledRect(0, y, float32(cols)*t.cellW, t.cellH, bgColor)
+	dc.FilledRect(0, y, dc.Width, dc.Height-y, bgColor)
 	var label string
 	switch {
 	case t.search.regex && t.search.reErr != nil:
