@@ -7,10 +7,88 @@ covers the protocol surface expected by modern CLI tools and TUI frameworks.
 
 Targets macOS and Linux.
 
-## Status
+## Stability
 
-Pre-1.0. The public API (`Cfg`, `Term`, `New`, `View`, `Close`) is small on
-purpose and may still shift. See [CHANGELOG.md](CHANGELOG.md).
+`go-term` is pre-1.0. The public API is deliberately small so embedders have a
+narrow, well-defined contract to code against. This section describes what you
+can rely on and what may still shift.
+
+### Public API (stable boundary)
+
+| Symbol | Kind | Guarantee |
+|---|---|---|
+| `Cfg` | struct | Fields are additive. Renames and removals will go through a deprecation cycle (at least one minor version with the old name still accepted). |
+| `NamedTheme` | struct | Stable. |
+| `Theme` | struct | Stable. |
+| `Term` | struct | Opaque handle. All fields are unexported; embedders interact only through methods. |
+| `New(w, cfg)` | constructor | Signature stable. |
+| `Term.View(w)` | method | Signature stable. The returned `gui.View` tree is an implementation detail. |
+| `Term.Close()` | method | Signature stable. Idempotent — safe to call multiple times. |
+| `Term.Cwd()` | method | Signature stable. |
+| `Term.SetTheme(th)` | method | Signature stable. |
+| `MaxGridDim` | constant | Stable. Grid rows/cols are clamped to this value. |
+| `MaxScrollbackCap` | constant | Stable. Scrollback rows are capped at this value. |
+
+The pre-built `Theme` variables (`DefaultTheme`, `GruvboxTheme`, `NordTheme`,
+`SolarizedDarkTheme`) are stable — their names won't change and their color
+values won't shift in ways that break contrast.
+
+### What may change before 1.0
+
+- **`Cfg` fields** — new fields may be added; existing fields will not be
+  removed without a deprecation cycle. Defaults for new fields are always
+  zero-value-safe (backwards compatible).
+- **`Term` method additions** — new methods may appear. Existing method
+  signatures are stable.
+- **`View` tree internals** — the `gui.View` tree returned by `Term.View`
+  may gain new widgets (e.g., tab bar, pane splitter) but the embedder
+  only calls `View` and passes the result to `UpdateView`; that contract
+  holds.
+- **Internal package layout** — new files may appear in `term/` (e.g., a
+  pane splitter). Embedders should import only `github.com/mike-ward/go-term/term`
+  and not reach into individual source files.
+- **Go version requirement** — the `go` directive in `go.mod` reflects the
+  oldest Go release the author tests against. It may advance on minor
+  version bumps.
+
+### What is NOT part of the public contract
+
+- **Concurrency details** — the fact that the reader goroutine feeds a parser
+  under `Grid.Mu` is an implementation detail. The contract is only that
+  `New` starts the shell, `View` renders it, and `Close` tears it down.
+- **Render pass structure** — coalesced bg/fg/cursor passes, dirty-row
+  tracking, and the tessellation cache are internal optimizations.
+- **`gui.DrawCanvas` IDs and versions** — the canvas ID `"term-canvas"` and
+  the draw-version counter are internal.
+- **Parser dispatch sites** — `dispatchCSI`, `dispatchOSC`, `dispatchDCS`,
+  `dispatchAPC` are internal. Adding a new protocol extension doesn't change
+  the public API.
+- **File names and code organisation** — the layering invariant (widget →
+  parser → grid) matters; the specific file boundaries within a layer do not.
+
+### Versioning
+
+This project follows [Semantic Versioning](https://semver.org/) but with a
+pre-1.0 interpretation:
+
+- **Patch (0.x.Y)** — bug fix; no new API surface. Safe to upgrade.
+- **Minor (0.X.0)** — new feature; may add `Cfg` fields or `Term` methods,
+  but existing signatures are backwards compatible. Read the changelog before
+  upgrading.
+- **Major (1.0.0)** — first stable release. After 1.0, the public API follows
+  standard semver (breaking changes require a major version bump).
+
+### Practical guidance for embedders
+
+- **Pin to a minor version** in your `go.mod` (`v0.X.0`, not `v0.X.Y` or a
+  bare commit hash). Patch upgrades are safe; minor upgrades may need a
+  one-line config change.
+- **Read the changelog** before bumping the minor version.
+- **Use `Cfg` zero values** for everything you don't explicitly set. New
+  fields added in a minor bump are always zero-value-safe.
+- **Don't reach past the four public methods** — if you need something that
+  `View`/`Close`/`Cwd`/`SetTheme` doesn't provide, open an issue rather than
+  depending on internal state.
 
 ---
 
