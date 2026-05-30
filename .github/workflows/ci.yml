@@ -255,6 +255,63 @@ jobs:
         working-directory: go-term
         run: go test -fuzz=. -fuzztime=120s ./term
 
+  fuzz-pr:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout go-term
+        uses: actions/checkout@v5
+        with:
+          path: go-term
+          fetch-depth: 0
+
+      - name: Checkout go-glyph
+        uses: actions/checkout@v5
+        with:
+          repository: mike-ward/go-glyph
+          path: go-glyph
+
+      - name: Checkout go-gui
+        uses: actions/checkout@v5
+        with:
+          repository: mike-ward/go-gui
+          path: go-gui
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsdl2-dev \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libpango1.0-dev \
+            libfontconfig1-dev \
+            libglib2.0-dev \
+            libhunspell-dev
+
+      - name: Check parser changes
+        id: changed
+        working-directory: go-term
+        run: |
+          git fetch origin main
+          if git diff --name-only origin/main...HEAD | grep -q '^term/parser'; then
+            echo "fuzz=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "fuzz=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fuzz (parser, 30s)
+        if: steps.changed.outputs.fuzz == 'true'
+        working-directory: go-term
+        run: go test -fuzz=. -fuzztime=30s ./term
+
   bench:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
