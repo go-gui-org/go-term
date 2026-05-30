@@ -155,6 +155,62 @@ jobs:
           working-directory: go-term
           version: v2.12
 
+  bench-regress:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    steps:
+      - name: Checkout go-term
+        uses: actions/checkout@v5
+        with:
+          path: go-term
+
+      - name: Checkout go-glyph
+        uses: actions/checkout@v5
+        with:
+          repository: mike-ward/go-glyph
+          path: go-glyph
+
+      - name: Checkout go-gui
+        uses: actions/checkout@v5
+        with:
+          repository: mike-ward/go-gui
+          path: go-gui
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsdl2-dev \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libpango1.0-dev \
+            libfontconfig1-dev \
+            libglib2.0-dev \
+            libhunspell-dev
+
+      - name: Bench regress
+        working-directory: go-term
+        run: |
+          go test -bench=. -count=10 -benchmem -run='^$$' ./term \
+            > /tmp/bench-current.txt
+          go run ./scripts/benchregress \
+            -base .github/benchmarks/baseline.txt \
+            -current /tmp/bench-current.txt
+
+      - name: Upload bench results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-regress-output
+          path: /tmp/bench-current.txt
+
   fuzz:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
@@ -248,3 +304,15 @@ jobs:
         with:
           name: bench-results
           path: go-term/bench.txt
+
+      - name: Generate normalized baseline
+        working-directory: go-term
+        run: |
+          go run ./scripts/benchregress -update < bench.txt \
+            > baseline-ci.txt
+
+      - name: Upload CI baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-baseline-ci
+          path: go-term/baseline-ci.txt
