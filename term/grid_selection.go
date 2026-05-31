@@ -67,7 +67,10 @@ func (g *grid) SelectedText() string {
 			}
 		}
 		for c := c0; c <= end; c++ {
-			b.WriteRune(g.ContentCellAt(r, c).Ch)
+			ch := g.ContentCellAt(r, c).Ch
+			if ch != 0 {
+				b.WriteRune(ch)
+			}
 		}
 		if r < e.Row {
 			b.WriteByte('\n')

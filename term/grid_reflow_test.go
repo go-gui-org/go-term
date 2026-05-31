@@ -306,3 +306,25 @@ func feedBench(b *testing.B, g *grid, p *parser, data []byte) {
 	defer g.Mu.Unlock()
 	p.Feed(data)
 }
+
+func TestRewrapLine_PreserveAttributes(t *testing.T) {
+	c := cell{Ch: '🍣', Width: 2, FG: 1, BG: 2, Attrs: attrBold, LinkID: 42}
+	cells := []cell{c, {Width: 0}} // wide char + continuation
+
+	rows := rewrapLine(cells, 10)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+
+	// Check continuation cell at index 1
+	cont := rows[0].cells[1]
+	if cont.Width != 0 {
+		t.Errorf("expected width 0, got %d", cont.Width)
+	}
+	if cont.LinkID != 42 {
+		t.Errorf("expected LinkID 42, got %d", cont.LinkID)
+	}
+	if cont.Attrs != attrBold {
+		t.Errorf("expected Bold attr, got %d", cont.Attrs)
+	}
+}

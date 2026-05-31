@@ -302,3 +302,35 @@ func TestVisualReorder_WideLTR(t *testing.T) {
 		t.Errorf("expected nil for LTR wide chars, got vis=%v v2l=%v", vis, v2l)
 	}
 }
+
+func TestVisualReorder_PreserveAttributes(t *testing.T) {
+	// 🍣 (LTR) followed by RTL text
+	c := cell{Ch: '🍣', Width: 2, FG: 1, BG: 2, Attrs: attrBold, LinkID: 42}
+	row := []cell{
+		c, {Width: 0},
+		{Ch: 'א', Width: 1},
+	}
+
+	visual, _ := visualReorder(row, 3)
+	if visual == nil {
+		t.Fatal("expected reordering")
+	}
+
+	found := false
+	for i, v := range visual {
+		if v.Ch == '🍣' {
+			found = true
+			if i+1 >= len(visual) {
+				t.Error("🍣 at end of row, no room for continuation")
+			} else {
+				cont := visual[i+1]
+				if cont.Width != 0 || cont.LinkID != 42 || cont.Attrs != attrBold {
+					t.Errorf("continuation cell at index %d lost attributes: %+v", i+1, cont)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("🍣 not found in visual order")
+	}
+}

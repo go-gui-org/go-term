@@ -328,6 +328,33 @@ func TestGrid_ViewportMatches_CapsAtMaxHighlights(t *testing.T) {
 // rowRunesBuf must truncate the returned slice when the reused buf is larger
 // than the current row, so callers never see stale runes from a prior (wider)
 // row.
+// rowRunesBuf is retained as a test helper; production code uses searchRow.
+func (g *grid) rowRunesBuf(contentRow int, buf []rune) []rune {
+	sb := g.Scrollback.Len()
+	var src []cell
+	if contentRow < sb {
+		if contentRow < 0 {
+			return nil
+		}
+		src = g.Scrollback.Row(contentRow)
+	} else {
+		liveRow := contentRow - sb
+		if liveRow < 0 || liveRow >= g.Rows || g.Cols == 0 {
+			return nil
+		}
+		base := liveRow * g.Cols
+		src = g.Cells[base : base+g.Cols]
+	}
+	if cap(buf) < len(src) {
+		buf = make([]rune, len(src))
+	}
+	buf = buf[:len(src)]
+	for i, cell := range src {
+		buf[i] = cell.Ch
+	}
+	return buf
+}
+
 func TestGrid_RowRunesBuf_ReuseWithShrinkingRow(t *testing.T) {
 	g := newGrid(3, 5)
 	// Row 0: 5 cols of 'a'
@@ -427,5 +454,117 @@ func BenchmarkGrid_Search_LargeScrollback(b *testing.B) {
 		if len(matches) != 1 {
 			b.Fatalf("expected 1 match, got %d", len(matches))
 		}
+	}
+}
+
+func TestSearchWide(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣')
+	g.Put('a')
+
+	// Search for "🍣a" starting from before col 0
+	pos, found := g.Find("🍣a", contentPos{0, -1}, true)
+	if !found {
+		t.Errorf("expected to find '🍣a', but not found")
+	} else if pos.Col != 0 {
+		t.Errorf("expected match at col 0, got col %d", pos.Col)
+	}
+}
+
+func TestViewportMatches_WideChars(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // cols 0-1
+	g.Put('a') // col 2
+
+	matches := g.ViewportMatches("🍣a")
+	if len(matches) != 1 {
+		t.Fatalf("ViewportMatches found %d matches, want 1", len(matches))
+	}
+	if matches[0].Col != 0 {
+		t.Errorf("match Col = %d, want 0", matches[0].Col)
+	}
+	// 🍣 spans 2 cols + 'a' spans 1 = 3 total
+	if matches[0].Len != 3 {
+		t.Errorf("match Len = %d, want 3", matches[0].Len)
+	}
+}
+
+func TestViewportMatchesRegex_WideChars(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // cols 0-1
+	g.Put('1') // col 2
+	g.Put('2') // col 3
+	g.Put('3') // col 4
+
+	re := regexp.MustCompile(`\d+`)
+	matches := g.ViewportMatchesRegex(re)
+	if len(matches) != 1 {
+		t.Fatalf("ViewportMatchesRegex found %d matches, want 1", len(matches))
+	}
+	if matches[0].Col != 2 {
+		t.Errorf("match Col = %d, want 2", matches[0].Col)
+	}
+	if matches[0].Len != 3 {
+		t.Errorf("match Len = %d, want 3", matches[0].Len)
+	}
+}
+
+func TestSearchRow_AllContinuationCells(t *testing.T) {
+	g := newGrid(1, 5)
+	// Directly populate the row with only continuation cells (Ch==0, Width==0)
+	for c := range g.Cols {
+		g.Cells[c] = cell{Ch: 0, Width: 0}
+	}
+
+	rr, colMap := g.searchRow(0, nil, nil)
+	if len(rr) != 0 {
+		t.Errorf("expected empty rr for all-continuation row, got %v", rr)
+	}
+	if len(colMap) != 0 {
+		t.Errorf("expected empty colMap for all-continuation row, got %v", colMap)
+	}
+}
+
+func TestCleanIdxGT_EmptyColMap(t *testing.T) {
+	if got := cleanIdxGT(nil, 0); got != 0 {
+		t.Errorf("cleanIdxGT(nil, 0) = %d, want 0", got)
+	}
+}
+
+func TestCleanIdxGE_EmptyColMap(t *testing.T) {
+	if got := cleanIdxGE(nil, 0); got != -1 {
+		t.Errorf("cleanIdxGE(nil, 0) = %d, want -1", got)
+	}
+}
+
+func TestSearchRow_ScrollbackWide(t *testing.T) {
+	g := newGrid(2, 5)
+	g.ScrollbackCap = 10
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // cols 0-1
+	g.Put('a') // col 2
+	// Push to scrollback
+	g.Newline()
+	g.scrollUpRegion(1)
+
+	sb := g.Scrollback.Len()
+	if sb == 0 {
+		t.Fatal("expected scrollback to have rows")
+	}
+	rr, colMap := g.searchRow(sb-1, nil, nil)
+	// Row has 5 cells: 🍣 (col 0, W=2), continuation (col 1, Ch=0),
+	// 'a' (col 2), and two trailing spaces (cols 3-4).
+	// searchRow drops the continuation cell, leaving 4 runes.
+	if len(rr) != 4 {
+		t.Fatalf("expected 4 runes in scrollback row, got %d: %v", len(rr), rr)
+	}
+	if rr[0] != '🍣' || rr[1] != 'a' {
+		t.Errorf("expected [🍣, a, ...], got %v", rr)
+	}
+	if colMap[0] != 0 || colMap[1] != 2 {
+		t.Errorf("expected colMap[0]=0, colMap[1]=2, got %v", colMap)
 	}
 }

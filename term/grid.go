@@ -189,6 +189,15 @@ func blankCell(fg, bg uint32, attrs uint8) cell {
 	return cell{Ch: ' ', FG: fg, BG: bg, ULColor: DefaultColor, Attrs: attrs, Width: 1}
 }
 
+// continuation returns a copy of c with Ch cleared and Width zeroed,
+// preserving all visual attributes. Used when appending the trailing
+// cell of a wide (Width==2) character.
+func (c cell) continuation() cell {
+	c.Ch = 0
+	c.Width = 0
+	return c
+}
+
 // altSavedScreen captures everything needed to restore the main screen
 // when ExitAlt is called: the cell buffer plus cursor/SGR/scroll-region
 // state and the DECSC slot (so DECSC/DECRC inside the alt buffer don't
@@ -947,33 +956,4 @@ func (g *grid) partialTopRow() []cell {
 		return nil
 	}
 	return g.Scrollback.Row(idx)
-}
-
-// rowRunesBuf returns the rune slice for a content row with length == g.Cols,
-// so rune index == cell column. Writes into buf (growing it if necessary) to
-// avoid a heap allocation on every row when the caller holds a reusable slice.
-func (g *grid) rowRunesBuf(contentRow int, buf []rune) []rune {
-	sb := g.Scrollback.Len()
-	var src []cell
-	if contentRow < sb {
-		if contentRow < 0 {
-			return nil
-		}
-		src = g.Scrollback.Row(contentRow)
-	} else {
-		liveRow := contentRow - sb
-		if liveRow < 0 || liveRow >= g.Rows || g.Cols == 0 {
-			return nil
-		}
-		base := liveRow * g.Cols
-		src = g.Cells[base : base+g.Cols]
-	}
-	if cap(buf) < len(src) {
-		buf = make([]rune, len(src))
-	}
-	buf = buf[:len(src)]
-	for i, cell := range src {
-		buf[i] = cell.Ch
-	}
-	return buf
 }

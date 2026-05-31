@@ -86,8 +86,7 @@ func rewrapLine(cells []cell, newCols int) []physRow {
 		}
 		cur = append(cur, c)
 		if w == 2 {
-
-			cur = append(cur, cell{Ch: 0, FG: c.FG, BG: c.BG, Attrs: c.Attrs, Width: 0, ULStyle: c.ULStyle, ULColor: c.ULColor})
+			cur = append(cur, c.continuation())
 		}
 		i++
 	}

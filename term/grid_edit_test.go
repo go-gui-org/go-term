@@ -699,3 +699,74 @@ func TestGrid_DirtyTracking_EraseInLineMarksDirty(t *testing.T) {
 		t.Error("EraseInLine should mark cursor row dirty")
 	}
 }
+
+func TestWideCharSanitization(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // 🍣 is width 2, so it occupies (0,0) and (0,1)
+
+	if g.At(0, 0).Ch != '🍣' || g.At(0, 0).Width != 2 {
+		t.Errorf("expected 🍣 at (0,0), got %v", g.At(0, 0))
+	}
+	if g.At(0, 1).Ch != 0 || g.At(0, 1).Width != 0 {
+		t.Errorf("expected continuation at (0,1), got %v", g.At(0, 1))
+	}
+
+	// Move cursor to (0,1) and erase to EOL
+	g.CursorC = 1
+	g.EraseInLine(0)
+
+	// Now (0,0) should have been sanitized because its continuation at (0,1) was erased
+	if g.At(0, 0).Ch != ' ' || g.At(0, 0).Width != 1 {
+		t.Errorf("expected (0,0) to be sanitized after erasing (0,1), but got %v", g.At(0, 0))
+	}
+}
+
+func TestWideCharShiftSanitization(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // (0,0) and (0,1)
+
+	// Move cursor to (0,1) and insert 1 char
+	g.CursorC = 1
+	g.InsertChars(1)
+
+	// (0,0) should be sanitized
+	if g.At(0, 0).Ch != ' ' || g.At(0, 0).Width != 1 {
+		t.Errorf("expected (0,0) to be sanitized after inserting at (0,1), but got %v", g.At(0, 0))
+	}
+}
+
+func TestWideCharDeleteSanitization(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // (0,0) and (0,1)
+
+	// Move cursor to (0,0) and delete 1 char
+	g.CursorC = 0
+	g.DeleteChars(1)
+
+	// Now (0,0) has the continuation shifted into it. It should be sanitized.
+	if g.At(0, 0).Ch != ' ' || g.At(0, 0).Width != 1 {
+		t.Errorf("expected (0,0) to be sanitized after deleting its head, but got %v", g.At(0, 0))
+	}
+}
+
+func TestWideCharSanitization_Mode1(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // (0,0) and (0,1)
+
+	if g.At(0, 0).Ch != '🍣' || g.At(0, 0).Width != 2 {
+		t.Errorf("expected 🍣 at (0,0), got %v", g.At(0, 0))
+	}
+
+	// Move cursor to continuation cell and erase SOL→cursor (mode 1)
+	g.CursorC = 1
+	g.EraseInLine(1)
+
+	// Head at (0,0) should be sanitized because continuation at (0,1) was erased
+	if g.At(0, 0).Ch != ' ' || g.At(0, 0).Width != 1 {
+		t.Errorf("expected (0,0) to be sanitized after mode-1 erasing (0,1), got %v", g.At(0, 0))
+	}
+}

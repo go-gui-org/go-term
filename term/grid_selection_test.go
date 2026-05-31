@@ -216,3 +216,34 @@ func TestGrid_SelectedText_ContentCoords_IndependentOfViewOffset(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectedTextWide(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // (0,0) and (0,1)
+
+	g.SelActive = true
+	g.SelAnchor = contentPos{0, 0}
+	g.SelHead = contentPos{0, 1}
+
+	text := g.SelectedText()
+	if text != "🍣" {
+		t.Errorf("expected SelectedText to be '🍣', but got %q (hex: %x)", text, text)
+	}
+}
+
+func TestSelectedText_ContinuationCellOnly(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // (0,0) and (0,1)
+
+	// Select only the continuation cell
+	g.SelActive = true
+	g.SelAnchor = contentPos{0, 1}
+	g.SelHead = contentPos{0, 1}
+
+	text := g.SelectedText()
+	if text != "" {
+		t.Errorf("expected empty text for continuation-only selection, got %q", text)
+	}
+}

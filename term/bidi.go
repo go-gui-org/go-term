@@ -90,7 +90,7 @@ func visualReorder(cells []cell, cols int) (visual []cell, v2l []int) {
 		return nil, nil
 	}
 
-	blank := cell{Width: 1, FG: DefaultColor, BG: DefaultColor}
+	blank := defaultCell()
 	visual = make([]cell, 0, cols)
 	v2l = make([]int, 0, cols)
 
@@ -138,11 +138,7 @@ func appendVisualCell(visual []cell, v2l []int, cells []cell, cellIdx int, blank
 	visual = append(visual, cell)
 	v2l = append(v2l, cellIdx)
 	if cell.Width == 2 && len(visual) < cols {
-		cont := blank
-		cont.Width = 0
-		cont.FG = cell.FG
-		cont.BG = cell.BG
-		visual = append(visual, cont)
+		visual = append(visual, cell.continuation())
 		v2l = append(v2l, cellIdx+1) // logical continuation at cellIdx+1
 	}
 	return visual, v2l

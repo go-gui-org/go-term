@@ -46,20 +46,17 @@ func (g *grid) Put(ch rune) {
 	if w == 2 {
 		g.eraseWideAt(g.CursorR, g.CursorC+1)
 	}
+	head := cell{
+		Ch: ch, FG: g.CurFG, BG: g.CurBG,
+		Attrs: g.CurAttrs, Width: uint8(w), LinkID: g.CurLinkID,
+		ULStyle: g.CurULStyle, ULColor: g.CurULColor,
+	}
 	if c := g.At(g.CursorR, g.CursorC); c != nil {
-		*c = cell{
-			Ch: ch, FG: g.CurFG, BG: g.CurBG,
-			Attrs: g.CurAttrs, Width: uint8(w), LinkID: g.CurLinkID,
-			ULStyle: g.CurULStyle, ULColor: g.CurULColor,
-		}
+		*c = head
 	}
 	if w == 2 {
 		if c := g.At(g.CursorR, g.CursorC+1); c != nil {
-			*c = cell{
-				Ch: 0, FG: g.CurFG, BG: g.CurBG,
-				Attrs: g.CurAttrs, Width: 0, LinkID: g.CurLinkID,
-				ULStyle: g.CurULStyle, ULColor: g.CurULColor,
-			}
+			*c = head.continuation()
 		}
 	}
 	g.markDirty(g.CursorR)
@@ -169,8 +166,10 @@ func (g *grid) EraseInLine(mode int) {
 	cFrom, cTo := 0, g.Cols
 	switch mode {
 	case 0:
+		g.eraseWideAt(row, g.CursorC)
 		cFrom = g.CursorC
 	case 1:
+		g.eraseWideAt(row, g.CursorC)
 		cTo = g.CursorC + 1
 	case 2:
 
@@ -296,6 +295,8 @@ func (g *grid) InsertChars(n int) {
 	if n > width {
 		n = width
 	}
+	g.eraseWideAt(g.CursorR, g.CursorC)
+	g.eraseWideAt(g.CursorR, g.Cols-1)
 	row := g.Cells[g.CursorR*g.Cols : (g.CursorR+1)*g.Cols]
 	if n < width {
 		copy(row[g.CursorC+n:], row[g.CursorC:g.Cols-n])
@@ -320,6 +321,8 @@ func (g *grid) DeleteChars(n int) {
 	if n > width {
 		n = width
 	}
+	g.eraseWideAt(g.CursorR, g.CursorC)
+	g.eraseWideAt(g.CursorR, g.CursorC+n)
 	row := g.Cells[g.CursorR*g.Cols : (g.CursorR+1)*g.Cols]
 	if n < width {
 		copy(row[g.CursorC:], row[g.CursorC+n:g.Cols])
