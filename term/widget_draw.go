@@ -22,6 +22,12 @@ func realNumber(f float32) bool {
 // garbage row/col counts in OnDraw.
 func finite(f float32) bool { return realNumber(f) && f > 0 }
 
+// imeCompRuneLimit caps the number of runes accepted from the IME
+// composition string. Typical compositions contain fewer than 50 runes;
+// this prevents excessive allocation from a malformed or malicious
+// platform input.
+const imeCompRuneLimit = 256
+
 // asciiStr caches single-rune strings for runes 0..127 to avoid the
 // per-cell allocation that string(rune) incurs in the OnDraw hot path.
 var asciiStr = func() [128]string {
@@ -537,27 +543,102 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 
 		now := time.Now()
 
+		// Resolve the GUI window once for IME interaction.
+		var gw *gui.Window
+		if w, ok := t.cmd.(*gui.Window); ok {
+			gw = w
+		}
+
+		// Draw IME composition text if active.
+		var composing bool
+		var compRunes []rune
+		var compWidths []int
+		var compTotalCols int
+		var compCursor int
+		if gw != nil && gw.IMEComposing() {
+			composing = true
+			compRunes = []rune(gw.IMECompText())
+			if len(compRunes) > imeCompRuneLimit {
+				compRunes = compRunes[:imeCompRuneLimit]
+			}
+			compWidths = make([]int, len(compRunes))
+			for i, r := range compRunes {
+				w := runeWidth(r)
+				if w < 1 {
+					w = 1
+				}
+				compWidths[i] = w
+				compTotalCols += w
+			}
+			compCursor = gw.IMECompCursor()
+			if compCursor > len(compRunes) {
+				compCursor = len(compRunes)
+			}
+		}
+
+		if composing && len(compRunes) > 0 && g.CursorR < renderRows && g.ViewOffset == 0 && renderYOff == 0 {
+			startX := float32(g.CursorC) * t.cellW
+			rowY := float32(g.CursorR)*t.cellH + renderYOff
+
+			bgCol := g.Theme.DefaultBG
+			dc.FilledRect(startX, rowY, float32(compTotalCols)*t.cellW, t.cellH, bgCol)
+
+			cs := style
+			cs.Color = g.Theme.DefaultFG
+			cs.Underline = false
+
+			currX := startX
+			for i, r := range compRunes {
+				dc.Text(currX, rowY, t.termRuneStr(r), cs)
+				currX += float32(compWidths[i]) * t.cellW
+			}
+
+			t.drawUnderlineDecor(dc, startX, rowY, float32(compTotalCols)*t.cellW, ulSingle, cs.Color)
+		}
+
 		// Cursor: shape per DECSCUSR (block / underline / bar). Suppress
 		// entirely when DEC ?25 has hidden it OR when the viewport is
 		// scrolled back into history. Honor blink-off half-cycle when
 		// blinking is enabled.
 		if g.CursorVisible && g.CursorR < renderRows && g.ViewOffset == 0 && renderYOff == 0 && !t.cursorBlinkOff(now) {
 			cc := g.CursorC
+			if composing {
+				colOffset := 0
+				for i := range compCursor {
+					colOffset += compWidths[i]
+				}
+				cc = g.CursorC + colOffset
+			}
 			if cc >= cols {
 				cc = cols - 1
 			}
-			// When the cursor's row has bidi reordering, find the visual column
-			// that corresponds to the logical cursor column.
+			// When the cursor's row has bidi reordering, find the visual
+			// column that corresponds to the logical cursor column.
 			if cr := g.CursorR; cr >= 0 && cr < renderRows && t.draw.bidiV2LRows[cr] != nil {
-				for v, l := range t.draw.bidiV2LRows[cr] {
-					if l == g.CursorC {
-						cc = v
-						break
+				if !composing {
+					for v, l := range t.draw.bidiV2LRows[cr] {
+						if l == g.CursorC {
+							cc = v
+							break
+						}
 					}
 				}
 			}
+
+			cursorCell := cell{Ch: ' '}
 			if cell := g.At(g.CursorR, g.CursorC); cell != nil {
-				t.drawCursor(dc, cc, g.CursorR, *cell, g.cursorShape, style)
+				cursorCell = *cell
+			}
+			if composing && compCursor >= 0 && compCursor < len(compRunes) {
+				cursorCell.Ch = compRunes[compCursor]
+			}
+			t.drawCursor(dc, cc, g.CursorR, cursorCell, g.cursorShape, style)
+
+			// Report cursor rect to the platform for candidate window.
+			if gw != nil && gw.IMEComposing() {
+				imeX := t.ime.layoutX + float32(cc)*t.cellW
+				imeY := t.ime.layoutY + float32(g.CursorR)*t.cellH
+				gw.IMESetRect(imeX, imeY, t.cellW, t.cellH)
 			}
 		}
 

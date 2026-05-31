@@ -1995,3 +1995,145 @@ func TestClose_StopsAuxiliaryGoroutines(t *testing.T) {
 		t.Fatal("loop goroutines did not exit within timeout")
 	}
 }
+
+func TestTerm_IMECompositionState(t *testing.T) {
+	win := gui.NewWindow(gui.WindowCfg{})
+	term, err := New(win, Cfg{})
+	if err != nil {
+		t.Fatalf("New term: %v", err)
+	}
+	defer func() { _ = term.Close() }()
+
+	// Initial state
+	if term.ime.composing {
+		t.Error("expected initial imeComposing to be false")
+	}
+
+	// Dispatch an IME composition event to the window
+	win.EventFn(&gui.Event{
+		Type:      gui.EventIMEComposition,
+		IMEText:   "かん",
+		IMEStart:  1,
+		IMELength: 1,
+	})
+
+	// Invoke View to let it detect the composition and update cached state
+	_ = term.View(win)
+
+	if !term.ime.composing {
+		t.Error("expected ime.composing to be true")
+	}
+	if term.ime.compText != "かん" {
+		t.Errorf("expected ime.compText to be 'かん', got %q", term.ime.compText)
+	}
+	if term.ime.compCursor != 1 {
+		t.Errorf("expected ime.compCursor to be 1, got %d", term.ime.compCursor)
+	}
+
+	// Dispatch an empty composition to clear IME
+	win.EventFn(&gui.Event{
+		Type:    gui.EventIMEComposition,
+		IMEText: "",
+	})
+
+	_ = term.View(win)
+
+	if term.ime.composing {
+		t.Error("expected ime.composing to be false after clear")
+	}
+	if term.ime.compText != "" {
+		t.Errorf("expected ime.compText to be empty, got %q", term.ime.compText)
+	}
+}
+
+func TestTerm_onAmendLayout(t *testing.T) {
+	win := gui.NewWindow(gui.WindowCfg{})
+	term, err := New(win, Cfg{})
+	if err != nil {
+		t.Fatalf("New term: %v", err)
+	}
+	defer func() { _ = term.Close() }()
+
+	t.Run("nil layout", func(t *testing.T) {
+		term.ime.layoutX = 42
+		term.ime.layoutY = 99
+		term.onAmendLayout(nil, win)
+		if term.ime.layoutX != 42 || term.ime.layoutY != 99 {
+			t.Errorf("nil layout should not mutate position, got (%.1f, %.1f)",
+				term.ime.layoutX, term.ime.layoutY)
+		}
+	})
+
+	t.Run("child shape", func(t *testing.T) {
+		childShape := &gui.Shape{}
+		childShape.X = 100
+		childShape.Y = 200
+		l := &gui.Layout{
+			Children: []gui.Layout{{Shape: childShape}},
+		}
+		term.onAmendLayout(l, win)
+		if term.ime.layoutX != 100 || term.ime.layoutY != 200 {
+			t.Errorf("expected (100, 200), got (%.1f, %.1f)",
+				term.ime.layoutX, term.ime.layoutY)
+		}
+	})
+
+	t.Run("own shape fallback", func(t *testing.T) {
+		ownShape := &gui.Shape{}
+		ownShape.X = 300
+		ownShape.Y = 400
+		l := &gui.Layout{Shape: ownShape}
+		term.onAmendLayout(l, win)
+		if term.ime.layoutX != 300 || term.ime.layoutY != 400 {
+			t.Errorf("expected (300, 400), got (%.1f, %.1f)",
+				term.ime.layoutX, term.ime.layoutY)
+		}
+	})
+
+	t.Run("child nil shape falls back to own", func(t *testing.T) {
+		ownShape := &gui.Shape{}
+		ownShape.X = 500
+		ownShape.Y = 600
+		l := &gui.Layout{
+			Shape:    ownShape,
+			Children: []gui.Layout{{Shape: nil}},
+		}
+		term.onAmendLayout(l, win)
+		if term.ime.layoutX != 500 || term.ime.layoutY != 600 {
+			t.Errorf("expected fallback to own (500, 600), got (%.1f, %.1f)",
+				term.ime.layoutX, term.ime.layoutY)
+		}
+	})
+
+	t.Run("NaN position rejected", func(t *testing.T) {
+		term.ime.layoutX = 99
+		term.ime.layoutY = 99
+		nanShape := &gui.Shape{}
+		nanShape.X = float32(math.NaN())
+		nanShape.Y = 700
+		l := &gui.Layout{Children: []gui.Layout{{Shape: nanShape}}}
+		term.onAmendLayout(l, win)
+		if term.ime.layoutX == float32(math.NaN()) || math.IsNaN(float64(term.ime.layoutX)) {
+			t.Error("NaN X should have been rejected")
+		}
+		if term.ime.layoutY != 700 {
+			t.Errorf("expected Y=700, got %.1f", term.ime.layoutY)
+		}
+	})
+
+	t.Run("Inf position rejected", func(t *testing.T) {
+		term.ime.layoutX = 99
+		term.ime.layoutY = 99
+		infShape := &gui.Shape{}
+		infShape.X = 800
+		infShape.Y = float32(math.Inf(1))
+		l := &gui.Layout{Children: []gui.Layout{{Shape: infShape}}}
+		term.onAmendLayout(l, win)
+		if term.ime.layoutX != 800 {
+			t.Errorf("expected X=800, got %.1f", term.ime.layoutX)
+		}
+		if math.IsInf(float64(term.ime.layoutY), 0) {
+			t.Error("Inf Y should have been rejected")
+		}
+	})
+}

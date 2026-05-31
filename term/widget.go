@@ -117,6 +117,17 @@ type resizeState struct {
 	timer        *time.Timer // wakes main thread to apply after debounce
 }
 
+// imeState holds transient IME composition and widget-position state.
+// Updated from the main thread: onAmendLayout sets layoutX/Y during
+// layout, View reads the window's IME state for change detection, and
+// onDraw reads layoutX/Y for IMESetRect.
+type imeState struct {
+	layoutX, layoutY float32 // widget absolute position (AmendLayout)
+	composing        bool    // whether IME composition is active
+	compText         string  // cached composition text for change detection
+	compCursor       int     // cached composition cursor position
+}
+
 // momentumState drives the two-phase friction deceleration after a trackpad
 // scroll gesture ends. vel/coasting protected by mu; timer and kick owned
 // by the GUI goroutine (onMouseScroll) except for the timer callback which
@@ -197,6 +208,10 @@ type Term struct {
 	// cell metrics measured on first draw and reused thereafter. Both
 	// zero until the first OnDraw.
 	cellW, cellH float32
+
+	// ime tracks IME composition state and widget position for
+	// candidate-window placement. See imeState doc.
+	ime imeState
 
 	// embedded grouped state — see each struct's doc comment.
 	resize    resizeState
@@ -606,9 +621,41 @@ func (t *Term) SetTheme(th Theme) {
 // focusID is the IDFocus value claimed by the terminal container.
 const focusID uint32 = 1
 
+// onAmendLayout updates the Term's recorded absolute position when layout changes.
+func (t *Term) onAmendLayout(l *gui.Layout, _ *gui.Window) {
+	if l == nil {
+		return
+	}
+	var x, y float32
+	if len(l.Children) > 0 && l.Children[0].Shape != nil {
+		x = l.Children[0].Shape.X
+		y = l.Children[0].Shape.Y
+	} else if l.Shape != nil {
+		x = l.Shape.X
+		y = l.Shape.Y
+	}
+	if realNumber(x) {
+		t.ime.layoutX = x
+	}
+	if realNumber(y) {
+		t.ime.layoutY = y
+	}
+}
+
 // View returns the go-gui view tree for this terminal. Usable as a
 // gui.Window UpdateView generator: w.UpdateView(t.View).
 func (t *Term) View(w *gui.Window) gui.View {
+	// Detect IME composition state changes and bump version to redraw.
+	composing := w.IMEComposing()
+	compText := w.IMECompText()
+	compCursor := w.IMECompCursor()
+	if composing != t.ime.composing || compText != t.ime.compText || compCursor != t.ime.compCursor {
+		t.ime.composing = composing
+		t.ime.compText = compText
+		t.ime.compCursor = compCursor
+		t.bumpVersion()
+	}
+
 	ww, wh := w.WindowSize()
 	canvas := gui.DrawCanvas(gui.DrawCanvasCfg{
 		ID:            "term-canvas",
@@ -621,14 +668,15 @@ func (t *Term) View(w *gui.Window) gui.View {
 		OnMouseUp:     t.onMouseUp,
 	})
 	colCfg := gui.ContainerCfg{
-		Padding:   gui.Some(gui.Padding{}),
-		Spacing:   gui.SomeF(0),
-		Color:     t.grid.Theme.DefaultBG,
-		IDFocus:   focusID,
-		OnChar:    t.onChar,
-		OnKeyDown: t.onKeyDown,
-		OnKeyUp:   t.onKeyUp,
-		Content:   []gui.View{canvas},
+		Padding:     gui.Some(gui.Padding{}),
+		Spacing:     gui.SomeF(0),
+		Color:       t.grid.Theme.DefaultBG,
+		IDFocus:     focusID,
+		OnChar:      t.onChar,
+		OnKeyDown:   t.onKeyDown,
+		OnKeyUp:     t.onKeyUp,
+		AmendLayout: t.onAmendLayout,
+		Content:     []gui.View{canvas},
 	}
 	if len(t.themeMenuItems) > 0 {
 		colCfg.Width = float32(ww)
