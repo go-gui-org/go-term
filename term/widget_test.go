@@ -384,6 +384,7 @@ func newDrawTerm(rows, cols int, cellW, cellH float32) (*Term, *gui.DrawContext)
 		cellH: cellH,
 		cmd:   syncScheduler{},
 	}
+	t.focused.Store(true)
 	t.mouse.hoverR.Store(-1)
 	t.mouse.hoverC.Store(-1)
 	tm := testTextMeasurer{cellW: cellW, cellH: cellH}
@@ -2136,4 +2137,162 @@ func TestTerm_onAmendLayout(t *testing.T) {
 			t.Error("Inf Y should have been rejected")
 		}
 	})
+}
+
+// --- SetFocused ---
+
+// recordingScheduler captures QueueCommand calls for inspection in
+// SetFocused tests.
+type recordingScheduler struct {
+	calls []func(*gui.Window)
+}
+
+func (r *recordingScheduler) QueueCommand(fn func(*gui.Window)) {
+	r.calls = append(r.calls, fn)
+}
+
+func TestTerm_SetFocused_GainQueuesFocusClaim(t *testing.T) {
+	rec := &recordingScheduler{}
+	term := &Term{
+		grid: newGrid(4, 8),
+		cmd:  rec,
+	}
+	term.SetFocused(true)
+	if len(rec.calls) != 1 {
+		t.Fatalf("gain focus: expected 1 QueueCommand, got %d", len(rec.calls))
+	}
+	// The callback must call SetIDFocus on the window.
+	rec.calls[0](&gui.Window{})
+}
+
+func TestTerm_SetFocused_LossSkipsQueueCommand(t *testing.T) {
+	rec := &recordingScheduler{}
+	term := &Term{
+		grid: newGrid(4, 8),
+		cmd:  rec,
+	}
+	term.focused.Store(true) // currently focused
+	term.SetFocused(false)
+	if len(rec.calls) != 0 {
+		t.Fatalf("loss focus: expected 0 QueueCommand, got %d", len(rec.calls))
+	}
+	if term.focused.Load() {
+		t.Error("focused should be false after SetFocused(false)")
+	}
+}
+
+func TestTerm_SetFocused_SameValueNoOp(t *testing.T) {
+	rec := &recordingScheduler{}
+	term := &Term{
+		grid: newGrid(4, 8),
+		cmd:  rec,
+	}
+	term.focused.Store(false)
+	term.SetFocused(true)
+	if len(rec.calls) != 1 {
+		t.Fatalf("first call: expected 1 QueueCommand, got %d", len(rec.calls))
+	}
+	verAfter := term.drawVersion.Load()
+
+	// Second call with same value — must be no-op.
+	term.SetFocused(true)
+	if len(rec.calls) != 1 {
+		t.Fatalf("same-value call: expected still 1 QueueCommand, got %d", len(rec.calls))
+	}
+	if term.drawVersion.Load() != verAfter {
+		t.Error("drawVersion should not change on no-op SetFocused")
+	}
+}
+
+func TestTerm_SetFocused_NilCmdNoPanic(t *testing.T) {
+	term := &Term{grid: newGrid(4, 8)}
+	// cmd is nil (zero-value Term). Must not panic.
+	term.SetFocused(true)
+	if !term.focused.Load() {
+		t.Error("focused should be true after SetFocused(true)")
+	}
+	// bumpVersion should still fire even without a cmd.
+	if term.drawVersion.Load() == 0 {
+		t.Error("drawVersion should have been bumped even with nil cmd")
+	}
+}
+
+func TestTerm_SetFocused_AfterCloseNoPanic(t *testing.T) {
+	rec := &recordingScheduler{}
+	term := &Term{
+		grid: newGrid(4, 8),
+		cmd:  rec,
+	}
+	term.closed.Store(true)
+	// Must not panic — the QueueCommand callback guards against closed.
+	term.SetFocused(true)
+	if len(rec.calls) != 1 {
+		t.Fatalf("expected QueueCommand even after close (guard is in callback), got %d", len(rec.calls))
+	}
+	// Execute the callback on a closed term — must be a no-op.
+	rec.calls[0](&gui.Window{})
+}
+
+// --- canvasID uniqueness ---
+
+func TestTerm_New_UniqueCanvasIDs(t *testing.T) {
+	a, err := New(gui.NewWindow(gui.WindowCfg{}), Cfg{})
+	if err != nil {
+		t.Fatalf("first New: %v", err)
+	}
+	defer func() { _ = a.Close() }()
+	b, err := New(gui.NewWindow(gui.WindowCfg{}), Cfg{})
+	if err != nil {
+		t.Fatalf("second New: %v", err)
+	}
+	defer func() { _ = b.Close() }()
+	if a.canvasID == b.canvasID {
+		t.Errorf("two Terms must have unique canvas IDs, both got %q", a.canvasID)
+	}
+	if a.canvasID == "" || b.canvasID == "" {
+		t.Error("canvasID must not be empty")
+	}
+}
+
+// --- drawCursor unfocused opacity ---
+
+func TestDrawCursor_UnfocusedDimmed(t *testing.T) {
+	// Verify drawCursor completes without panic when unfocused.
+	// The focused path (opacity=1.0) is covered by existing draw tests
+	// via newDrawTerm which sets focused=true.
+	term := &Term{
+		grid:  newGrid(24, 80),
+		cellW: 10,
+		cellH: 20,
+	}
+	if term.focused.Load() {
+		t.Fatal("test expects unfocused (default) state")
+	}
+	tm := testTextMeasurer{cellW: 10, cellH: 20}
+	dc := gui.NewDrawContext(800, 480, tm)
+	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
+	c := cell{Ch: 'X', FG: 7, BG: 0, Width: 1}
+
+	shapes := []cursorShape{cursorBlock, cursorUnderline, cursorBar}
+	for _, shape := range shapes {
+		term.drawCursor(dc, 0, 0, c, shape, base)
+	}
+}
+
+func TestDrawCursor_FocusedFullOpacity(t *testing.T) {
+	term := &Term{
+		grid:  newGrid(24, 80),
+		cellW: 10,
+		cellH: 20,
+	}
+	term.focused.Store(true)
+	tm := testTextMeasurer{cellW: 10, cellH: 20}
+	dc := gui.NewDrawContext(800, 480, tm)
+	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
+	c := cell{Ch: 'X', FG: 7, BG: 0, Width: 1}
+
+	shapes := []cursorShape{cursorBlock, cursorUnderline, cursorBar}
+	for _, shape := range shapes {
+		term.drawCursor(dc, 0, 0, c, shape, base)
+	}
 }

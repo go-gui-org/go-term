@@ -222,6 +222,16 @@ type Term struct {
 	mouse     mouseState
 	draw      drawBufs
 
+	// focused is set by a pane manager via SetFocused to control whether
+	// this terminal claims IDFocus. Defaults to true in New so a
+	// standalone Term (no pane manager) works without extra setup.
+	focused atomic.Bool
+
+	// canvasID is a unique per-Term identifier used as the DrawCanvas ID
+	// so multiple terminals in the same window don't collide in go-gui's
+	// tessellation cache.
+	canvasID string
+
 	// closed guards Close so multiple calls are safe.
 	closed atomic.Bool
 
@@ -348,6 +358,7 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		cursorEpoch:    time.Now(),
 		blinkDone:      make(chan struct{}),
 		readDone:       make(chan struct{}),
+		canvasID:       "term-canvas-" + strconv.FormatUint(termSeq.Add(1), 10),
 		themeMenuItems: themeMenuItems,
 	}
 	t.mouse.lastR = -1
@@ -378,6 +389,7 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 			prevOnEvent(e, w)
 		}
 	}
+	t.focused.Store(true)
 	w.SetIDFocus(focusID)
 	go t.readLoop()
 	t.loopWg.Add(3)
@@ -618,8 +630,31 @@ func (t *Term) SetTheme(th Theme) {
 	t.bumpVersion()
 }
 
+// SetFocused sets whether this terminal has pane focus. The pane
+// manager calls this when the user switches between panes. When
+// focused, the container claims IDFocus (so go-gui routes keystrokes
+// here) and the cursor renders normally. When unfocused, the cursor
+// is dimmed. New defaults to focused=true for standalone use.
+func (t *Term) SetFocused(v bool) {
+	if t.focused.Swap(v) == v {
+		return // no change
+	}
+	if v && t.cmd != nil {
+		t.cmd.QueueCommand(func(w *gui.Window) {
+			if t.closed.Load() {
+				return
+			}
+			w.SetIDFocus(focusID)
+		})
+	}
+	t.bumpVersion()
+}
+
 // focusID is the IDFocus value claimed by the terminal container.
 const focusID uint32 = 1
+
+// termSeq provides unique per-Term identifiers (canvas IDs etc.).
+var termSeq atomic.Uint64
 
 // onAmendLayout updates the Term's recorded absolute position when layout changes.
 func (t *Term) onAmendLayout(l *gui.Layout, _ *gui.Window) {
@@ -658,7 +693,7 @@ func (t *Term) View(w *gui.Window) gui.View {
 
 	ww, wh := w.WindowSize()
 	canvas := gui.DrawCanvas(gui.DrawCanvasCfg{
-		ID:            "term-canvas",
+		ID:            t.canvasID,
 		Version:       t.drawVersion.Load(),
 		Sizing:        gui.FillFill,
 		OnDraw:        t.onDraw,
@@ -671,12 +706,14 @@ func (t *Term) View(w *gui.Window) gui.View {
 		Padding:     gui.Some(gui.Padding{}),
 		Spacing:     gui.SomeF(0),
 		Color:       t.grid.Theme.DefaultBG,
-		IDFocus:     focusID,
 		OnChar:      t.onChar,
 		OnKeyDown:   t.onKeyDown,
 		OnKeyUp:     t.onKeyUp,
 		AmendLayout: t.onAmendLayout,
 		Content:     []gui.View{canvas},
+	}
+	if t.focused.Load() {
+		colCfg.IDFocus = focusID
 	}
 	if len(t.themeMenuItems) > 0 {
 		colCfg.Width = float32(ww)

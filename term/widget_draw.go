@@ -692,6 +692,13 @@ func (t *Term) drawCursor(dc *gui.DrawContext, col, row int, cell cell,
 	shape cursorShape, style gui.TextStyle) {
 	x := float32(col) * t.cellW
 	y := float32(row) * t.cellH
+
+	// Dim the cursor to 40% when the terminal doesn't have pane focus.
+	opacity := float32(1.0)
+	if !t.focused.Load() {
+		opacity = 0.4
+	}
+
 	switch shape {
 	case cursorUnderline:
 		// Bottom-aligned bar 1/8th of the cell height (min 2px) so it
@@ -700,19 +707,21 @@ func (t *Term) drawCursor(dc *gui.DrawContext, col, row int, cell cell,
 		if h < 2 {
 			h = 2
 		}
-		dc.FilledRect(x, y+t.cellH-h, t.cellW, h, t.grid.Theme.fg(cell))
+		dc.FilledRect(x, y+t.cellH-h, t.cellW, h,
+			t.grid.Theme.fg(cell).WithOpacity(opacity))
 	case cursorBar:
 		w := t.cellW / 6
 		if w < 2 {
 			w = 2
 		}
-		dc.FilledRect(x, y, w, t.cellH, t.grid.Theme.fg(cell))
+		dc.FilledRect(x, y, w, t.cellH,
+			t.grid.Theme.fg(cell).WithOpacity(opacity))
 	default: // cursorBlock
 		fillColor := t.grid.Theme.fg(cell)
 		if t.grid.CursorColor != DefaultColor {
 			fillColor = gui.RGB(uint8(t.grid.CursorColor>>16), uint8(t.grid.CursorColor>>8), uint8(t.grid.CursorColor))
 		}
-		dc.FilledRect(x, y, t.cellW, t.cellH, fillColor)
+		dc.FilledRect(x, y, t.cellW, t.cellH, fillColor.WithOpacity(opacity))
 		cs := style
 		cs.Color = t.grid.Theme.bg(cell)
 		dc.Text(x, y, t.termRuneStr(cell.Ch), cs)
