@@ -3,6 +3,7 @@ package term
 import (
 	"encoding/base64"
 	"image"
+	"log"
 	"os"
 	"strconv"
 )
@@ -34,6 +35,30 @@ type kgpParams struct {
 	imageID  uint32 // i=: image id (0 = anonymous)
 	quiet    int    // q=: 0 reply always, 1 suppress OK, 2 always suppress
 	deleteOp string // d=: delete specifier (when a=d)
+}
+
+// parseIntKV parses a KGP integer key=value, logging on error.
+// The bool indicates success; callers skip the assignment on false
+// so the field retains its default.
+func parseIntKV(val string, key byte) (int, bool) {
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		log.Printf("term: KGP bad %c= value %q: %v", key, val, err)
+		return 0, false
+	}
+	return n, true
+}
+
+// parseUint32KV parses a KGP uint32 key=value, logging on error.
+// The bool indicates success; callers skip the assignment on false
+// so the field retains its default.
+func parseUint32KV(val string, key byte) (uint32, bool) {
+	n, err := strconv.ParseUint(val, 10, 32)
+	if err != nil {
+		log.Printf("term: KGP bad %c= value %q: %v", key, val, err)
+		return 0, false
+	}
+	return uint32(n), true
 }
 
 // handleKittyGraphics parses a Kitty Graphics Protocol payload (bytes after
@@ -110,22 +135,31 @@ func splitKGPPayload(payload []byte) (kgpParams, []byte) {
 				params.action = val[0]
 			}
 		case 'f':
-			params.format, _ = strconv.Atoi(val)
+			if n, ok := parseIntKV(val, 'f'); ok {
+				params.format = n
+			}
 		case 't':
 			if len(val) == 1 {
 				params.medium = val[0]
 			}
 		case 's':
-			params.widthPx, _ = strconv.Atoi(val)
+			if n, ok := parseIntKV(val, 's'); ok {
+				params.widthPx = n
+			}
 		case 'v':
-			params.heightPx, _ = strconv.Atoi(val)
+			if n, ok := parseIntKV(val, 'v'); ok {
+				params.heightPx = n
+			}
 		case 'm':
 			params.more = val == "1"
 		case 'i':
-			n, _ := strconv.ParseUint(val, 10, 32)
-			params.imageID = uint32(n)
+			if n, ok := parseUint32KV(val, 'i'); ok {
+				params.imageID = n
+			}
 		case 'q':
-			params.quiet, _ = strconv.Atoi(val)
+			if n, ok := parseIntKV(val, 'q'); ok {
+				params.quiet = n
+			}
 		case 'd':
 			params.deleteOp = val
 		}

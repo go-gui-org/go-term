@@ -334,3 +334,38 @@ func TestVisualReorder_PreserveAttributes(t *testing.T) {
 		t.Error("🍣 not found in visual order")
 	}
 }
+
+// BenchmarkVisualReorder_FullRow measures the BiDi visual-reordering cost
+// for a row with mixed LTR/RTL content at a realistic terminal width.
+func BenchmarkVisualReorder_FullRow(b *testing.B) {
+	cols := 120
+	row := make([]cell, cols)
+	// Mix of Latin, Hebrew, and Arabic characters.
+	scripts := []rune{
+		'A', ' ', 'H', 'e', 'l', 'l', 'o', ' ', // LTR
+		0x5E9, 0x5DC, 0x5D5, 0x5DD, ' ', // RTL Hebrew
+		'W', 'o', 'r', 'l', 'd', ' ', // LTR
+		0x627, 0x644, 0x639, 0x631, 0x628, 0x64A, // RTL Arabic
+	}
+	for i := range row {
+		row[i] = cell{Ch: scripts[i%len(scripts)], Width: 1}
+	}
+	b.ResetTimer()
+	for range b.N {
+		_, _ = visualReorder(row, cols)
+	}
+}
+
+// BenchmarkVisualReorder_AllLTR measures the fast-path for fully LTR rows
+// (the common case). Should return nil immediately after scan.
+func BenchmarkVisualReorder_AllLTR(b *testing.B) {
+	cols := 120
+	row := make([]cell, cols)
+	for i := range row {
+		row[i] = cell{Ch: 'x', Width: 1}
+	}
+	b.ResetTimer()
+	for range b.N {
+		_, _ = visualReorder(row, cols)
+	}
+}

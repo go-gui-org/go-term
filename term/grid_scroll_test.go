@@ -382,3 +382,29 @@ func TestGrid_ScrollViewPx_ScrollView_ZerosSubPx(t *testing.T) {
 		t.Errorf("ViewOffset = %d, want 1", g.ViewOffset)
 	}
 }
+
+// BenchmarkGrid_ScrollUpRegion_FullScreen measures scrolling the full screen
+// up by 1 line, which is the common case on every linefeed.
+func BenchmarkGrid_ScrollUpRegion_FullScreen(b *testing.B) {
+	g := newGrid(48, 120)
+	// Fill with content so cells are not all default.
+	for i := range g.Cells {
+		g.Cells[i].Ch = rune(0x41 + i%26)
+	}
+	b.ResetTimer()
+	for range b.N {
+		g.scrollUpRegion(1)
+	}
+}
+
+// BenchmarkGrid_ScrollDownRegion_FullScreen measures reverse scroll.
+func BenchmarkGrid_ScrollDownRegion_FullScreen(b *testing.B) {
+	g := newGrid(48, 120)
+	for i := range g.Cells {
+		g.Cells[i].Ch = rune(0x41 + i%26)
+	}
+	b.ResetTimer()
+	for range b.N {
+		g.scrollDownRegion(1)
+	}
+}

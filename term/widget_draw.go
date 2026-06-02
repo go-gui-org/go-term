@@ -518,28 +518,9 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			flushRun(r)
 		}
 
-		// Graphics pass: paint decoded Sixel (or other) images on top of the
-		// background fill, under the cursor. Cells covered by an image are
-		// blanked at AddGraphic time so the text passes wrote nothing there.
-		// Each image's content-row origin maps to a viewport row via
-		// ContentRowToViewport; off-screen graphics are skipped.
-		if len(g.Graphics) > 0 {
-			for _, gr := range g.Graphics {
-				vr := g.ContentRowToScreen(gr.OriginR)
-				// Skip only when the image rectangle has no overlap with the
-				// viewport. A negative vr means the top is above the viewport;
-				// dc.Image clips to the canvas so the visible portion renders.
-				if vr >= rows || vr+gr.Rows <= 0 {
-					continue
-				}
-				x := float32(gr.OriginC) * t.cellW
-				y := float32(vr)*t.cellH + renderYOff
-				w := float32(gr.Cols) * t.cellW
-				h := float32(gr.Rows) * t.cellH
-				dc.Image(x, y, w, h, gr.Src,
-					gui.Opt[float32]{}, gui.Color{})
-			}
-		}
+		// Graphics pass: paint decoded images on top of the background
+		// fill, under the cursor. See drawGraphics for details.
+		t.drawGraphics(dc, g, rows, renderYOff)
 
 		now := time.Now()
 
@@ -640,11 +621,12 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		// back or within scrollbarDuration of the last scroll event. Drawn before
 		// the search bar so the thumb doesn't overdraw it.
 		sb := g.Scrollback.Len()
-		if (now.Before(t.scrollbar.until) || g.ViewOffset > 0 || g.ViewSubPx > 0) && sb > 0 && dc.Width >= scrollbarWidth {
+		sw := t.effectiveScrollbarWidth()
+		if (now.Before(t.scrollbar.until) || g.ViewOffset > 0 || g.ViewSubPx > 0) && sb > 0 && dc.Width >= sw && sw > 0 {
 			viewOffsetVal := float32(g.ViewOffset) + g.ViewSubPx/t.cellH
 			thumbY, thumbH := scrollbarGeometry(sb, g.Rows, viewOffsetVal, dc.Height)
-			dc.FilledRoundedRect(dc.Width-scrollbarWidth, thumbY, scrollbarWidth, thumbH,
-				scrollbarWidth/2, gui.RGBA(128, 128, 128, 120))
+			dc.FilledRoundedRect(dc.Width-sw, thumbY, sw, thumbH,
+				sw/2, gui.RGBA(128, 128, 128, 120))
 		}
 
 		if t.search.active {

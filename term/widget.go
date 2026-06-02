@@ -84,6 +84,35 @@ type Cfg struct {
 	// Themes, if non-empty, adds a right-click context menu for selecting
 	// a color theme at runtime. The first entry is used as the initial theme.
 	Themes []NamedTheme
+
+	// Command overrides the shell command. When empty (default), $SHELL
+	// from the environment is used (with /bin/sh as fallback). Set this
+	// to spawn a custom binary in the pty instead of a shell.
+	Command string
+
+	// Args supplies arguments when Command is set. When Command is empty,
+	// Args are passed to the default shell (e.g. []string{"-c", "htop"}).
+	Args []string
+
+	// Env appends to the child process environment. When nil or empty,
+	// the child inherits os.Environ() plus TERM=xterm-256color. Entries
+	// are appended after the inherited environment, so they override
+	// inherited values. Use "KEY=" (trailing equals) to unset.
+	Env []string
+
+	// ScrollbarWidth overrides the pixel width of the scrollbar thumb.
+	// Zero (default) uses the built-in 4 px. Negative hides the scrollbar.
+	ScrollbarWidth float32
+
+	// DisableGraphics, when true, skips Sixel, Kitty, and iTerm2 inline
+	// image decoding and rendering. Use to reduce memory/CPU in panes
+	// that don't need image support.
+	DisableGraphics bool
+
+	// BellFlashDuration overrides how long the visual-bell overlay stays
+	// visible. Zero (default) uses the built-in 100 ms. Negative disables
+	// the visual bell entirely.
+	BellFlashDuration time.Duration
 }
 
 // NamedTheme pairs a display name with a Theme for use in menus.
@@ -107,7 +136,8 @@ const defaultScrollbackRows = 5000
 // apply feels instant.
 const resizeDebounce = 50 * time.Millisecond
 
-// bellFlashDuration is how long the visual-bell overlay remains visible.
+// bellFlashDuration is the default visual-bell flash duration.
+// Override via Cfg.BellFlashDuration; see effectiveBellDuration().
 const bellFlashDuration = 100 * time.Millisecond
 
 // scrollbarWidth is the pixel width of the scrollbar thumb.
@@ -247,11 +277,16 @@ type Term struct {
 	// tessellation cache.
 	canvasID string
 
-	// prevOnEvent is the previous Window.OnEvent handler, saved in New
-	// so multiple Terms can chain event handlers without losing the
-	// original. Restoring it in Close would be cleaner but requires the
-	// caller to guarantee no other Term captured the same wrapper;
-	// the current closure-based chain handles arbitrary creation order.
+	// win is the *gui.Window this Term is bound to. Stored so Close can
+	// restore the original OnEvent handler and prevent the handler chain
+	// from leaking closed-Term closures. Only accessed on the main thread.
+	win *gui.Window
+
+	// prevOnEvent is the original Window.OnEvent handler before this Term
+	// wrapped it. Restored in Close so that creating and destroying Terms
+	// (e.g. closing a pane) does not leak closures in the dispatch chain.
+	// Correct for LIFO close order; a pane manager managing multiple live
+	// Terms should install its own dispatcher rather than rely on chaining.
 	prevOnEvent func(*gui.Event, *gui.Window)
 
 	// closed guards Close so multiple calls are safe.
@@ -361,7 +396,7 @@ func applyTheme(g *grid, cfg Cfg) {
 // spawned before New returns. Call Close to tear down.
 func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	const initRows, initCols = 24, 80
-	pty, err := startPTY(initRows, initCols)
+	pty, err := startPTY(initRows, initCols, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -385,14 +420,17 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		canvasID:       "term-canvas-" + strconv.FormatUint(seqID, 10),
 		themeMenuItems: themeMenuItems,
 	}
+	t.win = w
 	t.mouse.lastR = -1
 	t.mouse.lastC = -1
 	t.momentum.kick = make(chan struct{}, 1)
 	t.mouse.hoverR.Store(-1)
 	t.mouse.hoverC.Store(-1)
-	if dir, err := os.MkdirTemp("", "go-term-gfx-*"); err == nil {
-		t.gfxDir = dir
-		t.parser.SetGraphicsDir(dir)
+	if !cfg.DisableGraphics {
+		if dir, err := os.MkdirTemp("", "go-term-gfx-*"); err == nil {
+			t.gfxDir = dir
+			t.parser.SetGraphicsDir(dir)
+		}
 	}
 	t.parser.SetTitleHandler(t.onParserTitle)
 	t.parser.SetReplyHandler(t.onParserReply)
@@ -617,7 +655,7 @@ func (t *Term) flushPendingReplies() {
 }
 
 func (t *Term) onWindowEvent(e *gui.Event) {
-	if e == nil {
+	if e == nil || t.closed.Load() {
 		return
 	}
 	// Cancel momentum on mouse press or trackpad touch. EventScrollBegan
@@ -813,6 +851,13 @@ func (t *Term) Close() error {
 	if t.gfxDir != "" {
 		_ = os.RemoveAll(t.gfxDir)
 	}
+	// Restore the window's original OnEvent handler so this Term's
+	// closure does not leak in the dispatch chain. Correct for LIFO
+	// close order; a pane manager managing multiple live Terms should
+	// install its own dispatcher rather than rely on chaining.
+	if t.win != nil {
+		t.win.OnEvent = t.prevOnEvent
+	}
 	return err
 }
 
@@ -850,25 +895,28 @@ func (t *Term) readLoop() {
 				t.cmd.QueueCommand(func(w *gui.Window) {
 					if bellCount > t.bell.seenCount {
 						t.bell.seenCount = bellCount
-						t.bell.flashUntil = time.Now().Add(bellFlashDuration)
-						// Schedule a redraw to clear the flash overlay.
-						// Use a select goroutine so blinkDone cancellation
-						// prevents QueueCommand from firing after Close.
-						blinkDone := t.blinkDone
-						t.loopWg.Go(func() {
-							timer := time.NewTimer(bellFlashDuration + time.Millisecond)
-							defer timer.Stop()
-							select {
-							case <-blinkDone:
-								return
-							case <-timer.C:
-								if t.closed.Load() {
+						if d := t.effectiveBellDuration(); d > 0 {
+							t.bell.flashUntil = time.Now().Add(d)
+							// Schedule a redraw to clear the flash
+							// overlay. blinkDone cancellation
+							// prevents QueueCommand from firing
+							// after Close.
+							blinkDone := t.blinkDone
+							t.loopWg.Go(func() {
+								timer := time.NewTimer(d + time.Millisecond)
+								defer timer.Stop()
+								select {
+								case <-blinkDone:
 									return
+								case <-timer.C:
+									if t.closed.Load() {
+										return
+									}
 								}
-							}
-							t.bumpVersion()
-							t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
-						})
+								t.bumpVersion()
+								t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
+							})
+						}
 					}
 					w.UpdateWindow()
 				})
@@ -886,6 +934,35 @@ func (t *Term) style() gui.TextStyle {
 		return t.cfg.TextStyle
 	}
 	return gui.CurrentTheme().M5
+}
+
+// effectiveBellDuration returns the configured visual-bell duration,
+// falling back to the default when unset. Negative disables the flash.
+func (t *Term) effectiveBellDuration() time.Duration {
+	if t.cfg.BellFlashDuration < 0 {
+		return 0
+	}
+	if t.cfg.BellFlashDuration > 0 {
+		return t.cfg.BellFlashDuration
+	}
+	return bellFlashDuration
+}
+
+// effectiveScrollbarWidth returns the configured scrollbar pixel width,
+// falling back to the default when unset. Negative or NaN hides the
+// scrollbar; +Inf is clamped to 0 (hidden) so it doesn't propagate
+// into draw calls.
+func (t *Term) effectiveScrollbarWidth() float32 {
+	if !realNumber(t.cfg.ScrollbarWidth) {
+		return 0 // NaN, Inf → hidden
+	}
+	if t.cfg.ScrollbarWidth < 0 {
+		return 0
+	}
+	if t.cfg.ScrollbarWidth > 0 {
+		return t.cfg.ScrollbarWidth
+	}
+	return scrollbarWidth
 }
 
 // bumpVersion increments drawVersion so the next View call produces a

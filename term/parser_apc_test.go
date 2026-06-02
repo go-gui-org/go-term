@@ -483,3 +483,60 @@ func TestParser_APC_KittyStore_EvictsFallback_AllVisible(t *testing.T) {
 			len(h.p.g.Graphics), maxKittyStoreEntries-1)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// splitKGPPayload bad parameter handling
+// ---------------------------------------------------------------------------
+
+func TestSplitKGP_BadNumericParamsNoPanic(t *testing.T) {
+	// Send a KGP payload with non-numeric values for every numeric key.
+	// splitKGPPayload must not panic and must leave defaults in place.
+	payload := []byte("f=abc,s=NaN,v=,i=99999999999999999999,q=x;AAAA")
+	params, b64 := splitKGPPayload(payload)
+
+	// f=abc → format stays at default 32.
+	if params.format != 32 {
+		t.Errorf("format = %d; want default 32 after bad f=", params.format)
+	}
+	// s=NaN → widthPx stays 0.
+	if params.widthPx != 0 {
+		t.Errorf("widthPx = %d; want 0 after bad s=", params.widthPx)
+	}
+	// v= (empty) → heightPx stays 0 (Atoi("") returns error).
+	if params.heightPx != 0 {
+		t.Errorf("heightPx = %d; want 0 after empty v=", params.heightPx)
+	}
+	// i= overflow → imageID stays 0.
+	if params.imageID != 0 {
+		t.Errorf("imageID = %d; want 0 after overflow i=", params.imageID)
+	}
+	// q=x → quiet stays 0.
+	if params.quiet != 0 {
+		t.Errorf("quiet = %d; want 0 after bad q=", params.quiet)
+	}
+	// Base64 portion should be "AAAA".
+	if string(b64) != "AAAA" {
+		t.Errorf("b64 = %q; want AAAA", b64)
+	}
+}
+
+func TestSplitKGP_AllValidNumericParams(t *testing.T) {
+	payload := []byte("f=100,s=640,v=480,i=42,q=1;AAAA")
+	params, _ := splitKGPPayload(payload)
+
+	if params.format != 100 {
+		t.Errorf("format = %d; want 100", params.format)
+	}
+	if params.widthPx != 640 {
+		t.Errorf("widthPx = %d; want 640", params.widthPx)
+	}
+	if params.heightPx != 480 {
+		t.Errorf("heightPx = %d; want 480", params.heightPx)
+	}
+	if params.imageID != 42 {
+		t.Errorf("imageID = %d; want 42", params.imageID)
+	}
+	if params.quiet != 1 {
+		t.Errorf("quiet = %d; want 1", params.quiet)
+	}
+}

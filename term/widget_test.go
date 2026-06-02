@@ -3,6 +3,8 @@ package term
 import (
 	"errors"
 	"math"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -1692,7 +1694,7 @@ func TestClose_Idempotent(t *testing.T) {
 }
 
 func TestClose_FullIntegration(t *testing.T) {
-	pty, err := startPTY(24, 80)
+	pty, err := startPTY(24, 80, Cfg{})
 	if err != nil {
 		t.Skipf("startPTY: %v", err)
 	}
@@ -2401,4 +2403,347 @@ func TestTerm_OnWindowEvent_NilPrevHandlerNoPanic(t *testing.T) {
 	}
 	// Must not panic.
 	w.OnEvent(&gui.Event{}, w)
+}
+
+// ---------------------------------------------------------------------------
+// SetTheme
+// ---------------------------------------------------------------------------
+
+func TestTerm_SetTheme_ChangesGridTheme(t *testing.T) {
+	term := &Term{grid: newGrid(2, 4)}
+	custom := Theme{
+		ANSI:      DefaultTheme.ANSI,
+		DefaultFG: gui.RGB(100, 200, 50),
+		DefaultBG: gui.RGB(10, 20, 30),
+	}
+	term.SetTheme(custom)
+	if got := term.Theme(); got.DefaultFG != custom.DefaultFG {
+		t.Errorf("DefaultFG = %v, want %v", got.DefaultFG, custom.DefaultFG)
+	}
+	if got := term.Theme(); got.DefaultBG != custom.DefaultBG {
+		t.Errorf("DefaultBG = %v, want %v", got.DefaultBG, custom.DefaultBG)
+	}
+}
+
+func TestTerm_SetTheme_BumpsVersion(t *testing.T) {
+	term := &Term{grid: newGrid(2, 4)}
+	prev := term.drawVersion.Load()
+	term.SetTheme(GruvboxTheme)
+	if term.drawVersion.Load() <= prev {
+		t.Error("SetTheme should bump drawVersion")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cwd
+// ---------------------------------------------------------------------------
+
+func TestTerm_Cwd_ReturnsGridCwd(t *testing.T) {
+	term := &Term{grid: newGrid(2, 4)}
+	term.grid.Cwd = "file://host/home/user/projects"
+	if got := term.Cwd(); got != "file://host/home/user/projects" {
+		t.Errorf("Cwd() = %q, want %q", got, "file://host/home/user/projects")
+	}
+}
+
+func TestTerm_Cwd_EmptyByDefault(t *testing.T) {
+	term := &Term{grid: newGrid(2, 4)}
+	if got := term.Cwd(); got != "" {
+		t.Errorf("Cwd() = %q, want empty", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// OnEvent chain cleanup on Close
+// ---------------------------------------------------------------------------
+
+func TestTerm_Close_RestoresPrevOnEvent(t *testing.T) {
+	originalCalled := false
+	originalHandler := func(e *gui.Event, w *gui.Window) {
+		originalCalled = true
+	}
+	w := &gui.Window{}
+	w.OnEvent = originalHandler
+
+	// Minimal PTY so Close() doesn't panic.
+	r, wp, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	pty := &ptyDev{file: wp, cmd: &exec.Cmd{}}
+	readDone := make(chan struct{})
+	close(readDone)
+
+	term := &Term{
+		grid:        newGrid(2, 4),
+		win:         w,
+		prevOnEvent: w.OnEvent,
+		pty:         pty,
+		blinkDone:   make(chan struct{}),
+		readDone:    readDone,
+	}
+
+	// Simulate the event wrapper New() installs.
+	w.OnEvent = func(e *gui.Event, w *gui.Window) {
+		if term.closed.Load() {
+			return
+		}
+		term.onWindowEvent(e)
+		if term.prevOnEvent != nil {
+			term.prevOnEvent(e, w)
+		}
+	}
+
+	if err := term.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	_ = r.Close() // close read end after write end closed by pty.Close()
+
+	if w.OnEvent == nil {
+		t.Fatal("w.OnEvent is nil after Close")
+	}
+	w.OnEvent(&gui.Event{}, w)
+	if !originalCalled {
+		t.Error("original handler was not restored after Close")
+	}
+}
+
+func TestTerm_OnWindowEvent_ClosedTermNoOp(t *testing.T) {
+	term := &Term{grid: newGrid(2, 4)}
+	term.closed.Store(true)
+	// Must not panic and must return early.
+	term.onWindowEvent(&gui.Event{})
+	// No assertion needed — the test passes if no panic occurs.
+}
+
+// ---------------------------------------------------------------------------
+// Config knobs
+// ---------------------------------------------------------------------------
+
+func TestTerm_EffectiveBellDuration_ZeroUsesDefault(t *testing.T) {
+	term := &Term{cfg: Cfg{}}
+	if got := term.effectiveBellDuration(); got != bellFlashDuration {
+		t.Errorf("zero config: got %v, want %v (default)", got, bellFlashDuration)
+	}
+}
+
+func TestTerm_EffectiveBellDuration_NegativeDisables(t *testing.T) {
+	term := &Term{cfg: Cfg{BellFlashDuration: -1}}
+	if got := term.effectiveBellDuration(); got != 0 {
+		t.Errorf("negative config: got %v, want 0", got)
+	}
+}
+
+func TestTerm_EffectiveBellDuration_PositiveUsesCustom(t *testing.T) {
+	term := &Term{cfg: Cfg{BellFlashDuration: 200 * time.Millisecond}}
+	if got := term.effectiveBellDuration(); got != 200*time.Millisecond {
+		t.Errorf("custom config: got %v, want 200ms", got)
+	}
+}
+
+func TestTerm_EffectiveScrollbarWidth_ZeroUsesDefault(t *testing.T) {
+	term := &Term{cfg: Cfg{}}
+	if got := term.effectiveScrollbarWidth(); got != scrollbarWidth {
+		t.Errorf("zero config: got %v, want %v (default)", got, scrollbarWidth)
+	}
+}
+
+func TestTerm_EffectiveScrollbarWidth_NegativeHides(t *testing.T) {
+	term := &Term{cfg: Cfg{ScrollbarWidth: -1}}
+	if got := term.effectiveScrollbarWidth(); got != 0 {
+		t.Errorf("negative config: got %v, want 0", got)
+	}
+}
+
+func TestTerm_EffectiveScrollbarWidth_PositiveUsesCustom(t *testing.T) {
+	term := &Term{cfg: Cfg{ScrollbarWidth: 8}}
+	if got := term.effectiveScrollbarWidth(); got != 8 {
+		t.Errorf("custom config: got %v, want 8", got)
+	}
+}
+
+func TestTerm_EffectiveScrollbarWidth_NaNReturnsZero(t *testing.T) {
+	term := &Term{cfg: Cfg{ScrollbarWidth: float32(math.NaN())}}
+	if got := term.effectiveScrollbarWidth(); got != 0 {
+		t.Errorf("NaN config: got %v, want 0", got)
+	}
+}
+
+func TestTerm_EffectiveScrollbarWidth_InfReturnsZero(t *testing.T) {
+	term := &Term{cfg: Cfg{ScrollbarWidth: float32(math.Inf(1))}}
+	if got := term.effectiveScrollbarWidth(); got != 0 {
+		t.Errorf("+Inf config: got %v, want 0", got)
+	}
+}
+
+func TestTerm_EffectiveScrollbarWidth_NegInfReturnsZero(t *testing.T) {
+	term := &Term{cfg: Cfg{ScrollbarWidth: float32(math.Inf(-1))}}
+	if got := term.effectiveScrollbarWidth(); got != 0 {
+		t.Errorf("-Inf config: got %v, want 0", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Shell command config
+// ---------------------------------------------------------------------------
+
+func TestStartPTY_CustomCommand(t *testing.T) {
+	cfg := Cfg{
+		Command: "/bin/echo",
+		Args:    []string{"hello"},
+	}
+	p, err := startPTY(24, 80, cfg)
+	if err != nil {
+		t.Skipf("startPTY: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	buf := make([]byte, 128)
+	n, err := p.Read(buf)
+	if err != nil {
+		t.Fatalf("read pty: %v", err)
+	}
+	if got := string(buf[:n]); !strings.Contains(got, "hello") {
+		t.Errorf("pty output = %q, want 'hello'", got)
+	}
+}
+
+func TestStartPTY_CustomEnv(t *testing.T) {
+	cfg := Cfg{
+		Command: "/bin/sh",
+		Args:    []string{"-c", "echo $GO_TERM_TEST"},
+		Env:     []string{"GO_TERM_TEST=1"},
+	}
+	p, err := startPTY(24, 80, cfg)
+	if err != nil {
+		t.Skipf("startPTY: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	buf := make([]byte, 128)
+	n, err := p.Read(buf)
+	if err != nil {
+		t.Fatalf("read pty: %v", err)
+	}
+	if got := string(buf[:n]); !strings.Contains(got, "1") {
+		t.Errorf("pty output = %q, want '1'", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// drawGraphics
+// ---------------------------------------------------------------------------
+
+func TestDrawGraphics_EmptyGraphicsNoOp(t *testing.T) {
+	term := &Term{cellW: 10, cellH: 20}
+	g := newGrid(4, 8)
+	dc := &gui.DrawContext{}
+	// Must not panic when Graphics is nil/empty.
+	term.drawGraphics(dc, g, g.Rows, 0)
+	if len(dc.Images()) != 0 {
+		t.Errorf("Images = %d; want 0 for empty graphics", len(dc.Images()))
+	}
+}
+
+func TestDrawGraphics_DegenerateRowsSkipped(t *testing.T) {
+	term := &Term{cellW: 10, cellH: 20}
+	g := newGrid(4, 8)
+	g.Graphics = []graphic{
+		{Src: "/tmp/test.png", OriginR: 0, OriginC: 0, Cols: 4, Rows: 0},
+	}
+	dc := &gui.DrawContext{}
+	term.drawGraphics(dc, g, g.Rows, 0)
+	if len(dc.Images()) != 0 {
+		t.Error("graphic with Rows=0 should be skipped")
+	}
+}
+
+func TestDrawGraphics_DegenerateColsSkipped(t *testing.T) {
+	term := &Term{cellW: 10, cellH: 20}
+	g := newGrid(4, 8)
+	g.Graphics = []graphic{
+		{Src: "/tmp/test.png", OriginR: 0, OriginC: 0, Cols: 0, Rows: 4},
+	}
+	dc := &gui.DrawContext{}
+	term.drawGraphics(dc, g, g.Rows, 0)
+	if len(dc.Images()) != 0 {
+		t.Error("graphic with Cols=0 should be skipped")
+	}
+}
+
+func TestDrawGraphics_BelowViewportSkipped(t *testing.T) {
+	term := &Term{cellW: 10, cellH: 20}
+	g := newGrid(4, 8)
+	// Graphic starts at row 10, but viewport is only 4 rows.
+	g.Graphics = []graphic{
+		{Src: "/tmp/test.png", OriginR: 10, OriginC: 0, Cols: 2, Rows: 2},
+	}
+	dc := &gui.DrawContext{}
+	term.drawGraphics(dc, g, g.Rows, 0)
+	if len(dc.Images()) != 0 {
+		t.Error("graphic entirely below viewport should be skipped")
+	}
+}
+
+func TestDrawGraphics_AboveViewportSkipped(t *testing.T) {
+	term := &Term{cellW: 10, cellH: 20}
+	g := newGrid(4, 8)
+	// Graphic ends at row 0 but viewport starts at row 0, so
+	// vr+Rows = -3+2 = -1 <= 0 is NOT true. Actually set Rows=2:
+	// vr+Rows = -3+2 = -1 <= 0 → skipped.
+	// Use OriginR=-3, Rows=2: ContentRowToScreen(-3) = -3,
+	// vr+Rows = -3+2 = -1 <= 0 → skip.
+	g.Graphics = []graphic{
+		{Src: "/tmp/test.png", OriginR: -3, OriginC: 0, Cols: 2, Rows: 2},
+	}
+	dc := &gui.DrawContext{}
+	term.drawGraphics(dc, g, g.Rows, 0)
+	if len(dc.Images()) != 0 {
+		t.Error("graphic entirely above viewport should be skipped")
+	}
+}
+
+func TestDrawGraphics_VisibleGraphicRendered(t *testing.T) {
+	term := &Term{cellW: 10, cellH: 20}
+	g := newGrid(4, 8)
+	g.Graphics = []graphic{
+		{Src: "/tmp/test.png", OriginR: 1, OriginC: 2, Cols: 3, Rows: 2},
+	}
+	dc := &gui.DrawContext{}
+	term.drawGraphics(dc, g, g.Rows, 0)
+	entries := dc.Images()
+	if len(entries) != 1 {
+		t.Fatalf("Images = %d; want 1", len(entries))
+	}
+	if entries[0].Src != "/tmp/test.png" {
+		t.Errorf("Src = %q; want /tmp/test.png", entries[0].Src)
+	}
+	// Check computed pixel geometry against expectations.
+	// OriginC=2 * cellW=10 = 20; ContentRowToScreen(1)=1 * cellH=20 = 20
+	// Cols=3 * cellW=10 = 30; Rows=2 * cellH=20 = 40
+	if entries[0].X != 20 {
+		t.Errorf("X = %v; want 20", entries[0].X)
+	}
+	if entries[0].Y != 20 {
+		t.Errorf("Y = %v; want 20", entries[0].Y)
+	}
+	if entries[0].W != 30 {
+		t.Errorf("W = %v; want 30", entries[0].W)
+	}
+	if entries[0].H != 40 {
+		t.Errorf("H = %v; want 40", entries[0].H)
+	}
+}
+
+func TestDrawGraphics_PartiallyAboveViewportStillRenders(t *testing.T) {
+	term := &Term{cellW: 10, cellH: 20}
+	g := newGrid(4, 8)
+	// Graphic origin is at row -5, but it spans 10 rows, so rows -5..4
+	// overlap the viewport 0..3. v=-5, v+10=5 > 0, so it should render.
+	g.Graphics = []graphic{
+		{Src: "/tmp/test.png", OriginR: -5, OriginC: 0, Cols: 2, Rows: 10},
+	}
+	dc := &gui.DrawContext{}
+	term.drawGraphics(dc, g, g.Rows, 0)
+	if len(dc.Images()) != 1 {
+		t.Error("graphic overlapping viewport from above should render")
+	}
 }

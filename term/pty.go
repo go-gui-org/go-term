@@ -26,16 +26,23 @@ func clampWinsize(n int) uint16 {
 	return uint16(n)
 }
 
-// startPTY spawns $SHELL (fallback /bin/sh) attached to a new pty sized
-// rows×cols. TERM is forced to xterm-256color so apps emit standard
-// SGR sequences.
-func startPTY(rows, cols int) (*ptyDev, error) {
-	shell := os.Getenv("SHELL")
+// startPTY spawns the shell configured in cfg (default $SHELL, fallback
+// /bin/sh) attached to a new pty sized rows×cols. TERM is forced to
+// xterm-256color so apps emit standard SGR sequences. cfg.Command, cfg.Args,
+// and cfg.Env allow callers to override the command and environment.
+func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
+	shell := cfg.Command
+	args := cfg.Args
 	if shell == "" {
-		shell = "/bin/sh"
+		shell = os.Getenv("SHELL")
+		if shell == "" {
+			shell = "/bin/sh"
+		}
 	}
-	cmd := exec.Command(shell)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd := exec.Command(shell, args...)
+	env := append(os.Environ(), "TERM=xterm-256color")
+	env = append(env, cfg.Env...)
+	cmd.Env = env
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Rows: clampWinsize(rows),
 		Cols: clampWinsize(cols),
