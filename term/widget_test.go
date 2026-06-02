@@ -1596,12 +1596,12 @@ func TestKKPCodepoint_AllKeys(t *testing.T) {
 		{gui.KeyCode(9999), 0, false},
 	}
 	for _, tt := range tests {
-		got, ok := kkpCodepoint(tt.k)
+		got, ok := kittyKeyCodepoint(tt.k)
 		if ok != tt.ok {
-			t.Errorf("kkpCodepoint(%v) ok=%v, want %v", tt.k, ok, tt.ok)
+			t.Errorf("kittyKeyCodepoint(%v) ok=%v, want %v", tt.k, ok, tt.ok)
 		}
 		if ok && got != tt.want {
-			t.Errorf("kkpCodepoint(%v) = %d, want %d", tt.k, got, tt.want)
+			t.Errorf("kittyKeyCodepoint(%v) = %d, want %d", tt.k, got, tt.want)
 		}
 	}
 }
@@ -2295,4 +2295,110 @@ func TestDrawCursor_FocusedFullOpacity(t *testing.T) {
 	for _, shape := range shapes {
 		term.drawCursor(dc, 0, 0, c, shape, base)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
+
+func TestTerm_Theme_ReturnsActiveTheme(t *testing.T) {
+	custom := Theme{
+		ANSI:      DefaultTheme.ANSI,
+		DefaultFG: gui.RGB(255, 0, 0),
+		DefaultBG: gui.RGB(0, 0, 255),
+	}
+	term := &Term{grid: newGrid(2, 4)}
+	term.grid.Theme = custom
+	if got := term.Theme(); got.DefaultFG != custom.DefaultFG {
+		t.Errorf("Theme().DefaultFG = %+v, want %+v", got.DefaultFG, custom.DefaultFG)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// style
+// ---------------------------------------------------------------------------
+
+func TestTerm_Style_ZeroValueTextStyleFallsBack(t *testing.T) {
+	term := &Term{grid: newGrid(2, 4)}
+	// cfg.TextStyle is the zero value → should fall back to M5.
+	if got, fallback := term.style(), gui.CurrentTheme().M5; got != fallback {
+		t.Errorf("zero-value TextStyle should fall back: got %+v, want M5 %+v",
+			got, fallback)
+	}
+}
+
+func TestTerm_Style_CustomTextStyleUsed(t *testing.T) {
+	custom := gui.TextStyle{Typeface: glyph.TypefaceBold, Size: 18}
+	term := &Term{grid: newGrid(2, 4), cfg: Cfg{TextStyle: custom}}
+	if got := term.style(); got != custom {
+		t.Errorf("custom TextStyle not used: got %+v, want %+v", got, custom)
+	}
+}
+
+func TestTerm_Style_TypefaceOnlyUsesCustom(t *testing.T) {
+	// A TextStyle with only Typeface set (Size=0) should override
+	// the fallback — the check is against the full zero value, not
+	// just Size>0.
+	custom := gui.TextStyle{Typeface: glyph.TypefaceBold}
+	term := &Term{grid: newGrid(2, 4), cfg: Cfg{TextStyle: custom}}
+	if got := term.style(); got != custom {
+		t.Errorf("typeface-only TextStyle should override fallback: got %+v, want %+v",
+			got, custom)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// focusID / canvasID uniqueness
+// ---------------------------------------------------------------------------
+
+func TestTerm_New_UniqueFocusIDs(t *testing.T) {
+	// Simulate what New does: each Term gets a unique termSeq id.
+	id1 := termSeq.Add(1)
+	id2 := termSeq.Add(1)
+	if id1 == id2 {
+		t.Errorf("termSeq should produce unique ids: %d == %d", id1, id2)
+	}
+	if id2 != id1+1 {
+		t.Errorf("termSeq should be monotonic: %d, %d", id1, id2)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// OnEvent chaining
+// ---------------------------------------------------------------------------
+
+func TestTerm_OnWindowEvent_ChainsPreviousHandler(t *testing.T) {
+	called := false
+	w := &gui.Window{}
+	w.OnEvent = func(e *gui.Event, w *gui.Window) {
+		called = true
+	}
+	// Simulate what New does: wrap the existing handler.
+	term, _ := newTestTermCapture()
+	term.prevOnEvent = w.OnEvent
+	w.OnEvent = func(e *gui.Event, w *gui.Window) {
+		term.onWindowEvent(e)
+		if term.prevOnEvent != nil {
+			term.prevOnEvent(e, w)
+		}
+	}
+	w.OnEvent(&gui.Event{}, w)
+	if !called {
+		t.Error("previous OnEvent handler was not called after chaining")
+	}
+}
+
+func TestTerm_OnWindowEvent_NilPrevHandlerNoPanic(t *testing.T) {
+	w := &gui.Window{}
+	term := &Term{grid: newGrid(2, 4)}
+	// Simulate New with no previous handler.
+	term.prevOnEvent = nil
+	w.OnEvent = func(e *gui.Event, w *gui.Window) {
+		term.onWindowEvent(e)
+		if term.prevOnEvent != nil {
+			term.prevOnEvent(e, w)
+		}
+	}
+	// Must not panic.
+	w.OnEvent(&gui.Event{}, w)
 }

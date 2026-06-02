@@ -4,7 +4,6 @@ import (
 	"math"
 	"sync"
 
-	"github.com/mike-ward/go-gui/gui"
 	"github.com/rivo/uniseg"
 )
 
@@ -554,7 +553,7 @@ func (g *grid) markAllDirty() {
 // Marks all rows dirty so the next render picks up the change.
 // Called from the parser while Mu is held.
 func (g *grid) SetDynColor(ps int, c uint32) {
-	col := gui.RGB(uint8(c>>16), uint8(c>>8), uint8(c))
+	col := rgbToGUIColor(c)
 	switch ps {
 	case 10:
 		g.Theme.DefaultFG = col

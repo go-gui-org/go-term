@@ -11,7 +11,9 @@ type Theme struct {
 	DefaultBG gui.Color
 }
 
-// Predefined themes. DefaultTheme is applied when a new grid is created.
+// Predefined themes. These are read-only after init(); do not mutate.
+// DefaultTheme is applied when a new grid is created. To customize, copy
+// the struct: custom := DefaultTheme; custom.DefaultFG = myColor.
 var (
 	DefaultTheme       Theme // VS Code Dark+ approximation
 	GruvboxTheme       Theme // Gruvbox Dark
@@ -151,7 +153,7 @@ func (th *Theme) resolve(c uint32, def gui.Color) gui.Color {
 		return def
 	}
 	if c&0xFF000000 == colorRGB {
-		return gui.RGB(uint8(c>>16), uint8(c>>8), uint8(c))
+		return rgbToGUIColor(c)
 	}
 	idx := c & 0xFF
 	if idx < 16 {
@@ -174,4 +176,10 @@ func (th *Theme) bg(c cell) gui.Color {
 		return th.resolve(c.FG, th.DefaultFG)
 	}
 	return th.resolve(c.BG, th.DefaultBG)
+}
+
+// rgbToGUIColor unpacks a colorRGB-tagged uint32 into a gui.Color.
+// Used by grid.SetDynColor so grid doesn't call gui.RGB directly.
+func rgbToGUIColor(c uint32) gui.Color {
+	return gui.RGB(uint8(c>>16), uint8(c>>8), uint8(c))
 }

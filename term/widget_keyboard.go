@@ -124,10 +124,10 @@ func kittyKeySeq(codepoint int, mods gui.Modifier, flags uint32, release bool) [
 	return b
 }
 
-// kkpCodepoint returns the KKP codepoint for k, or (0, false) when k has none.
+// kittyKeyCodepoint returns the KKP codepoint for k, or (0, false) when k has none.
 // Modifier keys map to private-use-area codepoints; ASCII keys A–Z return 'a'–'z',
 // 0–9 return '0'–'9'. KKP spec §7 table.
-func kkpCodepoint(k gui.KeyCode) (int, bool) {
+func kittyKeyCodepoint(k gui.KeyCode) (int, bool) {
 	switch k {
 	case gui.KeyLeftShift:
 		return 57441, true
@@ -582,7 +582,7 @@ func (t *Term) onKeyUp(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
 	if modes.kittyKeyFlags&2 == 0 {
 		return
 	}
-	cp, ok := kkpCodepoint(e.KeyCode)
+	cp, ok := kittyKeyCodepoint(e.KeyCode)
 	if !ok {
 		return
 	}

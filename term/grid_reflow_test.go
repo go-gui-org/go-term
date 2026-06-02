@@ -328,3 +328,83 @@ func TestRewrapLine_PreserveAttributes(t *testing.T) {
 		t.Errorf("expected Bold attr, got %d", cont.Attrs)
 	}
 }
+
+func TestLogicalReflow_ZeroDimsClamped(t *testing.T) {
+	// The defensive guards must prevent division by zero and negative
+	// allocations without panicking.
+	cfg := reflowConfig{
+		cells:      nil,
+		rowWrapped: nil,
+		scrollback: nil,
+		sbWrapped:  nil,
+		oldRows:    0,
+		oldCols:    0,
+		newRows:    0,
+		newCols:    0,
+		cursorR:    0,
+		cursorC:    0,
+	}
+	// Must not panic.
+	res := logicalReflow(cfg)
+	// oldRows=0, newRows clamped to 1, newCols clamped to 1.
+	if len(res.cells) != 1 {
+		t.Fatalf("zero dims: got %d cells, want 1", len(res.cells))
+	}
+	if len(res.rowWrapped) != 1 {
+		t.Fatalf("zero dims: got %d rowWrapped, want 1", len(res.rowWrapped))
+	}
+	if res.cursorR != 0 || res.cursorC != 0 {
+		t.Errorf("zero dims cursor: (%d,%d), want (0,0)", res.cursorR, res.cursorC)
+	}
+}
+
+func TestLogicalReflow_TinyDimsNoPanic(t *testing.T) {
+	// newCols=1 with cells present should not panic on rewrap or
+	// division. Regression test for the oldCols/newCols division in
+	// the estRows formula.
+	g := newGrid(3, 5)
+	for _, r := range "hello" {
+		g.Put(r)
+	}
+	cfg := reflowConfig{
+		cells:      g.Cells,
+		rowWrapped: g.RowWrapped,
+		scrollback: nil,
+		sbWrapped:  nil,
+		oldRows:    g.Rows,
+		oldCols:    g.Cols,
+		newRows:    3,
+		newCols:    1,
+		cursorR:    g.CursorR,
+		cursorC:    g.CursorC,
+	}
+	res := logicalReflow(cfg)
+	if len(res.cells) != 3 {
+		t.Errorf("tiny dims: got %d cells, want 3", len(res.cells))
+	}
+	if res.cursorR < 0 || res.cursorR >= 3 {
+		t.Errorf("cursorR %d out of [0,3)", res.cursorR)
+	}
+}
+
+func TestLogicalReflow_NegativeOldRowsClamped(t *testing.T) {
+	// oldRows < 0 must be clamped to 0 without panicking.
+	cfg := reflowConfig{
+		cells:      nil,
+		rowWrapped: nil,
+		scrollback: nil,
+		sbWrapped:  nil,
+		oldRows:    -5,
+		oldCols:    10,
+		newRows:    2,
+		newCols:    4,
+		cursorR:    0,
+		cursorC:    0,
+	}
+	// Must not panic.
+	res := logicalReflow(cfg)
+	// oldRows clamped to 0, newRows=2, newCols=4 → 8 cells total.
+	if len(res.cells) != 8 {
+		t.Errorf("negative oldRows: got %d cells, want 8", len(res.cells))
+	}
+}

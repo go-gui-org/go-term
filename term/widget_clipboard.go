@@ -52,9 +52,13 @@ func (t *Term) pasteFromClipboard(w *gui.Window) {
 	text = truncatePaste(text, maxPasteBytes)
 	t.snapToLive()
 	clean := stripPasteEnd(text)
+	// Read BracketedPaste under the lock, then release before calling
+	// pw.Write — holding Mu across a blocking pty write can deadlock
+	// when the slave-side input buffer is full and the reader goroutine
+	// is waiting for the same lock to drain output.
 	t.grid.Mu.Lock()
-	defer t.grid.Mu.Unlock()
 	bracketed := t.grid.BracketedPaste
+	t.grid.Mu.Unlock()
 	payload := clean
 	if bracketed {
 		payload = pasteStart + clean + pasteEnd

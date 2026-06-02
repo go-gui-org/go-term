@@ -36,20 +36,31 @@ type desktopNotifier struct{}
 
 func (desktopNotifier) Notify(title, body string) { sendDesktopNotify(title, body) }
 
-// Cfg configures a Term widget. All fields optional.
+// Cfg configures a Term widget. All fields are optional.
 type Cfg struct {
-	// TextStyle overrides the default monospace style. Zero value
-	// uses gui.CurrentTheme().M5.
+	// TextStyle overrides the default monospace text style. When set to
+	// the zero value, the widget falls back to gui.CurrentTheme().M5.
+	// To use a custom style you must set at least one field (typically
+	// Size or Typeface) — a zero-value TextStyle is treated as "unset."
 	TextStyle gui.TextStyle
 
-	// ScrollbackRows caps the scrollback ring buffer. Zero uses the
-	// default (defaultScrollbackRows). Negative disables scrollback.
+	// ScrollbackRows caps the number of scrollback rows. The meaning
+	// depends on the sign:
+	//
+	//   - Zero (the default): use defaultScrollbackRows (5000).
+	//   - Positive: use this many rows, clamped to [1, MaxScrollbackCap].
+	//   - Negative: disable scrollback entirely (ScrollbackCap = 0).
+	//
+	// Disabling scrollback saves memory for short-lived embedded
+	// widgets that never need history.
 	ScrollbackRows int
 
-	// OnTitle, if non-nil, receives OSC 0/1/2 window-title updates on
-	// the main goroutine (delivered via Window.QueueCommand). When
-	// nil, the widget calls win.SetTitle directly. Embedders set this
-	// to wrap the title in app-specific framing.
+	// OnTitle, if non-nil, receives OSC 0/1/2 window-title updates
+	// on the main goroutine. When nil, the widget calls
+	// win.SetTitle directly, which is appropriate for standalone
+	// single-Term windows. Embedders that manage their own title bar
+	// (or multiple Term instances) should set OnTitle to capture
+	// per-terminal titles.
 	OnTitle func(string)
 
 	// OnNotify, if non-nil, is called for OSC 9 / OSC 777 desktop
@@ -227,10 +238,21 @@ type Term struct {
 	// standalone Term (no pane manager) works without extra setup.
 	focused atomic.Bool
 
+	// focusID is a unique per-Term IDFocus value so multiple terminals
+	// in the same window don't compete for the same focus slot.
+	focusID uint32
+
 	// canvasID is a unique per-Term identifier used as the DrawCanvas ID
 	// so multiple terminals in the same window don't collide in go-gui's
 	// tessellation cache.
 	canvasID string
+
+	// prevOnEvent is the previous Window.OnEvent handler, saved in New
+	// so multiple Terms can chain event handlers without losing the
+	// original. Restoring it in Close would be cleaner but requires the
+	// caller to guarantee no other Term captured the same wrapper;
+	// the current closure-based chain handles arbitrary creation order.
+	prevOnEvent func(*gui.Event, *gui.Window)
 
 	// closed guards Close so multiple calls are safe.
 	closed atomic.Bool
@@ -347,6 +369,7 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	applyTheme(g, cfg)
 	applyScrollbackConfig(g, cfg)
 	themeMenuItems := buildThemeMenu(cfg)
+	seqID := termSeq.Add(1)
 	t := &Term{
 		cfg:            cfg,
 		grid:           g,
@@ -358,7 +381,8 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		cursorEpoch:    time.Now(),
 		blinkDone:      make(chan struct{}),
 		readDone:       make(chan struct{}),
-		canvasID:       "term-canvas-" + strconv.FormatUint(termSeq.Add(1), 10),
+		focusID:        uint32(seqID),
+		canvasID:       "term-canvas-" + strconv.FormatUint(seqID, 10),
 		themeMenuItems: themeMenuItems,
 	}
 	t.mouse.lastR = -1
@@ -382,15 +406,15 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		})
 	}
 	t.registerNotifyHandler()
-	prevOnEvent := w.OnEvent
+	t.prevOnEvent = w.OnEvent
 	w.OnEvent = func(e *gui.Event, w *gui.Window) {
 		t.onWindowEvent(e)
-		if prevOnEvent != nil {
-			prevOnEvent(e, w)
+		if t.prevOnEvent != nil {
+			t.prevOnEvent(e, w)
 		}
 	}
 	t.focused.Store(true)
-	w.SetIDFocus(focusID)
+	w.SetIDFocus(t.focusID)
 	go t.readLoop()
 	t.loopWg.Add(3)
 	go t.blinkLoop()
@@ -399,12 +423,21 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	return t, nil
 }
 
+// recoverLoop logs and suppresses panics in background goroutines so a
+// single goroutine crash does not take down the whole process.
+func recoverLoop(name string) {
+	if r := recover(); r != nil {
+		log.Printf("term: panic in %s: %v", name, r)
+	}
+}
+
 // blinkLoop wakes every cursorBlinkPeriod and forces a redraw when the
 // cursor is currently blinking + visible at the live viewport. Other
 // states (steady cursor, scrolled-back view, hidden cursor) need no
 // periodic redraw and the loop simply skips.
 func (t *Term) blinkLoop() {
 	defer t.loopWg.Done()
+	defer recoverLoop("blinkLoop")
 	tk := time.NewTicker(cursorBlinkPeriod)
 	defer tk.Stop()
 	for {
@@ -434,6 +467,7 @@ func (t *Term) blinkLoop() {
 // the window (e.g. above the title bar). Exits when blinkDone is closed.
 func (t *Term) autoScrollLoop() {
 	defer t.loopWg.Done()
+	defer recoverLoop("autoScrollLoop")
 	const rate = 80 * time.Millisecond
 	tk := time.NewTicker(rate)
 	defer tk.Stop()
@@ -621,6 +655,13 @@ func (t *Term) Cwd() string {
 	return t.grid.Cwd
 }
 
+// Theme returns the active color theme. Safe to call from any goroutine.
+func (t *Term) Theme() Theme {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	return t.grid.Theme
+}
+
 // SetTheme replaces the active color theme and schedules a redraw.
 // Safe to call from the main thread at any time.
 func (t *Term) SetTheme(th Theme) {
@@ -644,14 +685,11 @@ func (t *Term) SetFocused(v bool) {
 			if t.closed.Load() {
 				return
 			}
-			w.SetIDFocus(focusID)
+			w.SetIDFocus(t.focusID)
 		})
 	}
 	t.bumpVersion()
 }
-
-// focusID is the IDFocus value claimed by the terminal container.
-const focusID uint32 = 1
 
 // termSeq provides unique per-Term identifiers (canvas IDs etc.).
 var termSeq atomic.Uint64
@@ -713,7 +751,7 @@ func (t *Term) View(w *gui.Window) gui.View {
 		Content:     []gui.View{canvas},
 	}
 	if t.focused.Load() {
-		colCfg.IDFocus = focusID
+		colCfg.IDFocus = t.focusID
 	}
 	if len(t.themeMenuItems) > 0 {
 		colCfg.Width = float32(ww)
@@ -737,9 +775,7 @@ func (t *Term) View(w *gui.Window) gui.View {
 			Content: []gui.View{gui.Column(colCfg)},
 		})
 	}
-	colCfg.Width = float32(ww)
-	colCfg.Height = float32(wh)
-	colCfg.Sizing = gui.FixedFixed
+	colCfg.Sizing = gui.FillFill
 	return gui.Column(colCfg)
 }
 
@@ -781,6 +817,7 @@ func (t *Term) Close() error {
 // render. Exits when the pty is closed or returns EOF.
 func (t *Term) readLoop() {
 	defer close(t.readDone)
+	defer recoverLoop("readLoop")
 	buf := make([]byte, 4096)
 	for {
 		n, err := t.pty.Read(buf)
@@ -815,7 +852,9 @@ func (t *Term) readLoop() {
 						// Use a select goroutine so blinkDone cancellation
 						// prevents QueueCommand from firing after Close.
 						blinkDone := t.blinkDone
+						t.loopWg.Add(1)
 						go func() {
+							defer t.loopWg.Done()
 							timer := time.NewTimer(bellFlashDuration + time.Millisecond)
 							defer timer.Stop()
 							select {
@@ -842,7 +881,7 @@ func (t *Term) readLoop() {
 
 // style returns the resolved text style for this terminal.
 func (t *Term) style() gui.TextStyle {
-	if t.cfg.TextStyle.Size > 0 {
+	if t.cfg.TextStyle != (gui.TextStyle{}) {
 		return t.cfg.TextStyle
 	}
 	return gui.CurrentTheme().M5

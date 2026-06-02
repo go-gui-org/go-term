@@ -27,19 +27,26 @@ func mouseSGRBaseButton(b gui.MouseButton) (int, bool) {
 	return 0, false
 }
 
+// SGR mouse modifier bits, per xterm ctlseqs documentation.
+const (
+	mouseModShift = 4
+	mouseModAlt   = 8
+	mouseModCtrl  = 16
+)
+
 // mouseModBits encodes shift/alt/ctrl modifier bits into the xterm
 // mouse-button byte. Values from xterm ctlseqs: shift=4, alt/meta=8,
 // ctrl=16. Super/Cmd has no standard mapping and is ignored.
 func mouseModBits(m gui.Modifier) int {
 	bits := 0
 	if m.Has(gui.ModShift) {
-		bits += 4
+		bits += mouseModShift
 	}
 	if m.Has(gui.ModAlt) {
-		bits += 8
+		bits += mouseModAlt
 	}
 	if m.Has(gui.ModCtrl) {
-		bits += 16
+		bits += mouseModCtrl
 	}
 	return bits
 }
@@ -485,6 +492,7 @@ func (t *Term) kickMomentum() {
 // to ScrollViewPx for sub-cell-accurate smooth scrolling.
 func (t *Term) momentumLoop() {
 	defer t.loopWg.Done()
+	defer recoverLoop("momentumLoop")
 	const (
 		tickDur       = 16 * time.Millisecond
 		frictionFast  = 0.90  // decelerate at high speed — avoids linear feel

@@ -98,6 +98,38 @@ func rewrapLine(cells []cell, newCols int) []physRow {
 	return rows
 }
 
+// maxReflowRows caps the total (scrollback + live) row count processed
+// by logicalReflow so a runaway input cannot trigger a massive allocation.
+// The upstream MaxScrollbackCap + MaxGridDim already bounds this to ~101K;
+// this constant is defense-in-depth for the internal struct-param path.
+const maxReflowRows = 200_000
+
+// reflowConfig holds the parameters for logicalReflow so call sites
+// are readable without positional-parameter noise.
+type reflowConfig struct {
+	cells         []cell
+	rowWrapped    []bool
+	scrollback    [][]cell
+	sbWrapped     []bool
+	oldRows       int
+	oldCols       int
+	newRows       int
+	newCols       int
+	cursorR       int
+	cursorC       int
+	scrollbackCap int
+}
+
+// reflowResult holds the output of logicalReflow.
+type reflowResult struct {
+	cells      []cell
+	rowWrapped []bool
+	scrollback [][]cell
+	sbWrapped  []bool
+	cursorR    int
+	cursorC    int
+}
+
 // logicalReflow joins soft-wrapped physical rows into logical lines,
 // re-wraps them at newCols, and returns the new cell buffer, wrap flags,
 // scrollback, and cursor position. Hard newlines (wrapped==false) are
@@ -110,16 +142,55 @@ func rewrapLine(cells []cell, newCols int) []physRow {
 //   - newRows, newCols: target dims
 //   - cursorR, cursorC: cursor in the live buffer
 //   - scrollbackCap: maximum scrollback rows (0 = unlimited trim handled by caller)
-func logicalReflow(
-	cells []cell, rowWrapped []bool,
-	scrollback [][]cell, sbWrapped []bool,
-	oldRows, oldCols, newRows, newCols int,
-	cursorR, cursorC int,
-	scrollbackCap int,
-) (newCells []cell, newRowWrapped []bool, newScrollback [][]cell, newSbWrapped []bool, newCursorR, newCursorC int) {
+func logicalReflow(cfg reflowConfig) reflowResult {
+	cells := cfg.cells
+	rowWrapped := cfg.rowWrapped
+	scrollback := cfg.scrollback
+	sbWrapped := cfg.sbWrapped
+	oldRows, oldCols := cfg.oldRows, cfg.oldCols
+	newRows, newCols := cfg.newRows, cfg.newCols
+	cursorR, cursorC := cfg.cursorR, cfg.cursorC
+	scrollbackCap := cfg.scrollbackCap
+
+	// Defensive: clamp dims to >=1 so division and allocation
+	// arithmetic never hits zero or negative. Callers already clamp
+	// via clampDim; this is defense-in-depth for the struct-param path.
+	if newCols < 1 {
+		newCols = 1
+	}
+	if newRows < 1 {
+		newRows = 1
+	}
+	if oldCols < 1 {
+		oldCols = 1
+	}
+	if oldRows < 0 {
+		oldRows = 0
+	}
+
+	var (
+		newCells      []cell
+		newRowWrapped []bool
+		newScrollback [][]cell
+		newSbWrapped  []bool
+		newCursorR    int
+		newCursorC    int
+	)
 
 	nSB := len(scrollback)
 	total := nSB + oldRows
+	// Cap total so a runaway scrollback count doesn't trigger a
+	// massive physRow allocation. MaxScrollbackCap + MaxGridDim
+	// already bounds this to ~101K; the cap here is belt-and-suspenders.
+	if total > maxReflowRows {
+		total = maxReflowRows
+		if nSB > maxReflowRows {
+			nSB = maxReflowRows
+			scrollback = scrollback[len(scrollback)-nSB:]
+		}
+		oldRows = total - nSB
+		cells = cells[len(cells)-oldRows*oldCols:]
+	}
 	phys := make([]physRow, total)
 	for i, row := range scrollback {
 		w := false
@@ -178,13 +249,7 @@ func logicalReflow(
 	var cursorLogCol int
 	if len(lines) > 0 && cursorLineIdx < len(lines) {
 		ll := lines[cursorLineIdx]
-		effectiveCursorC := cursorC
-		if effectiveCursorC >= oldCols {
-			effectiveCursorC = oldCols - 1
-		}
-		if effectiveCursorC < 0 {
-			effectiveCursorC = 0
-		}
+		effectiveCursorC := clamp(cursorC, 0, oldCols-1)
 		cursorLogCol = (cursorPhys-ll.start)*oldCols + effectiveCursorC
 	}
 
@@ -195,6 +260,12 @@ func logicalReflow(
 	estRows := len(lines) + (nSB*oldCols+oldRows*oldCols)/newCols
 	if estRows < total {
 		estRows = total
+	}
+	// Cap the capacity hint so a degenerate newCols=1 + wide oldCols
+	// combination can't trigger a multi-GB pre-allocation. The slice
+	// will grow as needed; the cap only skips the upfront reservation.
+	if estRows > maxReflowRows {
+		estRows = maxReflowRows
 	}
 	allNew := make([]physRow, 0, estRows)
 	cursorNewPhysStart := 0
@@ -325,7 +396,14 @@ func logicalReflow(
 	if newCursorC >= newCols {
 		newCursorC = newCols - 1
 	}
-	return
+	return reflowResult{
+		cells:      newCells,
+		rowWrapped: newRowWrapped,
+		scrollback: newScrollback,
+		sbWrapped:  newSbWrapped,
+		cursorR:    newCursorR,
+		cursorC:    newCursorC,
+	}
 }
 
 // Resize reflows to new dims using logical line wrapping. Rows that ended
@@ -369,34 +447,46 @@ func (g *grid) Resize(rows, cols int) {
 			if len(savedRW) != g.Rows {
 				savedRW = make([]bool, g.Rows)
 			}
-			newCells, newRW2, newSB, newSBW, newCR, newCC := logicalReflow(
-				g.mainSaved.cells, savedRW,
-				sbRows, sbWrap,
-				g.Rows, g.Cols, rows, cols,
-				g.mainSaved.cursorR, g.mainSaved.cursorC,
-				g.ScrollbackCap,
-			)
-			g.mainSaved.cells = newCells
-			g.mainSaved.rowWrapped = newRW2
-			g.repopulateScrollback(newSB, newSBW, cols)
-			g.mainSaved.cursorR = newCR
-			g.mainSaved.cursorC = newCC
+			res := logicalReflow(reflowConfig{
+				cells:         g.mainSaved.cells,
+				rowWrapped:    savedRW,
+				scrollback:    sbRows,
+				sbWrapped:     sbWrap,
+				oldRows:       g.Rows,
+				oldCols:       g.Cols,
+				newRows:       rows,
+				newCols:       cols,
+				cursorR:       g.mainSaved.cursorR,
+				cursorC:       g.mainSaved.cursorC,
+				scrollbackCap: g.ScrollbackCap,
+			})
+			g.mainSaved.cells = res.cells
+			g.mainSaved.rowWrapped = res.rowWrapped
+			g.repopulateScrollback(res.scrollback, res.sbWrapped, cols)
+			g.mainSaved.cursorR = res.cursorR
+			g.mainSaved.cursorC = res.cursorC
 			g.mainSaved.top = 0
 			g.mainSaved.bottom = rows - 1
 		}
 	} else {
-		newCells, newRW, newSB, newSBW, newCR, newCC := logicalReflow(
-			g.Cells, g.RowWrapped,
-			sbRows, sbWrap,
-			g.Rows, g.Cols, rows, cols,
-			g.CursorR, g.CursorC,
-			g.ScrollbackCap,
-		)
-		g.Cells = newCells
-		g.RowWrapped = newRW
-		g.repopulateScrollback(newSB, newSBW, cols)
-		g.CursorR = newCR
-		g.CursorC = newCC
+		res := logicalReflow(reflowConfig{
+			cells:         g.Cells,
+			rowWrapped:    g.RowWrapped,
+			scrollback:    sbRows,
+			sbWrapped:     sbWrap,
+			oldRows:       g.Rows,
+			oldCols:       g.Cols,
+			newRows:       rows,
+			newCols:       cols,
+			cursorR:       g.CursorR,
+			cursorC:       g.CursorC,
+			scrollbackCap: g.ScrollbackCap,
+		})
+		g.Cells = res.cells
+		g.RowWrapped = res.rowWrapped
+		g.repopulateScrollback(res.scrollback, res.sbWrapped, cols)
+		g.CursorR = res.cursorR
+		g.CursorC = res.cursorC
 	}
 
 	g.Rows = rows

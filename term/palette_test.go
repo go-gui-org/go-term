@@ -126,3 +126,32 @@ func TestPalette_ThemeOverridesANSI(t *testing.T) {
 		t.Errorf("extended color unchanged: got %+v want %+v", got, want)
 	}
 }
+
+func TestRGBToGUIColor_Roundtrip(t *testing.T) {
+	// Verify each byte position survives the uint32→RGB trip intact.
+	cases := []uint32{
+		0x00000000,
+		0x00FF0000, // red
+		0x0000FF00, // green
+		0x000000FF, // blue
+		0x00FF00FF, // magenta
+		0x00FFFFFF, // white
+		0x00123456, // arbitrary
+	}
+	for _, c := range cases {
+		got := rgbToGUIColor(c)
+		want := gui.RGB(uint8(c>>16), uint8(c>>8), uint8(c))
+		if got != want {
+			t.Errorf("rgbToGUIColor(%#08x) = %+v, want %+v", c, got, want)
+		}
+	}
+}
+
+func TestRGBToGUIColor_PreservesAlphaZero(t *testing.T) {
+	// Alpha byte (bits 24-31) is discarded by uint8 casts.
+	got := rgbToGUIColor(0xFF000000)
+	want := gui.RGB(0, 0, 0)
+	if got != want {
+		t.Errorf("alpha bits should be ignored: got %+v, want %+v", got, want)
+	}
+}
