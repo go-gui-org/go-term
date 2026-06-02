@@ -39,10 +39,7 @@ func (t *Term) scrollByPage(dir int, w *gui.Window) {
 	func() {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
-		step := t.grid.Rows - 1
-		if step < 1 {
-			step = 1
-		}
+		step := max(t.grid.Rows-1, 1)
 		t.grid.ScrollView(dir * step)
 	}()
 	t.showScrollbar()

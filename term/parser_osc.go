@@ -197,11 +197,11 @@ func (p *parser) handleOSC1337(pt string) {
 		return
 	}
 	rest := pt[len(prefix):]
-	colon := strings.IndexByte(rest, ':')
-	if colon < 0 {
+	before, after, ok := strings.Cut(rest, ":")
+	if !ok {
 		return
 	}
-	args, b64 := rest[:colon], rest[colon+1:]
+	args, b64 := before, after
 
 	if !strings.Contains(";"+args+";", ";inline=1;") {
 		return

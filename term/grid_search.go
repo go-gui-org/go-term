@@ -23,7 +23,7 @@ func runeSliceSearch(haystack, needle []rune, fromCol int) int {
 	}
 	for i := fromCol; i <= n-m; i++ {
 		match := true
-		for j := 0; j < m; j++ {
+		for j := range m {
 			if !equalFoldRune(haystack[i+j], needle[j]) {
 				match = false
 				break
@@ -43,16 +43,13 @@ func runeSliceSearchLast(haystack, needle []rune, upToCol int) int {
 	if m == 0 || n < m {
 		return -1
 	}
-	maxStart := n - m
-	if upToCol-1 < maxStart {
-		maxStart = upToCol - 1
-	}
+	maxStart := min(upToCol-1, n-m)
 	if maxStart < 0 {
 		return -1
 	}
 	for i := maxStart; i >= 0; i-- {
 		match := true
-		for j := 0; j < m; j++ {
+		for j := range m {
 			if !equalFoldRune(haystack[i+j], needle[j]) {
 				match = false
 				break
@@ -153,7 +150,7 @@ func (g *grid) Find(query string, start contentPos, forward bool) (contentPos, b
 	start.Row = clamp(start.Row, 0, total-1)
 	var rrBuf []rune
 	var colBuf []int
-	for i := 0; i < total; i++ {
+	for i := range total {
 		var row int
 		if forward {
 			row = (start.Row + i) % total

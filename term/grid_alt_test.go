@@ -59,7 +59,7 @@ func TestGrid_AltSuppressesScrollback(t *testing.T) {
 	g := newGrid(2, 3)
 	g.ScrollbackCap = 100
 	g.EnterAlt()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		g.Put('a' + rune(i))
 		g.Newline()
 	}
@@ -69,7 +69,7 @@ func TestGrid_AltSuppressesScrollback(t *testing.T) {
 	}
 	g.ExitAlt()
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		g.Put('m')
 		g.Newline()
 	}
@@ -81,7 +81,7 @@ func TestGrid_AltSuppressesScrollback(t *testing.T) {
 func TestGrid_EnterAlt_ResetsView(t *testing.T) {
 	g := newGrid(2, 3)
 	g.ScrollbackCap = 10
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		g.Put('a')
 		g.Newline()
 	}

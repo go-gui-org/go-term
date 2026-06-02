@@ -257,10 +257,7 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 	// Capacity estimate: each logical line produces at least one physical
 	// row at newCols; long lines produce oldCols/newCols+1 rows. The
 	// ceiling avoids overallocation from wrapping every row individually.
-	estRows := len(lines) + (nSB*oldCols+oldRows*oldCols)/newCols
-	if estRows < total {
-		estRows = total
-	}
+	estRows := max(len(lines)+(nSB*oldCols+oldRows*oldCols)/newCols, total)
 	// Cap the capacity hint so a degenerate newCols=1 + wide oldCols
 	// combination can't trigger a multi-GB pre-allocation. The slice
 	// will grow as needed; the cap only skips the upfront reservation.
@@ -315,10 +312,7 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 		allNew = append(allNew, rewrapped...)
 
 		if li < cursorLineIdx {
-			capRows := newRows + scrollbackCap
-			if capRows < newRows*2 {
-				capRows = newRows * 2
-			}
+			capRows := max(newRows+scrollbackCap, newRows*2)
 			if len(allNew) > capRows {
 				allNew = allNew[len(allNew)-capRows:]
 			}
@@ -328,14 +322,8 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 	rowOffset := 0
 	colOffset := 0
 	if newCols > 0 && len(cursorLineRewrapped) > 0 {
-		maxLogCol := len(cursorLineRewrapped)*newCols - 1
-		if maxLogCol < 0 {
-			maxLogCol = 0
-		}
-		effective := cursorLogCol
-		if effective > maxLogCol {
-			effective = maxLogCol
-		}
+		maxLogCol := max(len(cursorLineRewrapped)*newCols-1, 0)
+		effective := min(cursorLogCol, maxLogCol)
 		rowOffset = effective / newCols
 		colOffset = effective % newCols
 		if rowOffset >= len(cursorLineRewrapped) {
@@ -344,14 +332,8 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 	}
 	newCursorPhys := cursorNewPhysStart + rowOffset
 
-	maxStart := len(allNew) - newRows
-	if maxStart < 0 {
-		maxStart = 0
-	}
-	liveStart := newCursorPhys - (newRows - 1)
-	if liveStart > maxStart {
-		liveStart = maxStart
-	}
+	maxStart := max(len(allNew)-newRows, 0)
+	liveStart := min(newCursorPhys-(newRows-1), maxStart)
 	if liveStart < 0 {
 		liveStart = 0
 	}

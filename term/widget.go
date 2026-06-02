@@ -852,9 +852,7 @@ func (t *Term) readLoop() {
 						// Use a select goroutine so blinkDone cancellation
 						// prevents QueueCommand from firing after Close.
 						blinkDone := t.blinkDone
-						t.loopWg.Add(1)
-						go func() {
-							defer t.loopWg.Done()
+						t.loopWg.Go(func() {
 							timer := time.NewTimer(bellFlashDuration + time.Millisecond)
 							defer timer.Stop()
 							select {
@@ -867,7 +865,7 @@ func (t *Term) readLoop() {
 							}
 							t.bumpVersion()
 							t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
-						}()
+						})
 					}
 					w.UpdateWindow()
 				})

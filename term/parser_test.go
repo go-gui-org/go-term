@@ -271,7 +271,7 @@ func TestParser_TBC_ClearAll(t *testing.T) {
 	feed(t, g, p, []byte("\x1b[3g"))
 	g.Mu.Lock()
 	defer g.Mu.Unlock()
-	for c := 0; c < MaxGridDim; c++ {
+	for c := range MaxGridDim {
 		if g.TabStops[c] {
 			t.Errorf("CSI 3g: stop still set at col %d", c)
 		}
@@ -294,7 +294,7 @@ func TestParser_HTS_TBC_RoundTrip(t *testing.T) {
 	g.Mu.Lock()
 	defer g.Mu.Unlock()
 
-	for c := 0; c < 20; c++ {
+	for c := range 20 {
 		want := c == 5 || c == 10
 		if g.TabStops[c] != want {
 			t.Errorf("col %d: TabStops=%v, want %v", c, g.TabStops[c], want)

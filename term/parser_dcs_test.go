@@ -117,7 +117,7 @@ func TestParser_XTGETTCAP_EmptyBodyReturnsError(t *testing.T) {
 func TestSplitSemis_CapsAtMax(t *testing.T) {
 	// 41 fields separated by 40 semicolons — must be capped at maxXTGETTCAPParts
 	var b []byte
-	for i := 0; i < 41; i++ {
+	for i := range 41 {
 		if i > 0 {
 			b = append(b, ';')
 		}

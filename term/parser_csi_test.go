@@ -596,7 +596,7 @@ func TestParser_DEC1049_SuppressesScrollback(t *testing.T) {
 	g, p := newParserGrid(2, 3)
 	g.ScrollbackCap = 50
 	feed(t, g, p, []byte("\x1b[?1049h"))
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		feed(t, g, p, []byte("x\r\n"))
 	}
 	if g.Scrollback.Len() != 0 {
@@ -604,7 +604,7 @@ func TestParser_DEC1049_SuppressesScrollback(t *testing.T) {
 			g.Scrollback.Len())
 	}
 	feed(t, g, p, []byte("\x1b[?1049l"))
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		feed(t, g, p, []byte("y\r\n"))
 	}
 	if g.Scrollback.Len() == 0 {

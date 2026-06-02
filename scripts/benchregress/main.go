@@ -511,7 +511,7 @@ func runCompare(basePath, currentPath string, threshold float64, zeroAlloc []str
 
 // printlnf is a small helper to avoid repetitive errcheck noise for stdout
 // writes. If stdout fails the process is dying anyway.
-func printlnf(w io.Writer, format string, args ...interface{}) {
+func printlnf(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, format+"\n", args...)
 }
 

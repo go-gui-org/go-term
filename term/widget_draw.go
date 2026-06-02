@@ -563,17 +563,11 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			}
 			compWidths = make([]int, len(compRunes))
 			for i, r := range compRunes {
-				w := runeWidth(r)
-				if w < 1 {
-					w = 1
-				}
+				w := max(runeWidth(r), 1)
 				compWidths[i] = w
 				compTotalCols += w
 			}
-			compCursor = gw.IMECompCursor()
-			if compCursor > len(compRunes) {
-				compCursor = len(compRunes)
-			}
+			compCursor = min(gw.IMECompCursor(), len(compRunes))
 		}
 
 		if composing && len(compRunes) > 0 && g.CursorR < renderRows && g.ViewOffset == 0 && renderYOff == 0 {

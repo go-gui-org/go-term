@@ -98,11 +98,9 @@ func visualReorder(cells []cell, cols int) (visual []cell, v2l []int) {
 		run := order.Run(i)
 		// Pos returns rune indices; end is INCLUSIVE.
 		first, lastIncl := run.Pos()
-		last := lastIncl + 1 // convert to exclusive for loop bounds
-
-		if last > len(entries) {
-			last = len(entries)
-		}
+		last := min(
+			// convert to exclusive for loop bounds
+			lastIncl+1, len(entries))
 		if first < 0 || first >= len(entries) {
 			continue
 		}

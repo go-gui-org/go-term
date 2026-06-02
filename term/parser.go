@@ -310,10 +310,7 @@ func (p *parser) Feed(b []byte) {
 
 				p.leader = c
 			case c >= '0' && c <= '9':
-				p.curP = p.curP*10 + int(c-'0')
-				if p.curP > maxCSIParamValue {
-					p.curP = maxCSIParamValue
-				}
+				p.curP = min(p.curP*10+int(c-'0'), maxCSIParamValue)
 				p.hasP = true
 			case c == ';':
 				if len(p.params) < maxCSIParams {

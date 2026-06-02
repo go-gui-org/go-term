@@ -98,7 +98,7 @@ func TestOnDraw_BackgroundMultipleRuns(t *testing.T) {
 	tm.grid.Mu.Lock()
 	g := tm.grid
 	// Row 0: cols 0-1 red, 2-4 blue, 5-7 default
-	for c := 0; c < 2; c++ {
+	for c := range 2 {
 		g.Cells[c].BG = rgbColor(255, 0, 0)
 	}
 	for c := 2; c < 5; c++ {

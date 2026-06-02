@@ -297,10 +297,7 @@ func readInt(data []byte, i int) (int, int) {
 	n := 0
 	seen := false
 	for i < len(data) && isDigit(data[i]) {
-		n = n*10 + int(data[i]-'0')
-		if n > cap {
-			n = cap
-		}
+		n = min(n*10+int(data[i]-'0'), cap)
 		i++
 		seen = true
 	}

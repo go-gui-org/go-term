@@ -662,7 +662,7 @@ func TestGrid_ClearTabStop_AtCursor(t *testing.T) {
 func TestGrid_ClearTabStop_All(t *testing.T) {
 	g := newGrid(1, 80)
 	g.ClearTabStop(true)
-	for c := 0; c < MaxGridDim; c++ {
+	for c := range MaxGridDim {
 		if g.TabStops[c] {
 			t.Errorf("ClearTabStop(true): stop still set at col %d", c)
 		}
