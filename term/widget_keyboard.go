@@ -34,6 +34,14 @@ func (t *Term) keyModes() keyModes {
 	}
 }
 
+// isAltActive reports whether the alt screen is active, acquiring grid.Mu
+// briefly. Used by scrollback handling in encodeKeyEvent.
+func (t *Term) isAltActive() bool {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	return t.grid.AltActive
+}
+
 // recompileSearchRE compiles searchQuery into searchRE when regex mode is
 // active. Clears searchRE and searchREErr when not in regex mode or when the
 // query is empty.
@@ -330,13 +338,31 @@ func funcKeySeq(k gui.KeyCode, shift, ctrl bool) []byte {
 // move the viewport instead of writing to the pty; any other key snaps
 // the viewport back to live.
 func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-	shift := e.Modifiers.Has(gui.ModShift)
+	if t.handleSearchKey(e, w) {
+		return
+	}
+	if t.handleClipboardKey(e, w) {
+		return
+	}
+	out := t.encodeKeyEvent(e, w)
+	if len(out) == 0 {
+		return
+	}
+	t.snapToLive()
+	t.writeBytes(out)
+	e.IsHandled = true
+}
+
+// handleSearchKey handles the search bar lifecycle: Cmd+F opens it,
+// Cmd+Up/Down jumps between prompt marks, and while active, editing and
+// navigation keys are intercepted. Returns true when the event was consumed.
+func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 	cmd := e.Modifiers.Has(gui.ModSuper)
 	ctrl := e.Modifiers.Has(gui.ModCtrl)
 	alt := e.Modifiers.Has(gui.ModAlt)
-	modes := t.keyModes()
+	shift := e.Modifiers.Has(gui.ModShift)
 
-	// Search: Cmd+F opens the search bar.
+	// Cmd+F opens the search bar.
 	if e.KeyCode == gui.KeyF && cmd {
 		t.search.active = true
 		t.search.query = ""
@@ -345,14 +371,14 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		e.IsHandled = true
 		t.bumpVersion()
 		w.UpdateWindow()
-		return
+		return true
 	}
 
 	// Cmd+Up/Down: jump between OSC 133 prompt marks (shell integration).
 	if cmd && !ctrl && !alt && (e.KeyCode == gui.KeyUp || e.KeyCode == gui.KeyDown) {
 		t.jumpToMark(e.KeyCode == gui.KeyUp, w)
 		e.IsHandled = true
-		return
+		return true
 	}
 
 	// While in search mode, intercept navigation and editing keys.
@@ -383,20 +409,29 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 			}
 		}
 		e.IsHandled = true
-		return
+		return true
 	}
+	return false
+}
+
+// handleClipboardKey handles Cmd+C / Ctrl+Shift+C (copy) and Cmd+V /
+// Ctrl+Shift+V (paste). Returns true when the event was consumed.
+func (t *Term) handleClipboardKey(e *gui.Event, w *gui.Window) bool {
+	cmd := e.Modifiers.Has(gui.ModSuper)
+	ctrl := e.Modifiers.Has(gui.ModCtrl)
+	shift := e.Modifiers.Has(gui.ModShift)
 
 	// Copy: Cmd+C (macOS) or Ctrl+Shift+C. Only suppress when there
 	// is a non-empty selection so plain Ctrl+C still SIGINTs the child.
 	if e.KeyCode == gui.KeyC && (cmd || (ctrl && shift)) {
 		if t.copySelection(w) {
 			e.IsHandled = true
-			return
+			return true
 		}
 		if cmd {
 			// Cmd+C without selection is a no-op; never reaches pty.
 			e.IsHandled = true
-			return
+			return true
 		}
 		// Ctrl+Shift+C without selection falls through to Ctrl+letter
 		// (sends 0x03 = SIGINT) below.
@@ -407,43 +442,48 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if e.KeyCode == gui.KeyV && (cmd || (ctrl && shift)) {
 		t.pasteFromClipboard(w)
 		e.IsHandled = true
-		return
+		return true
 	}
+	return false
+}
 
+// encodeKeyEvent translates a key event into the corresponding terminal
+// byte sequence. Scrollback keys (PageUp/Down, Shift+Home/End) are
+// resolved first and return nil when consumed as viewport navigation.
+// Returns nil when the key has no terminal encoding.
+func (t *Term) encodeKeyEvent(e *gui.Event, w *gui.Window) []byte {
+	shift := e.Modifiers.Has(gui.ModShift)
+	ctrl := e.Modifiers.Has(gui.ModCtrl)
+	alt := e.Modifiers.Has(gui.ModAlt)
+	modes := t.keyModes()
+
+	// Scrollback navigation: intercept before encoding. When the alt
+	// screen is active, only Shift+PageUp/PageDown scroll; plain
+	// PageUp/PageDown pass through to the pty.
 	switch e.KeyCode {
 	case gui.KeyPageUp:
-		inAlt := func() bool {
-			t.grid.Mu.Lock()
-			defer t.grid.Mu.Unlock()
-			return t.grid.AltActive
-		}()
-		if shift || !inAlt {
+		if shift || !t.isAltActive() {
 			t.scrollByPage(+1, w)
 			e.IsHandled = true
-			return
+			return nil
 		}
 	case gui.KeyPageDown:
-		inAlt := func() bool {
-			t.grid.Mu.Lock()
-			defer t.grid.Mu.Unlock()
-			return t.grid.AltActive
-		}()
-		if shift || !inAlt {
+		if shift || !t.isAltActive() {
 			t.scrollByPage(-1, w)
 			e.IsHandled = true
-			return
+			return nil
 		}
 	case gui.KeyHome:
 		if shift && !ctrl {
 			t.scrollToTop(w)
 			e.IsHandled = true
-			return
+			return nil
 		}
 	case gui.KeyEnd:
 		if shift && !ctrl {
 			t.scrollToBottom(w)
 			e.IsHandled = true
-			return
+			return nil
 		}
 	}
 
@@ -568,12 +608,7 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if alt && len(out) > 0 {
 		out = append([]byte{0x1b}, out...)
 	}
-	if len(out) == 0 {
-		return
-	}
-	t.snapToLive()
-	t.writeBytes(out)
-	e.IsHandled = true
+	return out
 }
 
 // onKeyUp generates KKP key-release sequences (event-type 3) when flag bit 2 is set.
