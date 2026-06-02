@@ -1,13 +1,13 @@
 # go-term benchmark baseline
 # go test -bench=. -count=10 -benchmem ./term
 # Each line: Name  NsPerOp  BytesPerOp  AllocsPerOp
-BenchmarkSixel_Decode 13344 49344 5
-BenchmarkResize_Reflow_DeepScrollback 15273753 90451233 31155
-BenchmarkGrid_Search 53728 480 1
-BenchmarkGrid_Search_LargeScrollback 7755 344 2
-BenchmarkParserFeed_PlainText 93096 0 0
-BenchmarkParserFeed_SGR 46545 0 0
-BenchmarkScrollback_Push 63 0 0
-BenchmarkScrollback_EnsureGeom 203371 2893312 4
-BenchmarkForegroundPass 54852 0 0
+BenchmarkSixel_Decode 13442 49344 5
+BenchmarkResize_Reflow_DeepScrollback 15259259 90451233 31155
+BenchmarkGrid_Search 56076 0 0
+BenchmarkGrid_Search_LargeScrollback 8505 24 1
+BenchmarkParserFeed_PlainText 95701 0 0
+BenchmarkParserFeed_SGR 46918 0 0
+BenchmarkScrollback_Push 60 0 0
+BenchmarkScrollback_EnsureGeom 205320 2893312 4
+BenchmarkForegroundPass 56082 0 0
 BenchmarkDrawPrep_DirtyRows 21 0 0

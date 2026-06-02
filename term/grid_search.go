@@ -65,6 +65,9 @@ func runeSliceSearchLast(haystack, needle []rune, upToCol int) int {
 // searchRow prepares a content row for searching by stripping continuation
 // cells (Ch == 0). It returns a "clean" rune slice and a mapping table
 // where colMap[cleanIdx] is the original grid column index.
+//
+// Buffers are grown once to src length, then reused across calls via
+// direct indexing — no per-cell append/capacity checks in the hot loop.
 func (g *grid) searchRow(row int, rrBuf []rune, colBuf []int) (rr []rune, colMap []int) {
 	sb := g.Scrollback.Len()
 	var src []cell
@@ -82,15 +85,24 @@ func (g *grid) searchRow(row int, rrBuf []rune, colBuf []int) (rr []rune, colMap
 		src = g.Cells[base : base+g.Cols]
 	}
 
-	rr = rrBuf[:0]
-	colMap = colBuf[:0]
+	n := len(src)
+	if cap(rrBuf) < n {
+		rrBuf = make([]rune, n)
+	}
+	if cap(colBuf) < n {
+		colBuf = make([]int, n)
+	}
+	rr = rrBuf[:n]
+	colMap = colBuf[:n]
+	cnt := 0
 	for i, cell := range src {
 		if cell.Ch != 0 {
-			rr = append(rr, cell.Ch)
-			colMap = append(colMap, i)
+			rr[cnt] = cell.Ch
+			colMap[cnt] = i
+			cnt++
 		}
 	}
-	return rr, colMap
+	return rr[:cnt], colMap[:cnt]
 }
 
 // cleanIdxGT returns the first index i in colMap where colMap[i] > gridCol.
@@ -148,8 +160,6 @@ func (g *grid) Find(query string, start contentPos, forward bool) (contentPos, b
 		return contentPos{}, false
 	}
 	start.Row = clamp(start.Row, 0, total-1)
-	var rrBuf []rune
-	var colBuf []int
 	for i := range total {
 		var row int
 		if forward {
@@ -157,8 +167,8 @@ func (g *grid) Find(query string, start contentPos, forward bool) (contentPos, b
 		} else {
 			row = (start.Row - i + total) % total
 		}
-		rr, colMap := g.searchRow(row, rrBuf, colBuf)
-		rrBuf, colBuf = rr, colMap
+		rr, colMap := g.searchRow(row, g.searchRunes, g.searchCols)
+		g.searchRunes, g.searchCols = rr, colMap
 		if forward {
 			fromCleanIdx := 0
 			if i == 0 {
@@ -200,12 +210,10 @@ func (g *grid) ViewportMatches(query string) []searchMatch {
 	off := clamp(g.ViewOffset, 0, sb)
 	n := min(off, g.Rows)
 	var matches []searchMatch
-	var rrBuf []rune
-	var colBuf []int
 	for vr := range g.Rows {
 		contentRow := viewportContentRow(vr, sb, off, n)
-		rr, colMap := g.searchRow(contentRow, rrBuf, colBuf)
-		rrBuf, colBuf = rr, colMap
+		rr, colMap := g.searchRow(contentRow, g.searchRunes, g.searchCols)
+		g.searchRunes, g.searchCols = rr, colMap
 		idx := 0
 		for {
 			idx = runeSliceSearch(rr, qRunes, idx)
@@ -272,8 +280,6 @@ func (g *grid) FindRegex(re *regexp.Regexp, start contentPos, forward bool) (con
 		return contentPos{}, 0, false
 	}
 	start.Row = clamp(start.Row, 0, total-1)
-	var rrBuf []rune
-	var colBuf []int
 	for i := range total {
 		var row int
 		if forward {
@@ -281,8 +287,8 @@ func (g *grid) FindRegex(re *regexp.Regexp, start contentPos, forward bool) (con
 		} else {
 			row = (start.Row - i + total) % total
 		}
-		rr, colMap := g.searchRow(row, rrBuf, colBuf)
-		rrBuf, colBuf = rr, colMap
+		rr, colMap := g.searchRow(row, g.searchRunes, g.searchCols)
+		g.searchRunes, g.searchCols = rr, colMap
 		s := string(rr)
 		if forward {
 			fromCleanIdx := 0
@@ -320,12 +326,10 @@ func (g *grid) ViewportMatchesRegex(re *regexp.Regexp) []searchMatch {
 	off := clamp(g.ViewOffset, 0, sb)
 	n := min(off, g.Rows)
 	var matches []searchMatch
-	var rrBuf []rune
-	var colBuf []int
 	for vr := range g.Rows {
 		contentRow := viewportContentRow(vr, sb, off, n)
-		rr, colMap := g.searchRow(contentRow, rrBuf, colBuf)
-		rrBuf, colBuf = rr, colMap
+		rr, colMap := g.searchRow(contentRow, g.searchRunes, g.searchCols)
+		g.searchRunes, g.searchCols = rr, colMap
 		s := string(rr)
 		idx := 0
 		for {

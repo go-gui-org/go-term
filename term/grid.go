@@ -376,6 +376,12 @@ type grid struct {
 	// text near them. Capped at maxGraphics; oldest evicted first.
 	Graphics []graphic
 
+	// searchRunes and searchCols are reusable buffers for searchRow,
+	// persisted on the grid so repeated Find / ViewportMatches calls
+	// don't re-allocate them from nil every time.
+	searchRunes []rune
+	searchCols  []int
+
 	// CellPxW, CellPxH are advisory cell-pixel sizes set by the widget
 	// after its first measurement (under Mu in onDraw). Used to convert
 	// pixel-space image dimensions into cell-space cursor advancement
