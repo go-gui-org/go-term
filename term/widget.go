@@ -807,6 +807,9 @@ func (t *Term) Close() error {
 	if t.resize.timer != nil {
 		t.resize.timer.Stop()
 	}
+	if t.scrollbar.timer != nil {
+		t.scrollbar.timer.Stop()
+	}
 	if t.gfxDir != "" {
 		_ = os.RemoveAll(t.gfxDir)
 	}

@@ -13,7 +13,7 @@ func (t *Term) showScrollbar() {
 	t.scrollbar.until = time.Now().Add(scrollbarDuration)
 	if t.scrollbar.timer == nil {
 		t.scrollbar.timer = time.AfterFunc(scrollbarDuration+time.Millisecond, func() {
-			if !t.closed.Load() {
+			if !t.closed.Load() && t.cmd != nil {
 				t.bumpVersion()
 				t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
 			}

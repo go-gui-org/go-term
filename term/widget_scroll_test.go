@@ -205,4 +205,5 @@ func TestShowScrollbar_SetsTimer(t *testing.T) {
 	if tm.scrollbar.timer != oldTimer {
 		t.Error("second showScrollbar should reuse existing timer")
 	}
+	tm.scrollbar.timer.Stop()
 }
