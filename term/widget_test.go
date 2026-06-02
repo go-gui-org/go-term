@@ -2277,7 +2277,7 @@ func TestDrawCursor_UnfocusedDimmed(t *testing.T) {
 
 	shapes := []cursorShape{cursorBlock, cursorUnderline, cursorBar}
 	for _, shape := range shapes {
-		term.drawCursor(dc, 0, 0, c, shape, base)
+		term.drawCursorShape(dc, 0, 0, c, shape, base)
 	}
 }
 
@@ -2295,7 +2295,7 @@ func TestDrawCursor_FocusedFullOpacity(t *testing.T) {
 
 	shapes := []cursorShape{cursorBlock, cursorUnderline, cursorBar}
 	for _, shape := range shapes {
-		term.drawCursor(dc, 0, 0, c, shape, base)
+		term.drawCursorShape(dc, 0, 0, c, shape, base)
 	}
 }
 

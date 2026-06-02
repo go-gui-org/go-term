@@ -579,7 +579,7 @@ func TestDrawCursor_CustomColor(t *testing.T) {
 	tm.grid.CursorColor = 0xFF0000 // red
 	tm.grid.Mu.Unlock()
 	cell := cell{Ch: 'X', Width: 1}
-	tm.drawCursor(dc, 0, 0, cell, cursorBlock, gui.TextStyle{})
+	tm.drawCursorShape(dc, 0, 0, cell, cursorBlock, gui.TextStyle{})
 	batches := dc.Batches()
 	found := false
 	for _, b := range batches {

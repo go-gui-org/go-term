@@ -170,6 +170,72 @@ func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int) runK
 	}
 }
 
+// drawState holds per-frame state computed under grid.Mu and threaded
+// through the phase methods that replaced the anonymous function in onDraw.
+type drawState struct {
+	dc            *gui.DrawContext
+	style         gui.TextStyle
+	g             *grid
+	rows, cols    int
+	renderYOff    float32
+	renderRows    int
+	live          bool
+	cells         []cell
+	vMatchesByRow [][]vMatch
+	rowSel        []rowBounds
+	bidiVisRows   [][]cell
+	bidiV2LRows   [][]int
+	partialRow    []cell
+	now           time.Time
+	doResize      bool
+	// IME composition state, populated by drawIME and consumed by drawCursor.
+	imeComposing bool
+	imeRunes     []rune
+	imeWidths    []int
+	imeCursor    int
+}
+
+// resolveCell returns the cell at viewport (r, c), applying selection
+// and search-highlight inversions. Uses the fast path (direct Cells
+// index) when ds.live; otherwise goes through ViewCellAt.
+func (ds *drawState) resolveCell(r, c int) cell {
+	if ds.live {
+		return ds.cells[r*ds.cols+c]
+	}
+	cell := ds.g.ViewCellAt(r, c)
+	if ds.rowSel != nil {
+		if rb := ds.rowSel[r]; rb.active && c >= rb.c0 && c <= rb.c1 {
+			cell.Attrs ^= attrInverse
+		}
+	}
+	if ds.vMatchesByRow != nil {
+		for _, m := range ds.vMatchesByRow[r] {
+			if c >= m.col && c < m.col+m.len {
+				cell.Attrs ^= attrInverse
+				break
+			}
+		}
+	}
+	return cell
+}
+
+// resolveVisual returns the cell at viewport (r, c), routing through the
+// BiDi visual-reorder map when row r contains RTL content.
+func (ds *drawState) resolveVisual(r, c int) cell {
+	if ds.bidiVisRows[r] != nil {
+		return ds.bidiVisRows[r][c]
+	}
+	return ds.resolveCell(r, c)
+}
+
+// flushState tracks an in-progress text-run for fg-pass run coalescing.
+type flushState struct {
+	start int
+	cols  int // columns spanned (for underline width)
+	key   runKey
+	open  bool
+}
+
 // onDraw is the DrawCanvas callback. Measures cell size on first call,
 // reflows the grid + pty when the canvas size changes, then paints the
 // grid as a sequence of background rects + per-cell text + cursor.
@@ -189,463 +255,509 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	rows := clampDim(int(dc.Height / t.cellH))
 	t.draw.runBuf.Grow(cols * 4) // one row of text, worst-case UTF-8; no-op when cap sufficient
 
-	var doResize bool // set when grid.Resize fires; pty.Resize deferred to after Mu unlock
-	func() {
-		t.grid.Mu.Lock()
-		defer t.grid.Mu.Unlock()
-		if rows != t.grid.Rows || cols != t.grid.Cols {
-			now := time.Now()
-			if rows != t.resize.pendingRows ||
-				cols != t.resize.pendingCols ||
-				t.resize.pendingSince.IsZero() {
-				t.resize.pendingRows = rows
-				t.resize.pendingCols = cols
-				t.resize.pendingSince = now
-			}
-			if elapsed := now.Sub(t.resize.pendingSince); elapsed >= resizeDebounce {
-				t.grid.Resize(rows, cols)
-				doResize = true
-				t.resize.pendingSince = time.Time{}
-			} else {
-				// Schedule a wake so the apply still happens after the
-				// mouse stops moving (no further frame events would fire).
-				t.scheduleResizeWake(resizeDebounce - elapsed)
-			}
-		} else if !t.resize.pendingSince.IsZero() {
-			t.resize.pendingSince = time.Time{}
-		}
-		// Publish cell size in device pixels so image footprint math matches the
-		// device-pixel dimensions stored in image files. dc.Scale is the backing
-		// scale factor (2.0 on Retina); cellW/cellH are in logical points.
-		scale := dc.Scale
-		if scale == 0 {
-			scale = 1
-		}
-		t.grid.CellPxW = t.cellW * scale
-		t.grid.CellPxH = t.cellH * scale
-		t.grid.ClearDirty()
+	ds := drawState{
+		dc:    dc,
+		style: style,
+		g:     t.grid,
+		rows:  rows,
+		cols:  cols,
+		now:   time.Now(),
+	}
 
-		// Fast path: live viewport with no selection and no active search reads
-		// directly from the cell buffer, skipping ViewOffset / scrollback
-		// branches and per-cell InSelection / search-match work.
-		g := t.grid
-		rows, cols = g.Rows, g.Cols
-		renderYOff := g.ViewSubPx
-		live := g.ViewOffset == 0 && renderYOff == 0 && !g.SelActive && !t.search.active
-		cells := g.Cells
+	t.grid.Mu.Lock()
+	// Phase order matters: prepareFastPath sets ds.renderRows / ds.live which
+	// which all subsequent phases read. prepareBiDi sets ds.bidiVisRows consumed
+	// by drawBgPass / drawFgPass / drawCursor. drawIME populates ds.ime* fields
+	// consumed by drawCursor.
+	t.prepareResize(&ds)
+	t.prepareFastPath(&ds)
+	t.prepareSearch(&ds)
+	t.prepareSelection(&ds)
+	t.prepareBiDi(&ds)
+	t.preparePartialRow(&ds)
+	t.drawBgPass(&ds)
+	t.drawFgPass(&ds)
+	t.drawGraphics(ds.dc, ds.g, ds.renderRows, ds.renderYOff)
+	t.drawIME(&ds)
+	t.drawCursor(&ds)
+	t.drawOverlays(&ds)
+	t.grid.Mu.Unlock()
 
-		// Pre-map search matches and selection to viewport rows to avoid O(N)
-		// checks inside the per-cell loop.
-		var vMatchesByRow [][]vMatch
-		if t.search.active && t.search.query != "" {
-			if cap(t.draw.vMatchBuf) < rows {
-				t.draw.vMatchBuf = make([][]vMatch, rows)
-			} else {
-				t.draw.vMatchBuf = t.draw.vMatchBuf[:rows]
-				for i := range t.draw.vMatchBuf {
-					t.draw.vMatchBuf[i] = t.draw.vMatchBuf[i][:0]
-				}
-			}
-			vMatchesByRow = t.draw.vMatchBuf
-			curVer := t.drawVersion.Load()
-			if curVer != t.search.cacheVer || t.search.query != t.search.cacheQuery || t.search.regex != t.search.cacheRegex {
-				var matches []searchMatch
-				if t.search.regex && t.search.re != nil {
-					matches = g.ViewportMatchesRegex(t.search.re)
-				} else if !t.search.regex {
-					matches = g.ViewportMatches(t.search.query)
-				}
-				t.search.matches = matches
-				t.search.cacheVer = curVer
-				t.search.cacheQuery = t.search.query
-				t.search.cacheRegex = t.search.regex
-			}
-			for _, m := range t.search.matches {
-				if vr, ok := g.ContentRowToViewport(m.Row); ok && vr < rows {
-					vMatchesByRow[vr] = append(vMatchesByRow[vr], vMatch{m.Col, m.Len})
-				}
-			}
-		}
-
-		var rowSel []rowBounds
-		if g.SelActive {
-			if cap(t.draw.selBuf) < rows {
-				t.draw.selBuf = make([]rowBounds, rows)
-			} else {
-				t.draw.selBuf = t.draw.selBuf[:rows]
-				clear(t.draw.selBuf)
-			}
-			rowSel = t.draw.selBuf
-			s, e := g.selOrder()
-			for r := range rows {
-				cr := g.viewportToContent(r)
-				if cr < s.Row || cr > e.Row {
-					continue
-				}
-				c0, c1 := 0, cols-1
-				if cr == s.Row {
-					c0 = s.Col
-				}
-				if cr == e.Row {
-					c1 = e.Col
-				}
-				rowSel[r] = rowBounds{c0, c1, true}
-			}
-		}
-
-		resolveCell := func(r, c int) cell {
-			if live {
-				return cells[r*cols+c]
-			}
-			cell := g.ViewCellAt(r, c)
-			if rowSel != nil {
-				if rb := rowSel[r]; rb.active && c >= rb.c0 && c <= rb.c1 {
-					cell.Attrs ^= attrInverse
-				}
-			}
-			if vMatchesByRow != nil {
-				for _, m := range vMatchesByRow[r] {
-					if c >= m.col && c < m.col+m.len {
-						cell.Attrs ^= attrInverse
-						break
-					}
-				}
-			}
-			return cell
-		}
-
-		// When the search bar is active, reserve grid rows whose text
-		// footprint (shifted by sub-pixel scroll) overlaps the search
-		// bar's pixel region. go-gui renders all Text on top of all
-		// FilledRects, so terminal text in that region would paint over
-		// the search bar background.
-		renderRows := rows
-		if t.search.active {
-			renderRows -= searchOverlap(t.cellH, renderYOff, dc.Height, rows)
-			if renderRows < 0 {
-				renderRows = 0
-			}
-		}
-
-		// BiDi pre-pass: compute visual-reordered rows for any viewport row
-		// containing RTL characters. For live LTR-only terminals (the common
-		// case) rowHasRTL returns false immediately — zero allocations.
-		if cap(t.draw.bidiVisRows) < renderRows {
-			t.draw.bidiVisRows = make([][]cell, renderRows)
-			t.draw.bidiV2LRows = make([][]int, renderRows)
-		}
-		t.draw.bidiVisRows = t.draw.bidiVisRows[:renderRows]
-		t.draw.bidiV2LRows = t.draw.bidiV2LRows[:renderRows]
-		for i := range t.draw.bidiVisRows {
-			t.draw.bidiVisRows[i] = nil
-			t.draw.bidiV2LRows[i] = nil
-		}
-		for r := range renderRows {
-			var hasRTL bool
-			if live {
-				hasRTL = rowHasRTL(cells[r*cols:(r+1)*cols], cols)
-			} else {
-				for c := range cols {
-					if isRTLRune(g.ViewCellAt(r, c).Ch) {
-						hasRTL = true
-						break
-					}
-				}
-			}
-			if !hasRTL {
-				continue
-			}
-			if cap(t.draw.bidiScratch) < cols {
-				t.draw.bidiScratch = make([]cell, cols)
-			} else {
-				t.draw.bidiScratch = t.draw.bidiScratch[:cols]
-			}
-			for c := range cols {
-				t.draw.bidiScratch[c] = resolveCell(r, c)
-			}
-			t.draw.bidiVisRows[r], t.draw.bidiV2LRows[r] = visualReorder(t.draw.bidiScratch, cols)
-		}
-		resolveVisual := func(r, c int) cell {
-			if t.draw.bidiVisRows[r] != nil {
-				return t.draw.bidiVisRows[r][c]
-			}
-			return resolveCell(r, c)
-		}
-
-		// Resolve partial top row once for both bg and fg passes.
-		// Nil when there is no scrollback row above the current viewport.
-		var partialRow []cell
-		if renderYOff > 0 {
-			partialRow = g.partialTopRow()
-			if partialRow != nil && rowHasRTL(partialRow, cols) {
-				if vis, _ := visualReorder(partialRow, cols); vis != nil {
-					partialRow = vis
-				}
-			}
-		}
-
-		// Background pass: optional partial top row (renders at y = -cellH + renderYOff
-		// so only its bottom renderYOff pixels are visible; canvas clips y < 0), then
-		// all regular rows.
-		if partialRow != nil {
-			runStart := 0
-			runColor := g.Theme.bg(partialRow[0])
-			for c := 1; c < cols; c++ {
-				cur := g.Theme.bg(partialRow[c])
-				if cur != runColor {
-					t.fillRun(dc, -1, runStart, c, runColor, renderYOff)
-					runStart = c
-					runColor = cur
-				}
-			}
-			t.fillRun(dc, -1, runStart, cols, runColor, renderYOff)
-		}
-		for r := range renderRows {
-			runStart := 0
-			runColor := g.Theme.bg(resolveVisual(r, 0))
-			for c := 1; c < cols; c++ {
-				cur := g.Theme.bg(resolveVisual(r, c))
-				if cur != runColor {
-					t.fillRun(dc, r, runStart, c, runColor, renderYOff)
-					runStart = c
-					runColor = cur
-				}
-			}
-			t.fillRun(dc, r, runStart, cols, runColor, renderYOff)
-		}
-
-		// Foreground pass: coalesce adjacent cells with identical style into a
-		// single dc.Text call. Wide chars break the run and are emitted
-		// individually (their glyph spans two columns). Continuation cells
-		// (right half of a wide char, Width==0 Ch==0) are skipped without
-		// breaking the current run. Plain spaces with no attrs or link don't
-		// start a new run but extend an existing same-style one.
-		hR, hC := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
-		t.draw.runBuf.Reset()
-		var (
-			runStart int
-			runCols  int // columns spanned by the open run (for underline width)
-			runStyle runKey
-			runOpen  bool
-		)
-		flushRun := func(r int) {
-			if !runOpen || t.draw.runBuf.Len() == 0 {
-				runOpen = false
-				return
-			}
-			text := t.draw.runBuf.String()
-			// Trim trailing spaces when no decoration spans them: "abc   " and
-			// "abc" share a layout-cache entry, so trimming keeps cache hits
-			// stable as tail padding wobbles frame to frame.
-			if runStyle.ulStyle == ulNone && !runStyle.strikethrough {
-				text = strings.TrimRight(text, " ")
-				if text == "" {
-					runOpen = false
-					t.draw.runBuf.Reset()
-					runCols = 0
-					return
-				}
-			}
-			cs := style
-			cs.Color = runStyle.color
-			cs.Typeface = runStyle.typeface
-			cs.Underline = false
-			cs.Strikethrough = runStyle.strikethrough
-			rowY := float32(r)*t.cellH + renderYOff
-			dc.Text(float32(runStart)*t.cellW, rowY, text, cs)
-			if runStyle.ulStyle != ulNone {
-				t.drawUnderlineDecor(dc,
-					float32(runStart)*t.cellW, rowY,
-					float32(runCols)*t.cellW,
-					runStyle.ulStyle, runStyle.ulColor)
-			}
-			runOpen = false
-			t.draw.runBuf.Reset()
-			runCols = 0
-		}
-		// Partial top row foreground pass: per-cell (no run coalescing).
-		if partialRow != nil {
-			partialY := -t.cellH + renderYOff
-			for c := range cols {
-				cell := partialRow[c]
-				if cell.Width == 0 && cell.Ch == 0 {
-					continue
-				}
-				if cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0 {
-					continue
-				}
-				k := cellRunKey(cell, style, g, hR, hC)
-				t.emitCell(dc, float32(c)*t.cellW, partialY, cell, k, style)
-			}
-		}
-		for r := range renderRows {
-			runOpen = false
-			t.draw.runBuf.Reset()
-			runCols = 0
-			for c := range cols {
-				cell := resolveVisual(r, c)
-				if cell.Width == 0 && cell.Ch == 0 {
-					continue // continuation cell; skip without breaking run
-				}
-				k := cellRunKey(cell, style, g, hR, hC)
-				isPlainSpace := cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0
-				if cell.Width == 2 {
-					flushRun(r)
-					t.emitCell(dc, float32(c)*t.cellW, float32(r)*t.cellH+renderYOff, cell, k, style)
-					continue
-				}
-				if isPlainSpace {
-					if runOpen && k == runStyle {
-						t.draw.runBuf.WriteRune(' ')
-						runCols++
-					} else {
-						flushRun(r)
-					}
-					continue
-				}
-				if runOpen && k == runStyle {
-					t.draw.runBuf.WriteRune(cell.Ch)
-					runCols++
-				} else {
-					flushRun(r)
-					runOpen = true
-					runStart = c
-					runCols = 1
-					runStyle = k
-					t.draw.runBuf.WriteRune(cell.Ch)
-				}
-			}
-			flushRun(r)
-		}
-
-		// Graphics pass: paint decoded images on top of the background
-		// fill, under the cursor. See drawGraphics for details.
-		t.drawGraphics(dc, g, rows, renderYOff)
-
-		now := time.Now()
-
-		// Resolve the GUI window once for IME interaction.
-		var gw *gui.Window
-		if w, ok := t.cmd.(*gui.Window); ok {
-			gw = w
-		}
-
-		// Draw IME composition text if active.
-		var composing bool
-		var compRunes []rune
-		var compWidths []int
-		var compTotalCols int
-		var compCursor int
-		if gw != nil && gw.IMEComposing() {
-			composing = true
-			compRunes = []rune(gw.IMECompText())
-			if len(compRunes) > imeCompRuneLimit {
-				compRunes = compRunes[:imeCompRuneLimit]
-			}
-			compWidths = make([]int, len(compRunes))
-			for i, r := range compRunes {
-				w := max(runeWidth(r), 1)
-				compWidths[i] = w
-				compTotalCols += w
-			}
-			compCursor = min(gw.IMECompCursor(), len(compRunes))
-		}
-
-		if composing && len(compRunes) > 0 && g.CursorR < renderRows && g.ViewOffset == 0 && renderYOff == 0 {
-			startX := float32(g.CursorC) * t.cellW
-			rowY := float32(g.CursorR)*t.cellH + renderYOff
-
-			bgCol := g.Theme.DefaultBG
-			dc.FilledRect(startX, rowY, float32(compTotalCols)*t.cellW, t.cellH, bgCol)
-
-			cs := style
-			cs.Color = g.Theme.DefaultFG
-			cs.Underline = false
-
-			currX := startX
-			for i, r := range compRunes {
-				dc.Text(currX, rowY, t.termRuneStr(r), cs)
-				currX += float32(compWidths[i]) * t.cellW
-			}
-
-			t.drawUnderlineDecor(dc, startX, rowY, float32(compTotalCols)*t.cellW, ulSingle, cs.Color)
-		}
-
-		// Cursor: shape per DECSCUSR (block / underline / bar). Suppress
-		// entirely when DEC ?25 has hidden it OR when the viewport is
-		// scrolled back into history. Honor blink-off half-cycle when
-		// blinking is enabled.
-		if g.CursorVisible && g.CursorR < renderRows && g.ViewOffset == 0 && renderYOff == 0 && !t.cursorBlinkOff(now) {
-			cc := g.CursorC
-			if composing {
-				colOffset := 0
-				for i := range compCursor {
-					colOffset += compWidths[i]
-				}
-				cc = g.CursorC + colOffset
-			}
-			if cc >= cols {
-				cc = cols - 1
-			}
-			// When the cursor's row has bidi reordering, find the visual
-			// column that corresponds to the logical cursor column.
-			if cr := g.CursorR; cr >= 0 && cr < renderRows && t.draw.bidiV2LRows[cr] != nil {
-				if !composing {
-					for v, l := range t.draw.bidiV2LRows[cr] {
-						if l == g.CursorC {
-							cc = v
-							break
-						}
-					}
-				}
-			}
-
-			cursorCell := cell{Ch: ' '}
-			if cell := g.At(g.CursorR, g.CursorC); cell != nil {
-				cursorCell = *cell
-			}
-			if composing && compCursor >= 0 && compCursor < len(compRunes) {
-				cursorCell.Ch = compRunes[compCursor]
-			}
-			t.drawCursor(dc, cc, g.CursorR, cursorCell, g.cursorShape, style)
-
-			// Report cursor rect to the platform for candidate window.
-			if gw != nil && gw.IMEComposing() {
-				imeX := t.ime.layoutX + float32(cc)*t.cellW
-				imeY := t.ime.layoutY + float32(g.CursorR)*t.cellH
-				gw.IMESetRect(imeX, imeY, t.cellW, t.cellH)
-			}
-		}
-
-		// Scrollbar: pill-shaped thumb on the right edge. Visible while scrolled
-		// back or within scrollbarDuration of the last scroll event. Drawn before
-		// the search bar so the thumb doesn't overdraw it.
-		sb := g.Scrollback.Len()
-		sw := t.effectiveScrollbarWidth()
-		if (now.Before(t.scrollbar.until) || g.ViewOffset > 0 || g.ViewSubPx > 0) && sb > 0 && dc.Width >= sw && sw > 0 {
-			viewOffsetVal := float32(g.ViewOffset) + g.ViewSubPx/t.cellH
-			thumbY, thumbH := scrollbarGeometry(sb, g.Rows, viewOffsetVal, dc.Height)
-			dc.FilledRoundedRect(dc.Width-sw, thumbY, sw, thumbH,
-				sw/2, gui.RGBA(128, 128, 128, 120))
-		}
-
-		if t.search.active {
-			t.drawSearchBar(dc, style)
-		}
-
-		// Visual bell: brief semi-transparent overlay that fades within bellFlashDuration.
-		if now.Before(t.bell.flashUntil) {
-			dc.FilledRect(0, 0, dc.Width, dc.Height, gui.RGBA(255, 255, 255, 40))
-		}
-
-	}()
-
-	// Resize the pty outside the lock: the ioctl can block if the pty fd
-	// is in a degraded state, and holding Mu would stall readLoop.
-	if doResize {
-		if err := t.pty.Resize(rows, cols); err != nil {
+	if ds.doResize {
+		if err := t.pty.Resize(ds.rows, ds.cols); err != nil {
 			log.Printf("term: pty resize: %v", err)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase methods — called sequentially from onDraw under grid.Mu.
+// ---------------------------------------------------------------------------
+
+// prepareResize debounces canvas-size changes and applies grid.Resize when
+// the target dimensions have been stable for resizeDebounce. Sets ds.doResize
+// so the caller can resize the pty outside the lock.
+func (t *Term) prepareResize(ds *drawState) {
+	if ds.rows != t.grid.Rows || ds.cols != t.grid.Cols {
+		now := ds.now
+		if ds.rows != t.resize.pendingRows ||
+			ds.cols != t.resize.pendingCols ||
+			t.resize.pendingSince.IsZero() {
+			t.resize.pendingRows = ds.rows
+			t.resize.pendingCols = ds.cols
+			t.resize.pendingSince = now
+		}
+		if elapsed := now.Sub(t.resize.pendingSince); elapsed >= resizeDebounce {
+			t.grid.Resize(ds.rows, ds.cols)
+			ds.doResize = true
+			t.resize.pendingSince = time.Time{}
+		} else {
+			t.scheduleResizeWake(resizeDebounce - elapsed)
+		}
+	} else if !t.resize.pendingSince.IsZero() {
+		t.resize.pendingSince = time.Time{}
+	}
+	// Publish cell size in device pixels so image footprint math matches the
+	// device-pixel dimensions stored in image files.
+	scale := ds.dc.Scale
+	if scale == 0 || !realNumber(scale) {
+		scale = 1
+	}
+	t.grid.CellPxW = t.cellW * scale
+	t.grid.CellPxH = t.cellH * scale
+	t.grid.ClearDirty()
+
+	// Refresh ds dims after potential Resize.
+	ds.rows, ds.cols = t.grid.Rows, t.grid.Cols
+}
+
+// prepareFastPath computes the fast-path flag, the effective render row count
+// (accounting for search-bar overlap), and aliases the grid and cell buffer.
+func (t *Term) prepareFastPath(ds *drawState) {
+	g := ds.g
+	ds.renderYOff = g.ViewSubPx
+	ds.live = g.ViewOffset == 0 && ds.renderYOff == 0 && !g.SelActive && !t.search.active
+	ds.cells = g.Cells
+	ds.renderRows = ds.rows
+	if t.search.active {
+		ds.renderRows -= searchOverlap(t.cellH, ds.renderYOff, ds.dc.Height, ds.rows)
+		if ds.renderRows < 0 {
+			ds.renderRows = 0
+		}
+	}
+}
+
+// prepareSearch pre-computes search-match spans per viewport row, reusing the
+// cached match list unless the query or draw version has changed.
+func (t *Term) prepareSearch(ds *drawState) {
+	if !t.search.active || t.search.query == "" {
+		return
+	}
+	g := ds.g
+	rows := ds.rows
+	if cap(t.draw.vMatchBuf) < rows {
+		t.draw.vMatchBuf = make([][]vMatch, rows)
+	} else {
+		t.draw.vMatchBuf = t.draw.vMatchBuf[:rows]
+		for i := range t.draw.vMatchBuf {
+			t.draw.vMatchBuf[i] = t.draw.vMatchBuf[i][:0]
+		}
+	}
+	ds.vMatchesByRow = t.draw.vMatchBuf
+	curVer := t.drawVersion.Load()
+	if curVer != t.search.cacheVer || t.search.query != t.search.cacheQuery || t.search.regex != t.search.cacheRegex {
+		var matches []searchMatch
+		if t.search.regex && t.search.re != nil {
+			matches = g.ViewportMatchesRegex(t.search.re)
+		} else if !t.search.regex {
+			matches = g.ViewportMatches(t.search.query)
+		}
+		t.search.matches = matches
+		t.search.cacheVer = curVer
+		t.search.cacheQuery = t.search.query
+		t.search.cacheRegex = t.search.regex
+	}
+	for _, m := range t.search.matches {
+		if vr, ok := g.ContentRowToViewport(m.Row); ok && vr < ds.renderRows {
+			ds.vMatchesByRow[vr] = append(ds.vMatchesByRow[vr], vMatch{m.Col, m.Len})
+		}
+	}
+}
+
+// prepareSelection pre-computes the selection column span for each viewport
+// row so the per-cell resolveCell path can apply attrInverse without
+// re-computing selOrder on every cell.
+func (t *Term) prepareSelection(ds *drawState) {
+	g := ds.g
+	if !g.SelActive {
+		return
+	}
+	rows := ds.rows
+	cols := ds.cols
+	if cap(t.draw.selBuf) < rows {
+		t.draw.selBuf = make([]rowBounds, rows)
+	} else {
+		t.draw.selBuf = t.draw.selBuf[:rows]
+		clear(t.draw.selBuf)
+	}
+	ds.rowSel = t.draw.selBuf
+	s, e := g.selOrder()
+	for r := range rows {
+		cr := g.viewportToContent(r)
+		if cr < s.Row || cr > e.Row {
+			continue
+		}
+		c0, c1 := 0, cols-1
+		if cr == s.Row {
+			c0 = s.Col
+		}
+		if cr == e.Row {
+			c1 = e.Col
+		}
+		ds.rowSel[r] = rowBounds{c0, c1, true}
+	}
+}
+
+// prepareBiDi detects viewport rows containing RTL characters and computes
+// their visual-reordered cell slices + logical→visual column maps. For live
+// LTR-only terminals rowHasRTL returns false immediately — zero allocations.
+func (t *Term) prepareBiDi(ds *drawState) {
+	renderRows := ds.renderRows
+	if renderRows == 0 {
+		return
+	}
+	if cap(t.draw.bidiVisRows) < renderRows {
+		t.draw.bidiVisRows = make([][]cell, renderRows)
+		t.draw.bidiV2LRows = make([][]int, renderRows)
+	}
+	t.draw.bidiVisRows = t.draw.bidiVisRows[:renderRows]
+	t.draw.bidiV2LRows = t.draw.bidiV2LRows[:renderRows]
+	for i := range t.draw.bidiVisRows {
+		t.draw.bidiVisRows[i] = nil
+		t.draw.bidiV2LRows[i] = nil
+	}
+	ds.bidiVisRows = t.draw.bidiVisRows
+	ds.bidiV2LRows = t.draw.bidiV2LRows
+	cols := ds.cols
+	for r := range renderRows {
+		var hasRTL bool
+		if ds.live {
+			hasRTL = rowHasRTL(ds.cells[r*cols:(r+1)*cols], cols)
+		} else {
+			for c := range cols {
+				if isRTLRune(ds.g.ViewCellAt(r, c).Ch) {
+					hasRTL = true
+					break
+				}
+			}
+		}
+		if !hasRTL {
+			continue
+		}
+		if cap(t.draw.bidiScratch) < cols {
+			t.draw.bidiScratch = make([]cell, cols)
+		} else {
+			t.draw.bidiScratch = t.draw.bidiScratch[:cols]
+		}
+		for c := range cols {
+			t.draw.bidiScratch[c] = ds.resolveCell(r, c)
+		}
+		ds.bidiVisRows[r], ds.bidiV2LRows[r] = visualReorder(t.draw.bidiScratch, cols)
+	}
+}
+
+// preparePartialRow resolves the partial top row (visible when sub-pixel
+// scrolled) and applies BiDi reordering when needed.
+func (t *Term) preparePartialRow(ds *drawState) {
+	if ds.renderYOff <= 0 {
+		return
+	}
+	row := ds.g.partialTopRow()
+	if row != nil && rowHasRTL(row, ds.cols) {
+		if vis, _ := visualReorder(row, ds.cols); vis != nil {
+			row = vis
+		}
+	}
+	ds.partialRow = row
+}
+
+// drawBgPass paints background-color runs. One call to fillRun per
+// contiguous same-color span. Skips DefaultBG cells (canvas already filled).
+func (t *Term) drawBgPass(ds *drawState) {
+	dc := ds.dc
+	yOff := ds.renderYOff
+	cols := ds.cols
+	if ds.partialRow != nil {
+		t.drawBgPrecomputed(dc, -1, ds.partialRow, yOff, cols, ds.g.Theme)
+	}
+	for r := range ds.renderRows {
+		t.drawBgResolved(dc, r, yOff, ds)
+	}
+}
+
+// drawBgPrecomputed coalesces background-color runs from a pre-resolved cell
+// slice (partial row or BiDi-reordered row).
+func (t *Term) drawBgPrecomputed(dc *gui.DrawContext, r int, row []cell, yOff float32, cols int, th Theme) {
+	if len(row) == 0 {
+		return
+	}
+	runStart := 0
+	runColor := th.bg(row[0])
+	for c := 1; c < cols; c++ {
+		cur := th.bg(row[c])
+		if cur != runColor {
+			t.fillRun(dc, r, runStart, c, runColor, yOff)
+			runStart = c
+			runColor = cur
+		}
+	}
+	t.fillRun(dc, r, runStart, cols, runColor, yOff)
+}
+
+// drawBgResolved coalesces background-color runs for a single row.
+// Uses resolveVisual so BiDi-reordered rows and regular rows share one path.
+func (t *Term) drawBgResolved(dc *gui.DrawContext, r int, yOff float32, ds *drawState) {
+	th := ds.g.Theme
+	cols := ds.cols
+	runStart := 0
+	runColor := th.bg(ds.resolveVisual(r, 0))
+	for c := 1; c < cols; c++ {
+		cur := th.bg(ds.resolveVisual(r, c))
+		if cur != runColor {
+			t.fillRun(dc, r, runStart, c, runColor, yOff)
+			runStart = c
+			runColor = cur
+		}
+	}
+	t.fillRun(dc, r, runStart, cols, runColor, yOff)
+}
+
+// drawFgPass paints foreground text, coalescing adjacent cells with identical
+// visual style into single dc.Text calls. Wide chars break the run and emit
+// individually. Continuation cells are skipped. Plain spaces extend same-style
+// runs without starting new ones.
+func (t *Term) drawFgPass(ds *drawState) {
+	dc := ds.dc
+	style := ds.style
+	yOff := ds.renderYOff
+	cols := ds.cols
+	g := ds.g
+	hR, hC := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
+
+	// Partial top row: per-cell emit, no run coalescing.
+	if ds.partialRow != nil {
+		partialY := -t.cellH + yOff
+		for c := range cols {
+			cell := ds.partialRow[c]
+			if cell.Width == 0 && cell.Ch == 0 {
+				continue
+			}
+			if cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0 {
+				continue
+			}
+			k := cellRunKey(cell, style, g, hR, hC)
+			t.emitCell(dc, float32(c)*t.cellW, partialY, cell, k, style)
+		}
+	}
+
+	var fr flushState
+	for r := range ds.renderRows {
+		fr.open = false
+		t.draw.runBuf.Reset()
+		fr.cols = 0
+		for c := range cols {
+			cell := ds.resolveVisual(r, c)
+			if cell.Width == 0 && cell.Ch == 0 {
+				continue // continuation cell; skip without breaking run
+			}
+			k := cellRunKey(cell, style, g, hR, hC)
+			isPlainSpace := cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0
+			if cell.Width == 2 {
+				t.flushRun(dc, r, style, yOff, &fr)
+				t.emitCell(dc, float32(c)*t.cellW, float32(r)*t.cellH+yOff, cell, k, style)
+				continue
+			}
+			if isPlainSpace {
+				if fr.open && k == fr.key {
+					t.draw.runBuf.WriteRune(' ')
+					fr.cols++
+				} else {
+					t.flushRun(dc, r, style, yOff, &fr)
+				}
+				continue
+			}
+			if fr.open && k == fr.key {
+				t.draw.runBuf.WriteRune(cell.Ch)
+				fr.cols++
+			} else {
+				t.flushRun(dc, r, style, yOff, &fr)
+				fr.open = true
+				fr.start = c
+				fr.cols = 1
+				fr.key = k
+				t.draw.runBuf.WriteRune(cell.Ch)
+			}
+		}
+		t.flushRun(dc, r, style, yOff, &fr)
+	}
+}
+
+// flushRun draws the accumulated text run as a single dc.Text call with
+// optional underline decoration, then resets the run state.
+func (t *Term) flushRun(dc *gui.DrawContext, r int, style gui.TextStyle, yOff float32, fr *flushState) {
+	if !fr.open || t.draw.runBuf.Len() == 0 {
+		fr.open = false
+		return
+	}
+	text := t.draw.runBuf.String()
+	// Trim trailing spaces when no decoration spans them: "abc   " and
+	// "abc" share a layout-cache entry, so trimming keeps cache hits
+	// stable as tail padding wobbles frame to frame.
+	if fr.key.ulStyle == ulNone && !fr.key.strikethrough {
+		text = strings.TrimRight(text, " ")
+		if text == "" {
+			fr.open = false
+			t.draw.runBuf.Reset()
+			fr.cols = 0
+			return
+		}
+	}
+	cs := style
+	cs.Color = fr.key.color
+	cs.Typeface = fr.key.typeface
+	cs.Underline = false
+	cs.Strikethrough = fr.key.strikethrough
+	rowY := float32(r)*t.cellH + yOff
+	dc.Text(float32(fr.start)*t.cellW, rowY, text, cs)
+	if fr.key.ulStyle != ulNone {
+		t.drawUnderlineDecor(dc,
+			float32(fr.start)*t.cellW, rowY,
+			float32(fr.cols)*t.cellW,
+			fr.key.ulStyle, fr.key.ulColor)
+	}
+	fr.open = false
+	t.draw.runBuf.Reset()
+	fr.cols = 0
+}
+
+// drawIME renders the IME composition string at the cursor position. Fills
+// the background under the composition, draws each rune, and underlines the
+// full span. Populates ds.ime* fields for consumption by drawCursor.
+func (t *Term) drawIME(ds *drawState) {
+	if !t.ime.composing {
+		return
+	}
+	g := ds.g
+	ds.imeComposing = true
+	ds.imeRunes = []rune(t.ime.compText)
+	if len(ds.imeRunes) > imeCompRuneLimit {
+		ds.imeRunes = ds.imeRunes[:imeCompRuneLimit]
+	}
+	ds.imeWidths = make([]int, len(ds.imeRunes))
+	var totalCols int
+	for i, r := range ds.imeRunes {
+		w := max(runeWidth(r), 1)
+		ds.imeWidths[i] = w
+		totalCols += w
+	}
+	ds.imeCursor = min(t.ime.compCursor, len(ds.imeRunes))
+
+	if len(ds.imeRunes) == 0 || g.CursorR >= ds.renderRows || g.ViewOffset != 0 || ds.renderYOff != 0 {
+		return
+	}
+	startX := float32(g.CursorC) * t.cellW
+	rowY := float32(g.CursorR)*t.cellH + ds.renderYOff
+
+	bgCol := g.Theme.DefaultBG
+	ds.dc.FilledRect(startX, rowY, float32(totalCols)*t.cellW, t.cellH, bgCol)
+
+	cs := ds.style
+	cs.Color = g.Theme.DefaultFG
+	cs.Underline = false
+
+	currX := startX
+	for i, r := range ds.imeRunes {
+		ds.dc.Text(currX, rowY, t.termRuneStr(r), cs)
+		currX += float32(ds.imeWidths[i]) * t.cellW
+	}
+	t.drawUnderlineDecor(ds.dc, startX, rowY, float32(totalCols)*t.cellW, ulSingle, cs.Color)
+}
+
+// drawCursor renders the text cursor at the current grid position, honoring
+// DECSCUSR shape, blink phase, scrollback state, and IME composition offset.
+// When the cursor row has BiDi reordering the logical column is mapped to a
+// visual column.
+func (t *Term) drawCursor(ds *drawState) {
+	g := ds.g
+	if !g.CursorVisible || g.CursorR >= ds.renderRows || g.ViewOffset != 0 || ds.renderYOff != 0 {
+		return
+	}
+	if t.cursorBlinkOff(ds.now) {
+		return
+	}
+	cc := g.CursorC
+	if ds.imeComposing {
+		colOffset := 0
+		for i := range ds.imeCursor {
+			colOffset += ds.imeWidths[i]
+		}
+		cc = g.CursorC + colOffset
+	}
+	if cc >= ds.cols {
+		cc = ds.cols - 1
+	}
+	// When the cursor's row has bidi reordering, find the visual column
+	// that corresponds to the logical cursor column.
+	if cr := g.CursorR; cr >= 0 && cr < ds.renderRows && ds.bidiV2LRows[cr] != nil {
+		if !ds.imeComposing {
+			for v, l := range ds.bidiV2LRows[cr] {
+				if l == g.CursorC {
+					cc = v
+					break
+				}
+			}
+		}
+	}
+
+	cursorCell := cell{Ch: ' '}
+	if cell := g.At(g.CursorR, g.CursorC); cell != nil {
+		cursorCell = *cell
+	}
+	if ds.imeComposing && ds.imeCursor >= 0 && ds.imeCursor < len(ds.imeRunes) {
+		cursorCell.Ch = ds.imeRunes[ds.imeCursor]
+	}
+	t.drawCursorShape(ds.dc, cc, g.CursorR, cursorCell, g.cursorShape, ds.style)
+
+	// Report cursor rect to the platform for candidate window placement.
+	if ds.imeComposing && t.win != nil {
+		imeX := t.ime.layoutX + float32(cc)*t.cellW
+		imeY := t.ime.layoutY + float32(g.CursorR)*t.cellH
+		t.win.IMESetRect(imeX, imeY, t.cellW, t.cellH)
+	}
+}
+
+// drawOverlays paints the scrollbar thumb, search bar, and visual-bell flash.
+// All three are drawn on top of the terminal content.
+func (t *Term) drawOverlays(ds *drawState) {
+	g := ds.g
+	// Scrollbar: pill-shaped thumb on the right edge. Visible while scrolled
+	// back or within scrollbarDuration of the last scroll event.
+	sb := g.Scrollback.Len()
+	sw := t.effectiveScrollbarWidth()
+	if (ds.now.Before(t.scrollbar.until) || g.ViewOffset > 0 || g.ViewSubPx > 0) && sb > 0 && ds.dc.Width >= sw && sw > 0 {
+		viewOffsetVal := float32(g.ViewOffset) + g.ViewSubPx/t.cellH
+		thumbY, thumbH := scrollbarGeometry(sb, g.Rows, viewOffsetVal, ds.dc.Height)
+		ds.dc.FilledRoundedRect(ds.dc.Width-sw, thumbY, sw, thumbH,
+			sw/2, gui.RGBA(128, 128, 128, 120))
+	}
+
+	if t.search.active {
+		t.drawSearchBar(ds.dc, ds.style)
+	}
+
+	// Visual bell: brief semi-transparent overlay.
+	if ds.now.Before(t.bell.flashUntil) {
+		ds.dc.FilledRect(0, 0, ds.dc.Width, ds.dc.Height, gui.RGBA(255, 255, 255, 40))
 	}
 }
 
@@ -660,11 +772,11 @@ func (t *Term) cursorBlinkOff(now time.Time) bool {
 	return (elapsed/cursorBlinkPeriod)%2 == 1
 }
 
-// drawCursor renders the cursor at viewport (row, col) using the
+// drawCursorShape renders the cursor at viewport (row, col) using the
 // current shape. Block inverts the cell (filled bg + cell glyph in
 // fg's color); underline/bar overlay a thin filled rect on top of the
 // regular foreground glyph already drawn in the foreground pass.
-func (t *Term) drawCursor(dc *gui.DrawContext, col, row int, cell cell,
+func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 	shape cursorShape, style gui.TextStyle) {
 	x := float32(col) * t.cellW
 	y := float32(row) * t.cellH
