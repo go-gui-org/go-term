@@ -65,7 +65,7 @@ func TestEmulatorReplay(t *testing.T) {
 			wantCursorC: 0,
 			wantTitle:   "Build Output",
 			wantCwd:     "file://host/tmp",
-			wantReply:   da1Reply,
+			wantReply:   []byte(da1Reply),
 		},
 		{
 			name:        "private_modes_toggle_state",

@@ -6,21 +6,24 @@ import (
 	"github.com/mike-ward/go-gui/gui"
 )
 
+// scheduleViewUpdate signals that the viewport has changed: shows the
+// scrollbar thumb, bumps the tessellation-cache version, and triggers an
+// immediate window repaint. Call this on the main thread after any
+// operation that changes the visible cell range or selection.
+func (t *Term) scheduleViewUpdate(w *gui.Window) {
+	t.showScrollbar()
+	t.bumpVersion()
+	if w != nil {
+		w.UpdateWindow()
+	}
+}
+
 // showScrollbar arms the auto-hide timer for the scrollbar thumb. Call on
 // the main thread whenever the viewport scrolls. Uses a single debounced
 // timer so rapid scroll events don't accumulate goroutines.
 func (t *Term) showScrollbar() {
 	t.scrollbar.until = time.Now().Add(scrollbarDuration)
-	if t.scrollbar.timer == nil {
-		t.scrollbar.timer = time.AfterFunc(scrollbarDuration+time.Millisecond, func() {
-			if !t.closed.Load() && t.cmd != nil {
-				t.bumpVersion()
-				t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
-			}
-		})
-	} else {
-		t.scrollbar.timer.Reset(scrollbarDuration + time.Millisecond)
-	}
+	t.scheduleDelayedUpdate(scrollbarDuration+time.Millisecond, &t.scrollbar.timer)
 }
 
 // snapToLive clears any scrollback view-offset and selection so subsequent
@@ -42,9 +45,7 @@ func (t *Term) scrollByPage(dir int, w *gui.Window) {
 		step := max(t.grid.Rows-1, 1)
 		t.grid.ScrollView(dir * step)
 	}()
-	t.showScrollbar()
-	t.bumpVersion()
-	w.UpdateWindow()
+	t.scheduleViewUpdate(w)
 }
 
 // scrollToTop pins the viewport at the oldest scrollback row.
@@ -54,9 +55,7 @@ func (t *Term) scrollToTop(w *gui.Window) {
 		defer t.grid.Mu.Unlock()
 		t.grid.ScrollViewTop()
 	}()
-	t.showScrollbar()
-	t.bumpVersion()
-	w.UpdateWindow()
+	t.scheduleViewUpdate(w)
 }
 
 // scrollToBottom snaps the viewport back to the live grid.
@@ -66,9 +65,7 @@ func (t *Term) scrollToBottom(w *gui.Window) {
 		defer t.grid.Mu.Unlock()
 		t.grid.ResetView()
 	}()
-	t.showScrollbar()
-	t.bumpVersion()
-	w.UpdateWindow()
+	t.scheduleViewUpdate(w)
 }
 
 // jumpToMark scrolls the viewport to the previous (backward=true) or next
@@ -101,9 +98,7 @@ func (t *Term) jumpToMark(backward bool, w *gui.Window) {
 		}
 	}()
 	if found {
-		t.showScrollbar()
-		t.bumpVersion()
-		w.UpdateWindow()
+		t.scheduleViewUpdate(w)
 	}
 }
 
@@ -145,8 +140,6 @@ func (t *Term) searchJump(forward bool, w *gui.Window) {
 		return ok
 	}()
 	if ok {
-		t.showScrollbar()
-		t.bumpVersion()
-		w.UpdateWindow()
+		t.scheduleViewUpdate(w)
 	}
 }

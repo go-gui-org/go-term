@@ -8,6 +8,14 @@ import (
 	"github.com/mike-ward/go-gui/gui"
 )
 
+// Bracketed-paste markers (DEC ?2004). Sent around clipboard payloads
+// when the application has enabled the mode; stripped from incoming
+// payloads unconditionally so a clipboard exit-marker can't break out.
+const (
+	pasteStart = "\x1b[200~"
+	pasteEnd   = "\x1b[201~"
+)
+
 // maxPasteBytes caps clipboard payloads written to the pty. Multi-MB
 // pastes can wedge the shell and stall the reader goroutine; truncate
 // silently — nothing useful types thousands of lines at once.

@@ -160,12 +160,9 @@ func (p *parser) dispatchOSC() {
 		if b64 == "?" {
 			return
 		}
-		data, err := base64.StdEncoding.DecodeString(b64)
+		data, err := decodeBase64String(b64)
 		if err != nil {
-			data, err = base64.RawStdEncoding.DecodeString(b64)
-			if err != nil {
-				return
-			}
+			return
 		}
 		if p.allowClipboardWrite && p.onClipboard != nil {
 			p.onClipboard(data)
@@ -207,12 +204,9 @@ func (p *parser) handleOSC1337(pt string) {
 		return
 	}
 
-	raw, err := base64.StdEncoding.DecodeString(b64)
+	raw, err := decodeBase64String(b64)
 	if err != nil {
-		raw, err = base64.RawStdEncoding.DecodeString(b64)
-		if err != nil {
-			return
-		}
+		return
 	}
 	img := decodeImageBytes(raw)
 	if img == nil {
@@ -288,6 +282,21 @@ func sanitizeOSCString(s string) string {
 		}
 	}
 	return s
+}
+
+// decodeBase64String decodes a base64-encoded string, trying standard
+// encoding first then raw (unpadded) encoding. When len(s)%4 != 0 the
+// input is definitely unpadded, so we skip the StdEncoding attempt
+// (and its allocation) entirely.
+func decodeBase64String(s string) ([]byte, error) {
+	if len(s)%4 != 0 {
+		return base64.RawStdEncoding.DecodeString(s)
+	}
+	data, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		data, err = base64.RawStdEncoding.DecodeString(s)
+	}
+	return data, err
 }
 
 // oscHexWord expands an 8-bit color component to a 4-hex-digit string

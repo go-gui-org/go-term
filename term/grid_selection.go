@@ -11,28 +11,6 @@ func (g *grid) selOrder() (start, end contentPos) {
 	return a, b
 }
 
-// InSelection reports whether viewport (r, c) is inside the selection.
-// r is a viewport row; it is converted to content coordinates internally
-// so the highlight follows content regardless of ViewOffset. False when
-// SelActive is off.
-func (g *grid) InSelection(r, c int) bool {
-	if !g.SelActive {
-		return false
-	}
-	contentR := g.viewportToContent(r)
-	s, e := g.selOrder()
-	if contentR < s.Row || contentR > e.Row {
-		return false
-	}
-	if contentR == s.Row && c < s.Col {
-		return false
-	}
-	if contentR == e.Row && c > e.Col {
-		return false
-	}
-	return true
-}
-
 // SelectedText extracts the selection as a UTF-8 string. Trailing
 // blanks per row are trimmed; row breaks emit '\n' (kitty convention).
 // Returns "" when nothing is selected. Coordinates are content-relative

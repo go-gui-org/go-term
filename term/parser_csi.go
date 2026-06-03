@@ -94,7 +94,7 @@ func (p *parser) dispatchCSI(final byte) {
 	case 'c':
 
 		if p.param(0, 0) == 0 && p.onReply != nil {
-			p.onReply(da1Reply)
+			p.onReply([]byte(da1Reply))
 		}
 	case 'n':
 

@@ -425,9 +425,7 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		return t.grid.ViewOffset != prevOff || t.grid.ViewSubPx != prevSub
 	}()
 	if changed {
-		t.showScrollbar()
-		t.bumpVersion()
-		w.UpdateWindow()
+		t.scheduleViewUpdate(w)
 	}
 
 	// Mouse wheel: no momentum. Cancel any in-progress coast and return.

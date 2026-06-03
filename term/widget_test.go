@@ -432,8 +432,8 @@ func newScrollTerm(rows, cols int) *Term {
 func TestTerm_OnWindowEvent_NoReportWhenFocusOff(t *testing.T) {
 	term, buf := newTestTermCapture()
 	// FocusReporting defaults to false
-	term.onWindowEvent(&gui.Event{Type: gui.EventFocused})
-	term.onWindowEvent(&gui.Event{Type: gui.EventUnfocused})
+	term.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
+	term.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 	if got := string(*buf); got != "" {
 		t.Fatalf("focus off: got %q, want empty", got)
 	}
@@ -441,7 +441,7 @@ func TestTerm_OnWindowEvent_NoReportWhenFocusOff(t *testing.T) {
 
 func TestTerm_OnWindowEvent_NilEventNoPanic(t *testing.T) {
 	term := &Term{grid: newGrid(1, 5), pw: writerFunc(func([]byte) (int, error) { return 0, nil })}
-	term.onWindowEvent(nil) // must not panic
+	term.HandleWindowEvent(nil) // must not panic
 }
 
 func TestTerm_OnKeyDown_AppCursor(t *testing.T) {
@@ -470,8 +470,8 @@ func TestTerm_OnKeyDown_AppKeypad(t *testing.T) {
 func TestTerm_OnWindowEvent_FocusReporting(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.FocusReporting = true
-	term.onWindowEvent(&gui.Event{Type: gui.EventFocused})
-	term.onWindowEvent(&gui.Event{Type: gui.EventUnfocused})
+	term.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
+	term.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 	if got := string(*buf); got != "\x1b[I\x1b[O" {
 		t.Fatalf("focus reports = %q, want %q", got, "\x1b[I\x1b[O")
 	}
@@ -2379,7 +2379,7 @@ func TestTerm_OnWindowEvent_ChainsPreviousHandler(t *testing.T) {
 	term, _ := newTestTermCapture()
 	term.prevOnEvent = w.OnEvent
 	w.OnEvent = func(e *gui.Event, w *gui.Window) {
-		term.onWindowEvent(e)
+		term.HandleWindowEvent(e)
 		if term.prevOnEvent != nil {
 			term.prevOnEvent(e, w)
 		}
@@ -2396,7 +2396,7 @@ func TestTerm_OnWindowEvent_NilPrevHandlerNoPanic(t *testing.T) {
 	// Simulate New with no previous handler.
 	term.prevOnEvent = nil
 	w.OnEvent = func(e *gui.Event, w *gui.Window) {
-		term.onWindowEvent(e)
+		term.HandleWindowEvent(e)
 		if term.prevOnEvent != nil {
 			term.prevOnEvent(e, w)
 		}
@@ -2488,7 +2488,7 @@ func TestTerm_Close_RestoresPrevOnEvent(t *testing.T) {
 		if term.closed.Load() {
 			return
 		}
-		term.onWindowEvent(e)
+		term.HandleWindowEvent(e)
 		if term.prevOnEvent != nil {
 			term.prevOnEvent(e, w)
 		}
@@ -2512,7 +2512,7 @@ func TestTerm_OnWindowEvent_ClosedTermNoOp(t *testing.T) {
 	term := &Term{grid: newGrid(2, 4)}
 	term.closed.Store(true)
 	// Must not panic and must return early.
-	term.onWindowEvent(&gui.Event{})
+	term.HandleWindowEvent(&gui.Event{})
 	// No assertion needed — the test passes if no panic occurs.
 }
 

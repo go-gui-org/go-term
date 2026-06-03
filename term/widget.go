@@ -113,6 +113,13 @@ type Cfg struct {
 	// visible. Zero (default) uses the built-in 100 ms. Negative disables
 	// the visual bell entirely.
 	BellFlashDuration time.Duration
+
+	// NoWindowHandler, when true, prevents New from installing this Term
+	// as a handler on w.OnEvent. Set this when a pane manager or other
+	// container owns the window-level event dispatch and will route
+	// events to individual Terms via HandleWindowEvent. The standalone
+	// (false) default is correct for single-Term windows.
+	NoWindowHandler bool
 }
 
 // NamedTheme pairs a display name with a Theme for use in menus.
@@ -139,6 +146,10 @@ const resizeDebounce = 50 * time.Millisecond
 // bellFlashDuration is the default visual-bell flash duration.
 // Override via Cfg.BellFlashDuration; see effectiveBellDuration().
 const bellFlashDuration = 100 * time.Millisecond
+
+// maxBellDuration caps the user-configurable BellFlashDuration so that
+// arithmetic (d + time.Millisecond) cannot overflow time.Duration.
+const maxBellDuration = 5 * time.Second
 
 // scrollbarWidth is the pixel width of the scrollbar thumb.
 const scrollbarWidth float32 = 4
@@ -197,16 +208,23 @@ type searchState struct {
 	cacheRegex bool
 }
 
-// bellState tracks visual-bell flash timing. Main-thread only except for
-// readCount which is only accessed from readLoop.
+// bellState tracks visual-bell flash timing. flashUntil is written from
+// the QueueCommand callback (main thread) and read in onDraw (main thread).
+// readCount is only accessed from readLoop. flashTimer is managed from the
+// QueueCommand callback and stopped in Close.
 type bellState struct {
 	seenCount  uint64
 	flashUntil time.Time
-	readCount  uint64 // tracks BellCount seen by readLoop; no sync needed
+	readCount  uint64
+	flashTimer *time.Timer // reused per-BEL clear timer; lazy init
 }
 
 // scrollbarState manages the auto-hide scrollbar thumb timer. Main-thread
-// only (created lazily in showScrollbar).
+// only (created lazily in showScrollbar). The until field is read under
+// grid.Mu in drawOverlays but written without Mu in showScrollbar; both
+// call sites are main-thread-only so this is not a race, but future
+// refactors should keep showScrollbar on the main thread or switch to
+// an atomic.Time.
 type scrollbarState struct {
 	until time.Time
 	timer *time.Timer
@@ -286,7 +304,8 @@ type Term struct {
 	// wrapped it. Restored in Close so that creating and destroying Terms
 	// (e.g. closing a pane) does not leak closures in the dispatch chain.
 	// Correct for LIFO close order; a pane manager managing multiple live
-	// Terms should install its own dispatcher rather than rely on chaining.
+	// Terms should set NoWindowHandler and install its own
+	// dispatcher rather than rely on chaining.
 	prevOnEvent func(*gui.Event, *gui.Window)
 
 	// closed guards Close so multiple calls are safe.
@@ -444,11 +463,13 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		})
 	}
 	t.registerNotifyHandler()
-	t.prevOnEvent = w.OnEvent
-	w.OnEvent = func(e *gui.Event, w *gui.Window) {
-		t.onWindowEvent(e)
-		if t.prevOnEvent != nil {
-			t.prevOnEvent(e, w)
+	if !cfg.NoWindowHandler {
+		t.prevOnEvent = w.OnEvent
+		w.OnEvent = func(e *gui.Event, w *gui.Window) {
+			t.HandleWindowEvent(e)
+			if t.prevOnEvent != nil {
+				t.prevOnEvent(e, w)
+			}
 		}
 	}
 	t.focused.Store(true)
@@ -585,18 +606,7 @@ func (t *Term) onParserTitle(title string) {
 // never be applied. Main-thread only (called from inside onDraw under
 // grid.Mu, but only mutates resizeTimer which is main-thread owned).
 func (t *Term) scheduleResizeWake(d time.Duration) {
-	wake := func() {
-		if t.closed.Load() {
-			return
-		}
-		t.bumpVersion()
-		t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
-	}
-	if t.resize.timer == nil {
-		t.resize.timer = time.AfterFunc(d, wake)
-		return
-	}
-	t.resize.timer.Reset(d)
+	t.scheduleDelayedUpdate(d, &t.resize.timer)
 }
 
 // onParserReply queues parser-originated bytes (e.g. DA1 reply) for
@@ -654,7 +664,14 @@ func (t *Term) flushPendingReplies() {
 	}
 }
 
-func (t *Term) onWindowEvent(e *gui.Event) {
+// HandleWindowEvent processes window-level events that the Term needs to
+// see: momentum cancellation on mouse-down/trackpad-touch, and focus-
+// reporting sequences (CSI I / CSI O) when the shell has enabled focus
+// reporting (DECSET ?1004). A pane manager calls this on the focused Term
+// when the window dispatches an event. When [Cfg.NoWindowHandler] is false
+// (the standalone default), New installs a wrapper that calls this
+// automatically via w.OnEvent chaining.
+func (t *Term) HandleWindowEvent(e *gui.Event) {
 	if e == nil || t.closed.Load() {
 		return
 	}
@@ -848,14 +865,17 @@ func (t *Term) Close() error {
 	if t.scrollbar.timer != nil {
 		t.scrollbar.timer.Stop()
 	}
+	if t.bell.flashTimer != nil {
+		t.bell.flashTimer.Stop()
+	}
 	if t.gfxDir != "" {
 		_ = os.RemoveAll(t.gfxDir)
 	}
 	// Restore the window's original OnEvent handler so this Term's
-	// closure does not leak in the dispatch chain. Correct for LIFO
-	// close order; a pane manager managing multiple live Terms should
-	// install its own dispatcher rather than rely on chaining.
-	if t.win != nil {
+	// closure does not leak in the dispatch chain. Skip when
+	// NoWindowHandler was set (prevOnEvent is nil) — the pane
+	// manager owns the dispatch in that case.
+	if t.prevOnEvent != nil && t.win != nil {
 		t.win.OnEvent = t.prevOnEvent
 	}
 	return err
@@ -897,25 +917,7 @@ func (t *Term) readLoop() {
 						t.bell.seenCount = bellCount
 						if d := t.effectiveBellDuration(); d > 0 {
 							t.bell.flashUntil = time.Now().Add(d)
-							// Schedule a redraw to clear the flash
-							// overlay. blinkDone cancellation
-							// prevents QueueCommand from firing
-							// after Close.
-							blinkDone := t.blinkDone
-							t.loopWg.Go(func() {
-								timer := time.NewTimer(d + time.Millisecond)
-								defer timer.Stop()
-								select {
-								case <-blinkDone:
-									return
-								case <-timer.C:
-									if t.closed.Load() {
-										return
-									}
-								}
-								t.bumpVersion()
-								t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
-							})
+							t.scheduleBellClear(d)
 						}
 					}
 					w.UpdateWindow()
@@ -943,9 +945,43 @@ func (t *Term) effectiveBellDuration() time.Duration {
 		return 0
 	}
 	if t.cfg.BellFlashDuration > 0 {
-		return t.cfg.BellFlashDuration
+		return min(t.cfg.BellFlashDuration, maxBellDuration)
 	}
 	return bellFlashDuration
+}
+
+// scheduleDelayedUpdate lazily creates or resets a *time.Timer field so
+// that tmr fires after d, bumps the draw version, and schedules a window
+// repaint. Used by scheduleBellClear, showScrollbar, and scheduleResizeWake
+// to avoid duplicating the after-func / guard / bump / queue pattern.
+// Safe to call from any goroutine; the callback checks closed before
+// queueing work.
+func (t *Term) scheduleDelayedUpdate(d time.Duration, tmr **time.Timer) {
+	if *tmr == nil {
+		*tmr = time.AfterFunc(d, func() {
+			if t.closed.Load() || t.cmd == nil {
+				return
+			}
+			t.bumpVersion()
+			t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
+		})
+	} else {
+		(*tmr).Reset(d)
+	}
+}
+
+// scheduleBellClear schedules a redraw to clear the visual-bell flash
+// overlay after d. Uses a single reusable timer so rapid BEL sequences
+// don't accumulate goroutines. Safe to call from the QueueCommand
+// callback (main thread).
+func (t *Term) scheduleBellClear(d time.Duration) {
+	// Guard against overflow from a misconfigured (or malicious) duration.
+	// effectiveBellDuration already clamps to maxBellDuration, so this is
+	// defense-in-depth — the arithmetic is safe even if called directly.
+	if d > maxBellDuration {
+		d = maxBellDuration
+	}
+	t.scheduleDelayedUpdate(d+time.Millisecond, &t.bell.flashTimer)
 }
 
 // effectiveScrollbarWidth returns the configured scrollbar pixel width,

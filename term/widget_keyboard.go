@@ -8,14 +8,6 @@ import (
 	"github.com/mike-ward/go-gui/gui"
 )
 
-// Bracketed-paste markers (DEC ?2004). Sent around clipboard payloads
-// when the application has enabled the mode; stripped from incoming
-// payloads unconditionally so a clipboard exit-marker can't break out.
-const (
-	pasteStart = "\x1b[200~"
-	pasteEnd   = "\x1b[201~"
-)
-
 // keyModes captures keyboard mode state read under grid.Mu and used
 // in onKeyDown/onKeyUp without holding the lock.
 type keyModes struct {
@@ -344,7 +336,12 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if t.handleClipboardKey(e, w) {
 		return
 	}
-	out := t.encodeKeyEvent(e, w)
+	shift := e.Modifiers.Has(gui.ModShift)
+	ctrl := e.Modifiers.Has(gui.ModCtrl)
+	if t.scrollbackIntercept(e, w, shift, ctrl) {
+		return
+	}
+	out := t.encodeKeyEvent(e, w, shift, ctrl)
 	if len(out) == 0 {
 		return
 	}
@@ -447,45 +444,48 @@ func (t *Term) handleClipboardKey(e *gui.Event, w *gui.Window) bool {
 	return false
 }
 
-// encodeKeyEvent translates a key event into the corresponding terminal
-// byte sequence. Scrollback keys (PageUp/Down, Shift+Home/End) are
-// resolved first and return nil when consumed as viewport navigation.
-// Returns nil when the key has no terminal encoding.
-func (t *Term) encodeKeyEvent(e *gui.Event, w *gui.Window) []byte {
-	shift := e.Modifiers.Has(gui.ModShift)
-	ctrl := e.Modifiers.Has(gui.ModCtrl)
-	alt := e.Modifiers.Has(gui.ModAlt)
-	modes := t.keyModes()
-
-	// Scrollback navigation: intercept before encoding. When the alt
-	// screen is active, only Shift+PageUp/PageDown scroll; plain
-	// PageUp/PageDown pass through to the pty.
+// scrollbackIntercept handles PageUp/Down/Home/End keys when they should
+// navigate the scrollback rather than being encoded for the pty. Returns
+// true when the key was consumed. shift and ctrl are pre-computed by the
+// caller (onKeyDown) so they aren't re-read from e.Modifiers.
+// When the alt screen is active, only Shift+PageUp/PageDown scroll;
+// plain PageUp/PageDown pass through.
+func (t *Term) scrollbackIntercept(e *gui.Event, w *gui.Window, shift, ctrl bool) bool {
 	switch e.KeyCode {
 	case gui.KeyPageUp:
 		if shift || !t.isAltActive() {
 			t.scrollByPage(+1, w)
 			e.IsHandled = true
-			return nil
+			return true
 		}
 	case gui.KeyPageDown:
 		if shift || !t.isAltActive() {
 			t.scrollByPage(-1, w)
 			e.IsHandled = true
-			return nil
+			return true
 		}
 	case gui.KeyHome:
 		if shift && !ctrl {
 			t.scrollToTop(w)
 			e.IsHandled = true
-			return nil
+			return true
 		}
 	case gui.KeyEnd:
 		if shift && !ctrl {
 			t.scrollToBottom(w)
 			e.IsHandled = true
-			return nil
+			return true
 		}
 	}
+	return false
+}
+
+// encodeKeyEvent translates a key event into the corresponding terminal
+// byte sequence. Returns nil when the key has no terminal encoding.
+// shift and ctrl are pre-computed by the caller (onKeyDown).
+func (t *Term) encodeKeyEvent(e *gui.Event, w *gui.Window, shift, ctrl bool) []byte {
+	alt := e.Modifiers.Has(gui.ModAlt)
+	modes := t.keyModes()
 
 	var out []byte
 	switch e.KeyCode {

@@ -104,31 +104,6 @@ func TestGrid_SelectedText_AcrossScrollbackBoundary(t *testing.T) {
 	}
 }
 
-func TestGrid_InSelection(t *testing.T) {
-	g := newGrid(3, 5)
-	g.SelAnchor = contentPos{Row: 0, Col: 2}
-	g.SelHead = contentPos{Row: 1, Col: 1}
-	g.SelActive = true
-	cases := []struct {
-		r, c int
-		want bool
-	}{
-		{0, 1, false},
-		{0, 2, true},
-		{0, 4, true},
-		{1, 0, true},
-		{1, 1, true},
-		{1, 2, false},
-		{2, 0, false},
-	}
-	for _, tc := range cases {
-		if got := g.InSelection(tc.r, tc.c); got != tc.want {
-			t.Errorf("InSelection(%d,%d)=%v want %v",
-				tc.r, tc.c, got, tc.want)
-		}
-	}
-}
-
 func TestGrid_SelectedText_ClampsOutOfRangeCoords(t *testing.T) {
 
 	g := newGrid(2, 3)
@@ -158,39 +133,6 @@ func TestGrid_SelectedText_RowWithEmptySpan(t *testing.T) {
 	g.SelActive = true
 	if got := g.SelectedText(); got != "abc" {
 		t.Errorf("baseline: got %q want %q", got, "abc")
-	}
-}
-
-func TestGrid_InSelection_SurvivesViewOffsetChange(t *testing.T) {
-
-	g := newGrid(2, 3)
-	g.ScrollbackCap = 5
-	for c, ch := range "abc" {
-		g.At(0, c).Ch = ch
-	}
-	g.scrollUpRegion(1)
-	for c, ch := range "xyz" {
-		g.At(0, c).Ch = ch
-	}
-
-	g.SelAnchor = contentPos{Row: 0, Col: 0}
-	g.SelHead = contentPos{Row: 1, Col: 2}
-	g.SelActive = true
-
-	g.ViewOffset = 0
-	if !g.InSelection(0, 0) {
-		t.Error("ViewOffset=0: viewport row 0 (content row 1) should be selected")
-	}
-	if g.InSelection(1, 0) {
-		t.Error("ViewOffset=0: viewport row 1 (content row 2) should not be selected")
-	}
-
-	g.ViewOffset = 1
-	if !g.InSelection(0, 0) {
-		t.Error("ViewOffset=1: viewport row 0 (content row 0) should be selected")
-	}
-	if !g.InSelection(1, 2) {
-		t.Error("ViewOffset=1: viewport row 1 (content row 1) should be selected")
 	}
 }
 
