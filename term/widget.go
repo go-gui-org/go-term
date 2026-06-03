@@ -931,7 +931,9 @@ func (t *Term) Close() error {
 		t.bell.flashTimer.Stop()
 	}
 	if t.gfxDir != "" {
-		_ = os.RemoveAll(t.gfxDir)
+		if err := os.RemoveAll(t.gfxDir); err != nil {
+			log.Printf("term: gfx dir cleanup: %v", err)
+		}
 	}
 	// Restore the window's original OnEvent handler so this Term's
 	// closure does not leak in the dispatch chain. Skip when
@@ -950,7 +952,10 @@ func (t *Term) readLoop() {
 	defer recoverLoop("readLoop")
 	defer func() {
 		if fn := t.cfg.OnExit; fn != nil {
-			fn()
+			func() {
+				defer recoverLoop("OnExit")
+				fn()
+			}()
 		}
 	}()
 	buf := make([]byte, 4096)

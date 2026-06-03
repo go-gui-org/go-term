@@ -17,11 +17,26 @@
 // Always call Close when the window is closed to avoid leaking file
 // descriptors and goroutines.
 //
+// Use [Cfg.OnExit] to detect child-process death. Use [Term.Alive] to
+// poll liveness without a callback.
+//
+// # Multi-Term windows (pane manager)
+//
+// Set [Cfg.NoWindowHandler] when embedding multiple Term instances in one
+// window. A pane manager should install its own window-level event handler
+// that routes events to the focused Term via [Term.HandleWindowEvent] and
+// keyboard input to the focused Term's [Term.View] container. Use
+// [Term.SetFocused] to switch focus between panes.
+//
+// The [Term.Rows], [Term.Cols], [Term.Write], [Term.PID], and [Term.Alive]
+// methods support pane-manager introspection without reaching into internal
+// state.
+//
 // # Thread safety
 //
-// The widget's exported methods (Cwd, SetTheme, View, Close) are safe
-// to call from any goroutine. Internal grid state is protected by a
-// single mutex.
+// The widget's exported methods (Cwd, SetTheme, View, Close, Rows, Cols,
+// Write, PID, Alive, SetFocused, HandleWindowEvent) are safe to call from
+// any goroutine. Internal grid state is protected by a single mutex.
 //
 // # Security: OSC 52 clipboard
 //
