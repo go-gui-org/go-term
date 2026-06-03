@@ -120,9 +120,9 @@ type rowBounds struct {
 // break the run correctly. Click hit-testing reads cell.LinkID
 // directly via ViewCellAt and is unaffected.
 type runKey struct {
+	typeface      glyph.Typeface
 	color         gui.Color
 	ulColor       gui.Color
-	typeface      glyph.Typeface
 	ulStyle       uint8 // ulNone..ulDashed; drives underline rendering
 	strikethrough bool
 }
@@ -173,26 +173,26 @@ func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int) runK
 // drawState holds per-frame state computed under grid.Mu and threaded
 // through the phase methods that replaced the anonymous function in onDraw.
 type drawState struct {
-	dc            *gui.DrawContext
 	style         gui.TextStyle
+	now           time.Time
+	dc            *gui.DrawContext
 	g             *grid
-	rows, cols    int
-	renderYOff    float32
-	renderRows    int
-	live          bool
 	cells         []cell
 	vMatchesByRow [][]vMatch
 	rowSel        []rowBounds
 	bidiVisRows   [][]cell
 	bidiV2LRows   [][]int
 	partialRow    []cell
-	now           time.Time
+	imeRunes      []rune
+	imeWidths     []int
+	rows, cols    int
+	renderRows    int
+	imeCursor     int
+	renderYOff    float32
+	live          bool
 	doResize      bool
 	// IME composition state, populated by drawIME and consumed by drawCursor.
 	imeComposing bool
-	imeRunes     []rune
-	imeWidths    []int
-	imeCursor    int
 }
 
 // resolveCell returns the cell at viewport (r, c), applying selection

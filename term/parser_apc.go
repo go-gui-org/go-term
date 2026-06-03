@@ -26,15 +26,15 @@ func (p *parser) dispatchAPC() {
 
 // kgpParams holds the decoded key=value pairs from a KGP escape.
 type kgpParams struct {
-	action   byte   // a=: 't' transmit, 'T' transmit+display, 'p' place, 'q' query, 'd' delete; default 'T'
+	deleteOp string // d=: delete specifier (when a=d)
 	format   int    // f=: 32 RGBA, 24 RGB, 100 PNG; default 32
-	medium   byte   // t=: 'd' direct (default), 'f' file, 't' temp-file, 's' shared-memory
 	widthPx  int    // s=: pixel width for raw formats
 	heightPx int    // v=: pixel height for raw formats
-	more     bool   // m=: true when m=1 (more chunks follow)
-	imageID  uint32 // i=: image id (0 = anonymous)
 	quiet    int    // q=: 0 reply always, 1 suppress OK, 2 always suppress
-	deleteOp string // d=: delete specifier (when a=d)
+	imageID  uint32 // i=: image id (0 = anonymous)
+	action   byte   // a=: 't' transmit, 'T' transmit+display, 'p' place, 'q' query, 'd' delete; default 'T'
+	medium   byte   // t=: 'd' direct (default), 'f' file, 't' temp-file, 's' shared-memory
+	more     bool   // m=: true when m=1 (more chunks follow)
 }
 
 // parseIntKV parses a KGP integer key=value, logging on error.

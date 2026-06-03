@@ -79,31 +79,7 @@ const maxCSIParamValue = 1 << 20
 // sixel graphics, synchronized updates); and APC (Kitty Graphics Protocol).
 // Unrecognized escape sequences are silently consumed.
 type parser struct {
-	g            *grid
-	state        parserState
-	params       []int   // SGR params accumulated in current CSI
-	paramSub     []bool  // paramSub[i] true when params[i] was colon-separated from params[i-1]
-	curP         int     // value being accumulated
-	hasP         bool    // any digit seen for curP
-	nextIsSub    bool    // pending: next param pushed will be marked as sub-param
-	leader       byte    // optional CSI private leader: one of < = > ?
-	intermediate byte    // last intermediate byte (0x20..0x2F) seen, 0 if none
-	escInter     byte    // ESC intermediate introducer like '(' in ESC(B
-	utf          [4]byte // UTF-8 carry-over between Feed calls
-	utfLen       int
-
-	// osc accumulates the payload of the in-progress OSC (Operating
-	// System Command). Reset on entry to stOSC; capped at maxOSCBytes
-	// unless oscIsImage is set (OSC 1337), in which case maxOSC1337Bytes.
-	osc        []byte
-	oscIsImage bool // true once "1337;" prefix detected
-	dcs        []byte
-
-	// apc accumulates the payload of the in-progress APC (Application
-	// Program Command). Used by the Kitty Graphics Protocol (payload
-	// starts with 'G'). Capped at maxAPCBytes per-chunk; chunked images
-	// accumulate base64 text in kittyChunks.
-	apc         []byte
+	g           *grid
 	kittyChunks map[uint32][]byte     // partial transmissions: id → raw base64 text
 	kittyStore  map[uint32]kittyEntry // off-screen cache: image id → entry
 
@@ -114,16 +90,41 @@ type parser struct {
 	// requests. onNotify, if non-nil, is invoked for OSC 9 and OSC 777
 	// desktop-notification requests. All run while grid.Mu is held —
 	// handlers must not re-enter the grid.
-	onTitle             func(string)
-	onReply             func([]byte)
-	onClipboard         func([]byte)
-	allowClipboardWrite bool
-	onNotify            func(title, body string)
+	onTitle     func(string)
+	onReply     func([]byte)
+	onClipboard func([]byte)
+	onNotify    func(title, body string)
 
 	// graphicsDir is the directory where decoded Sixel PNGs are written.
 	// Empty = os.TempDir(). Set via SetGraphicsDir; the widget creates a
 	// per-Term subdirectory and removes it on Close.
 	graphicsDir string
+	params      []int  // SGR params accumulated in current CSI
+	paramSub    []bool // paramSub[i] true when params[i] was colon-separated from params[i-1]
+
+	// osc accumulates the payload of the in-progress OSC (Operating
+	// System Command). Reset on entry to stOSC; capped at maxOSCBytes
+	// unless oscIsImage is set (OSC 1337), in which case maxOSC1337Bytes.
+	osc []byte
+	dcs []byte
+
+	// apc accumulates the payload of the in-progress APC (Application
+	// Program Command). Used by the Kitty Graphics Protocol (payload
+	// starts with 'G'). Capped at maxAPCBytes per-chunk; chunked images
+	// accumulate base64 text in kittyChunks.
+	apc    []byte
+	curP   int // value being accumulated
+	utfLen int
+
+	utf                 [4]byte // UTF-8 carry-over between Feed calls
+	state               parserState
+	hasP                bool // any digit seen for curP
+	nextIsSub           bool // pending: next param pushed will be marked as sub-param
+	leader              byte // optional CSI private leader: one of < = > ?
+	intermediate        byte // last intermediate byte (0x20..0x2F) seen, 0 if none
+	escInter            byte // ESC intermediate introducer like '(' in ESC(B
+	oscIsImage          bool // true once "1337;" prefix detected
+	allowClipboardWrite bool
 }
 
 // SetGraphicsDir tells the parser where to write decoded Sixel images.

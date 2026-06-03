@@ -13,14 +13,14 @@ import (
 // editor round-trip.
 type Fixture struct {
 	Name      string   `json:"name"`
-	Rows      int      `json:"rows"`
-	Cols      int      `json:"cols"`
 	InputB64  string   `json:"input_b64"`
-	WantLines []string `json:"want_lines"`
-	WantRow   int      `json:"want_row"`
-	WantCol   int      `json:"want_col"`
 	WantTitle string   `json:"want_title,omitempty"`
 	WantCwd   string   `json:"want_cwd,omitempty"`
+	WantLines []string `json:"want_lines"`
+	Rows      int      `json:"rows"`
+	Cols      int      `json:"cols"`
+	WantRow   int      `json:"want_row"`
+	WantCol   int      `json:"want_col"`
 }
 
 // gridLines returns the grid's visible lines as equal-length strings, one

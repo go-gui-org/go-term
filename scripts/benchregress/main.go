@@ -116,11 +116,11 @@ type benchSummary struct {
 
 type metricResult struct {
 	Metric   string  `json:"metric"`
+	Message  string  `json:"message,omitempty"`
 	Baseline float64 `json:"baseline"`
 	Current  float64 `json:"current"`
 	DeltaPct float64 `json:"delta_pct"`
 	Pass     bool    `json:"pass"`
-	Message  string  `json:"message,omitempty"`
 }
 
 type benchCmp struct {

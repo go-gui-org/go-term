@@ -44,17 +44,6 @@ type Cfg struct {
 	// Size or Typeface) — a zero-value TextStyle is treated as "unset."
 	TextStyle gui.TextStyle
 
-	// ScrollbackRows caps the number of scrollback rows. The meaning
-	// depends on the sign:
-	//
-	//   - Zero (the default): use defaultScrollbackRows (5000).
-	//   - Positive: use this many rows, clamped to [1, MaxScrollbackCap].
-	//   - Negative: disable scrollback entirely (ScrollbackCap = 0).
-	//
-	// Disabling scrollback saves memory for short-lived embedded
-	// widgets that never need history.
-	ScrollbackRows int
-
 	// OnTitle, if non-nil, receives OSC 0/1/2 window-title updates
 	// on the main goroutine. When nil, the widget calls
 	// win.SetTitle directly, which is appropriate for standalone
@@ -70,25 +59,25 @@ type Cfg struct {
 	// to block.
 	OnNotify func(title, body string)
 
-	// AllowOSC52Write permits host applications to write the system clipboard
-	// via OSC 52. Disabled by default so untrusted terminal output cannot
-	// silently replace the user's clipboard.
-	AllowOSC52Write bool
-
 	// CursorBlink, if non-nil, overrides the application's DECSCUSR
 	// blink request. Use *true to force blinking on, *false to force
 	// steady. Leave nil to honor whatever the shell asks for (steady
 	// by default for a brand-new grid).
 	CursorBlink *bool
 
-	// Themes, if non-empty, adds a right-click context menu for selecting
-	// a color theme at runtime. The first entry is used as the initial theme.
-	Themes []NamedTheme
+	// OnExit, if non-nil, is called when the child process exits.
+	// Runs on the reader goroutine — fire a goroutine for any slow
+	// work (e.g. calling Term.Close on the main thread via QueueCommand).
+	OnExit func()
 
 	// Command overrides the shell command. When empty (default), $SHELL
 	// from the environment is used (with /bin/sh as fallback). Set this
 	// to spawn a custom binary in the pty instead of a shell.
 	Command string
+
+	// Themes, if non-empty, adds a right-click context menu for selecting
+	// a color theme at runtime. The first entry is used as the initial theme.
+	Themes []NamedTheme
 
 	// Args supplies arguments when Command is set. When Command is empty,
 	// Args are passed to the default shell (e.g. []string{"-c", "htop"}).
@@ -100,19 +89,35 @@ type Cfg struct {
 	// inherited values. Use "KEY=" (trailing equals) to unset.
 	Env []string
 
-	// ScrollbarWidth overrides the pixel width of the scrollbar thumb.
-	// Zero (default) uses the built-in 4 px. Negative hides the scrollbar.
-	ScrollbarWidth float32
-
-	// DisableGraphics, when true, skips Sixel, Kitty, and iTerm2 inline
-	// image decoding and rendering. Use to reduce memory/CPU in panes
-	// that don't need image support.
-	DisableGraphics bool
+	// ScrollbackRows caps the number of scrollback rows. The meaning
+	// depends on the sign:
+	//
+	//   - Zero (the default): use defaultScrollbackRows (5000).
+	//   - Positive: use this many rows, clamped to [1, MaxScrollbackCap].
+	//   - Negative: disable scrollback entirely (ScrollbackCap = 0).
+	//
+	// Disabling scrollback saves memory for short-lived embedded
+	// widgets that never need history.
+	ScrollbackRows int
 
 	// BellFlashDuration overrides how long the visual-bell overlay stays
 	// visible. Zero (default) uses the built-in 100 ms. Negative disables
 	// the visual bell entirely.
 	BellFlashDuration time.Duration
+
+	// ScrollbarWidth overrides the pixel width of the scrollbar thumb.
+	// Zero (default) uses the built-in 4 px. Negative hides the scrollbar.
+	ScrollbarWidth float32
+
+	// AllowOSC52Write permits host applications to write the system clipboard
+	// via OSC 52. Disabled by default so untrusted terminal output cannot
+	// silently replace the user's clipboard.
+	AllowOSC52Write bool
+
+	// DisableGraphics, when true, skips Sixel, Kitty, and iTerm2 inline
+	// image decoding and rendering. Use to reduce memory/CPU in panes
+	// that don't need image support.
+	DisableGraphics bool
 
 	// NoWindowHandler, when true, prevents New from installing this Term
 	// as a handler on w.OnEvent. Set this when a pane manager or other
@@ -120,11 +125,6 @@ type Cfg struct {
 	// events to individual Terms via HandleWindowEvent. The standalone
 	// (false) default is correct for single-Term windows.
 	NoWindowHandler bool
-
-	// OnExit, if non-nil, is called when the child process exits.
-	// Runs on the reader goroutine — fire a goroutine for any slow
-	// work (e.g. calling Term.Close on the main thread via QueueCommand).
-	OnExit func()
 }
 
 // NamedTheme pairs a display name with a Theme for use in menus.
@@ -168,10 +168,10 @@ const scrollbarDuration = 1500 * time.Millisecond
 // redraw. The actual resize is deferred until the target dims have been
 // stable for resizeDebounce. Main-thread only (onDraw is the sole writer).
 type resizeState struct {
-	pendingRows  int
-	pendingCols  int
 	pendingSince time.Time
 	timer        *time.Timer // wakes main thread to apply after debounce
+	pendingRows  int
+	pendingCols  int
 }
 
 // imeState holds transient IME composition and widget-position state.
@@ -179,10 +179,10 @@ type resizeState struct {
 // layout, View reads the window's IME state for change detection, and
 // onDraw reads layoutX/Y for IMESetRect.
 type imeState struct {
-	layoutX, layoutY float32 // widget absolute position (AmendLayout)
-	composing        bool    // whether IME composition is active
 	compText         string  // cached composition text for change detection
 	compCursor       int     // cached composition cursor position
+	layoutX, layoutY float32 // widget absolute position (AmendLayout)
+	composing        bool    // whether IME composition is active
 }
 
 // momentumState drives the two-phase friction deceleration after a trackpad
@@ -190,26 +190,26 @@ type imeState struct {
 // by the GUI goroutine (onMouseScroll) except for the timer callback which
 // only touches mu-protected fields.
 type momentumState struct {
-	mu       sync.Mutex
-	vel      float64       // EMA of recent scroll deltas (pixels)
-	cellH    float32       // cellH snapshot at last scroll event
-	coasting bool          // true while goroutine is decelerating
 	kick     chan struct{} // buffered 1; wakes momentumLoop
 	timer    *time.Timer   // reset on each scroll; fires kickMomentum
+	vel      float64       // EMA of recent scroll deltas (pixels)
+	mu       sync.Mutex
+	cellH    float32 // cellH snapshot at last scroll event
+	coasting bool    // true while goroutine is decelerating
 }
 
 // searchState holds the interactive search bar state. All fields accessed
 // on the GUI goroutine only (onChar, onKeyDown, onDraw) — no lock required.
 type searchState struct {
-	active     bool
+	reErr      error
+	re         *regexp.Regexp
 	query      string
+	cacheQuery string
 	matches    []searchMatch // viewport matches refreshed each onDraw
 	idx        int           // index of last jump target in matches
-	regex      bool          // true: match via re instead of plain text
-	re         *regexp.Regexp
-	reErr      error
-	cacheVer   uint64 // last drawVersion for which matches was computed
-	cacheQuery string
+	cacheVer   uint64        // last drawVersion for which matches was computed
+	active     bool
+	regex      bool // true: match via re instead of plain text
 	cacheRegex bool
 }
 
@@ -218,10 +218,10 @@ type searchState struct {
 // readCount is only accessed from readLoop. flashTimer is managed from the
 // QueueCommand callback and stopped in Close.
 type bellState struct {
-	seenCount  uint64
 	flashUntil time.Time
-	readCount  uint64
 	flashTimer *time.Timer // reused per-BEL clear timer; lazy init
+	seenCount  uint64
+	readCount  uint64
 }
 
 // scrollbarState manages the auto-hide scrollbar thumb timer. Main-thread
@@ -264,89 +264,17 @@ type drawBufs struct {
 // Term is a terminal-emulator widget bound to a single pty-backed shell.
 // Use New to construct, View to embed in a layout, Close to tear down.
 type Term struct {
-	cfg    Cfg
-	grid   *grid
-	parser *parser
-	pty    *ptyDev
-
-	// cell metrics measured on first draw and reused thereafter. Both
-	// zero until the first OnDraw.
-	cellW, cellH float32
-
-	// ime tracks IME composition state and widget position for
-	// candidate-window placement. See imeState doc.
-	ime imeState
+	cfg Cfg
 
 	// embedded grouped state — see each struct's doc comment.
 	resize    resizeState
-	momentum  momentumState
-	search    searchState
 	bell      bellState
+	momentum  momentumState
 	scrollbar scrollbarState
-	mouse     mouseState
-	draw      drawBufs
-
-	// focused is set by a pane manager via SetFocused to control whether
-	// this terminal claims IDFocus. Defaults to true in New so a
-	// standalone Term (no pane manager) works without extra setup.
-	focused atomic.Bool
-
-	// focusID is a unique per-Term IDFocus value so multiple terminals
-	// in the same window don't compete for the same focus slot.
-	focusID uint32
-
-	// canvasID is a unique per-Term identifier used as the DrawCanvas ID
-	// so multiple terminals in the same window don't collide in go-gui's
-	// tessellation cache.
-	canvasID string
-
-	// win is the *gui.Window this Term is bound to. Stored so Close can
-	// restore the original OnEvent handler and prevent the handler chain
-	// from leaking closed-Term closures. Only accessed on the main thread.
-	win *gui.Window
-
-	// prevOnEvent is the original Window.OnEvent handler before this Term
-	// wrapped it. Restored in Close so that creating and destroying Terms
-	// (e.g. closing a pane) does not leak closures in the dispatch chain.
-	// Correct for LIFO close order; a pane manager managing multiple live
-	// Terms should set NoWindowHandler and install its own
-	// dispatcher rather than rely on chaining.
-	prevOnEvent func(*gui.Event, *gui.Window)
-
-	// closed guards Close so multiple calls are safe.
-	closed atomic.Bool
-
-	// loopWg tracks the three auxiliary goroutines (blink, autoScroll,
-	// momentum) so Close can wait for them to exit before tearing down
-	// state they may still reference.
-	loopWg sync.WaitGroup
-
-	// notifyBusy prevents goroutine pile-up from rapid OSC 9/777 sequences.
-	// Only one notification runs at a time; extras are dropped.
-	notifyBusy atomic.Bool
 
 	// cursorEpoch is the reference time for blink-phase calculation.
 	// Set in New so the cursor starts in the "on" half-cycle.
 	cursorEpoch time.Time
-
-	// blinkDone signals the blink ticker goroutine to exit. Closed by Close.
-	blinkDone chan struct{}
-
-	// readDone is closed by readLoop when it exits. Close waits on it so
-	// no further cmd.QueueCommand calls can arrive after Close returns.
-	readDone chan struct{}
-
-	// autoScrollDir drives the selection auto-scroll goroutine during a
-	// drag that extends outside the widget (-1 = toward live,
-	// +1 = into scrollback, 0 = no scroll). Written on the main
-	// thread; read in autoScrollLoop — atomic for safety.
-	autoScrollDir atomic.Int32
-
-	// drawVersion is incremented on every visual state change so that
-	// go-gui's DrawCanvas tessellation cache can skip OnDraw on unchanged
-	// frames. Reads happen on the main thread (View); writes happen on
-	// both the main thread and the reader goroutine, hence atomic.
-	drawVersion atomic.Uint64
 
 	// pw writes bytes to the pty slave. In production this is the *ptyDev
 	// itself (*os.File satisfies io.Writer). Tests replace it with a buffer
@@ -361,14 +289,51 @@ type Term struct {
 	// desktopNotifier (osascript / notify-send). Tests replace with a no-op.
 	notif notifier
 
-	// themeMenuItems is the precomputed ContextMenu item list for runtime
-	// theme switching. Built once in New; nil when no themes are configured.
-	themeMenuItems []gui.MenuItemCfg
+	grid   *grid
+	parser *parser
+	pty    *ptyDev
+
+	// win is the *gui.Window this Term is bound to. Stored so Close can
+	// restore the original OnEvent handler and prevent the handler chain
+	// from leaking closed-Term closures. Only accessed on the main thread.
+	win *gui.Window
+
+	// prevOnEvent is the original Window.OnEvent handler before this Term
+	// wrapped it. Restored in Close so that creating and destroying Terms
+	// (e.g. closing a pane) does not leak closures in the dispatch chain.
+	// Correct for LIFO close order; a pane manager managing multiple live
+	// Terms should set NoWindowHandler and install its own
+	// dispatcher rather than rely on chaining.
+	prevOnEvent func(*gui.Event, *gui.Window)
+
+	// blinkDone signals the blink ticker goroutine to exit. Closed by Close.
+	blinkDone chan struct{}
+
+	// readDone is closed by readLoop when it exits. Close waits on it so
+	// no further cmd.QueueCommand calls can arrive after Close returns.
+	readDone chan struct{}
+
+	// canvasID is a unique per-Term identifier used as the DrawCanvas ID
+	// so multiple terminals in the same window don't collide in go-gui's
+	// tessellation cache.
+	canvasID string
 
 	// gfxDir is a per-Term scratch directory for Sixel-decoded PNGs.
 	// Created lazily in New; removed (best-effort) in Close so a long
 	// session that prints many graphics doesn't pollute /tmp forever.
 	gfxDir string
+
+	draw drawBufs
+
+	search searchState
+
+	// ime tracks IME composition state and widget position for
+	// candidate-window placement. See imeState doc.
+	ime imeState
+
+	// themeMenuItems is the precomputed ContextMenu item list for runtime
+	// theme switching. Built once in New; nil when no themes are configured.
+	themeMenuItems []gui.MenuItemCfg
 
 	// pendingReplies buffers parser-originated reply bytes (DA, DECRQSS,
 	// XTGETTCAP, ...) emitted during parser.Feed. Drained by readLoop
@@ -378,6 +343,44 @@ type Term struct {
 	// — append (via onParserReply called from inside Feed) and drain
 	// both happen there.
 	pendingReplies [][]byte
+	mouse          mouseState
+
+	// loopWg tracks the three auxiliary goroutines (blink, autoScroll,
+	// momentum) so Close can wait for them to exit before tearing down
+	// state they may still reference.
+	loopWg sync.WaitGroup
+
+	// drawVersion is incremented on every visual state change so that
+	// go-gui's DrawCanvas tessellation cache can skip OnDraw on unchanged
+	// frames. Reads happen on the main thread (View); writes happen on
+	// both the main thread and the reader goroutine, hence atomic.
+	drawVersion atomic.Uint64
+
+	// cell metrics measured on first draw and reused thereafter. Both
+	// zero until the first OnDraw.
+	cellW, cellH float32
+
+	// focused is set by a pane manager via SetFocused to control whether
+	// this terminal claims IDFocus. Defaults to true in New so a
+	// standalone Term (no pane manager) works without extra setup.
+	focused atomic.Bool
+
+	// focusID is a unique per-Term IDFocus value so multiple terminals
+	// in the same window don't compete for the same focus slot.
+	focusID uint32
+
+	// closed guards Close so multiple calls are safe.
+	closed atomic.Bool
+
+	// notifyBusy prevents goroutine pile-up from rapid OSC 9/777 sequences.
+	// Only one notification runs at a time; extras are dropped.
+	notifyBusy atomic.Bool
+
+	// autoScrollDir drives the selection auto-scroll goroutine during a
+	// drag that extends outside the widget (-1 = toward live,
+	// +1 = into scrollback, 0 = no scroll). Written on the main
+	// thread; read in autoScrollLoop — atomic for safety.
+	autoScrollDir atomic.Int32
 }
 
 // applyScrollbackConfig sets ScrollbackCap based on cfg.ScrollbackRows.

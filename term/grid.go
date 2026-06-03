@@ -233,85 +233,15 @@ const maxMarks = 10000
 // concurrent callers via Mu; the parser writes under Mu, OnDraw reads
 // under Mu.
 type grid struct {
-	Mu             sync.Mutex
-	Rows           int
-	Cols           int
-	Cells          []cell // row-major, len = Rows*Cols
-	CursorR        int
-	CursorC        int
-	CurFG          uint32 // packed Color
-	CurBG          uint32
-	CurAttrs       uint8
-	CurULStyle     uint8  // current underline style (ulNone..ulDashed)
-	CurULColor     uint32 // current underline color; DefaultColor = use fg
-	CharsetG0      byte   // ESC ( F — designated set for GL when ActiveG=0
-	CharsetG1      byte   // ESC ) F — designated set for GL when ActiveG=1
-	ActiveG        uint8  // 0 = SI selects G0 into GL, 1 = SO selects G1
-	AutoWrap       bool   // DEC ?7 — autowrap at right margin
-	OriginMode     bool   // DEC ?6 — CUP/HVP/VPA relative to scroll region
-	InsertMode     bool   // CSI 4 h/l — insert vs replace on Put
-	CursorVisible  bool   // hidden via DEC ?25 l, shown via ?25 h
-	BracketedPaste bool   // DEC ?2004 — wrap pasted text in markers
-	FocusReporting bool   // DEC ?1004 — report focus in/out to host
-	SyncOutput     bool   // DEC ?2026 — allow synchronized updates
-	SyncActive     bool   // currently inside a synchronized update block
-	AppCursorKeys  bool   // DEC ?1 — application cursor key mode
-	AppKeypad      bool   // DECNKM — application keypad mode
-
-	// BellCount is incremented each time the terminal receives BEL (0x07).
-	// The widget watches for changes to trigger a visual flash.
-	BellCount uint64
-
-	// Cursor shape + blink. Set via DECSCUSR (CSI Ps SP q). Default is
-	// a steady block. Embedders can override blink via
-	// Cfg.CursorBlink without overriding shape.
-	cursorShape cursorShape
-	CursorBlink bool
-	// CursorColor is the fill color for the block cursor, set via OSC 12.
-	// DefaultColor means "invert the cell under the cursor" (the default).
-	CursorColor uint32
-
-	// Mouse reporting modes. Multiple may be active at once; the
-	// widget emits the broadest report any of them enables. SGR
-	// (?1006) is an encoding flag layered on top — without it, the
-	// widget drops reports rather than fall back to legacy X10
-	// byte-encoding.
-	MouseTrack     bool // ?1000 — button press/release
-	MouseTrackBtn  bool // ?1002 — press/release + drag (button held)
-	MouseTrackAny  bool // ?1003 — any motion, even with no button
-	MouseSGR       bool // ?1006 — SGR-style "<b;c;rM/m" encoding
-	MouseSGRPixels bool // ?1016 — pixel-precise coordinates in SGR reports
+	links   map[uint16]string
+	linkIDs map[string]uint16
 
 	// Cwd is the most recent value reported via OSC 7 (e.g.
 	// "file://host/path"). Embedders read it through Term.Cwd().
 	// Empty until the shell emits an OSC 7.
 	Cwd string
 
-	// Hyperlink registry (OSC 8). CurLinkID is the active link applied
-	// by Put; 0 means no link. links/linkIDs are a sidecar map so cell
-	// stays compact — URLs live here, not in each cell. The maps grow
-	// only, never shrink; sessions are short and links are rare.
-	CurLinkID uint16
-	links     map[uint16]string
-	linkIDs   map[string]uint16
-	nextLink  uint16
-	// Top, Bottom define the scroll region (inclusive, 0-based).
-	// Default 0..Rows-1 (full screen). Set via DECSTBM (CSI Pt;Pb r).
-	// scrollUpRegion / scrollDownRegion / IND / RI / IL / DL all
-	// honor this window; rows outside are untouched.
-	Top    int
-	Bottom int
-	saved  savedCursor
-
-	// Scrollback ring of rows that have scrolled off the top. Index 0
-	// is oldest, Len()-1 is newest. Cap of 0 disables scrollback (rows
-	// are dropped on scrollUp). ViewOffset > 0 freezes the viewport at
-	// `ViewOffset` rows back from live; OnDraw renders accordingly.
-	Scrollback    scrollbackRing
-	ScrollbackCap int
-	ViewOffset    int
-	// 0 ≤ ViewSubPx < cellH; with ViewOffset gives the exact scroll position.
-	ViewSubPx float32
+	Cells []cell // row-major, len = Rows*Cols
 
 	// RowWrapped[r] is true when row r ended with an autowrap (the cursor
 	// reached the right margin and wrapped onto row r+1). During Resize,
@@ -326,49 +256,13 @@ type grid struct {
 	// of each render cycle. dirtyCount tracks how many rows are dirty,
 	// letting HasDirtyRows avoid a linear scan. Allocation mirrors
 	// RowWrapped: len = Rows.
-	Dirty      []bool
-	dirtyCount int
-
-	// TabStops[c] is true when column c has a tab stop set. Initialized to
-	// every 8 columns (xterm default). ESC H sets; CSI g clears. Tab()
-	// advances to the next set stop, or to Cols-1 when none remains.
-	TabStops [MaxGridDim]bool
-
-	// Theme controls the 16 ANSI base colors and the default fg/bg used
-	// when rendering cells. Set via Term.SetTheme; defaults to DefaultTheme.
-	Theme Theme
+	Dirty []bool
 
 	// Marks records OSC 133 semantic shell-integration boundaries in
 	// content-row coordinates (same space as contentPos). Appended by
 	// AddMark; adjusted by scrollback trim and Resize; capped at maxMarks.
 	Marks []mark
 
-	// Alt-screen state. EnterAlt swaps g.Cells with a fresh blank buffer
-	// and stashes main-screen state in mainSaved; ExitAlt restores it.
-	// While AltActive, scrollback writes are suppressed (kitty/iTerm/
-	// ghostty default) so vim/htop/less don't fill history with their
-	// repaint output.
-	AltActive bool
-	mainSaved altSavedScreen
-
-	// Selection state in content coordinates (scrollback + live, stable across
-	// ViewOffset changes). SelActive == false means no selection (single-click
-	// position pre-drag). Anchor and Head may appear in any order; helpers
-	// normalize. contentPos row: 0..len(Scrollback)-1 for scrollback rows,
-	// len(Scrollback)..len(Scrollback)+Rows-1 for live rows.
-	SelAnchor contentPos
-	SelHead   contentPos
-	SelActive bool
-
-	// Kitty Keyboard Protocol state. KittyKeyFlags is the current effective
-	// flags bitset (0 = legacy mode). Flag bits:
-	//   1 (bit 0) — disambiguate escape codes (Tab≠Ctrl+I, Enter≠Ctrl+M, …)
-	//   2 (bit 1) — report event types (press/repeat/release)
-	//   4 (bit 2) — report alternate keys
-	//   8 (bit 3) — report all keys as escape codes
-	//  16 (bit 4) — report associated text
-	// kittyFlagStack supports CSI > u (push) / CSI < u (pop) nesting.
-	KittyKeyFlags  uint32
 	kittyFlagStack []uint32
 
 	// Graphics holds decoded images (Phase 32). Origin is in content
@@ -382,11 +276,124 @@ type grid struct {
 	searchRunes []rune
 	searchCols  []int
 
+	// Scrollback ring of rows that have scrolled off the top. Index 0
+	// is oldest, Len()-1 is newest. Cap of 0 disables scrollback (rows
+	// are dropped on scrollUp). ViewOffset > 0 freezes the viewport at
+	// `ViewOffset` rows back from live; OnDraw renders accordingly.
+	Scrollback scrollbackRing
+	mainSaved  altSavedScreen
+
+	saved savedCursor
+
+	// Selection state in content coordinates (scrollback + live, stable across
+	// ViewOffset changes). SelActive == false means no selection (single-click
+	// position pre-drag). Anchor and Head may appear in any order; helpers
+	// normalize. contentPos row: 0..len(Scrollback)-1 for scrollback rows,
+	// len(Scrollback)..len(Scrollback)+Rows-1 for live rows.
+	SelAnchor contentPos
+	SelHead   contentPos
+	Rows      int
+	Cols      int
+	CursorR   int
+	CursorC   int
+
+	// BellCount is incremented each time the terminal receives BEL (0x07).
+	// The widget watches for changes to trigger a visual flash.
+	BellCount uint64
+
+	// Top, Bottom define the scroll region (inclusive, 0-based).
+	// Default 0..Rows-1 (full screen). Set via DECSTBM (CSI Pt;Pb r).
+	// scrollUpRegion / scrollDownRegion / IND / RI / IL / DL all
+	// honor this window; rows outside are untouched.
+	Top           int
+	Bottom        int
+	ScrollbackCap int
+	ViewOffset    int
+	dirtyCount    int
+
+	Mu         sync.Mutex
+	CurFG      uint32 // packed Color
+	CurBG      uint32
+	CurULColor uint32 // current underline color; DefaultColor = use fg
+	// CursorColor is the fill color for the block cursor, set via OSC 12.
+	// DefaultColor means "invert the cell under the cursor" (the default).
+	CursorColor uint32
+
+	// 0 ≤ ViewSubPx < cellH; with ViewOffset gives the exact scroll position.
+	ViewSubPx float32
+
+	// Kitty Keyboard Protocol state. KittyKeyFlags is the current effective
+	// flags bitset (0 = legacy mode). Flag bits:
+	//   1 (bit 0) — disambiguate escape codes (Tab≠Ctrl+I, Enter≠Ctrl+M, …)
+	//   2 (bit 1) — report event types (press/repeat/release)
+	//   4 (bit 2) — report alternate keys
+	//   8 (bit 3) — report all keys as escape codes
+	//  16 (bit 4) — report associated text
+	// kittyFlagStack supports CSI > u (push) / CSI < u (pop) nesting.
+	KittyKeyFlags uint32
+
 	// CellPxW, CellPxH are advisory cell-pixel sizes set by the widget
 	// after its first measurement (under Mu in onDraw). Used to convert
 	// pixel-space image dimensions into cell-space cursor advancement
 	// at AddGraphic time. Zero before the first measurement.
 	CellPxW, CellPxH float32
+
+	// Hyperlink registry (OSC 8). CurLinkID is the active link applied
+	// by Put; 0 means no link. links/linkIDs are a sidecar map so cell
+	// stays compact — URLs live here, not in each cell. The maps grow
+	// only, never shrink; sessions are short and links are rare.
+	CurLinkID uint16
+	nextLink  uint16
+
+	// TabStops[c] is true when column c has a tab stop set. Initialized to
+	// every 8 columns (xterm default). ESC H sets; CSI g clears. Tab()
+	// advances to the next set stop, or to Cols-1 when none remains.
+	TabStops [MaxGridDim]bool
+
+	// Theme controls the 16 ANSI base colors and the default fg/bg used
+	// when rendering cells. Set via Term.SetTheme; defaults to DefaultTheme.
+	Theme Theme
+
+	CurAttrs       uint8
+	CurULStyle     uint8 // current underline style (ulNone..ulDashed)
+	CharsetG0      byte  // ESC ( F — designated set for GL when ActiveG=0
+	CharsetG1      byte  // ESC ) F — designated set for GL when ActiveG=1
+	ActiveG        uint8 // 0 = SI selects G0 into GL, 1 = SO selects G1
+	AutoWrap       bool  // DEC ?7 — autowrap at right margin
+	OriginMode     bool  // DEC ?6 — CUP/HVP/VPA relative to scroll region
+	InsertMode     bool  // CSI 4 h/l — insert vs replace on Put
+	CursorVisible  bool  // hidden via DEC ?25 l, shown via ?25 h
+	BracketedPaste bool  // DEC ?2004 — wrap pasted text in markers
+	FocusReporting bool  // DEC ?1004 — report focus in/out to host
+	SyncOutput     bool  // DEC ?2026 — allow synchronized updates
+	SyncActive     bool  // currently inside a synchronized update block
+	AppCursorKeys  bool  // DEC ?1 — application cursor key mode
+	AppKeypad      bool  // DECNKM — application keypad mode
+
+	// Cursor shape + blink. Set via DECSCUSR (CSI Ps SP q). Default is
+	// a steady block. Embedders can override blink via
+	// Cfg.CursorBlink without overriding shape.
+	cursorShape cursorShape
+	CursorBlink bool
+
+	// Mouse reporting modes. Multiple may be active at once; the
+	// widget emits the broadest report any of them enables. SGR
+	// (?1006) is an encoding flag layered on top — without it, the
+	// widget drops reports rather than fall back to legacy X10
+	// byte-encoding.
+	MouseTrack     bool // ?1000 — button press/release
+	MouseTrackBtn  bool // ?1002 — press/release + drag (button held)
+	MouseTrackAny  bool // ?1003 — any motion, even with no button
+	MouseSGR       bool // ?1006 — SGR-style "<b;c;rM/m" encoding
+	MouseSGRPixels bool // ?1016 — pixel-precise coordinates in SGR reports
+
+	// Alt-screen state. EnterAlt swaps g.Cells with a fresh blank buffer
+	// and stashes main-screen state in mainSaved; ExitAlt restores it.
+	// While AltActive, scrollback writes are suppressed (kitty/iTerm/
+	// ghostty default) so vim/htop/less don't fill history with their
+	// repaint output.
+	AltActive bool
+	SelActive bool
 }
 
 // PushKittyKeyFlags saves the current KittyKeyFlags on the stack and ORs in
