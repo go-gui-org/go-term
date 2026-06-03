@@ -535,10 +535,7 @@ func (t *Term) momentumLoop() {
 					t.grid.ScrollViewPx(deltaPx, cellH)
 				}()
 				t.bumpVersion()
-				t.cmd.QueueCommand(func(w *gui.Window) {
-					if t.closed.Load() {
-						return
-					}
+				t.queueCommand(func(w *gui.Window) {
 					t.showScrollbar()
 					w.UpdateWindow()
 				})

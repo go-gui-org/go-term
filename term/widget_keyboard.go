@@ -58,7 +58,7 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
 		}
 		e.IsHandled = true
 		t.bumpVersion()
-		t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
+		t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
 		return
 	}
 	t.snapToLive()

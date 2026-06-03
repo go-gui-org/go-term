@@ -2747,3 +2747,137 @@ func TestDrawGraphics_PartiallyAboveViewportStillRenders(t *testing.T) {
 		t.Error("graphic overlapping viewport from above should render")
 	}
 }
+
+// --- PID / Alive / OnExit ---
+
+func TestPID_ReturnsChildPID(t *testing.T) {
+	win := gui.NewWindow(gui.WindowCfg{})
+	tm, err := New(win, Cfg{Command: "sleep", Args: []string{"0.2"}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = tm.Close() }()
+
+	pid := tm.PID()
+	if pid <= 0 {
+		t.Fatalf("PID returned %d, want positive", pid)
+	}
+	if !tm.Alive() {
+		t.Error("expected Alive=true immediately after New")
+	}
+}
+
+func TestPID_NilPTYReturnsZero(t *testing.T) {
+	tm := &Term{}
+	if got := tm.PID(); got != 0 {
+		t.Errorf("PID with nil pty: got %d, want 0", got)
+	}
+}
+
+func TestAlive_DefaultsFalse(t *testing.T) {
+	tm := &Term{}
+	if tm.Alive() {
+		t.Error("Alive should return false before alive is set to true")
+	}
+}
+
+func TestOnExit_CalledWhenProcessExits(t *testing.T) {
+	exitCh := make(chan struct{})
+	win := gui.NewWindow(gui.WindowCfg{})
+	tm, err := New(win, Cfg{
+		Command: "true", // exits immediately
+		OnExit: func() {
+			close(exitCh)
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = tm.Close() }()
+
+	select {
+	case <-exitCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("OnExit was not called within timeout")
+	}
+	// OnExit runs before close(readDone) in the same defer chain, so
+	// Alive() must already be false by the time the channel fires.
+	if tm.Alive() {
+		t.Error("Alive should be false after process exits")
+	}
+}
+
+func TestOnExit_NilHandlerNoPanic(t *testing.T) {
+	win := gui.NewWindow(gui.WindowCfg{})
+	tm, err := New(win, Cfg{Command: "true"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Close waits on readDone; "true" exits instantly, so this returns
+	// quickly without a blind sleep.
+	_ = tm.Close()
+}
+
+func TestOnExit_PanicIsRecovered(t *testing.T) {
+	// If OnExit panics, recoverLoop must catch it so readDone is still
+	// closed and Close does not hang.
+	exitCh := make(chan struct{})
+	win := gui.NewWindow(gui.WindowCfg{})
+	tm, err := New(win, Cfg{
+		Command: "true",
+		OnExit: func() {
+			close(exitCh)
+			panic("onExit panic")
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() {
+		_ = tm.Close()
+	}()
+
+	select {
+	case <-exitCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("OnExit was not called within timeout")
+	}
+	// If the panic escaped, readDone would never close and Close would
+	// block for its 2-second timeout. recoverLoop catches the panic and
+	// readDone is closed immediately after, so Close returns fast.
+	_ = tm.Close()
+}
+
+func TestPID_AfterClose(t *testing.T) {
+	win := gui.NewWindow(gui.WindowCfg{})
+	tm, err := New(win, Cfg{Command: "sleep", Args: []string{"0.01"}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	pid := tm.PID()
+	if pid <= 0 {
+		t.Fatalf("PID returned %d before close, want positive", pid)
+	}
+	if err := tm.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// PID should still return the original value after Close — Unix PIDs
+	// don't change on process death.
+	if got := tm.PID(); got != pid {
+		t.Errorf("PID after Close = %d, want %d", got, pid)
+	}
+}
+
+func TestAlive_AfterClose(t *testing.T) {
+	win := gui.NewWindow(gui.WindowCfg{})
+	tm, err := New(win, Cfg{Command: "sleep", Args: []string{"0.01"}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := tm.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if tm.Alive() {
+		t.Error("Alive must return false after Close")
+	}
+}

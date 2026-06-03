@@ -807,7 +807,7 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 	default: // cursorBlock
 		fillColor := t.grid.Theme.fg(cell)
 		if t.grid.CursorColor != DefaultColor {
-			fillColor = gui.RGB(uint8(t.grid.CursorColor>>16), uint8(t.grid.CursorColor>>8), uint8(t.grid.CursorColor))
+			fillColor = rgbToGUIColor(t.grid.CursorColor)
 		}
 		dc.FilledRect(x, y, t.cellW, t.cellH, fillColor.WithOpacity(opacity))
 		cs := style

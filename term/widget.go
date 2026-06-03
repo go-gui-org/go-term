@@ -120,6 +120,11 @@ type Cfg struct {
 	// events to individual Terms via HandleWindowEvent. The standalone
 	// (false) default is correct for single-Term windows.
 	NoWindowHandler bool
+
+	// OnExit, if non-nil, is called when the child process exits.
+	// Runs on the reader goroutine — fire a goroutine for any slow
+	// work (e.g. calling Term.Close on the main thread via QueueCommand).
+	OnExit func()
 }
 
 // NamedTheme pairs a display name with a Theme for use in menus.
@@ -457,7 +462,7 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	if cfg.AllowOSC52Write {
 		t.parser.SetClipboardHandler(func(data []byte) {
 			text := string(data)
-			t.cmd.QueueCommand(func(w *gui.Window) {
+			t.queueCommand(func(w *gui.Window) {
 				w.SetClipboard(text)
 			})
 		})
@@ -513,7 +518,7 @@ func (t *Term) blinkLoop() {
 			}()
 			if redraw {
 				t.bumpVersion()
-				t.cmd.QueueCommand(func(w *gui.Window) {
+				t.queueCommand(func(w *gui.Window) {
 					w.UpdateWindow()
 				})
 			}
@@ -545,10 +550,7 @@ func (t *Term) autoScrollLoop() {
 				t.grid.ScrollView(dir)
 			}()
 			t.bumpVersion()
-			t.cmd.QueueCommand(func(w *gui.Window) {
-				if t.closed.Load() {
-					return
-				}
+			t.queueCommand(func(w *gui.Window) {
 				t.showScrollbar()
 				w.UpdateWindow()
 			})
@@ -590,7 +592,7 @@ func (t *Term) registerNotifyHandler() {
 // hence the QueueCommand hop.
 func (t *Term) onParserTitle(title string) {
 	fn := t.cfg.OnTitle
-	t.cmd.QueueCommand(func(w *gui.Window) {
+	t.queueCommand(func(w *gui.Window) {
 		if fn != nil {
 			fn(title)
 			return
@@ -701,6 +703,19 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 	}
 }
 
+// queueCommand wraps t.cmd.QueueCommand with a closed-Term guard: if
+// Close has already been called the callback is silently dropped. All
+// background goroutines that schedule work on the GUI thread should
+// use this instead of calling t.cmd.QueueCommand directly.
+func (t *Term) queueCommand(fn func(*gui.Window)) {
+	t.cmd.QueueCommand(func(w *gui.Window) {
+		if t.closed.Load() {
+			return
+		}
+		fn(w)
+	})
+}
+
 // Cwd returns the most recent working directory reported via OSC 7,
 // or "" if the shell has never emitted one. Typical payload format
 // is "file://host/path"; embedders parse as needed.
@@ -708,6 +723,28 @@ func (t *Term) Cwd() string {
 	t.grid.Mu.Lock()
 	defer t.grid.Mu.Unlock()
 	return t.grid.Cwd
+}
+
+// PID returns the child process ID, or 0 if the PTY is not started.
+func (t *Term) PID() int {
+	if t.pty == nil || t.pty.cmd == nil || t.pty.cmd.Process == nil {
+		return 0
+	}
+	return t.pty.cmd.Process.Pid
+}
+
+// Alive reports whether the child process is still running. Returns
+// false after the PTY reader goroutine exits (process death or Close).
+func (t *Term) Alive() bool {
+	if t.readDone == nil {
+		return false
+	}
+	select {
+	case <-t.readDone:
+		return false
+	default:
+		return true
+	}
 }
 
 // Theme returns the active color theme. Safe to call from any goroutine.
@@ -736,10 +773,7 @@ func (t *Term) SetFocused(v bool) {
 		return // no change
 	}
 	if v && t.cmd != nil {
-		t.cmd.QueueCommand(func(w *gui.Window) {
-			if t.closed.Load() {
-				return
-			}
+		t.queueCommand(func(w *gui.Window) {
 			w.SetIDFocus(t.focusID)
 		})
 	}
@@ -785,6 +819,11 @@ func (t *Term) View(w *gui.Window) gui.View {
 	}
 
 	ww, wh := w.WindowSize()
+	// Snapshot theme default-bg under the lock so a concurrent SetTheme
+	// does not race with this read. The rest of View() is lock-free.
+	t.grid.Mu.Lock()
+	bgColor := t.grid.Theme.DefaultBG
+	t.grid.Mu.Unlock()
 	canvas := gui.DrawCanvas(gui.DrawCanvasCfg{
 		ID:            t.canvasID,
 		Version:       t.drawVersion.Load(),
@@ -798,7 +837,7 @@ func (t *Term) View(w *gui.Window) gui.View {
 	colCfg := gui.ContainerCfg{
 		Padding:     gui.Some(gui.Padding{}),
 		Spacing:     gui.SomeF(0),
-		Color:       t.grid.Theme.DefaultBG,
+		Color:       bgColor,
 		OnChar:      t.onChar,
 		OnKeyDown:   t.onKeyDown,
 		OnKeyUp:     t.onKeyUp,
@@ -886,6 +925,11 @@ func (t *Term) Close() error {
 func (t *Term) readLoop() {
 	defer close(t.readDone)
 	defer recoverLoop("readLoop")
+	defer func() {
+		if fn := t.cfg.OnExit; fn != nil {
+			fn()
+		}
+	}()
 	buf := make([]byte, 4096)
 	for {
 		n, err := t.pty.Read(buf)
@@ -912,7 +956,7 @@ func (t *Term) readLoop() {
 			// stall onDraw waiting for the same lock.
 			t.flushPendingReplies()
 			if redraw && dirty {
-				t.cmd.QueueCommand(func(w *gui.Window) {
+				t.queueCommand(func(w *gui.Window) {
 					if bellCount > t.bell.seenCount {
 						t.bell.seenCount = bellCount
 						if d := t.effectiveBellDuration(); d > 0 {
@@ -963,7 +1007,7 @@ func (t *Term) scheduleDelayedUpdate(d time.Duration, tmr **time.Timer) {
 				return
 			}
 			t.bumpVersion()
-			t.cmd.QueueCommand(func(w *gui.Window) { w.UpdateWindow() })
+			t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
 		})
 	} else {
 		(*tmr).Reset(d)
