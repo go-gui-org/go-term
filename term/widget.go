@@ -716,6 +716,29 @@ func (t *Term) queueCommand(fn func(*gui.Window)) {
 	})
 }
 
+// Rows returns the current grid row count. Safe to call from any
+// goroutine.
+func (t *Term) Rows() int {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	return t.grid.Rows
+}
+
+// Cols returns the current grid column count. Safe to call from any
+// goroutine.
+func (t *Term) Cols() int {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	return t.grid.Cols
+}
+
+// Write sends p to the PTY as if typed by the user. Useful for
+// restoring CWD, running startup commands, or scripting input.
+// Safe to call from any goroutine.
+func (t *Term) Write(p []byte) (int, error) {
+	return t.pw.Write(p)
+}
+
 // Cwd returns the most recent working directory reported via OSC 7,
 // or "" if the shell has never emitted one. Typical payload format
 // is "file://host/path"; embedders parse as needed.

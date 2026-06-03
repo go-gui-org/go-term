@@ -2453,6 +2453,51 @@ func TestTerm_Cwd_EmptyByDefault(t *testing.T) {
 	}
 }
 
+func TestTerm_Rows_ReturnsGridRows(t *testing.T) {
+	term := &Term{grid: newGrid(30, 100)}
+	if got := term.Rows(); got != 30 {
+		t.Errorf("Rows() = %d, want 30", got)
+	}
+}
+
+func TestTerm_Cols_ReturnsGridCols(t *testing.T) {
+	term := &Term{grid: newGrid(30, 100)}
+	if got := term.Cols(); got != 100 {
+		t.Errorf("Cols() = %d, want 100", got)
+	}
+}
+
+func TestTerm_Write_ForwardsToPTY(t *testing.T) {
+	var got []byte
+	term := &Term{
+		pw: writerFunc(func(b []byte) (int, error) {
+			got = append(got, b...)
+			return len(b), nil
+		}),
+	}
+	n, err := term.Write([]byte("echo hello\n"))
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if n != 11 {
+		t.Errorf("Write n = %d, want 11", n)
+	}
+	if string(got) != "echo hello\n" {
+		t.Errorf("Write payload = %q, want %q", got, "echo hello\n")
+	}
+}
+
+func TestTerm_Write_ErrorPropagated(t *testing.T) {
+	boom := errors.New("pty closed")
+	term := &Term{
+		pw: writerFunc(func([]byte) (int, error) { return 0, boom }),
+	}
+	_, err := term.Write([]byte("x"))
+	if err != boom {
+		t.Errorf("Write error = %v, want %v", err, boom)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // OnEvent chain cleanup on Close
 // ---------------------------------------------------------------------------
