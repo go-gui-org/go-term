@@ -11,9 +11,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/mike-ward/go-gui/gui"
+	"github.com/go-gui-org/go-gui/gui"
 
-	glyph "github.com/mike-ward/go-glyph"
+	glyph "github.com/go-gui-org/go-glyph"
 )
 
 // scrollbarThumb delegates to scrollbarGeometry so tests share the production formula.

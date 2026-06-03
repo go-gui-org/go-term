@@ -20,13 +20,13 @@ jobs:
       - name: Checkout go-glyph
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-glyph
+          repository: go-gui-org/go-glyph
           path: go-glyph
 
       - name: Checkout go-gui
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-gui
+          repository: go-gui-org/go-gui
           path: go-gui
 
       - name: Set up Go
@@ -71,13 +71,13 @@ jobs:
       - name: Checkout go-glyph
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-glyph
+          repository: go-gui-org/go-glyph
           path: go-glyph
 
       - name: Checkout go-gui
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-gui
+          repository: go-gui-org/go-gui
           path: go-gui
 
       - name: Set up Go
@@ -121,13 +121,13 @@ jobs:
       - name: Checkout go-glyph
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-glyph
+          repository: go-gui-org/go-glyph
           path: go-glyph
 
       - name: Checkout go-gui
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-gui
+          repository: go-gui-org/go-gui
           path: go-gui
 
       - name: Set up Go
@@ -167,13 +167,13 @@ jobs:
       - name: Checkout go-glyph
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-glyph
+          repository: go-gui-org/go-glyph
           path: go-glyph
 
       - name: Checkout go-gui
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-gui
+          repository: go-gui-org/go-gui
           path: go-gui
 
       - name: Set up Go
@@ -223,13 +223,13 @@ jobs:
       - name: Checkout go-glyph
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-glyph
+          repository: go-gui-org/go-glyph
           path: go-glyph
 
       - name: Checkout go-gui
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-gui
+          repository: go-gui-org/go-gui
           path: go-gui
 
       - name: Set up Go
@@ -268,13 +268,13 @@ jobs:
       - name: Checkout go-glyph
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-glyph
+          repository: go-gui-org/go-glyph
           path: go-glyph
 
       - name: Checkout go-gui
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-gui
+          repository: go-gui-org/go-gui
           path: go-gui
 
       - name: Set up Go
@@ -324,13 +324,13 @@ jobs:
       - name: Checkout go-glyph
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-glyph
+          repository: go-gui-org/go-glyph
           path: go-glyph
 
       - name: Checkout go-gui
         uses: actions/checkout@v5
         with:
-          repository: mike-ward/go-gui
+          repository: go-gui-org/go-gui
           path: go-gui
 
       - name: Set up Go

@@ -20,7 +20,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mike-ward/go-term/term"
+	"github.com/go-gui-org/go-term/term"
 )
 
 func main() {

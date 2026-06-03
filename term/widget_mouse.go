@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mike-ward/go-gui/gui"
+	"github.com/go-gui-org/go-gui/gui"
 )
 
 // mouseSGRBaseButton maps a go-gui MouseButton to its SGR (?1006) base

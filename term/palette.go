@@ -1,6 +1,6 @@
 package term
 
-import "github.com/mike-ward/go-gui/gui"
+import "github.com/go-gui-org/go-gui/gui"
 
 // Theme holds the 16 ANSI base colors plus default fg/bg for a terminal
 // color scheme. Indices 0–7 are standard ANSI; 8–15 are bright variants.

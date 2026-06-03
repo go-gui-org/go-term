@@ -3,7 +3,7 @@ package term
 import (
 	"time"
 
-	"github.com/mike-ward/go-gui/gui"
+	"github.com/go-gui-org/go-gui/gui"
 )
 
 // scheduleViewUpdate signals that the viewport has changed: shows the

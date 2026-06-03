@@ -1,8 +1,8 @@
 package term_test
 
 import (
-	"github.com/mike-ward/go-gui/gui"
-	"github.com/mike-ward/go-term/term"
+	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/term"
 )
 
 func ExampleNew() {

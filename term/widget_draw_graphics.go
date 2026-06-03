@@ -1,6 +1,6 @@
 package term
 
-import "github.com/mike-ward/go-gui/gui"
+import "github.com/go-gui-org/go-gui/gui"
 
 // drawGraphics paints decoded Sixel / Kitty / iTerm2 inline images on top of
 // the background fill, under the cursor. Cells covered by an image are blanked

@@ -1,7 +1,7 @@
 # go-term
 
 A full-featured, embeddable terminal-emulator widget for the
-[`go-gui`](https://github.com/mike-ward/go-gui) framework. Spawns a real
+[`go-gui`](https://github.com/go-gui-org/go-gui) framework. Spawns a real
 shell over a PTY, renders through a GPU-accelerated `gui.DrawCanvas`, and
 covers the protocol surface expected by modern CLI tools and TUI frameworks.
 
@@ -45,7 +45,7 @@ values won't shift in ways that break contrast.
   only calls `View` and passes the result to `UpdateView`; that contract
   holds.
 - **Internal package layout** — new files may appear in `term/` (e.g., a
-  pane splitter). Embedders should import only `github.com/mike-ward/go-term/term`
+  pane splitter). Embedders should import only `github.com/go-gui-org/go-term/term`
   and not reach into individual source files.
 - **Go version requirement** — the `go` directive in `go.mod` reflects the
   oldest Go release the author tests against. It may advance on minor
@@ -184,8 +184,8 @@ pre-1.0 interpretation:
 
 - Go 1.26+
 - macOS or Linux
-- Sibling working trees of [`go-gui`](https://github.com/mike-ward/go-gui)
-  and [`go-glyph`](https://github.com/mike-ward/go-glyph) at `../go-gui`
+- Sibling working trees of [`go-gui`](https://github.com/go-gui-org/go-gui)
+  and [`go-glyph`](https://github.com/go-gui-org/go-glyph) at `../go-gui`
   and `../go-glyph`. Copy `go.work.example` to `go.work` to wire the
   local siblings into the module graph (Go workspace mode).
 
@@ -194,7 +194,7 @@ pre-1.0 interpretation:
 ## Quickstart
 
 ```bash
-git clone https://github.com/mike-ward/go-term.git
+git clone https://github.com/go-gui-org/go-term.git
 cd go-term/examples/demo
 go run .
 ```
@@ -213,9 +213,9 @@ package main
 import (
     "log"
 
-    "github.com/mike-ward/go-gui/gui"
-    "github.com/mike-ward/go-gui/gui/backend"
-    "github.com/mike-ward/go-term/term"
+    "github.com/go-gui-org/go-gui/gui"
+    "github.com/go-gui-org/go-gui/gui/backend"
+    "github.com/go-gui-org/go-term/term"
 )
 
 func main() {

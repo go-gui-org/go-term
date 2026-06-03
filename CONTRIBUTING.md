@@ -12,9 +12,9 @@ narrow project — please read this file before opening a PR.
 Clone all three repos as siblings:
 
 ```bash
-git clone https://github.com/mike-ward/go-glyph.git
-git clone https://github.com/mike-ward/go-gui.git
-git clone https://github.com/mike-ward/go-term.git
+git clone https://github.com/go-gui-org/go-glyph.git
+git clone https://github.com/go-gui-org/go-gui.git
+git clone https://github.com/go-gui-org/go-term.git
 ```
 
 Edits in `../go-glyph` and `../go-gui` are picked up immediately by

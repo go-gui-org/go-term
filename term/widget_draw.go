@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	glyph "github.com/mike-ward/go-glyph"
-	"github.com/mike-ward/go-gui/gui"
+	glyph "github.com/go-gui-org/go-glyph"
+	"github.com/go-gui-org/go-gui/gui"
 )
 
 // realNumber reports whether f is non-NaN and non-Inf. Used for inputs

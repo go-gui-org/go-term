@@ -3,7 +3,7 @@
 ## Context
 
 `go-term` is a feature-rich terminal emulator widget for the
-[go-gui](https://github.com/mike-ward/go-gui) framework. 38 phases are
+[go-gui](https://github.com/go-gui-org/go-gui) framework. 38 phases are
 complete — the widget covers modern terminal feature parity
 (ghostty/iTerm2/kitty) including 24-bit color, truecolor SGR, alt
 screen, logical reflow, sixel/kitty/iTerm2 graphics, BiDi/RTL text,

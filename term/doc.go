@@ -61,5 +61,5 @@
 //
 // macOS and Linux. Windows / ConPTY is not supported.
 //
-// [go-gui]: https://github.com/mike-ward/go-gui
+// [go-gui]: https://github.com/go-gui-org/go-gui
 package term

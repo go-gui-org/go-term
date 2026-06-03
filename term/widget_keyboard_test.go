@@ -3,7 +3,7 @@ package term
 import (
 	"testing"
 
-	"github.com/mike-ward/go-gui/gui"
+	"github.com/go-gui-org/go-gui/gui"
 )
 
 // newKeyboardTerm returns a Term whose pty writer captures encoded key
