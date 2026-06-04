@@ -13,6 +13,17 @@ Work remaining: native split panes/tabs, then 1.0 API stabilisation.
 
 Each phase below is sized for one focused PR, demo-testable by running
 `cd examples/demo && go run .` and exercising the new behavior.
+Phase 39 is five sub-phases (39a–e), each its own PR.
+
+## Package layering for Phase 39
+
+The pane/tab layer sits *above* `term`, not inside it. The `term`
+package already exposes the right surface: `Cfg.NoWindowHandler`,
+`Term.SetFocused`, `Term.HandleWindowEvent`, `Term.Rows/Cols/Write/PID/Alive`.
+A new package `term/session` owns the split tree, tab bar, keybindings,
+layout persistence, and creates/destroys `*term.Term` instances.
+`term/widget.go` does not grow further — the pane manager wires Terms
+together through their public API only.
 
 ## Architecture
 
@@ -70,51 +81,114 @@ phases unlocked advanced apps (tmux, mouse-aware editors) and polish.
 multiplexing, turning the emulator into a full workspace without
 depending on `tmux`.
 
-#### 39a — Pane model
+**Package:** Pane/tab logic lives in a new `term/session` package.
+The `term` package already exposes the necessary API
+(`Cfg.NoWindowHandler`, `SetFocused`, `HandleWindowEvent`, `Rows`,
+`Cols`, `Write`, `PID`, `Alive`, `OnExit`). No new surface in `term/`
+unless a parser gap forces it (see parser notes below).
 
-- [ ] Define pane struct: owns a `*Term`, has a tree node, dimensions, border.
-- [ ] Pane tree: root split node, leaf panes; create/destroy/focus primitives.
-- [ ] Each pane spawns its own PTY + shell.
+**Default keybindings** follow kitty/iTerm2 conventions to avoid
+colliding with macOS window shortcuts and common shell bindings:
+
+| Action | Key |
+|--------|-----|
+| Split vertical | Cmd+D |
+| Split horizontal | Cmd+Shift+D |
+| Close pane | Cmd+Shift+W |
+| Next pane | Cmd+] |
+| Previous pane | Cmd+[ |
+| New tab | Cmd+T |
+| Close tab | Cmd+Ctrl+W |
+| Next tab | Cmd+Shift+] |
+| Previous tab | Cmd+Shift+[ |
+
+Cmd+W is reserved for macOS window-close; panes close with Cmd+Shift+W
+instead. All bindings are overridable in session config (see 39e).
+
+**Focus traversal on close:** nearest sibling in the split tree; if none,
+the parent's other child; if the last pane in a tab closes, the tab is
+removed. Closing the last tab replaces it with a fresh single-pane tab
+so the session is never empty.
+
+#### Parser prerequisites (delivered in 39a or a small pre-PR)
+
+- [ ] DECRQM (`CSI ? Pn $ p`): reply with DECRPM (`CSI ? Pn ; V $ y`)
+      reporting which DEC private modes are set, reset, or not
+      recognized. Needed so apps inside panes can probe terminal
+      capabilities correctly.
+- [ ] DA2 (`CSI > c`): reply with secondary device attributes
+      (`CSI > 0 ; 0 ; 0 c`) so apps that query terminal identity
+      don't fall back to lowest-common-denominator modes.
+
+#### 39a — Pane model (`term/session`)
+
+- [ ] `pane` struct: owns a `*term.Term`, split-tree node, flex ratio,
+      border style. Border is rendered by a shared go-gui canvas or
+      container padding — not inside `widget_draw.go`.
+- [ ] Split tree: `SplitNode` with leaf-pane / horz-split / vert-split
+      variants; `Add()`, `Remove()`, `Find()`, `Walk()` primitives.
+- [ ] Each pane calls `term.New(w, cfg)` with `NoWindowHandler: true`.
+- [ ] `Cfg.OnTitle` wired per-pane so the session layer captures OSC 0/2
+      for tab titles.
 
 **Verify:** Open two panes, `echo $$` in each returns different PIDs.
 
 #### 39b — Focus routing
 
-- [ ] Focused pane receives keyboard input. Unfocused panes dim their cursor.
-- [ ] Mouse click in a pane sets focus.
-- [ ] Focus border highlight on the active pane.
-- [ ] Cmd+[ / Cmd+] or Cmd+Shift+[ / ] cycle between panes.
+- [ ] Focused pane receives keyboard input via `SetFocused(true)`.
+      All others get `SetFocused(false)` → dimmed cursor.
+- [ ] Mouse click in a pane's canvas sets focus to that pane.
+- [ ] Focus border: active pane gets a 1–2 px colored border (theme
+      accent); unfocused panes get a dimmed or invisible border.
+- [ ] Cmd+] / Cmd+[ cycle focus to next/previous pane in depth-first
+      split-tree order.
 
 **Verify:** Click between panes, keystrokes go to the focused one.
+Cursor dims on unfocused panes.
 
 #### 39c — Split layout
 
 - [ ] Cmd+D: split focused pane vertically (side-by-side).
 - [ ] Cmd+Shift+D: split focused pane horizontally (stacked).
-- [ ] Drag handle between panes to resize.
-- [ ] Cmd+W: close focused pane (kill its PTY).
-- [ ] Re-layout on window resize; distribute space proportionally.
+- [ ] Drag handle (2–4 px wide between panes) to resize. Resize
+      distributes flex ratios; the handle is a go-gui Column/Row
+      with a mouse-drag handler.
+- [ ] Cmd+Shift+W: close focused pane (kill its PTY via `Term.Close`).
+- [ ] Re-layout on window resize: distribute space proportionally to
+      flex ratios. Min pane size enforced so no pane collapses to zero.
 
-**Verify:** Split → resize drag → close leaves remaining panes correctly laid out.
+**Verify:** Split → resize drag → close leaves remaining panes
+correctly laid out. Window resize distributes space.
 
 #### 39d — Tab model
 
-- [ ] Tab bar rendering (above the pane layout).
-- [ ] Cmd+T: new tab with a single full-width pane.
-- [ ] Cmd+Shift+W: close current tab.
-- [ ] Cmd+Shift+[ / ] (no pane splits) or Cmd+{ / }: switch tabs.
-- [ ] Tab title derived from active pane's OSC 0/2 title.
+- [ ] Tab bar rendering above the pane layout: go-gui Row of tab
+      buttons + a "+" new-tab button. Each tab shows the active
+      pane's OSC 0/2 title (truncated to ~30 chars, ellipsized).
+- [ ] Cmd+T: new tab containing a single full-width pane running $SHELL.
+- [ ] Cmd+Ctrl+W: close current tab. Kills all panes in the tab,
+      removes the tab bar entry. Last tab → replaces with fresh pane.
+- [ ] Cmd+Shift+] / Cmd+Shift+[ (or Cmd+{ / Cmd+}): switch to
+      next/previous tab.
+- [ ] Tab title updates when the active pane emits OSC 0/2.
 
-**Verify:** Create tabs, switch between them, close tabs; panes survive tab switches.
+**Verify:** Create tabs, switch between them, close tabs; pane split
+trees survive tab switches.
 
-#### 39e — Persistence/config
+#### 39e — Persistence / config
 
-- [ ] Save layout to JSON: tab→split tree→pane working directories.
-- [ ] Restore layout on launch: spawn PTYs, restore CWD via OSC 7 write.
-- [ ] Configurable keybindings for split/tab/focus actions.
-- [ ] Session file format; `go-term --session ~/.config/go-term/session.json`.
+- [ ] Save session to JSON: tab list → split tree → pane CWD, flex
+      ratio, shell command (if non-default). Writes to
+      `~/.config/go-term/session.json` by default.
+- [ ] Restore session on launch: parse JSON, spawn PTYs with saved CWD
+      via OSC 7 write after shell starts, restore split ratios.
+- [ ] Keybinding map in session JSON; overrides the defaults listed
+      above. Stored per-session, not global.
+- [ ] CLI flag: `--session <path>` to load a named session file;
+      `--save-session <path>` to write on quit.
 
-**Verify:** Save a 3-tab layout with splits, quit, relaunch — terminals restore.
+**Verify:** Save a 3-tab layout with splits, quit, relaunch with
+`--session`. Terminals restore with correct CWDs, splits, and titles.
 
 ---
 
@@ -171,8 +245,12 @@ until real-world memory pressure warrants it.
 2. `go build ./...` clean.
 3. `go test -race -count=1 ./...` passes.
 4. `cd examples/demo && go run .` and verify visually.
+   For 39a+ also run `cd examples/panedemo && go run .`.
 5. Smoke matrix: `ls --color`, `cat /etc/hosts`, `vim` + `:q!`, resize → `stty size`, Ctrl+C interrupts `sleep 100`.
-6. CI: `go vet`, `go build ./examples/demo`, `go test -race -count=1 ./...`, `golangci-lint`.
+6. CI: `go vet`, `go build ./examples/...`, `go test -race -count=1 ./...`, `golangci-lint`.
+7. Multi-Term integration test: two `Term` instances with `NoWindowHandler`,
+   verify `SetFocused` routes keystrokes to the correct PTY, and
+   `HandleWindowEvent` forwards focus-reporting sequences for the focused pane only.
 
 
 ## Resolved decisions
@@ -183,3 +261,15 @@ until real-world memory pressure warrants it.
 4. **Alt-screen scrollback:** suppress while alt is active (kitty/iTerm/ghostty default).
 5. **Cursor blink:** honor DECSCUSR; allow `Cfg.CursorBlink *bool` override.
 6. **Public API:** `Cfg`, `Term`, `Theme`, `NamedTheme`, `New`, `View`, `Close`, `Cwd`, `SetTheme`.
+7. **Pane/tab package location:** `term/session` — a layer above `term` that
+   wires `*term.Term` instances through their public API only. No pane logic
+   inside `term/widget.go`.
+8. **Pane keybindings:** follow kitty/iTerm2 conventions. Cmd+D (vert split),
+   Cmd+Shift+D (horz split), Cmd+[ / ] (cycle panes), Cmd+Shift+W (close pane).
+   Cmd+W reserved for macOS window-close; not bound to pane actions.
+   All bindings overridable via session JSON.
+9. **Focus traversal on pane close:** nearest sibling → parent's other child →
+   parent. Last pane in tab → close tab. Last tab → replace with fresh pane
+   so session never empty.
+10. **Tab switching with no splits:** Cmd+Shift+[ / ] cycle tabs regardless
+    of whether panes exist in the current tab. Cmd+[ / ] always cycle panes.

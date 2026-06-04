@@ -69,6 +69,7 @@ term/widget_keyboard.go  onChar, onKeyDown, onKeyUp; KKP encoding.
 term/widget_mouse.go     Mouse button/motion/wheel; SGR encoding.
 term/widget_clipboard.go Cmd+C/V; opt-in OSC 52 clipboard write.
 term/widget_scroll.go    Scrollbar, momentum scroll, ViewSubPx math.
+term/widget_draw_graphics.go Graphics render pass (sixel/kitty/iTerm2).
         │
         ▼
 term/parser.go           VT state machine entry point. Bytes → grid mutations.
@@ -116,13 +117,17 @@ term/palette.go          256-color ANSI table (16 + 6×6×6 cube + 24 grayscale)
 3. Each frame: derive `rows = floor(dc.Height/cellH)`,
    `cols = floor(dc.Width/cellW)`. If they changed, `Grid.Resize` and
    `PTY.Resize` (sends `TIOCSWINSZ` so the child sees `SIGWINCH`).
-4. Three passes per frame: coalesced bg-rect runs per row, then coalesced
-   foreground text runs, then graphics (sixel/kitty/iTerm2 images), then
-   the cursor. Cursor shape depends on `CursorShape` (block/underline/bar)
-   and `CursorColor`; block falls back to cell-inversion when no color set.
-5. `DrawCanvas` uses `ID: "term-canvas"` and a `Version` counter —
-   go-gui's tessellation cache skips `OnDraw` entirely when the version
-   is unchanged. `readLoop` only bumps the version when `HasDirtyRows`
+4. Passes per frame: coalesced bg-rect runs per row (`drawBgPass`),
+   coalesced foreground text runs (`drawFgPass`), graphics
+   (`drawGraphics` — sixel/kitty/iTerm2 images), IME composition text
+   (`drawIME`), cursor (`drawCursor`), then overlays (`drawOverlays` —
+   bell flash, search bar). Cursor shape depends on `CursorShape`
+   (block/underline/bar) and `CursorColor`; block falls back to
+   cell-inversion when no color set.
+5. `DrawCanvas` uses a unique per-Term `canvasID` (`"term-canvas-N"` where
+   N is a monotonically-incrementing sequence number) and a `Version`
+   counter — go-gui's tessellation cache skips `OnDraw` entirely when the
+   version is unchanged. `readLoop` only bumps the version when `HasDirtyRows`
    is true, so no-op PTY sequences do not invalidate the cache.
 
 ### Parser scope
@@ -165,28 +170,32 @@ When `KittyKeyFlags != 0` the widget emits KKP sequences (`CSI codepoint
 Ctrl+letters, and functional keys. `onKeyUp` emits release events when
 flag bit 2 is set.
 
-The widget claims focus via `IDFocus: 1` on its outer `gui.Column`.
+The widget claims focus via `IDFocus` set to a unique per-Term `focusID`
+on its outer `gui.Column`. In multi-Term windows the pane manager calls
+`SetFocused` to route `IDFocus` to the active Term.
 If keystrokes don't reach the PTY, focus is the first place to look.
 
 ## Out-of-scope (don't add casually)
 
 These are currently excluded from the roadmap. Each is a real chunk of work:
 
-- IME composition / dead keys
 - Windows / ConPTY support
 
 ## Conventions
 
 - Comments wrap at ~90 columns.
-- Public API in `term/` is small on purpose: `Cfg`, `Term`, `New`,
-  `View`, `Close`. Keep it that way; add unexported helpers freely.
+- Public API in `term/` is small on purpose: `Cfg`, `Term`, `NamedTheme`,
+  `Theme`, `New`, `View`, `Close`, `Cwd`, `SetTheme`, `Rows`, `Cols`,
+  `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`. Keep it that
+  way; add unexported helpers freely.
 - Performance target: reduce heap allocations. The OnDraw hot path
   must not allocate per cell — keep `string(rune)` conversions and
   slice growth out of the inner loop if perf work begins.
 - `Grid.Mu` is the single lock — don't add per-feature mutexes.
-- `QueueCommand` is the only thread-safe path from reader goroutine to
-  gui state. Title updates, clipboard writes, and notifications triggered
-  by the parser must go through it.
+- `Term.queueCommand` (which wraps `cmd.QueueCommand` with a closed-Term
+  guard) is the only thread-safe path from reader goroutine to gui state.
+  Title updates, clipboard writes, and notifications triggered by the
+  parser must go through it. Never call `cmd.QueueCommand` directly.
 - `dispatchCSI`, `dispatchOSC`, `dispatchDCS`, `dispatchAPC` are the
   single dispatch sites for their respective sequences — extend, don't
   add parallel dispatchers.
