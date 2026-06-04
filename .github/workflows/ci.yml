@@ -13,20 +13,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout go-term
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           path: go-term
 
       - name: Checkout go-glyph
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-glyph
+          ref: v1.9.0
           path: go-glyph
 
       - name: Checkout go-gui
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
+          ref: v0.21.0
           path: go-gui
 
       - name: Set up Go
@@ -64,20 +66,22 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout go-term
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           path: go-term
 
       - name: Checkout go-glyph
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-glyph
+          ref: v1.9.0
           path: go-glyph
 
       - name: Checkout go-gui
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
+          ref: v0.21.0
           path: go-gui
 
       - name: Set up Go
@@ -114,20 +118,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout go-term
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           path: go-term
 
       - name: Checkout go-glyph
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-glyph
+          ref: v1.9.0
           path: go-glyph
 
       - name: Checkout go-gui
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
+          ref: v0.21.0
           path: go-gui
 
       - name: Set up Go
@@ -160,20 +166,22 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     steps:
       - name: Checkout go-term
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           path: go-term
 
       - name: Checkout go-glyph
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-glyph
+          ref: v1.9.0
           path: go-glyph
 
       - name: Checkout go-gui
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
+          ref: v0.21.0
           path: go-gui
 
       - name: Set up Go
@@ -216,20 +224,22 @@ jobs:
     if: github.event_name == 'schedule'
     steps:
       - name: Checkout go-term
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           path: go-term
 
       - name: Checkout go-glyph
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-glyph
+          ref: v1.9.0
           path: go-glyph
 
       - name: Checkout go-gui
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
+          ref: v0.21.0
           path: go-gui
 
       - name: Set up Go
@@ -260,21 +270,23 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout go-term
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           path: go-term
           fetch-depth: 0
 
       - name: Checkout go-glyph
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-glyph
+          ref: v1.9.0
           path: go-glyph
 
       - name: Checkout go-gui
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
+          ref: v0.21.0
           path: go-gui
 
       - name: Set up Go
@@ -317,20 +329,22 @@ jobs:
     if: github.event_name == 'schedule'
     steps:
       - name: Checkout go-term
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           path: go-term
 
       - name: Checkout go-glyph
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-glyph
+          ref: v1.9.0
           path: go-glyph
 
       - name: Checkout go-gui
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
+          ref: v0.21.0
           path: go-gui
 
       - name: Set up Go
