@@ -59,6 +59,10 @@ const maxKittyStoreEntries = 256
 // stall briefly waiting for it.
 var da1Reply = []byte("\x1b[?1;2c")
 
+// da2Reply is the Secondary Device Attribute response: no terminal
+// version, firmware version, or hardware options.
+var da2Reply = []byte("\x1b[>0;0;0c")
+
 // maxCSIParams caps the SGR/CSI parameter list to bound memory use against
 // pathological streams like "\x1b[1;1;1;...m".
 const maxCSIParams = 32

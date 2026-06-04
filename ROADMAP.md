@@ -112,23 +112,23 @@ so the session is never empty.
 
 #### Parser prerequisites (delivered in 39a or a small pre-PR)
 
-- [ ] DECRQM (`CSI ? Pn $ p`): reply with DECRPM (`CSI ? Pn ; V $ y`)
+- [x] DECRQM (`CSI ? Pn $ p`): reply with DECRPM (`CSI ? Pn ; V $ y`)
       reporting which DEC private modes are set, reset, or not
       recognized. Needed so apps inside panes can probe terminal
       capabilities correctly.
-- [ ] DA2 (`CSI > c`): reply with secondary device attributes
+- [x] DA2 (`CSI > c`): reply with secondary device attributes
       (`CSI > 0 ; 0 ; 0 c`) so apps that query terminal identity
       don't fall back to lowest-common-denominator modes.
 
 #### 39a — Pane model (`term/session`)
 
-- [ ] `pane` struct: owns a `*term.Term`, split-tree node, flex ratio,
+- [x] `pane` struct: owns a `*term.Term`, split-tree node, flex ratio,
       border style. Border is rendered by a shared go-gui canvas or
       container padding — not inside `widget_draw.go`.
-- [ ] Split tree: `SplitNode` with leaf-pane / horz-split / vert-split
+- [x] Split tree: `SplitNode` with leaf-pane / horz-split / vert-split
       variants; `Add()`, `Remove()`, `Find()`, `Walk()` primitives.
-- [ ] Each pane calls `term.New(w, cfg)` with `NoWindowHandler: true`.
-- [ ] `Cfg.OnTitle` wired per-pane so the session layer captures OSC 0/2
+- [x] Each pane calls `term.New(w, cfg)` with `NoWindowHandler: true`.
+- [x] `Cfg.OnTitle` wired per-pane so the session layer captures OSC 0/2
       for tab titles.
 
 **Verify:** Open two panes, `echo $$` in each returns different PIDs.

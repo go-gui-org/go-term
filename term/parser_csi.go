@@ -20,11 +20,33 @@ func (p *parser) dispatchCSI(final byte) {
 					b = append(b, 'u')
 					p.onReply(b)
 				}
+			case 'p':
+
+				if p.intermediate == '$' && p.onReply != nil {
+					n := p.param(0, 0)
+					if n < 0 {
+						n = 0
+					}
+					v := p.decModeState(n)
+					b := make([]byte, 0, 24)
+					b = append(b, "\x1b[?"...)
+					b = strconv.AppendUint(b, uint64(n), 10)
+					b = append(b, ';')
+					b = strconv.AppendUint(b, uint64(v), 10)
+					b = append(b, '$', 'y')
+					p.onReply(b)
+				}
 			}
 		case '>':
 
-			if final == 'u' {
+			switch final {
+			case 'u':
 				p.g.PushKittyKeyFlags(uint32(p.param(0, 0)))
+			case 'c':
+
+				if p.param(0, 0) == 0 && p.onReply != nil {
+					p.onReply([]byte(da2Reply))
+				}
 			}
 		case '<':
 
@@ -185,6 +207,51 @@ func (p *parser) applyMode(set bool) {
 			p.g.InsertMode = set
 		}
 	}
+}
+
+// decModeState returns the current state of a DEC private mode:
+// 1 = set, 2 = reset, 0 = unrecognized. Used for DECRQM replies.
+func (p *parser) decModeState(n int) int {
+	switch n {
+	case 1:
+		return boolState(p.g.AppCursorKeys)
+	case 6:
+		return boolState(p.g.OriginMode)
+	case 7:
+		return boolState(p.g.AutoWrap)
+	case 25:
+		return boolState(p.g.CursorVisible)
+	case 47, 1047, 1049:
+		return boolState(p.g.AltActive)
+	case 66:
+		return boolState(p.g.AppKeypad)
+	case 1000:
+		return boolState(p.g.MouseTrack)
+	case 1002:
+		return boolState(p.g.MouseTrackBtn)
+	case 1003:
+		return boolState(p.g.MouseTrackAny)
+	case 1004:
+		return boolState(p.g.FocusReporting)
+	case 1006:
+		return boolState(p.g.MouseSGR)
+	case 1016:
+		return boolState(p.g.MouseSGRPixels)
+	case 2004:
+		return boolState(p.g.BracketedPaste)
+	case 2026:
+		return boolState(p.g.SyncOutput)
+	default:
+		return 0
+	}
+}
+
+// boolState returns 1 if b is true, 2 if false (DECRPM state encoding).
+func boolState(b bool) int {
+	if b {
+		return 1
+	}
+	return 2
 }
 
 // param returns params[i] or def if missing or zero (per VT semantics

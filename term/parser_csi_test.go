@@ -938,3 +938,95 @@ func TestParser_SGR4_Semicolon_NotSubparam(t *testing.T) {
 		t.Error("4;3m: attrItalic should also be set")
 	}
 }
+
+func TestParser_DA2(t *testing.T) {
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	feed(t, g, p, []byte("\x1b[>c"))
+	want := []byte("\x1b[>0;0;0c")
+	if !bytes.Equal(reply, want) {
+		t.Errorf("DA2 reply = %q, want %q", reply, want)
+	}
+}
+
+func TestParser_DECRQM_Set(t *testing.T) {
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	// Set bracketed paste (2004) then query.
+	feed(t, g, p, []byte("\x1b[?2004h"))
+	// Reset reply buffer so we only see the DECRQM reply.
+	reply = nil
+	feed(t, g, p, []byte("\x1b[?2004$p"))
+	want := []byte("\x1b[?2004;1$y")
+	if !bytes.Equal(reply, want) {
+		t.Errorf("DECRQM 2004 set reply = %q, want %q", reply, want)
+	}
+}
+
+func TestParser_DECRQM_Reset(t *testing.T) {
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	// Set and then reset cursor visible (25), then query.
+	feed(t, g, p, []byte("\x1b[?25h"))
+	feed(t, g, p, []byte("\x1b[?25l"))
+	reply = nil
+	feed(t, g, p, []byte("\x1b[?25$p"))
+	want := []byte("\x1b[?25;2$y")
+	if !bytes.Equal(reply, want) {
+		t.Errorf("DECRQM 25 reset reply = %q, want %q", reply, want)
+	}
+}
+
+func TestParser_DECRQM_Unrecognized(t *testing.T) {
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	feed(t, g, p, []byte("\x1b[?9999$p"))
+	want := []byte("\x1b[?9999;0$y")
+	if !bytes.Equal(reply, want) {
+		t.Errorf("DECRQM 9999 unrecognized reply = %q, want %q", reply, want)
+	}
+}
+
+func TestParser_DECRQM_NoDollar(t *testing.T) {
+	// CSI ? 25 p without $ intermediate must not trigger DECRQM. Mode 25
+	// has no meaning as a bare CSI final, so it falls through
+	// silently and no reply is emitted.
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	feed(t, g, p, []byte("\x1b[?25p"))
+	if len(reply) != 0 {
+		t.Errorf("DECRQM without $ should not reply, got %q", reply)
+	}
+}
+
+func TestParser_DA2_NonZeroParam(t *testing.T) {
+	// DA2 with Ps != 0 must not reply (matches DA1 behavior).
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	feed(t, g, p, []byte("\x1b[>1c"))
+	if len(reply) != 0 {
+		t.Errorf("DA2 with Ps=1 should not reply, got %q", reply)
+	}
+}
+
+func TestParser_DA2_NoHandler(t *testing.T) {
+	// DA2 without a reply handler must not panic.
+	g, p := newParserGrid(2, 10)
+	// No SetReplyHandler call — p.onReply is nil.
+	feed(t, g, p, []byte("\x1b[>c"))
+	// No panic = pass.
+}
+
+func TestParser_DECRQM_NoHandler(t *testing.T) {
+	// DECRQM without a reply handler must not panic.
+	g, p := newParserGrid(2, 10)
+	// No SetReplyHandler call — p.onReply is nil.
+	feed(t, g, p, []byte("\x1b[?2004$p"))
+	// No panic = pass.
+}
