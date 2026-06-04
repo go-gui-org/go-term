@@ -76,6 +76,10 @@ func visualReorder(cells []cell, cols int) (visual []cell, v2l []int) {
 	if cols > len(cells) {
 		cols = len(cells)
 	}
+	// Fast path: zero-allocation check before any allocations in scanBidiCells.
+	if !rowHasRTL(cells, cols) {
+		return nil, nil
+	}
 	entries, bidiStr, hasRTL := scanBidiCells(cells, cols)
 	if !hasRTL {
 		return nil, nil
