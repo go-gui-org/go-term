@@ -173,7 +173,6 @@ func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int) runK
 // drawState holds per-frame state computed under grid.Mu and threaded
 // through the phase methods that replaced the anonymous function in onDraw.
 type drawState struct {
-	style         gui.TextStyle
 	now           time.Time
 	dc            *gui.DrawContext
 	g             *grid
@@ -185,6 +184,7 @@ type drawState struct {
 	partialRow    []cell
 	imeRunes      []rune
 	imeWidths     []int
+	style         gui.TextStyle
 	rows, cols    int
 	renderRows    int
 	imeCursor     int

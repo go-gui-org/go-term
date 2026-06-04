@@ -38,11 +38,6 @@ func (desktopNotifier) Notify(title, body string) { sendDesktopNotify(title, bod
 
 // Cfg configures a Term widget. All fields are optional.
 type Cfg struct {
-	// TextStyle overrides the default monospace text style. When set to
-	// the zero value, the widget falls back to gui.CurrentTheme().M5.
-	// To use a custom style you must set at least one field (typically
-	// Size or Typeface) — a zero-value TextStyle is treated as "unset."
-	TextStyle gui.TextStyle
 
 	// OnTitle, if non-nil, receives OSC 0/1/2 window-title updates
 	// on the main goroutine. When nil, the widget calls
@@ -88,6 +83,12 @@ type Cfg struct {
 	// are appended after the inherited environment, so they override
 	// inherited values. Use "KEY=" (trailing equals) to unset.
 	Env []string
+
+	// TextStyle overrides the default monospace text style. When set to
+	// the zero value, the widget falls back to gui.CurrentTheme().M5.
+	// To use a custom style you must set at least one field (typically
+	// Size or Typeface) — a zero-value TextStyle is treated as "unset."
+	TextStyle gui.TextStyle
 
 	// ScrollbackRows caps the number of scrollback rows. The meaning
 	// depends on the sign:
@@ -264,12 +265,6 @@ type drawBufs struct {
 // Term is a terminal-emulator widget bound to a single pty-backed shell.
 // Use New to construct, View to embed in a layout, Close to tear down.
 type Term struct {
-	cfg Cfg
-
-	// embedded grouped state — see each struct's doc comment.
-	resize    resizeState
-	bell      bellState
-	momentum  momentumState
 	scrollbar scrollbarState
 
 	// cursorEpoch is the reference time for blink-phase calculation.
@@ -325,11 +320,9 @@ type Term struct {
 
 	draw drawBufs
 
-	search searchState
-
-	// ime tracks IME composition state and widget position for
-	// candidate-window placement. See imeState doc.
-	ime imeState
+	// embedded grouped state — see each struct's doc comment.
+	resize resizeState
+	bell   bellState
 
 	// themeMenuItems is the precomputed ContextMenu item list for runtime
 	// theme switching. Built once in New; nil when no themes are configured.
@@ -343,7 +336,17 @@ type Term struct {
 	// — append (via onParserReply called from inside Feed) and drain
 	// both happen there.
 	pendingReplies [][]byte
-	mouse          mouseState
+	momentum       momentumState
+
+	// ime tracks IME composition state and widget position for
+	// candidate-window placement. See imeState doc.
+	ime imeState
+
+	cfg Cfg
+
+	search searchState
+
+	mouse mouseState
 
 	// loopWg tracks the three auxiliary goroutines (blink, autoScroll,
 	// momentum) so Close can wait for them to exit before tearing down
