@@ -2,6 +2,7 @@ package term
 
 import (
 	"errors"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -2633,9 +2634,11 @@ func TestTerm_EffectiveScrollbarWidth_NegInfReturnsZero(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestStartPTY_CustomCommand(t *testing.T) {
+	// Use sh -c so echo is always the shell builtin; /bin/echo may be at a
+	// different path on minimal Linux images (e.g. CI containers).
 	cfg := Cfg{
-		Command: "/bin/echo",
-		Args:    []string{"hello"},
+		Command: "/bin/sh",
+		Args:    []string{"-c", "echo hello"},
 	}
 	p, err := startPTY(24, 80, cfg)
 	if err != nil {
@@ -2644,7 +2647,9 @@ func TestStartPTY_CustomCommand(t *testing.T) {
 	defer func() { _ = p.Close() }()
 	buf := make([]byte, 128)
 	n, err := p.Read(buf)
-	if err != nil {
+	// On Linux the child may exit before we read; Go can return data + EOF
+	// in a single call. Accept EOF if we got the expected output.
+	if err != nil && err != io.EOF {
 		t.Fatalf("read pty: %v", err)
 	}
 	if got := string(buf[:n]); !strings.Contains(got, "hello") {
