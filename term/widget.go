@@ -126,18 +126,6 @@ type Cfg struct {
 	// events to individual Terms via HandleWindowEvent. The standalone
 	// (false) default is correct for single-Term windows.
 	NoWindowHandler bool
-
-	// OnFocusRequest, if non-nil, is called at the start of onClick
-	// (before any mouse-reporting or selection logic). A pane manager
-	// uses this to route focus to this Term when the user clicks in it.
-	OnFocusRequest func()
-
-	// OnKeyIntercept, if non-nil, is called at the start of onKeyDown
-	// (before search, clipboard, scrollback, or PTY encoding). Return
-	// true to consume the event without forwarding it to the PTY. Pane
-	// managers use this for keyboard shortcuts (focus cycling, pane
-	// close, split operations).
-	OnKeyIntercept func(e *gui.Event) bool
 }
 
 // NamedTheme pairs a display name with a Theme for use in menus.
@@ -820,15 +808,6 @@ func (t *Term) SetFocused(v bool) {
 	}
 	t.bumpVersion()
 }
-
-// FocusID returns this Term's unique focus identifier. Pane managers
-// use this to set IDFocus on wrapper containers and for direct
-// w.SetIDFocus calls when switching focus.
-func (t *Term) FocusID() uint32 { return t.focusID }
-
-// SetOnFocusRequest sets a callback that fires when the user clicks
-// in this terminal. Called by pane managers to route focus on click.
-func (t *Term) SetOnFocusRequest(fn func()) { t.cfg.OnFocusRequest = fn }
 
 // termSeq provides unique per-Term identifiers (canvas IDs etc.).
 var termSeq atomic.Uint64

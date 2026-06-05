@@ -114,21 +114,6 @@ func (n *SplitNode) Walk(fn func(*SplitNode)) {
 	}
 }
 
-// Leaves collects all leaf panes in depth-first, left-to-right order.
-// Returns nil when n is nil.
-func (n *SplitNode) Leaves() []*Pane {
-	if n == nil {
-		return nil
-	}
-	var out []*Pane
-	n.Walk(func(sn *SplitNode) {
-		if sn.Type == NodeLeaf && sn.Pane != nil {
-			out = append(out, sn.Pane)
-		}
-	})
-	return out
-}
-
 // LeafCount returns the number of leaf (pane) nodes in the tree.
 func (n *SplitNode) LeafCount() int {
 	if n == nil {
