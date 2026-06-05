@@ -135,12 +135,12 @@ so the session is never empty.
 
 #### 39b — Focus routing
 
-- [ ] Focused pane receives keyboard input via `SetFocused(true)`.
+- [x] Focused pane receives keyboard input via `SetFocused(true)`.
       All others get `SetFocused(false)` → dimmed cursor.
-- [ ] Mouse click in a pane's canvas sets focus to that pane.
-- [ ] Focus border: active pane gets a 1–2 px colored border (theme
+- [x] Mouse click in a pane's canvas sets focus to that pane.
+- [x] Focus border: active pane gets a 1–2 px colored border (theme
       accent); unfocused panes get a dimmed or invisible border.
-- [ ] Cmd+] / Cmd+[ cycle focus to next/previous pane in depth-first
+- [x] Cmd+] / Cmd+[ cycle focus to next/previous pane in depth-first
       split-tree order.
 
 **Verify:** Click between panes, keystrokes go to the focused one.

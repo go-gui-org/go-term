@@ -330,6 +330,12 @@ func funcKeySeq(k gui.KeyCode, shift, ctrl bool) []byte {
 // move the viewport instead of writing to the pty; any other key snaps
 // the viewport back to live.
 func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	// OnKeyIntercept fires first — before search, clipboard, or scrollback
+	// handling — so pane managers can consume shortcuts (Cmd+], Cmd+D, etc.)
+	// regardless of terminal state.
+	if t.cfg.OnKeyIntercept != nil && t.cfg.OnKeyIntercept(e) {
+		return
+	}
 	if t.handleSearchKey(e, w) {
 		return
 	}
