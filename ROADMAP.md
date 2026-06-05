@@ -122,13 +122,13 @@ so the session is never empty.
 
 #### 39a — Pane model (`term/session`)
 
-- [x] `pane` struct: owns a `*term.Term`, split-tree node, flex ratio,
+- [ ] `pane` struct: owns a `*term.Term`, split-tree node, flex ratio,
       border style. Border is rendered by a shared go-gui canvas or
       container padding — not inside `widget_draw.go`.
-- [x] Split tree: `SplitNode` with leaf-pane / horz-split / vert-split
+- [ ] Split tree: `SplitNode` with leaf-pane / horz-split / vert-split
       variants; `Add()`, `Remove()`, `Find()`, `Walk()` primitives.
-- [x] Each pane calls `term.New(w, cfg)` with `NoWindowHandler: true`.
-- [x] `Cfg.OnTitle` wired per-pane so the session layer captures OSC 0/2
+- [ ] Each pane calls `term.New(w, cfg)` with `NoWindowHandler: true`.
+- [ ] `Cfg.OnTitle` wired per-pane so the session layer captures OSC 0/2
       for tab titles.
 
 **Verify:** Open two panes, `echo $$` in each returns different PIDs.
