@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	gui.SetTheme(gui.ThemeDarkBordered)
+	gui.SetTheme(gui.ThemeDark.WithBorders(true))
 
 	var t *term.Term
 	w := gui.NewWindow(gui.WindowCfg{
