@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
-          ref: v0.21.0
+          ref: 0.25.0
           path: go-gui
 
       - name: Set up Go
@@ -81,7 +81,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
-          ref: v0.21.0
+          ref: 0.25.0
           path: go-gui
 
       - name: Set up Go
@@ -133,7 +133,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
-          ref: v0.21.0
+          ref: 0.25.0
           path: go-gui
 
       - name: Set up Go
@@ -181,7 +181,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
-          ref: v0.21.0
+          ref: 0.25.0
           path: go-gui
 
       - name: Set up Go
@@ -239,7 +239,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
-          ref: v0.21.0
+          ref: 0.25.0
           path: go-gui
 
       - name: Set up Go
@@ -286,7 +286,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
-          ref: v0.21.0
+          ref: 0.25.0
           path: go-gui
 
       - name: Set up Go
@@ -344,7 +344,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: go-gui-org/go-gui
-          ref: v0.21.0
+          ref: 0.25.0
           path: go-gui
 
       - name: Set up Go
