@@ -17,20 +17,6 @@ jobs:
         with:
           path: go-term
 
-      - name: Checkout go-glyph
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-glyph
-          ref: v1.9.0
-          path: go-glyph
-
-      - name: Checkout go-gui
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-gui
-          ref: v0.21.0
-          path: go-gui
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -70,20 +56,6 @@ jobs:
         with:
           path: go-term
 
-      - name: Checkout go-glyph
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-glyph
-          ref: v1.9.0
-          path: go-glyph
-
-      - name: Checkout go-gui
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-gui
-          ref: v0.21.0
-          path: go-gui
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -122,20 +94,6 @@ jobs:
         with:
           path: go-term
 
-      - name: Checkout go-glyph
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-glyph
-          ref: v1.9.0
-          path: go-glyph
-
-      - name: Checkout go-gui
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-gui
-          ref: v0.21.0
-          path: go-gui
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -169,20 +127,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: go-term
-
-      - name: Checkout go-glyph
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-glyph
-          ref: v1.9.0
-          path: go-glyph
-
-      - name: Checkout go-gui
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-gui
-          ref: v0.21.0
-          path: go-gui
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -228,20 +172,6 @@ jobs:
         with:
           path: go-term
 
-      - name: Checkout go-glyph
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-glyph
-          ref: v1.9.0
-          path: go-glyph
-
-      - name: Checkout go-gui
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-gui
-          ref: v0.21.0
-          path: go-gui
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -274,20 +204,6 @@ jobs:
         with:
           path: go-term
           fetch-depth: 0
-
-      - name: Checkout go-glyph
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-glyph
-          ref: v1.9.0
-          path: go-glyph
-
-      - name: Checkout go-gui
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-gui
-          ref: v0.21.0
-          path: go-gui
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -332,20 +248,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: go-term
-
-      - name: Checkout go-glyph
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-glyph
-          ref: v1.9.0
-          path: go-glyph
-
-      - name: Checkout go-gui
-        uses: actions/checkout@v4
-        with:
-          repository: go-gui-org/go-gui
-          ref: v0.21.0
-          path: go-gui
 
       - name: Set up Go
         uses: actions/setup-go@v5
