@@ -875,6 +875,11 @@ func (t *Term) View(w *gui.Window) gui.View {
 	}
 	if t.focused.Load() {
 		colCfg.IDFocus = t.focusID
+		// UpdateView → clearViewStateLocked zeros idFocus (go-gui
+		// post-v0.26.0). Reassert after every full layout rebuild so
+		// keystrokes reach onChar/onKeyDown without requiring a
+		// prior click.
+		w.SetIDFocus(t.focusID)
 	}
 	if len(t.themeMenuItems) > 0 {
 		colCfg.Width = float32(ww)

@@ -2050,6 +2050,39 @@ func TestTerm_IMECompositionState(t *testing.T) {
 	}
 }
 
+// TestTerm_View_RestoresFocus verifies that View() reasserts
+// w.SetIDFocus when the Term is focused. go-gui post-v0.26.0
+// clears idFocus during UpdateView; View() must restore it so
+// keystrokes reach onChar/onKeyDown without requiring a prior click.
+func TestTerm_View_RestoresFocus(t *testing.T) {
+	win := gui.NewWindow(gui.WindowCfg{Width: 640, Height: 480})
+	term, err := New(win, Cfg{})
+	if err != nil {
+		t.Fatalf("New term: %v", err)
+	}
+	defer func() { _ = term.Close() }()
+
+	// Simulate what UpdateView does: clear focus, then rebuild.
+	win.SetIDFocus(0)
+	if got := win.IDFocus(); got != 0 {
+		t.Fatalf("SetIDFocus(0) = %d, want 0", got)
+	}
+
+	// View() must restore focus when the Term is focused.
+	_ = term.View(win)
+	if got := win.IDFocus(); got != term.focusID {
+		t.Errorf("after View, IDFocus = %d, want %d", got, term.focusID)
+	}
+
+	// When unfocused, View() must not overwrite focus.
+	term.SetFocused(false)
+	win.SetIDFocus(0)
+	_ = term.View(win)
+	if got := win.IDFocus(); got != 0 {
+		t.Errorf("unfocused: after View, IDFocus = %d, want 0", got)
+	}
+}
+
 func TestTerm_onAmendLayout(t *testing.T) {
 	win := gui.NewWindow(gui.WindowCfg{})
 	term, err := New(win, Cfg{})
