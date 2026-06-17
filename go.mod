@@ -22,5 +22,3 @@ require (
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 )
-
-replace github.com/go-gui-org/go-gui => ../go-gui
