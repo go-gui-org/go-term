@@ -959,9 +959,9 @@ func (t *Term) Close() error {
 // readLoop forwards pty output through the parser and schedules a
 // render. Exits when the pty is closed or returns EOF.
 func (t *Term) readLoop() {
-	defer close(t.readDone)
 	defer recoverLoop("readLoop")
 	defer func() {
+		close(t.readDone)
 		if fn := t.cfg.OnExit; fn != nil {
 			func() {
 				defer recoverLoop("OnExit")
