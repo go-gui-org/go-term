@@ -798,4 +798,3 @@ func BenchmarkGrid_DeleteLines(b *testing.B) {
 		g.DeleteLines(1)
 	}
 }
-
