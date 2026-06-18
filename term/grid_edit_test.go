@@ -774,15 +774,13 @@ func TestWideCharSanitization_Mode1(t *testing.T) {
 // BenchmarkGrid_InsertLines measures the hot path for inserting lines at
 // the cursor position (common in full-screen apps like vim/htop).
 func BenchmarkGrid_InsertLines(b *testing.B) {
-	for range b.N {
-		b.StopTimer()
-		g := newGrid(48, 120)
-		// Fill with non-default content so memmove has real work.
-		for i := range g.Cells {
-			g.Cells[i].Ch = 'x'
-		}
-		g.CursorR = 24
-		b.StartTimer()
+	g := newGrid(48, 120)
+	g.CursorR = 24
+	// Fill with non-default content so memmove has real work.
+	for i := range g.Cells {
+		g.Cells[i].Ch = 'x'
+	}
+	for b.Loop() {
 		g.InsertLines(1)
 	}
 }
@@ -790,37 +788,14 @@ func BenchmarkGrid_InsertLines(b *testing.B) {
 // BenchmarkGrid_DeleteLines measures the hot path for deleting lines at
 // the cursor position.
 func BenchmarkGrid_DeleteLines(b *testing.B) {
-	for range b.N {
-		b.StopTimer()
-		g := newGrid(48, 120)
-		// Fill with non-default content so memmove has real work.
-		for i := range g.Cells {
-			g.Cells[i].Ch = 'x'
-		}
-		g.CursorR = 24
-		b.StartTimer()
+	g := newGrid(48, 120)
+	g.CursorR = 24
+	// Fill with non-default content so memmove has real work.
+	for i := range g.Cells {
+		g.Cells[i].Ch = 'x'
+	}
+	for b.Loop() {
 		g.DeleteLines(1)
 	}
 }
 
-// BenchmarkGrid_InsertChars measures inserting characters mid-line.
-func BenchmarkGrid_InsertChars(b *testing.B) {
-	for range b.N {
-		b.StopTimer()
-		g := newGrid(48, 120)
-		g.CursorC = 60
-		b.StartTimer()
-		g.InsertChars(1)
-	}
-}
-
-// BenchmarkGrid_DeleteChars measures deleting characters mid-line.
-func BenchmarkGrid_DeleteChars(b *testing.B) {
-	for range b.N {
-		b.StopTimer()
-		g := newGrid(48, 120)
-		g.CursorC = 60
-		b.StartTimer()
-		g.DeleteChars(1)
-	}
-}

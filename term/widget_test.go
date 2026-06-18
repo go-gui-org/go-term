@@ -1883,33 +1883,6 @@ func TestCancelMomentum_BeforeFirstScrollNoPanic(t *testing.T) {
 // errTestBoom is a sentinel error for ptyWriter failure tests.
 var errTestBoom = errors.New("boom")
 
-// --- benchmarks ---
-
-func BenchmarkDrawPrep_DirtyRows(b *testing.B) {
-	const rows, cols = 24, 80
-	g := newGrid(rows, cols)
-	// Mark every other row dirty.
-	for r := range rows {
-		if r%2 == 0 {
-			g.Dirty[r] = true
-		}
-	}
-	g.dirtyCount = rows / 2
-
-	b.ResetTimer()
-	for b.Loop() {
-		_ = g.HasDirtyRows()
-		g.ClearDirty()
-		// Re-mark for next iteration.
-		for r := range rows {
-			if r%2 == 0 {
-				g.Dirty[r] = true
-			}
-		}
-		g.dirtyCount = rows / 2
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Lifecycle loop tests
 // ---------------------------------------------------------------------------

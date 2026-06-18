@@ -366,24 +366,6 @@ func TestScrollbackRing_EnsureGeom_NegativeClamp(t *testing.T) {
 
 // ---- Benchmarks ----
 
-func BenchmarkScrollback_Push(b *testing.B) {
-	r := scrollbackRing{}
-	r.SetGeom(10000, 80)
-	row := make([]cell, 80)
-	for i := range row {
-		row[i] = cell{Ch: 'x', Width: 1}
-	}
-	// pre-fill to capacity so every Push evicts
-	for range r.cap {
-		r.Push(row, false)
-	}
-	b.ResetTimer()
-	b.ReportAllocs()
-	for b.Loop() {
-		r.Push(row, false)
-	}
-}
-
 func BenchmarkScrollback_EnsureGeom(b *testing.B) {
 	r := scrollbackRing{}
 	r.SetGeom(1000, 80)

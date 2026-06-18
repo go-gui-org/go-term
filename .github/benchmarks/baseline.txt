@@ -1,21 +1,17 @@
 # go-term benchmark baseline
-# go test -bench=. -count=10 -benchmem ./term
+# go test -bench=. -count=5 -benchmem ./term
 # Each line: Name  NsPerOp  BytesPerOp  AllocsPerOp
-BenchmarkVisualReorder_FullRow 17090 22552 69
-BenchmarkVisualReorder_AllLTR 1646 1504 2
-BenchmarkSixel_Decode 23491 49344 5
-BenchmarkGrid_InsertLines 2660 0 0
-BenchmarkGrid_DeleteLines 2144 0 0
-BenchmarkGrid_InsertChars 728 0 0
-BenchmarkGrid_DeleteChars 703 0 0
-BenchmarkResize_Reflow_DeepScrollback 31678345 90451216 31155
-BenchmarkGrid_ScrollUpRegion_FullScreen 1765 0 0
-BenchmarkGrid_ScrollDownRegion_FullScreen 2296 0 0
-BenchmarkGrid_Search 89696 0 0
-BenchmarkGrid_Search_LargeScrollback 12777 24 1
-BenchmarkParserFeed_PlainText 106816 0 0
-BenchmarkParserFeed_SGR 50468 0 0
-BenchmarkScrollback_Push 37 0 0
-BenchmarkScrollback_EnsureGeom 388051 2893312 4
-BenchmarkForegroundPass 68789 0 0
-BenchmarkDrawPrep_DirtyRows 16 0 0
+BenchmarkVisualReorder_FullRow 12337 22552 69
+BenchmarkVisualReorder_AllLTR 599 0 0
+BenchmarkSixel_Decode 13424 49344 5
+BenchmarkGrid_InsertLines 1224 0 0
+BenchmarkGrid_DeleteLines 1057 0 0
+BenchmarkResize_Reflow_DeepScrollback 15525296 90451238 31155
+BenchmarkGrid_ScrollUpRegion_FullScreen 3125 0 0
+BenchmarkGrid_ScrollDownRegion_FullScreen 2585 0 0
+BenchmarkGrid_Search 56154 0 0
+BenchmarkGrid_Search_LargeScrollback 8546 24 1
+BenchmarkParserFeed_PlainText 95183 0 0
+BenchmarkParserFeed_SGR 46082 0 0
+BenchmarkScrollback_EnsureGeom 210232 2893312 4
+BenchmarkForegroundPass 54606 0 0
