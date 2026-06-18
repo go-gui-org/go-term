@@ -1,5 +1,10 @@
 .PHONY: bench bench-verbose bench-save bench-regress test test-race vet lint \
-	build clean
+	build clean app clean-app
+
+DEMO_BIN     := got
+APP_NAME     := Got
+BUILDAPP_DIR := ../go-gui/cmd/buildapp
+BUILDAPP_BIN := $(BUILDAPP_DIR)/buildapp
 
 # Default benchmark run — quick pass over all benchmarks.
 # -run=^$ skips tests so stale timers don't fire during benchmark runs.
@@ -44,6 +49,22 @@ build:
 # Build the demo binary (ensures it compiles).
 build-demo:
 	go build ./examples/demo
+
+# Package the demo as a macOS .app bundle.
+app: $(APP_NAME).app
+
+$(BUILDAPP_BIN):
+	cd $(BUILDAPP_DIR) && go build -o buildapp .
+
+$(APP_NAME).app: $(BUILDAPP_BIN)
+	cd examples/demo && go build -o $(CURDIR)/$(DEMO_BIN) .
+	$(BUILDAPP_BIN) -bundle-deps -o . -name $(APP_NAME) \
+		-id github.com.go-gui-org.go-term $(DEMO_BIN)
+
+clean-app:
+	rm -f $(DEMO_BIN)
+	rm -rf $(APP_NAME).app
+	cd $(BUILDAPP_DIR) && rm -f buildapp
 
 # Clean test cache and built binaries.
 clean:

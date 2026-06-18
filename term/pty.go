@@ -3,6 +3,8 @@ package term
 import (
 	"os"
 	"os/exec"
+	"runtime"
+	"strings"
 
 	"github.com/creack/pty"
 )
@@ -40,7 +42,18 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 		}
 	}
 	cmd := exec.Command(shell, args...)
-	env := append(os.Environ(), "TERM=xterm-256color")
+	env := os.Environ()
+	// On macOS, GUI apps inherit a minimal PATH from launchd that omits
+	// Homebrew directories (/opt/homebrew/bin, /usr/local/bin). Run
+	// path_helper to construct the full system PATH from /etc/paths and
+	// /etc/paths.d so tools such as starship and fzf are reachable from
+	// shell startup files.
+	if runtime.GOOS == "darwin" {
+		if sp := darwinSystemPath(); sp != "" {
+			env = replaceEnv(env, "PATH", sp)
+		}
+	}
+	env = append(env, "TERM=xterm-256color")
 	env = append(env, cfg.Env...)
 	cmd.Env = env
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{
@@ -76,4 +89,43 @@ func (p *ptyDev) Close() error {
 		_, _ = p.cmd.Process.Wait()
 	}
 	return err
+}
+
+// darwinSystemPath returns the standard macOS system PATH by running
+// /usr/libexec/path_helper, which reads /etc/paths and /etc/paths.d/*.
+// Returns "" when path_helper is unavailable or its output is unparseable.
+func darwinSystemPath() string {
+	out, err := exec.Command("/usr/libexec/path_helper", "-s").Output()
+	if err != nil {
+		return ""
+	}
+	// Output is: PATH="..."; export PATH;
+	s := string(out)
+	const prefix = `PATH="`
+	i := strings.Index(s, prefix)
+	if i < 0 {
+		return ""
+	}
+	s = s[i+len(prefix):]
+	if j := strings.IndexByte(s, '"'); j >= 0 {
+		return s[:j]
+	}
+	return ""
+}
+
+// replaceEnv replaces the first occurrence of key in env with key=val,
+// or appends key=val if key is not present. The caller's slice is not
+// mutated; a new slice is returned only when a replacement is made.
+func replaceEnv(env []string, key, val string) []string {
+	prefix := key + "="
+	entry := prefix + val
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			out := make([]string, len(env))
+			copy(out, env)
+			out[i] = entry
+			return out
+		}
+	}
+	return append(env, entry)
 }

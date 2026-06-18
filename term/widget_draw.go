@@ -1,7 +1,6 @@
 package term
 
 import (
-	"log"
 	"math"
 	"strings"
 	"time"
@@ -284,9 +283,18 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.grid.Mu.Unlock()
 
 	if ds.doResize {
-		if err := t.pty.Resize(ds.rows, ds.cols); err != nil {
-			log.Printf("term: pty resize: %v", err)
-		}
+		// Defer pty resize to the readLoop goroutine so the
+		// TIOCSWINSZ ioctl never runs on the main thread.
+		// During live resize on macOS, onDraw is called from
+		// within SDL's event watch callback inside Cocoa's
+		// modal tracking loop — calling the ioctl inline (or
+		// via QueueCommand, which executes in flushCommands
+		// during the next FrameFn from the same callback) can
+		// deadlock against the SDL event queue when the shell's
+		// SIGWINCH response causes readLoop to push a user event.
+		t.ptyResizeRows.Store(int32(ds.rows))
+		t.ptyResizeCols.Store(int32(ds.cols))
+		t.ptyResizePending.Store(true)
 	}
 }
 

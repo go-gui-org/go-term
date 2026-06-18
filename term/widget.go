@@ -384,6 +384,15 @@ type Term struct {
 	// +1 = into scrollback, 0 = no scroll). Written on the main
 	// thread; read in autoScrollLoop — atomic for safety.
 	autoScrollDir atomic.Int32
+
+	// ptyResizeRows/Cols carry a pending TIOCSWINSZ from onDraw to
+	// readLoop. onDraw writes them under grid.Mu and sets pending.
+	// readLoop consumes them before its next Read call so the ioctl
+	// never runs on the main thread — avoids deadlock with the SDL
+	// event queue during macOS live-resize.
+	ptyResizePending atomic.Bool
+	ptyResizeRows    atomic.Int32
+	ptyResizeCols    atomic.Int32
 }
 
 // applyScrollbackConfig sets ScrollbackCap based on cfg.ScrollbackRows.
@@ -971,6 +980,17 @@ func (t *Term) readLoop() {
 	}()
 	buf := make([]byte, 4096)
 	for {
+		// Apply a pending pty resize before blocking in Read so
+		// the TIOCSWINSZ ioctl runs on this goroutine, not the
+		// main thread. Avoids deadlock with the SDL event queue
+		// during macOS live-resize (see onDraw).
+		if t.ptyResizePending.Swap(false) {
+			rows := int(t.ptyResizeRows.Load())
+			cols := int(t.ptyResizeCols.Load())
+			if err := t.pty.Resize(rows, cols); err != nil {
+				log.Printf("term: pty resize: %v", err)
+			}
+		}
 		n, err := t.pty.Read(buf)
 		if n > 0 {
 			bellCount, redraw, dirty := func() (uint64, bool, bool) {
