@@ -585,6 +585,16 @@ func (t *Term) drawFgPass(ds *drawState) {
 				t.emitCell(dc, float32(c)*t.cellW, float32(r)*t.cellH+yOff, cell, k, style)
 				continue
 			}
+			// Non-ASCII glyphs may trigger font fallback with metrics
+			// that differ from the monospace cellW measured via 'M'.
+			// Accumulated drift inside a coalesced text run can cause
+			// visual overlap with the next run. Emit individually so
+			// each glyph stays pinned to its cell origin.
+			if cell.Ch > 0x7F {
+				t.flushRun(dc, r, style, yOff, &fr)
+				t.emitCell(dc, float32(c)*t.cellW, float32(r)*t.cellH+yOff, cell, k, style)
+				continue
+			}
 			if isPlainSpace {
 				if fr.open && k == fr.key {
 					t.draw.runBuf.WriteRune(' ')
