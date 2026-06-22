@@ -698,6 +698,17 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 	if e.Type == gui.EventMouseDown || e.Type == gui.EventScrollBegan {
 		t.cancelMomentum()
 	}
+	// Safety net: when a window-resize drag consumes the mouse-up event,
+	// the locked onMouseUp callback never fires and t.mouse.dragging gets
+	// stuck true. Any subsequent pointer motion then spuriously extends the
+	// selection. Reset drag state on every window-level mouse-up so a
+	// "lost" release doesn't leave the terminal in a permanent drag.
+	if e.Type == gui.EventMouseUp && t.mouse.dragging {
+		t.mouse.dragging = false
+		t.mouse.dragReport = false
+		t.autoScrollDir.Store(0)
+		t.win.MouseUnlock()
+	}
 	var report []byte
 	t.grid.Mu.Lock()
 	focus := t.grid.FocusReporting

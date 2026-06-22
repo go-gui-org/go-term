@@ -264,6 +264,23 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	}
 
 	t.grid.Mu.Lock()
+
+	// Cancel selection drag when canvas dimensions change between frames.
+	// A window-resize drag started from the border can leak a mouse-down
+	// into the terminal (go-gui regression); the native Cocoa resize
+	// tracking loop then consumes the mouse-up, so neither the locked
+	// onMouseUp nor HandleWindowEvent ever sees the release. Without this,
+	// t.mouse.dragging stays true permanently and every subsequent pointer
+	// motion spuriously extends the selection.
+	if t.mouse.dragging && !t.mouse.dragReport {
+		if rows != t.grid.Rows || cols != t.grid.Cols {
+			t.mouse.dragging = false
+			t.autoScrollDir.Store(0)
+			t.grid.ClearSelection()
+			t.win.MouseUnlock()
+		}
+	}
+
 	// Phase order matters: prepareFastPath sets ds.renderRows / ds.live which
 	// which all subsequent phases read. prepareBiDi sets ds.bidiVisRows consumed
 	// by drawBgPass / drawFgPass / drawCursor. drawIME populates ds.ime* fields
