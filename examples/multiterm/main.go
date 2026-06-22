@@ -304,7 +304,7 @@ func closePanel(app *AppState, panelID string, w *gui.Window) {
 
 	// Last terminal → quit immediately without confirmation.
 	if len(app.Terms) == 1 {
-		t.Close()
+		_ = t.Close()
 		delete(app.Terms, panelID)
 		delete(app.Titles, panelID)
 		w.Close()
@@ -314,7 +314,7 @@ func closePanel(app *AppState, panelID string, w *gui.Window) {
 	// Find the group before mutating the tree.
 	group, groupOK := gui.DockTreeFindGroupByPanel(app.Root, panelID)
 
-	t.Close()
+	_ = t.Close()
 	delete(app.Terms, panelID)
 	delete(app.Titles, panelID)
 	app.Root = gui.DockTreeRemovePanel(app.Root, panelID)
