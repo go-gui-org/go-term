@@ -193,7 +193,10 @@ jobs:
 
       - name: Fuzz
         working-directory: go-term
-        run: go test -fuzz=. -fuzztime=120s ./term
+        run: |
+          for fuzz in FuzzParserFeed FuzzCSIDispatch FuzzOSCDispatch FuzzKittyAPC; do
+            go test -fuzz="^${fuzz}$" -fuzztime=120s ./term || exit 1
+          done
 
   fuzz-pr:
     runs-on: ubuntu-latest
@@ -238,7 +241,10 @@ jobs:
       - name: Fuzz (parser, 30s)
         if: steps.changed.outputs.fuzz == 'true'
         working-directory: go-term
-        run: go test -fuzz=. -fuzztime=30s ./term
+        run: |
+          for fuzz in FuzzParserFeed FuzzCSIDispatch FuzzOSCDispatch FuzzKittyAPC; do
+            go test -fuzz="^${fuzz}$" -fuzztime=30s ./term || exit 1
+          done
 
   bench:
     runs-on: ubuntu-latest
