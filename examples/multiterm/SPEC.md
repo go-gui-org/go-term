@@ -173,22 +173,42 @@ re-runs `mainView` so `DockPanelDef.Label` picks up the updated title
 without needing `w.UpdateView(mainView)`.
 
 **First frame:** before `OnInit` fires, `app.Terms` is empty but
-`app.Root` references `"term-0"`. `collectPanelIDs` returns an empty
+`app.Root` references `"term-0"`. `collectPanelDefs` returns an empty
 list, so the first frame renders an empty dock layout. `OnInit` creates
 the first Term and calls `w.UpdateView(mainView)`, triggering a rebuild
 with the terminal visible. This flash is imperceptible in practice.
 
 ```go
-func collectPanelIDs(root *gui.DockNode, terms map[string]*term.Term) []string {
-    var ids []string
+func collectPanelDefs(
+    root *gui.DockNode,
+    terms map[string]*term.Term,
+    titles map[string]string,
+    w *gui.Window,
+) []gui.DockPanelDef {
+    if root == nil {
+        return nil
+    }
+    closable := len(terms) > 1
+    var panels []gui.DockPanelDef
     for _, g := range gui.DockTreeCollectPanelNodes(root) {
         for _, id := range g.PanelIDs {
-            if _, ok := terms[id]; ok {
-                ids = append(ids, id)
+            t, ok := terms[id]
+            if !ok {
+                continue
             }
+            label := titles[id]
+            if label == "" {
+                label = id
+            }
+            panels = append(panels, gui.DockPanelDef{
+                ID:       id,
+                Label:    label,
+                Content:  []gui.View{t.View(w)},
+                Closable: closable,
+            })
         }
     }
-    return ids
+    return panels
 }
 ```
 

@@ -65,22 +65,22 @@ func main() {
 					Shortcut: gui.Shortcut{Key: gui.KeyT, Modifiers: gui.ModSuper},
 					Global:   true,
 					Execute: func(_ *gui.Event, w *gui.Window) {
-						st := gui.State[AppState](w)
-						id := fmt.Sprintf("term-%d", st.NextID)
+						app := gui.State[AppState](w)
+						id := fmt.Sprintf("term-%d", app.NextID)
 						t, err := term.New(w, newTermCfg(id, w))
 						if err != nil {
 							log.Printf("term.New: %v", err)
 							return
 						}
-						st.NextID++
-						st.Terms[id] = t
-						st.Titles[id] = id
-						if g, ok := gui.DockTreeFindGroupByPanel(st.Root, st.Focused); ok {
-							st.Root = gui.DockTreeAddTab(st.Root, g.ID, id)
+						app.NextID++
+						app.Terms[id] = t
+						app.Titles[id] = id
+						if g, ok := gui.DockTreeFindGroupByPanel(app.Root, app.Focused); ok {
+							app.Root = gui.DockTreeAddTab(app.Root, g.ID, id)
 						} else {
-							st.Root = gui.DockPanelGroup(groupMain, []string{id}, id)
+							app.Root = gui.DockPanelGroup(groupMain, []string{id}, id)
 						}
-						focusPanel(st, id, w)
+						focusPanel(app, id, w)
 					},
 				},
 				gui.Command{
@@ -152,15 +152,15 @@ func main() {
 			if err != nil {
 				log.Fatalf("term.New: %v", err)
 			}
-			st := gui.State[AppState](w)
-			st.Terms[id] = t
-			st.Titles[id] = id
-			st.Focused = id
+			app := gui.State[AppState](w)
+			app.Terms[id] = t
+			app.Titles[id] = id
+			app.Focused = id
 
 			// Route window-level events to the focused terminal.
 			w.OnEvent = func(e *gui.Event, w *gui.Window) {
-				st := gui.State[AppState](w)
-				if t, ok := st.Terms[st.Focused]; ok {
+				app := gui.State[AppState](w)
+				if t, ok := app.Terms[app.Focused]; ok {
 					t.HandleWindowEvent(e)
 				}
 			}
@@ -435,10 +435,8 @@ func rebuildTreeFromTerms(app *AppState) {
 		return
 	}
 	selected := ids[0]
-	if app.Focused != "" {
-		if _, ok := app.Terms[app.Focused]; ok {
-			selected = app.Focused
-		}
+	if _, ok := app.Terms[app.Focused]; ok {
+		selected = app.Focused
 	}
 	app.Root = gui.DockPanelGroup(groupMain, ids, selected)
 }
