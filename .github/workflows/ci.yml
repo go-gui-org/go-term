@@ -153,6 +153,7 @@ jobs:
           go test -bench=. -count=10 -benchmem -run='^$$' ./term \
             > /tmp/bench-current.txt
           go run ./scripts/benchregress \
+            -threshold 30 \
             -base .github/benchmarks/baseline.txt \
             -current /tmp/bench-current.txt
 
