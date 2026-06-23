@@ -277,6 +277,9 @@ func focusPanel(app *AppState, panelID string, w *gui.Window) {
 	if panelID == "" || panelID == app.Focused {
 		return
 	}
+	if _, ok := app.Terms[panelID]; !ok {
+		return
+	}
 	if prev, ok := app.Terms[app.Focused]; ok {
 		prev.SetFocused(false)
 		prev.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
