@@ -65,6 +65,11 @@ type Cfg struct {
 	// work (e.g. calling Term.Close on the main thread via QueueCommand).
 	OnExit func()
 
+	// OnClickFocus, if non-nil, is called when the user clicks on the
+	// terminal canvas. Multi-Term embedders use this to switch focus to
+	// the clicked pane. Runs synchronously during the click handler.
+	OnClickFocus func()
+
 	// Command overrides the shell command. When empty (default), $SHELL
 	// from the environment is used (with /bin/sh as fallback). Set this
 	// to spawn a custom binary in the pty instead of a shell.
@@ -324,17 +329,12 @@ type Term struct {
 	resize resizeState
 	bell   bellState
 
-	// themeMenuItems is the precomputed ContextMenu item list for runtime
-	// theme switching. Built once in New; nil when no themes are configured.
-	themeMenuItems []gui.MenuItemCfg
-
 	// pendingReplies buffers parser-originated reply bytes (DA, DECRQSS,
-	// XTGETTCAP, ...) emitted during parser.Feed. Drained by readLoop
-	// after grid.Mu is released so pw.Write (which can block when the
-	// pty slave-side input buffer is full) cannot deadlock against
-	// onDraw waiting for the same lock. Owned by the readLoop goroutine
-	// — append (via onParserReply called from inside Feed) and drain
-	// both happen there.
+	// XTGETTCAP, ...) emitted during parser.Feed. Drained by applyChunk
+	// on the main thread after grid.Mu is released so pw.Write (which can
+	// block when the pty slave-side input buffer is full) cannot deadlock
+	// against onDraw waiting for the same lock. Append happens inside
+	// Feed (main thread); drain happens immediately after unlock.
 	pendingReplies [][]byte
 	momentum       momentumState
 
@@ -393,6 +393,11 @@ type Term struct {
 	ptyResizePending atomic.Bool
 	ptyResizeRows    atomic.Int32
 	ptyResizeCols    atomic.Int32
+
+	// readCh carries raw PTY output from readLoop (reader goroutine) to
+	// drainReads (main thread). Buffered so the reader can keep pulling
+	// data off the PTY while the main thread is between frames.
+	readCh chan []byte
 }
 
 // applyScrollbackConfig sets ScrollbackCap based on cfg.ScrollbackRows.
@@ -410,13 +415,16 @@ func applyScrollbackConfig(g *grid, cfg Cfg) {
 
 // buildThemeMenu builds a right-click context menu from cfg.Themes.
 // Returns nil when no themes are configured.
-func buildThemeMenu(cfg Cfg) []gui.MenuItemCfg {
-	if len(cfg.Themes) == 0 {
+// ThemeMenuItems returns a ContextMenu item list for the given themes.
+// Returns nil when themes is empty. Multi-Term embedders use this to
+// attach a theme menu at the appropriate level of their view tree.
+func ThemeMenuItems(themes []NamedTheme) []gui.MenuItemCfg {
+	if len(themes) == 0 {
 		return nil
 	}
-	items := make([]gui.MenuItemCfg, 0, len(cfg.Themes)+1)
+	items := make([]gui.MenuItemCfg, 0, len(themes)+1)
 	items = append(items, gui.MenuSubtitle("Theme"))
-	for i, nt := range cfg.Themes {
+	for i, nt := range themes {
 		items = append(items, gui.MenuItemCfg{ID: strconv.Itoa(i), Text: nt.Name})
 	}
 	return items
@@ -442,27 +450,26 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	g := newGrid(initRows, initCols)
 	applyTheme(g, cfg)
 	applyScrollbackConfig(g, cfg)
-	themeMenuItems := buildThemeMenu(cfg)
 	seqID := termSeq.Add(1)
 	t := &Term{
-		cfg:            cfg,
-		grid:           g,
-		parser:         newParser(g),
-		pty:            pty,
-		pw:             pty,
-		cmd:            w,
-		notif:          desktopNotifier{},
-		cursorEpoch:    time.Now(),
-		blinkDone:      make(chan struct{}),
-		readDone:       make(chan struct{}),
-		focusID:        uint32(seqID),
-		canvasID:       "term-canvas-" + strconv.FormatUint(seqID, 10),
-		themeMenuItems: themeMenuItems,
+		cfg:         cfg,
+		grid:        g,
+		parser:      newParser(g),
+		pty:         pty,
+		pw:          pty,
+		cmd:         w,
+		notif:       desktopNotifier{},
+		cursorEpoch: time.Now(),
+		blinkDone:   make(chan struct{}),
+		readDone:    make(chan struct{}),
+		focusID:     uint32(seqID),
+		canvasID:    "term-canvas-" + strconv.FormatUint(seqID, 10),
 	}
 	t.win = w
 	t.mouse.lastR = -1
 	t.mouse.lastC = -1
 	t.momentum.kick = make(chan struct{}, 1)
+	t.readCh = make(chan []byte, 512)
 	t.mouse.hoverR.Store(-1)
 	t.mouse.hoverC.Store(-1)
 	if !cfg.DisableGraphics {
@@ -627,11 +634,11 @@ func (t *Term) scheduleResizeWake(d time.Duration) {
 }
 
 // onParserReply queues parser-originated bytes (e.g. DA1 reply) for
-// writing back to the pty after readLoop releases grid.Mu. Called from
-// inside parser.Feed which runs under Mu on the readLoop goroutine —
-// writing to the pty directly here would risk a deadlock when the
-// slave-side input buffer is full (shell not reading), since onDraw on
-// the main thread would be blocked waiting for the same Mu.
+// writing back to the pty after applyChunk releases grid.Mu. Called from
+// inside parser.Feed which runs under Mu on the main thread — writing to
+// the pty directly here would risk a deadlock when the slave-side input
+// buffer is full (shell not reading), since onDraw on the main thread
+// would be blocked waiting for the same Mu.
 func (t *Term) onParserReply(b []byte) {
 	if len(b) == 0 {
 		return
@@ -666,8 +673,8 @@ func sendDesktopNotify(title, body string) {
 }
 
 // flushPendingReplies writes all queued parser replies to the pty.
-// Called by readLoop after grid.Mu is released. Errors are logged and
-// the queue is drained even on partial failure.
+// Called by applyChunk on the main thread after grid.Mu is released.
+// Errors are logged and the queue is drained even on partial failure.
 func (t *Term) flushPendingReplies() {
 	if len(t.pendingReplies) == 0 {
 		return
@@ -829,6 +836,11 @@ func (t *Term) SetFocused(v bool) {
 	t.bumpVersion()
 }
 
+// FocusID returns the go-gui IDFocus value for this terminal.
+// Multi-Term embedders use this to detect which pane has focus
+// after a mouse click.
+func (t *Term) FocusID() uint32 { return t.focusID }
+
 // termSeq provides unique per-Term identifiers (canvas IDs etc.).
 var termSeq atomic.Uint64
 
@@ -867,7 +879,6 @@ func (t *Term) View(w *gui.Window) gui.View {
 		t.bumpVersion()
 	}
 
-	ww, wh := w.WindowSize()
 	// Snapshot theme default-bg under the lock so a concurrent SetTheme
 	// does not race with this read. The rest of View() is lock-free.
 	t.grid.Mu.Lock()
@@ -901,28 +912,12 @@ func (t *Term) View(w *gui.Window) gui.View {
 		// prior click.
 		w.SetIDFocus(t.focusID)
 	}
-	if len(t.themeMenuItems) > 0 {
-		colCfg.Width = float32(ww)
-		colCfg.Height = float32(wh)
-		colCfg.Sizing = gui.FillFill
-		return gui.ContextMenu(w, gui.ContextMenuCfg{
-			ID:      "term-theme-menu",
-			Width:   float32(ww),
-			Height:  float32(wh),
-			Sizing:  gui.FixedFixed,
-			Padding: gui.NoPadding,
-			Items:   t.themeMenuItems,
-			Action: func(id string, _ *gui.Event, w *gui.Window) {
-				i, err := strconv.Atoi(id)
-				if err != nil || i < 0 || i >= len(t.cfg.Themes) {
-					return
-				}
-				t.SetTheme(t.cfg.Themes[i].Theme)
-				w.UpdateWindow()
-			},
-			Content: []gui.View{gui.Column(colCfg)},
-		})
-	}
+	// FillFill without explicit Width/Height: the Term may be embedded
+	// in a multi-pane layout where the parent container dictates
+	// dimensions. Using w.WindowSize() here would overflow the pane.
+	// Theme menus are handled by the embedder (e.g. Session) via
+	// ThemeMenuItems and gui.ContextMenu — Term.View returns a plain
+	// Column so the embedder controls the wrapping.
 	colCfg.Sizing = gui.FillFill
 	return gui.Column(colCfg)
 }
@@ -976,8 +971,10 @@ func (t *Term) Close() error {
 	return err
 }
 
-// readLoop forwards pty output through the parser and schedules a
-// render. Exits when the pty is closed or returns EOF.
+// readLoop forwards raw PTY output to the main thread via a buffered
+// channel. Parsing and grid mutation happen on the main thread in
+// drainReads so that onDraw never contends with the reader for grid.Mu.
+// Exits when the pty is closed or returns EOF.
 func (t *Term) readLoop() {
 	defer recoverLoop("readLoop")
 	defer func() {
@@ -1004,44 +1001,75 @@ func (t *Term) readLoop() {
 		}
 		n, err := t.pty.Read(buf)
 		if n > 0 {
-			bellCount, redraw, dirty := func() (uint64, bool, bool) {
-				t.grid.Mu.Lock()
-				defer t.grid.Mu.Unlock()
-				t.parser.Feed(buf[:n])
-				bellCount := t.grid.BellCount
-				redraw := !t.grid.SyncOutput || !t.grid.SyncActive
-				// Gate the version bump on actual visual changes: cell mutations
-				// (HasDirtyRows) or a new BEL (which marks no cells but needs a
-				// flash). Pure no-op sequences (swallowed queries, etc.) skip the
-				// version bump so the tessellation cache stays valid.
-				dirty := t.grid.HasDirtyRows() || bellCount != t.bell.readCount
-				if redraw && dirty {
-					t.bell.readCount = bellCount
-					t.bumpVersion()
-				}
-				return bellCount, redraw, dirty
-			}()
-			// Drain parser replies (DA, DECRQSS, ...) outside Mu so a
-			// blocking pty.Write (slave-side input buffer full) cannot
-			// stall onDraw waiting for the same lock.
-			t.flushPendingReplies()
-			if redraw && dirty {
-				t.queueCommand(func(w *gui.Window) {
-					if bellCount > t.bell.seenCount {
-						t.bell.seenCount = bellCount
-						if d := t.effectiveBellDuration(); d > 0 {
-							t.bell.flashUntil = time.Now().Add(d)
-							t.scheduleBellClear(d)
-						}
-					}
-					w.UpdateWindow()
-				})
+			// Ship raw bytes to the main thread for parsing + grid
+			// mutation. Copy so the main thread owns the slice.
+			data := make([]byte, n)
+			copy(data, buf[:n])
+			select {
+			case t.readCh <- data:
+			case <-t.blinkDone:
+				return
 			}
+			t.queueCommand(func(w *gui.Window) {
+				t.drainReads(w)
+			})
 		}
 		if err != nil {
 			return
 		}
 	}
+}
+
+// drainReads drains all pending PTY output from readCh and feeds it to
+// the parser. Runs on the main thread via queueCommand so grid mutation
+// and onDraw are serialized — no lock contention. Multiple callbacks may
+// be queued by rapid reads; only the first does real work; the rest find
+// the channel empty and return.
+func (t *Term) drainReads(w *gui.Window) {
+	needUpdate := false
+	for {
+		select {
+		case data := <-t.readCh:
+			if t.applyChunk(data) {
+				needUpdate = true
+			}
+		default:
+			// Flush parser replies once after all chunks so a
+			// blocking pty.Write cannot stall onDraw.
+			t.flushPendingReplies()
+			if needUpdate {
+				w.UpdateWindow()
+			}
+			return
+		}
+	}
+}
+
+// applyChunk feeds a single PTY read to the parser, handles bell flash,
+// and bumps the draw version. Runs on the main thread. Returns true
+// when a redraw is required.
+func (t *Term) applyChunk(data []byte) bool {
+	var bellCount uint64
+	t.grid.Mu.Lock()
+	t.parser.Feed(data)
+	bellCount = t.grid.BellCount
+	redraw := !t.grid.SyncOutput || !t.grid.SyncActive
+	dirty := t.grid.HasDirtyRows() || bellCount != t.bell.readCount
+	needUpdate := false
+	if redraw && dirty {
+		t.bell.readCount = bellCount
+		t.bumpVersion()
+		needUpdate = true
+	}
+	t.grid.Mu.Unlock()
+	if bellCount > t.bell.seenCount {
+		t.bell.seenCount = bellCount
+		if d := t.effectiveBellDuration(); d > 0 {
+			t.bell.flashUntil = time.Now().Add(d)
+			t.scheduleBellClear(d)
+		}
+	}
+	return needUpdate
 }
 
 // style returns the resolved text style for this terminal.

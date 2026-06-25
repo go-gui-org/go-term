@@ -1633,18 +1633,18 @@ func TestApplyScrollbackConfig(t *testing.T) {
 	}
 }
 
-func TestBuildThemeMenu_Empty(t *testing.T) {
-	if got := buildThemeMenu(Cfg{}); got != nil {
+func TestThemeMenuItems_Empty(t *testing.T) {
+	if got := ThemeMenuItems(nil); got != nil {
 		t.Errorf("expected nil for empty themes, got %v", got)
 	}
 }
 
-func TestBuildThemeMenu_TwoThemes(t *testing.T) {
+func TestThemeMenuItems_TwoThemes(t *testing.T) {
 	themes := []NamedTheme{
 		{Name: "Dark", Theme: DefaultTheme},
 		{Name: "Light", Theme: SolarizedDarkTheme},
 	}
-	items := buildThemeMenu(Cfg{Themes: themes})
+	items := ThemeMenuItems(themes)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 menu items, got %d", len(items))
 	}
@@ -1710,6 +1710,7 @@ func TestClose_FullIntegration(t *testing.T) {
 		notif:     desktopNotifier{},
 		blinkDone: make(chan struct{}),
 		readDone:  make(chan struct{}),
+		readCh:    make(chan []byte, 512),
 	}
 	tm.mouse.hoverR.Store(-1)
 	tm.mouse.hoverC.Store(-1)
@@ -1848,6 +1849,178 @@ func TestScheduleResizeWake_ClosedSkipsBump(t *testing.T) {
 	}
 	if term.resize.timer != nil {
 		term.resize.timer.Stop()
+	}
+}
+
+// --- applyChunk ---
+
+func TestApplyChunk_DirtyCellsBumpsVersion(t *testing.T) {
+	g := newGrid(24, 80)
+	tm := &Term{
+		grid:   g,
+		parser: newParser(g),
+	}
+	needUpdate := tm.applyChunk([]byte("A"))
+	if !needUpdate {
+		t.Error("needUpdate should be true after dirty chunk")
+	}
+	if v := tm.drawVersion.Load(); v == 0 {
+		t.Error("drawVersion should be bumped after dirty chunk")
+	}
+}
+
+func TestApplyChunk_NoOpDataNoChange(t *testing.T) {
+	g := newGrid(24, 80)
+	tm := &Term{
+		grid:   g,
+		parser: newParser(g),
+	}
+	needUpdate := tm.applyChunk([]byte{})
+	if needUpdate {
+		t.Error("needUpdate should be false for no-op data")
+	}
+	if v := tm.drawVersion.Load(); v != 0 {
+		t.Errorf("drawVersion = %d, want 0", v)
+	}
+}
+
+func TestApplyChunk_SyncOutputGatesRedraw(t *testing.T) {
+	g := newGrid(24, 80)
+	g.SyncOutput = true
+	g.SyncActive = true
+	tm := &Term{
+		grid:   g,
+		parser: newParser(g),
+	}
+	// Feed a character that would normally dirty the grid, but the
+	// synchronized-output gate suppresses the version bump.
+	needUpdate := tm.applyChunk([]byte("X"))
+	if needUpdate {
+		t.Error("needUpdate should be false when sync gate is active")
+	}
+	if v := tm.drawVersion.Load(); v != 0 {
+		t.Errorf("drawVersion = %d, want 0 when sync gate active", v)
+	}
+}
+
+func TestApplyChunk_BellSchedulesFlash(t *testing.T) {
+	g := newGrid(24, 80)
+	tm := &Term{
+		grid:   g,
+		parser: newParser(g),
+		cfg:    Cfg{BellFlashDuration: 50 * time.Millisecond},
+	}
+	// BEL (0x07) increments BellCount. Grid stays clean but the bell
+	// delta makes dirty=true, triggering a version bump and flash.
+	needUpdate := tm.applyChunk([]byte("\x07"))
+	if !needUpdate {
+		t.Error("needUpdate should be true after BEL")
+	}
+	if tm.bell.seenCount != 1 {
+		t.Errorf("bell.seenCount = %d, want 1", tm.bell.seenCount)
+	}
+	if tm.bell.flashUntil.IsZero() {
+		t.Error("bell.flashUntil should be set")
+	}
+	if tm.bell.flashTimer != nil {
+		tm.bell.flashTimer.Stop()
+	}
+}
+
+func TestApplyChunk_BellFlashDisabled(t *testing.T) {
+	g := newGrid(24, 80)
+	tm := &Term{
+		grid:   g,
+		parser: newParser(g),
+		cfg:    Cfg{BellFlashDuration: -1}, // disabled
+	}
+	tm.applyChunk([]byte("\x07"))
+	if tm.bell.seenCount != 1 {
+		t.Errorf("bell.seenCount = %d, want 1", tm.bell.seenCount)
+	}
+	if !tm.bell.flashUntil.IsZero() {
+		t.Error("bell.flashUntil should be zero when flash disabled")
+	}
+}
+
+func TestDrainReads_FlushesPendingReplies(t *testing.T) {
+	g := newGrid(24, 80)
+	var wrote [][]byte
+	tm := &Term{
+		grid:   g,
+		parser: newParser(g),
+		pw: writerFunc(func(b []byte) (int, error) {
+			cp := make([]byte, len(b))
+			copy(cp, b)
+			wrote = append(wrote, cp)
+			return len(b), nil
+		}),
+		pendingReplies: [][]byte{[]byte("r1"), []byte("r2")},
+		readCh:         make(chan []byte, 8),
+	}
+	// flushPendingReplies runs once after the drain loop,
+	// not per-chunk inside applyChunk. Feed a no-op chunk
+	// through the drain path.
+	tm.readCh <- []byte{}
+	tm.drainReads(&gui.Window{})
+	if len(wrote) != 2 {
+		t.Errorf("wrote %d replies, want 2", len(wrote))
+	}
+	if tm.pendingReplies != nil {
+		t.Error("pendingReplies should be cleared after flush")
+	}
+}
+
+// --- drainReads ---
+
+func TestDrainReads_EmptyChannelNoUpdate(t *testing.T) {
+	g := newGrid(24, 80)
+	tm := &Term{
+		grid:   g,
+		parser: newParser(g),
+		readCh: make(chan []byte, 8),
+	}
+	prev := tm.drawVersion.Load()
+	tm.drainReads(&gui.Window{})
+	if tm.drawVersion.Load() != prev {
+		t.Error("drawVersion should not change when channel is empty")
+	}
+}
+
+func TestDrainReads_SingleChunkAppliesToGrid(t *testing.T) {
+	g := newGrid(24, 80)
+	tm := &Term{
+		grid:   g,
+		parser: newParser(g),
+		readCh: make(chan []byte, 8),
+	}
+	tm.readCh <- []byte("hello")
+	tm.drainReads(&gui.Window{})
+	if v := tm.drawVersion.Load(); v == 0 {
+		t.Error("drawVersion should be bumped after draining dirty chunk")
+	}
+	if len(tm.readCh) != 0 {
+		t.Errorf("readCh len = %d, want 0", len(tm.readCh))
+	}
+}
+
+func TestDrainReads_MultipleChunksEachApplied(t *testing.T) {
+	g := newGrid(24, 80)
+	tm := &Term{
+		grid:   g,
+		parser: newParser(g),
+		readCh: make(chan []byte, 8),
+	}
+	// Two separate dirty chunks — each should bump the version.
+	tm.readCh <- []byte("AB")
+	tm.readCh <- []byte("CD")
+	tm.drainReads(&gui.Window{})
+	if len(tm.readCh) != 0 {
+		t.Errorf("readCh len = %d after drain, want 0", len(tm.readCh))
+	}
+	// Each chunk bumped once → version = 2.
+	if v := tm.drawVersion.Load(); v != 2 {
+		t.Errorf("drawVersion = %d, want 2 (one per dirty chunk)", v)
 	}
 }
 
