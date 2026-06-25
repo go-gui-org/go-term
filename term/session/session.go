@@ -138,8 +138,13 @@ func (s *Session) closePaneInTab(tab *Tab, leafID string) {
 			}
 		}
 		if removed {
-			// Tab was replaced — rebuild the view for the new
-			// active tab.
+			// Tab was removed — focus the surviving tab's pane
+			// and rebuild the view.
+			tab := s.tabs[s.activeTab]
+			if t, ok := tab.terms[tab.focused]; ok {
+				t.SetFocused(true)
+				t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
+			}
 			s.refresh()
 			return
 		}
@@ -188,10 +193,18 @@ func tight(sizing gui.Sizing) gui.ContainerCfg {
 
 // refresh updates the window title from the active tab's focused pane
 // and schedules a view rebuild. Call after any state change that affects
-// the title or layout.
+// the title or layout. It also ensures the active pane has pane focus so
+// the invariant "active terminal always owns IDFocus" holds regardless of
+// which code path triggered the refresh.
 func (s *Session) refresh() {
 	if s.activeTab >= 0 && s.activeTab < len(s.tabs) {
 		s.w.SetTitle(s.tabs[s.activeTab].focusedTitle())
+		// Ensure the active pane owns IDFocus. No-op when already
+		// correct — cheap atomic compare-and-swap.
+		tab := s.tabs[s.activeTab]
+		if t, ok := tab.terms[tab.focused]; ok {
+			t.SetFocused(true)
+		}
 	}
 	s.w.UpdateView(s.View)
 }
