@@ -46,18 +46,18 @@ lint:
 build:
 	go build ./...
 
-# Build the multiterm binary (ensures it compiles).
-build-multiterm:
-	go build ./examples/multiterm
+# Build the demo binary (ensures it compiles).
+build-demo:
+	go build ./examples/demo
 
-# Package multiterm as a macOS .app bundle.
+# Package demo as a macOS .app bundle.
 app: $(APP_NAME).app
 
 $(BUILDAPP_BIN):
 	cd $(BUILDAPP_DIR) && go build -o buildapp .
 
 $(APP_NAME).app: $(BUILDAPP_BIN)
-	cd examples/multiterm && go build -o $(CURDIR)/$(DEMO_BIN) .
+	cd examples/demo && go build -o $(CURDIR)/$(DEMO_BIN) .
 	$(BUILDAPP_BIN) -bundle-deps -o . -name $(APP_NAME) \
 		-id github.com.go-gui-org.go-term $(DEMO_BIN)
 
