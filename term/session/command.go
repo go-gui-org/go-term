@@ -78,6 +78,14 @@ func (s *Session) registerCommands() {
 			Global:   true,
 			Execute:  func(_ *gui.Event, w *gui.Window) { s.PrevTab() },
 		},
+		// Theme.
+		{
+			ID:       "session.cycleTheme",
+			Label:    "Cycle Theme",
+			Shortcut: gui.Shortcut{Key: gui.KeyT, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { s.CycleTheme() },
+		},
 	}
 	// Tab 1–9 shortcuts.
 	for i := 0; i < 9; i++ {

@@ -371,25 +371,33 @@ func (s *Session) splitView(node *splitNode, tab *Tab) gui.View {
 	leaf := tight(gui.FillFill)
 	leaf.IDFocus = tm.FocusID()
 	leaf.Content = []gui.View{tm.View(s.w)}
-	col := gui.Column(leaf)
-	if items := term.ThemeMenuItems(s.cfg.Themes); items != nil {
-		return gui.ContextMenu(s.w, gui.ContextMenuCfg{
-			ID:      "session-theme-" + node.LeafID,
-			Sizing:  gui.FillFill,
-			Padding: gui.NoPadding,
-			Items:   items,
-			Action: func(id string, _ *gui.Event, w *gui.Window) {
-				i, err := strconv.Atoi(id)
-				if err != nil || i < 0 || i >= len(s.cfg.Themes) {
-					return
-				}
-				tm.SetTheme(s.cfg.Themes[i].Theme)
-				w.UpdateWindow()
-			},
-			Content: []gui.View{col},
-		})
+	return gui.Column(leaf)
+}
+
+// CycleTheme applies the next theme from cfg.Themes to every pane in
+// every tab, wrapping after the last. The active pane's current theme
+// determines the starting point. No-op when no themes are configured.
+func (s *Session) CycleTheme() {
+	if len(s.cfg.Themes) == 0 {
+		return
 	}
-	return col
+	cur := 0
+	if p := s.ActivePane(); p != nil {
+		curTheme := p.Theme()
+		for i, nt := range s.cfg.Themes {
+			if nt.Theme == curTheme {
+				cur = i
+				break
+			}
+		}
+	}
+	next := (cur + 1) % len(s.cfg.Themes)
+	for _, tab := range s.tabs {
+		for _, tm := range tab.terms {
+			tm.SetTheme(s.cfg.Themes[next].Theme)
+		}
+	}
+	s.w.UpdateWindow()
 }
 
 // onPaneTitle is called from the Term's OnTitle callback (via
