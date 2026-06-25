@@ -164,6 +164,9 @@ func (t *Term) writeMouse(cb, col, row int, pixX, pixY float32, pixels, press bo
 // a press report for any supported button and arms drag tracking.
 // Otherwise (the default) starts a left-button selection anchor.
 func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	if t.cfg.OnClickFocus != nil {
+		t.cfg.OnClickFocus()
+	}
 	r, c := t.posToCell(e.MouseX, e.MouseY)
 	snap := t.mouseSnap()
 	if snap.shouldReport() {

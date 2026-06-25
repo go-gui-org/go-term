@@ -65,6 +65,11 @@ type Cfg struct {
 	// work (e.g. calling Term.Close on the main thread via QueueCommand).
 	OnExit func()
 
+	// OnClickFocus, if non-nil, is called when the user clicks on the
+	// terminal canvas. Multi-Term embedders use this to switch focus to
+	// the clicked pane. Runs synchronously during the click handler.
+	OnClickFocus func()
+
 	// Command overrides the shell command. When empty (default), $SHELL
 	// from the environment is used (with /bin/sh as fallback). Set this
 	// to spawn a custom binary in the pty instead of a shell.
@@ -324,10 +329,6 @@ type Term struct {
 	resize resizeState
 	bell   bellState
 
-	// themeMenuItems is the precomputed ContextMenu item list for runtime
-	// theme switching. Built once in New; nil when no themes are configured.
-	themeMenuItems []gui.MenuItemCfg
-
 	// pendingReplies buffers parser-originated reply bytes (DA, DECRQSS,
 	// XTGETTCAP, ...) emitted during parser.Feed. Drained by readLoop
 	// after grid.Mu is released so pw.Write (which can block when the
@@ -410,13 +411,16 @@ func applyScrollbackConfig(g *grid, cfg Cfg) {
 
 // buildThemeMenu builds a right-click context menu from cfg.Themes.
 // Returns nil when no themes are configured.
-func buildThemeMenu(cfg Cfg) []gui.MenuItemCfg {
-	if len(cfg.Themes) == 0 {
+// ThemeMenuItems returns a ContextMenu item list for the given themes.
+// Returns nil when themes is empty. Multi-Term embedders use this to
+// attach a theme menu at the appropriate level of their view tree.
+func ThemeMenuItems(themes []NamedTheme) []gui.MenuItemCfg {
+	if len(themes) == 0 {
 		return nil
 	}
-	items := make([]gui.MenuItemCfg, 0, len(cfg.Themes)+1)
+	items := make([]gui.MenuItemCfg, 0, len(themes)+1)
 	items = append(items, gui.MenuSubtitle("Theme"))
-	for i, nt := range cfg.Themes {
+	for i, nt := range themes {
 		items = append(items, gui.MenuItemCfg{ID: strconv.Itoa(i), Text: nt.Name})
 	}
 	return items
@@ -442,7 +446,6 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	g := newGrid(initRows, initCols)
 	applyTheme(g, cfg)
 	applyScrollbackConfig(g, cfg)
-	themeMenuItems := buildThemeMenu(cfg)
 	seqID := termSeq.Add(1)
 	t := &Term{
 		cfg:            cfg,
@@ -457,7 +460,6 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		readDone:       make(chan struct{}),
 		focusID:        uint32(seqID),
 		canvasID:       "term-canvas-" + strconv.FormatUint(seqID, 10),
-		themeMenuItems: themeMenuItems,
 	}
 	t.win = w
 	t.mouse.lastR = -1
@@ -829,6 +831,11 @@ func (t *Term) SetFocused(v bool) {
 	t.bumpVersion()
 }
 
+// FocusID returns the go-gui IDFocus value for this terminal.
+// Multi-Term embedders use this to detect which pane has focus
+// after a mouse click.
+func (t *Term) FocusID() uint32 { return t.focusID }
+
 // termSeq provides unique per-Term identifiers (canvas IDs etc.).
 var termSeq atomic.Uint64
 
@@ -867,7 +874,6 @@ func (t *Term) View(w *gui.Window) gui.View {
 		t.bumpVersion()
 	}
 
-	ww, wh := w.WindowSize()
 	// Snapshot theme default-bg under the lock so a concurrent SetTheme
 	// does not race with this read. The rest of View() is lock-free.
 	t.grid.Mu.Lock()
@@ -901,28 +907,12 @@ func (t *Term) View(w *gui.Window) gui.View {
 		// prior click.
 		w.SetIDFocus(t.focusID)
 	}
-	if len(t.themeMenuItems) > 0 {
-		colCfg.Width = float32(ww)
-		colCfg.Height = float32(wh)
-		colCfg.Sizing = gui.FillFill
-		return gui.ContextMenu(w, gui.ContextMenuCfg{
-			ID:      "term-theme-menu",
-			Width:   float32(ww),
-			Height:  float32(wh),
-			Sizing:  gui.FixedFixed,
-			Padding: gui.NoPadding,
-			Items:   t.themeMenuItems,
-			Action: func(id string, _ *gui.Event, w *gui.Window) {
-				i, err := strconv.Atoi(id)
-				if err != nil || i < 0 || i >= len(t.cfg.Themes) {
-					return
-				}
-				t.SetTheme(t.cfg.Themes[i].Theme)
-				w.UpdateWindow()
-			},
-			Content: []gui.View{gui.Column(colCfg)},
-		})
-	}
+	// FillFill without explicit Width/Height: the Term may be embedded
+	// in a multi-pane layout where the parent container dictates
+	// dimensions. Using w.WindowSize() here would overflow the pane.
+	// Theme menus are handled by the embedder (e.g. Session) via
+	// ThemeMenuItems and gui.ContextMenu — Term.View returns a plain
+	// Column so the embedder controls the wrapping.
 	colCfg.Sizing = gui.FillFill
 	return gui.Column(colCfg)
 }

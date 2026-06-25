@@ -1633,18 +1633,18 @@ func TestApplyScrollbackConfig(t *testing.T) {
 	}
 }
 
-func TestBuildThemeMenu_Empty(t *testing.T) {
-	if got := buildThemeMenu(Cfg{}); got != nil {
+func TestThemeMenuItems_Empty(t *testing.T) {
+	if got := ThemeMenuItems(nil); got != nil {
 		t.Errorf("expected nil for empty themes, got %v", got)
 	}
 }
 
-func TestBuildThemeMenu_TwoThemes(t *testing.T) {
+func TestThemeMenuItems_TwoThemes(t *testing.T) {
 	themes := []NamedTheme{
 		{Name: "Dark", Theme: DefaultTheme},
 		{Name: "Light", Theme: SolarizedDarkTheme},
 	}
-	items := buildThemeMenu(Cfg{Themes: themes})
+	items := ThemeMenuItems(themes)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 menu items, got %d", len(items))
 	}

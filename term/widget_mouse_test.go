@@ -138,6 +138,26 @@ func TestOnClick_UnsupportedButton(t *testing.T) {
 	}
 }
 
+func TestOnClick_OnClickFocusCallbackFires(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	called := false
+	tm.cfg.OnClickFocus = func() { called = true }
+	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
+	tm.onClick(nil, e, &gui.Window{})
+	if !called {
+		t.Error("OnClickFocus callback was not called")
+	}
+}
+
+func TestOnClick_NilOnClickFocusNoPanic(t *testing.T) {
+	// Every existing onClick test already exercises this path;
+	// this test makes the nil-safety explicit.
+	tm, _ := newMouseTerm(4, 8)
+	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
+	// Should not panic.
+	tm.onClick(nil, e, &gui.Window{})
+}
+
 // ---------------------------------------------------------------------------
 // onMouseMove
 // ---------------------------------------------------------------------------
