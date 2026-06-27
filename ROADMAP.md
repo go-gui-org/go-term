@@ -3,17 +3,17 @@
 ## Context
 
 `go-term` is a feature-rich terminal emulator widget for the
-[go-gui](https://github.com/go-gui-org/go-gui) framework. 38 phases are
+[go-gui](https://github.com/go-gui-org/go-gui) framework. 39 phases are
 complete — the widget covers modern terminal feature parity
 (ghostty/iTerm2/kitty) including 24-bit color, truecolor SGR, alt
 screen, logical reflow, sixel/kitty/iTerm2 graphics, BiDi/RTL text,
-Kitty Keyboard Protocol, and pixel-perfect scrollback.
+Kitty Keyboard Protocol, pixel-perfect scrollback, and native
+split panes/tabs.
 
-Work remaining: native split panes/tabs, then 1.0 API stabilisation.
+Work remaining: 1.0 API stabilisation.
 
 Each phase below is sized for one focused PR, demo-testable by running
 `cd examples/demo && go run .` and exercising the new behavior.
-Phase 39 is five sub-phases (39a–e), each its own PR.
 
 ## Package layering for Phase 39
 
@@ -73,9 +73,14 @@ phases unlocked advanced apps (tmux, mouse-aware editors) and polish.
 
 ---
 
-## Active
+## Recently completed
 
-### Phase 39 — Native Splits, Panes, and Tabs
+### Phase 39 — Native Splits, Panes, and Tabs ✅
+
+**Status:** Done. Splits, focus routing, and tabs ship in `term/workspace`.
+Two items deferred (tracked under "Deferred" below): 39c keyboard pane
+resize (Cmd+Ctrl+Arrow; splits are fixed 50/50, so flex-ratio relayout +
+min-size floor go with it) and all of 39e persistence/config.
 
 **Why:** A defining feature of modern terminals is native window
 multiplexing, turning the emulator into a full workspace without
@@ -97,6 +102,7 @@ colliding with macOS window shortcuts and common shell bindings:
 | Close pane | Cmd+Shift+W |
 | Next pane | Cmd+] |
 | Previous pane | Cmd+[ |
+| Resize pane | Cmd+Ctrl+Arrow (grow active pane toward that edge) |
 | New tab | Cmd+T |
 | Close tab | Cmd+Ctrl+W |
 | Next tab | Cmd+Shift+] |
@@ -123,25 +129,25 @@ so the workspace is never empty.
 
 #### 39a — Pane model (`term/workspace`)
 
-- [ ] `pane` struct: owns a `*term.Term`, split-tree node, flex ratio,
+- [x] `pane` struct: owns a `*term.Term`, split-tree node, flex ratio,
       border style. Border is rendered by a shared go-gui canvas or
       container padding — not inside `widget_draw.go`.
-- [ ] Split tree: `SplitNode` with leaf-pane / horz-split / vert-split
+- [x] Split tree: `SplitNode` with leaf-pane / horz-split / vert-split
       variants; `Add()`, `Remove()`, `Find()`, `Walk()` primitives.
-- [ ] Each pane calls `term.New(w, cfg)` with `NoWindowHandler: true`.
-- [ ] `Cfg.OnTitle` wired per-pane so the workspace layer captures OSC 0/2
+- [x] Each pane calls `term.New(w, cfg)` with `NoWindowHandler: true`.
+- [x] `Cfg.OnTitle` wired per-pane so the workspace layer captures OSC 0/2
       for tab titles.
 
 **Verify:** Open two panes, `echo $$` in each returns different PIDs.
 
 #### 39b — Focus routing
 
-- [ ] Focused pane receives keyboard input via `SetFocused(true)`.
+- [x] Focused pane receives keyboard input via `SetFocused(true)`.
       All others get `SetFocused(false)` → dimmed cursor.
-- [ ] Mouse click in a pane's canvas sets focus to that pane.
-- [ ] Focus border: active pane gets a 1–2 px colored border (theme
+- [x] Mouse click in a pane's canvas sets focus to that pane.
+- [x] Focus border: active pane gets a 1–2 px colored border (theme
       accent); unfocused panes get a dimmed or invisible border.
-- [ ] Cmd+] / Cmd+[ cycle focus to next/previous pane in depth-first
+- [x] Cmd+] / Cmd+[ cycle focus to next/previous pane in depth-first
       split-tree order.
 
 **Verify:** Click between panes, keystrokes go to the focused one.
@@ -149,34 +155,41 @@ Cursor dims on unfocused panes.
 
 #### 39c — Split layout
 
-- [ ] Cmd+D: split focused pane vertically (side-by-side).
-- [ ] Cmd+Shift+D: split focused pane horizontally (stacked).
-- [ ] Drag handle (2–4 px wide between panes) to resize. Resize
-      distributes flex ratios; the handle is a go-gui Column/Row
-      with a mouse-drag handler.
-- [ ] Cmd+Shift+W: close focused pane (kill its PTY via `Term.Close`).
-- [ ] Re-layout on window resize: distribute space proportionally to
-      flex ratios. Min pane size enforced so no pane collapses to zero.
+- [x] Cmd+D: split focused pane vertically (side-by-side).
+- [x] Cmd+Shift+D: split focused pane horizontally (stacked).
+- [ ] **DEFERRED** — Keyboard pane resize: Cmd+Ctrl+Arrow grows the
+      active pane toward that edge (shrinking its split sibling). Mutates
+      the split node's flex `Ratio`; clamped to a min-pane-size floor.
+      Direct chords, no resize mode (kitty-style mode rejected as less
+      discoverable). No mouse-drag handle — keyboard only.
+      _(Splits are fixed 50/50; `Ratio` is unused in `splitView`.)_
+- [x] Cmd+Shift+W: close focused pane (kill its PTY via `Term.Close`).
+- [ ] **DEFERRED** — Re-layout: `splitView` honors each node's flex
+      `Ratio` (today it ignores it and splits 50/50). Window resize
+      distributes space proportionally; a min-pane-size floor keeps no
+      pane from collapsing to zero. Shared foundation for keyboard resize.
 
-**Verify:** Split → resize drag → close leaves remaining panes
-correctly laid out. Window resize distributes space.
+**Verify:** Split → Cmd+Ctrl+Arrow resize → close leaves remaining panes
+correctly laid out. Window resize distributes space by flex ratio.
 
 #### 39d — Tab model
 
-- [ ] Tab bar rendering above the pane layout: go-gui Row of tab
-      buttons + a "+" new-tab button. Each tab shows the active
-      pane's OSC 0/2 title (truncated to ~30 chars, ellipsized).
-- [ ] Cmd+T: new tab containing a single full-width pane running $SHELL.
-- [ ] Cmd+Ctrl+W: close current tab. Kills all panes in the tab,
+- [x] Tab bar rendering above the pane layout: go-gui Row of tab
+      buttons. Each tab shows the active pane's OSC 0/2 title
+      (truncated to ~30 chars, ellipsized). New-tab is Cmd+T.
+- [x] Cmd+T: new tab containing a single full-width pane running $SHELL.
+- [x] Cmd+Ctrl+W: close current tab. Kills all panes in the tab,
       removes the tab bar entry. Last tab → replaces with fresh pane.
-- [ ] Cmd+Shift+] / Cmd+Shift+[ (or Cmd+{ / Cmd+}): switch to
+- [x] Cmd+Shift+] / Cmd+Shift+[ (or Cmd+{ / Cmd+}): switch to
       next/previous tab.
-- [ ] Tab title updates when the active pane emits OSC 0/2.
+- [x] Tab title updates when the active pane emits OSC 0/2.
 
 **Verify:** Create tabs, switch between them, close tabs; pane split
 trees survive tab switches.
 
-#### 39e — Persistence / config
+#### 39e — Persistence / config (DEFERRED)
+
+Deferred wholesale; no implementation yet. Candidate for a future phase.
 
 - [ ] Save workspace to JSON: tab list → split tree → pane CWD, flex
       ratio, shell command (if non-default). Writes to
@@ -195,8 +208,14 @@ trees survive tab switches.
 
 ## Completed (archived)
 
-Phases 0–38 are done. Phase 31 (Disk-Backed Scrollback) was skipped — deferred
+Phases 0–39 are done. Phase 31 (Disk-Backed Scrollback) was skipped — deferred
 until real-world memory pressure warrants it.
+
+**Deferred from Phase 39** (candidates for a future phase):
+- 39c keyboard pane resize (Cmd+Ctrl+Arrow), plus the flex-ratio relayout
+  and min-size floor that ship with it (splits are currently fixed 50/50).
+- 39e persistence/config (workspace JSON save/restore, keybinding overrides,
+  `--workspace` / `--save-workspace` CLI flags).
 
 | Phase | Description | Key capability unlocked |
 |-------|-------------|------------------------|
@@ -239,6 +258,7 @@ until real-world memory pressure warrants it.
 | 36 | Kitty Graphics Protocol | `kitten icat` high-perf images |
 | 37 | Font ligatures | Fira Code `!=` → single glyph |
 | 38 | Bidirectional text (BiDi) + RTL | `echo "שלום"` RTL rendering |
+| 39 | Native splits, panes, tabs (`term/workspace`) | Built-in multiplexing; no `tmux` (keyboard pane-resize + 39e persistence deferred) |
 
 ## End-to-end verification (every phase)
 
