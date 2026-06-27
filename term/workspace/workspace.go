@@ -413,19 +413,39 @@ func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 	content := []gui.View{
 		gui.Text(gui.TextCfg{Text: title, TextStyle: style}),
 	}
+	// closeID names the "×" text shape so the hover handlers below can
+	// recolor it by ID without disturbing the title text.
+	closeID := tab.id + "-close"
 	if len(ws.tabs) > 1 {
 		// Fill spacer pushes × to the far right.
 		fill := tight(gui.FillFit)
+
+		// "×" is always laid out (reserving its slot avoids a reflow
+		// when it appears), but hidden on inactive tabs until the tab is
+		// hovered. The hover handlers mutate its color; the per-frame view
+		// rebuild restores these defaults when the pointer leaves, so no
+		// mouse-leave handling is needed.
+		closeColor := theme.ColorInterior // active tab: always visible
+		if !isActive {
+			closeColor = gui.Color{} // inactive: transparent until hovered
+		}
+
 		closeBtn := tight(gui.FitFit)
 		closeBtn.Padding = gui.SomeP(0, 0, 0, 4)
 		closeBtn.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 			ws.closeTabAt(idx)
 			e.IsHandled = true
 		}
+		// Direct hover over × brightens it to the high-contrast title color.
+		closeBtn.OnHover = func(layout *gui.Layout, _ *gui.Event, w *gui.Window) {
+			w.SetMouseCursorPointingHand()
+			setTextColorByID(layout, closeID, style.Color)
+		}
 		closeBtn.Content = []gui.View{
 			gui.Text(gui.TextCfg{
+				ID:        closeID,
 				Text:      "×",
-				TextStyle: gui.TextStyle{Color: theme.ColorInterior, Size: style.Size},
+				TextStyle: gui.TextStyle{Color: closeColor, Size: style.Size},
 			}),
 		}
 		content = append(content, gui.Row(fill), gui.Column(closeBtn))
@@ -438,8 +458,35 @@ func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 		ws.activateTab(idx)
 		e.IsHandled = true
 	}
+	// Hovering anywhere on an inactive tab reveals a muted "×" — the title
+	// text color at reduced opacity, so it stays legible against the panel.
+	// The child closeBtn's own OnHover (above) takes over when the pointer
+	// is directly on the glyph, brightening it to full opacity.
+	if len(ws.tabs) > 1 && !isActive {
+		revealColor := style.Color.WithOpacity(0.6)
+		outer.OnHover = func(layout *gui.Layout, _ *gui.Event, w *gui.Window) {
+			setTextColorByID(layout, closeID, revealColor)
+		}
+	}
 	outer.Content = []gui.View{gui.Row(inner)}
 	return gui.Column(outer)
+}
+
+// setTextColorByID recolors the text shape with the given ID found under
+// layout, depth-first. Returns true once recolored. Used by the tab hover
+// handlers to reveal/brighten the close "×" without touching the title.
+func setTextColorByID(layout *gui.Layout, id string, c gui.Color) bool {
+	if s := layout.Shape; s != nil && s.ID == id && s.TC != nil &&
+		s.TC.TextStyle != nil {
+		s.TC.TextStyle.Color = c
+		return true
+	}
+	for i := range layout.Children {
+		if setTextColorByID(&layout.Children[i], id, c) {
+			return true
+		}
+	}
+	return false
 }
 
 // activateTab switches to the tab at idx.
