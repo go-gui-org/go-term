@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"testing"
+
+	"github.com/go-gui-org/go-term/term"
 )
 
 // ---------------------------------------------------------------------------
@@ -116,5 +118,26 @@ func TestPrevTab_SingleTabNoop(t *testing.T) {
 	ws.PrevTab()
 	if ws.activeTab != 0 {
 		t.Errorf("PrevTab with one tab changed activeTab to %d, want 0", ws.activeTab)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LiveTermCount — zero/empty paths
+//
+// The counting branch (tm.Alive() → n++) needs real *term.Term values with a
+// live PTY and is covered visually via examples/demo. These exercise the
+// panic-safety guards: nil tabs slice and empty/nil terms maps return 0.
+// ---------------------------------------------------------------------------
+
+func TestLiveTermCount_NoTabsAndEmptyTermsReturnsZero(t *testing.T) {
+	if n := (&Workspace{}).LiveTermCount(); n != 0 {
+		t.Errorf("empty workspace: got %d, want 0", n)
+	}
+	ws := &Workspace{tabs: []*Tab{
+		{terms: map[string]*term.Term{}}, // non-nil empty map
+		{},                               // nil terms map
+	}}
+	if n := ws.LiveTermCount(); n != 0 {
+		t.Errorf("empty terms maps: got %d, want 0", n)
 	}
 }

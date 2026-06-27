@@ -172,6 +172,20 @@ func (ws *Workspace) Close() error {
 	return nil
 }
 
+// LiveTermCount returns the number of terminal panes with a live shell
+// process across all tabs. Useful for confirm-before-quit prompts.
+func (ws *Workspace) LiveTermCount() int {
+	n := 0
+	for _, tab := range ws.tabs {
+		for _, tm := range tab.terms {
+			if tm.Alive() {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // ActivePane returns the focused *term.Term, or nil.
 func (ws *Workspace) ActivePane() *term.Term {
 	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs) {
