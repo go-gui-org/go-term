@@ -909,8 +909,13 @@ func (t *Term) View(w *gui.Window) gui.View {
 		// UpdateView → clearViewStateLocked zeros idFocus (go-gui
 		// post-v0.26.0). Reassert after every full layout rebuild so
 		// keystrokes reach onChar/onKeyDown without requiring a
-		// prior click.
-		w.SetIDFocus(t.focusID)
+		// prior click. Skip while a modal dialog is up: go-gui routes
+		// keys to the dialog layer, and re-asserting here would steal
+		// idFocus back to the terminal, breaking Tab/Esc/Enter in the
+		// dialog. DialogDismiss restores focus to this pane on close.
+		if !w.DialogIsVisible() {
+			w.SetIDFocus(t.focusID)
+		}
 	}
 	// FillFill without explicit Width/Height: the Term may be embedded
 	// in a multi-pane layout where the parent container dictates

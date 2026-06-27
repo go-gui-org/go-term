@@ -24,21 +24,31 @@ func main() {
 		Width:  900,
 		Height: 600,
 		OnCloseRequest: func(w *gui.Window) {
+			// A confirm dialog is already up (e.g. a repeated Cmd+Q or
+			// a close-button click while confirming): don't stack a
+			// second one. DialogIsVisible also drives the quit-request
+			// dedup in go-gui, but the window-close path has no such
+			// guard, so check here too.
+			if w.DialogIsVisible() {
+				return
+			}
 			n := 0
 			if s != nil {
 				n = s.LiveTermCount()
 			}
 			if confirmOnQuit && n > 0 {
-				w.NativeConfirmDialog(gui.NativeConfirmDialogCfg{
-					Title: "Quit go-term?",
+				// Use go-gui's in-app dialog, not NativeConfirmDialog:
+				// go-gui renders and keyboard-routes it itself (Enter,
+				// Esc, Tab all work). The native NSAlert runModal path
+				// loses keyboard focus under the metal backend's manual
+				// event pump, and doesn't participate in the quit-request
+				// dedup, so it could stack duplicate dialogs.
+				w.Dialog(gui.DialogCfg{
+					DialogType: gui.DialogConfirm,
+					Title:      "Quit go-term?",
 					Body: fmt.Sprintf(
 						"%d active terminal(s) will be terminated. Quit anyway?", n),
-					Level: gui.AlertWarning,
-					OnDone: func(r gui.NativeAlertResult, w *gui.Window) {
-						if r.Status == gui.DialogOK {
-							w.Close()
-						}
-					},
+					OnOkYes: func(w *gui.Window) { w.Close() },
 				})
 				return
 			}
