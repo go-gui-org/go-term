@@ -915,7 +915,7 @@ func (t *Term) View(w *gui.Window) gui.View {
 	// FillFill without explicit Width/Height: the Term may be embedded
 	// in a multi-pane layout where the parent container dictates
 	// dimensions. Using w.WindowSize() here would overflow the pane.
-	// Theme menus are handled by the embedder (e.g. Session) via
+	// Theme menus are handled by the embedder (e.g. Workspace) via
 	// ThemeMenuItems and gui.ContextMenu — Term.View returns a plain
 	// Column so the embedder controls the wrapping.
 	colCfg.Sizing = gui.FillFill

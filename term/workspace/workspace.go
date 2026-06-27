@@ -1,4 +1,4 @@
-package session
+package workspace
 
 import (
 	"errors"
@@ -8,15 +8,15 @@ import (
 	"github.com/go-gui-org/go-term/term"
 )
 
-// Cfg configures a Session. All fields are optional.
+// Cfg configures a Workspace. All fields are optional.
 type Cfg struct {
 	TextStyle gui.TextStyle
 	Themes    []term.NamedTheme
 }
 
-// Session manages a multi-tab, multi-pane terminal workspace.
+// Workspace manages a multi-tab, multi-pane terminal workspace.
 // Create via New, render via View, tear down via Close.
-type Session struct {
+type Workspace struct {
 	w   *gui.Window
 	cfg Cfg
 
@@ -27,86 +27,86 @@ type Session struct {
 	prevOnEvent func(*gui.Event, *gui.Window)
 }
 
-// New creates a Session with a single tab containing a single terminal.
-func New(w *gui.Window, cfg Cfg) (*Session, error) {
+// New creates a Workspace with a single tab containing a single terminal.
+func New(w *gui.Window, cfg Cfg) (*Workspace, error) {
 	if w == nil {
-		return nil, errors.New("session.New: nil window")
+		return nil, errors.New("workspace.New: nil window")
 	}
-	s := &Session{
+	ws := &Workspace{
 		w:           w,
 		cfg:         cfg,
 		prevOnEvent: w.OnEvent,
 	}
-	w.OnEvent = s.onWindowEvent
-	s.registerCommands()
+	w.OnEvent = ws.onWindowEvent
+	ws.registerCommands()
 
-	_, err := s.addTab()
+	_, err := ws.addTab()
 	if err != nil {
 		return nil, err
 	}
-	return s, nil
+	return ws, nil
 }
 
 // addTab creates a new tab and appends it.
-func (s *Session) addTab() (*Tab, error) {
-	tabID := "tab-" + strconv.Itoa(s.nextTabID)
-	s.nextTabID++
-	tab, err := newTab(s.w, s.cfg, tabID, s.onPaneExit, s.onPaneFocus, s.onPaneTitle)
+func (ws *Workspace) addTab() (*Tab, error) {
+	tabID := "tab-" + strconv.Itoa(ws.nextTabID)
+	ws.nextTabID++
+	tab, err := newTab(ws.w, ws.cfg, tabID, ws.onPaneExit, ws.onPaneFocus, ws.onPaneTitle)
 	if err != nil {
 		return nil, err
 	}
-	s.tabs = append(s.tabs, tab)
-	s.activeTab = len(s.tabs) - 1
+	ws.tabs = append(ws.tabs, tab)
+	ws.activeTab = len(ws.tabs) - 1
 	return tab, nil
 }
 
 // removeTab closes all Terms in the tab and removes it. The last tab is
-// replaced with a fresh one (the session is never empty). Returns false
+// replaced with a fresh one (the workspace is never empty). Returns false
 // only when the replacement fails; the window has already been scheduled
-// for close in that case and callers must not touch session state further.
-func (s *Session) removeTab(idx int) bool {
-	if idx < 0 || idx >= len(s.tabs) {
+// for close in that case and callers must not touch workspace state further.
+func (ws *Workspace) removeTab(idx int) bool {
+	if idx < 0 || idx >= len(ws.tabs) {
 		return true
 	}
-	s.tabs[idx].closeAll()
-	s.tabs = append(s.tabs[:idx], s.tabs[idx+1:]...)
-	if len(s.tabs) == 0 {
-		if _, err := s.addTab(); err != nil {
-			s.w.Close()
+	ws.tabs[idx].closeAll()
+	ws.tabs = append(ws.tabs[:idx], ws.tabs[idx+1:]...)
+	if len(ws.tabs) == 0 {
+		if _, err := ws.addTab(); err != nil {
+			ws.w.Close()
 			return false
 		}
 	}
-	if s.activeTab >= len(s.tabs) {
-		s.activeTab = len(s.tabs) - 1
+	if ws.activeTab >= len(ws.tabs) {
+		ws.activeTab = len(ws.tabs) - 1
 	}
 	return true
 }
 
 // closeTabAt closes the tab at idx, focuses a survivor, and refreshes
 // the view. Used by the tab bar close button.
-func (s *Session) closeTabAt(idx int) {
-	wasActive := idx == s.activeTab
-	if !s.removeTab(idx) {
+func (ws *Workspace) closeTabAt(idx int) {
+	wasActive := idx == ws.activeTab
+	if !ws.removeTab(idx) {
 		return // window is closing
 	}
 	if wasActive {
 		// Focus the new active tab's pane.
-		tab := s.tabs[s.activeTab]
+		tab := ws.tabs[ws.activeTab]
 		if t, ok := tab.terms[tab.focused]; ok {
 			t.SetFocused(true)
 			t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 		}
 	}
-	s.refresh()
+	ws.refresh()
 }
 
 // onPaneFocus is called synchronously from Term.onClick when the user
 // clicks on a terminal pane.
-func (s *Session) onPaneFocus(leafID string) {
-	for _, tab := range s.tabs {
+func (ws *Workspace) onPaneFocus(leafID string) {
+	for _, tab := range ws.tabs {
 		if _, ok := tab.terms[leafID]; ok {
 			if tab.focused != leafID {
-				s.focusPaneInTab(tab, leafID)
+				ws.focusPaneInTab(tab, leafID)
 			}
 			return
 		}
@@ -114,23 +114,23 @@ func (s *Session) onPaneFocus(leafID string) {
 }
 
 // onPaneExit is called via QueueCommand when a shell exits.
-func (s *Session) onPaneExit(leafID string) {
-	for _, tab := range s.tabs {
+func (ws *Workspace) onPaneExit(leafID string) {
+	for _, tab := range ws.tabs {
 		if _, ok := tab.terms[leafID]; ok {
-			s.closePaneInTab(tab, leafID)
+			ws.closePaneInTab(tab, leafID)
 			return
 		}
 	}
 }
 
 // closePaneInTab closes a pane within a specific tab.
-func (s *Session) closePaneInTab(tab *Tab, leafID string) {
+func (ws *Workspace) closePaneInTab(tab *Tab, leafID string) {
 	tab.removePane(leafID)
 	if tab.root.isLeaf() {
 		removed := false
-		for i, t := range s.tabs {
+		for i, t := range ws.tabs {
 			if t == tab {
-				if !s.removeTab(i) {
+				if !ws.removeTab(i) {
 					return // window is closing
 				}
 				removed = true
@@ -140,12 +140,12 @@ func (s *Session) closePaneInTab(tab *Tab, leafID string) {
 		if removed {
 			// Tab was removed — focus the surviving tab's pane
 			// and rebuild the view.
-			tab := s.tabs[s.activeTab]
+			tab := ws.tabs[ws.activeTab]
 			if t, ok := tab.terms[tab.focused]; ok {
 				t.SetFocused(true)
 				t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 			}
-			s.refresh()
+			ws.refresh()
 			return
 		}
 	} else {
@@ -159,25 +159,25 @@ func (s *Session) closePaneInTab(tab *Tab, leafID string) {
 			}
 		}
 	}
-	s.refresh()
+	ws.refresh()
 }
 
 // Close tears down all terminals and restores the original OnEvent.
-func (s *Session) Close() error {
-	s.w.OnEvent = s.prevOnEvent
-	for _, tab := range s.tabs {
+func (ws *Workspace) Close() error {
+	ws.w.OnEvent = ws.prevOnEvent
+	for _, tab := range ws.tabs {
 		tab.closeAll()
 	}
-	s.tabs = nil
+	ws.tabs = nil
 	return nil
 }
 
 // ActivePane returns the focused *term.Term, or nil.
-func (s *Session) ActivePane() *term.Term {
-	if s.activeTab < 0 || s.activeTab >= len(s.tabs) {
+func (ws *Workspace) ActivePane() *term.Term {
+	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs) {
 		return nil
 	}
-	tab := s.tabs[s.activeTab]
+	tab := ws.tabs[ws.activeTab]
 	return tab.terms[tab.focused]
 }
 
@@ -196,36 +196,36 @@ func tight(sizing gui.Sizing) gui.ContainerCfg {
 // the title or layout. It also ensures the active pane has pane focus so
 // the invariant "active terminal always owns IDFocus" holds regardless of
 // which code path triggered the refresh.
-func (s *Session) refresh() {
-	if s.activeTab >= 0 && s.activeTab < len(s.tabs) {
-		s.w.SetTitle(s.tabs[s.activeTab].focusedTitle())
+func (ws *Workspace) refresh() {
+	if ws.activeTab >= 0 && ws.activeTab < len(ws.tabs) {
+		ws.w.SetTitle(ws.tabs[ws.activeTab].focusedTitle())
 		// Ensure the active pane owns IDFocus. No-op when already
 		// correct — cheap atomic compare-and-swap.
-		tab := s.tabs[s.activeTab]
+		tab := ws.tabs[ws.activeTab]
 		if t, ok := tab.terms[tab.focused]; ok {
 			t.SetFocused(true)
 		}
 	}
-	s.w.UpdateView(s.View)
+	ws.w.UpdateView(ws.View)
 }
 
-// View returns the session's go-gui view tree.
-func (s *Session) View(w *gui.Window) gui.View {
+// View returns the workspace's go-gui view tree.
+func (ws *Workspace) View(w *gui.Window) gui.View {
 	ww, wh := w.WindowSize()
-	if len(s.tabs) == 0 || s.activeTab >= len(s.tabs) {
+	if len(ws.tabs) == 0 || ws.activeTab >= len(ws.tabs) {
 		return gui.Column(tight(gui.FillFill))
 	}
-	tab := s.tabs[s.activeTab]
+	tab := ws.tabs[ws.activeTab]
 
-	split := s.splitView(tab.root, tab)
+	split := ws.splitView(tab.root, tab)
 
 	outer := tight(gui.FixedFixed)
 	outer.Width = float32(ww)
 	outer.Height = float32(wh)
-	if len(s.tabs) > 1 {
+	if len(ws.tabs) > 1 {
 		area := tight(gui.FillFill)
 		area.Content = []gui.View{split}
-		outer.Content = []gui.View{s.tabBarView(), gui.Column(area)}
+		outer.Content = []gui.View{ws.tabBarView(), gui.Column(area)}
 	} else {
 		outer.Content = []gui.View{split}
 	}
@@ -233,7 +233,7 @@ func (s *Session) View(w *gui.Window) gui.View {
 }
 
 // focusPaneInTab switches focus to the given leaf.
-func (s *Session) focusPaneInTab(tab *Tab, leafID string) {
+func (ws *Workspace) focusPaneInTab(tab *Tab, leafID string) {
 	if leafID == "" || leafID == tab.focused {
 		return
 	}
@@ -246,37 +246,37 @@ func (s *Session) focusPaneInTab(tab *Tab, leafID string) {
 		next.SetFocused(true)
 		next.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 	}
-	s.refresh()
+	ws.refresh()
 }
 
 // onWindowEvent routes window-level focus events to the active pane.
-func (s *Session) onWindowEvent(e *gui.Event, w *gui.Window) {
+func (ws *Workspace) onWindowEvent(e *gui.Event, w *gui.Window) {
 	if e == nil {
 		return
 	}
 	if e.Type == gui.EventFocused || e.Type == gui.EventUnfocused {
-		if pane := s.ActivePane(); pane != nil {
+		if pane := ws.ActivePane(); pane != nil {
 			pane.HandleWindowEvent(e)
 		}
 	}
-	if s.prevOnEvent != nil {
-		s.prevOnEvent(e, w)
+	if ws.prevOnEvent != nil {
+		ws.prevOnEvent(e, w)
 	}
 }
 
 // tabBarView renders the tab bar. Only called when 2+ tabs exist.
-func (s *Session) tabBarView() gui.View {
+func (ws *Workspace) tabBarView() gui.View {
 	theme := gui.CurrentTheme()
-	buttons := make([]gui.View, 0, len(s.tabs)*2)
-	for i, tab := range s.tabs {
+	buttons := make([]gui.View, 0, len(ws.tabs)*2)
+	for i, tab := range ws.tabs {
 		if i > 0 {
 			sep := tight(gui.FixedFill)
 			sep.Width = 1
 			sep.Color = theme.ColorBorder
 			buttons = append(buttons, gui.Column(sep))
 		}
-		isActive := i == s.activeTab
-		buttons = append(buttons, s.tabButton(tab, isActive, i))
+		isActive := i == ws.activeTab
+		buttons = append(buttons, ws.tabButton(tab, isActive, i))
 	}
 	bar := tight(gui.FillFit)
 	bar.Color = theme.ColorPanel
@@ -285,7 +285,7 @@ func (s *Session) tabBarView() gui.View {
 }
 
 // tabButton renders a single tab.
-func (s *Session) tabButton(tab *Tab, isActive bool, idx int) gui.View {
+func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 	theme := gui.CurrentTheme()
 	bg := theme.ColorPanel
 	style := theme.M5
@@ -300,13 +300,13 @@ func (s *Session) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 	content := []gui.View{
 		gui.Text(gui.TextCfg{Text: title, TextStyle: style}),
 	}
-	if len(s.tabs) > 1 {
+	if len(ws.tabs) > 1 {
 		// Fill spacer pushes × to the far right.
 		fill := tight(gui.FillFit)
 		closeBtn := tight(gui.FitFit)
 		closeBtn.Padding = gui.SomeP(0, 0, 0, 4)
 		closeBtn.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-			s.closeTabAt(idx)
+			ws.closeTabAt(idx)
 			e.IsHandled = true
 		}
 		closeBtn.Content = []gui.View{
@@ -322,7 +322,7 @@ func (s *Session) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 	outer := tight(gui.FillFit)
 	outer.Color = bg
 	outer.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-		s.activateTab(idx)
+		ws.activateTab(idx)
 		e.IsHandled = true
 	}
 	outer.Content = []gui.View{gui.Row(inner)}
@@ -330,35 +330,35 @@ func (s *Session) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 }
 
 // activateTab switches to the tab at idx.
-func (s *Session) activateTab(idx int) {
-	if idx < 0 || idx >= len(s.tabs) || idx == s.activeTab {
+func (ws *Workspace) activateTab(idx int) {
+	if idx < 0 || idx >= len(ws.tabs) || idx == ws.activeTab {
 		return
 	}
-	if old := s.activeTab; old >= 0 && old < len(s.tabs) {
-		oldTab := s.tabs[old]
+	if old := ws.activeTab; old >= 0 && old < len(ws.tabs) {
+		oldTab := ws.tabs[old]
 		if t, ok := oldTab.terms[oldTab.focused]; ok {
 			t.SetFocused(false)
 			t.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 		}
 	}
-	s.activeTab = idx
-	tab := s.tabs[idx]
+	ws.activeTab = idx
+	tab := ws.tabs[idx]
 	if t, ok := tab.terms[tab.focused]; ok {
 		t.SetFocused(true)
 		t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 	}
-	s.refresh()
+	ws.refresh()
 }
 
 // splitView renders a split tree using FillFill throughout. The parent
 // container determines actual dimensions, so the tree adapts correctly
 // when chrome (tab bar, etc.) consumes space. All FillFill siblings in
 // a split get equal space — matching the 0.5 default ratio.
-func (s *Session) splitView(node *splitNode, tab *Tab) gui.View {
+func (ws *Workspace) splitView(node *splitNode, tab *Tab) gui.View {
 	if node.First != nil {
 		const borderPx = float32(1)
-		first := s.splitView(node.First, tab)
-		second := s.splitView(node.Second, tab)
+		first := ws.splitView(node.First, tab)
+		second := ws.splitView(node.Second, tab)
 
 		if node.Dir == SplitVertical {
 			border := tight(gui.FixedFill)
@@ -383,41 +383,41 @@ func (s *Session) splitView(node *splitNode, tab *Tab) gui.View {
 	}
 	leaf := tight(gui.FillFill)
 	leaf.IDFocus = tm.FocusID()
-	leaf.Content = []gui.View{tm.View(s.w)}
+	leaf.Content = []gui.View{tm.View(ws.w)}
 	return gui.Column(leaf)
 }
 
 // CycleTheme applies the next theme from cfg.Themes to every pane in
 // every tab, wrapping after the last. The active pane's current theme
 // determines the starting point. No-op when no themes are configured.
-func (s *Session) CycleTheme() {
-	if len(s.cfg.Themes) == 0 {
+func (ws *Workspace) CycleTheme() {
+	if len(ws.cfg.Themes) == 0 {
 		return
 	}
 	cur := 0
-	if p := s.ActivePane(); p != nil {
+	if p := ws.ActivePane(); p != nil {
 		curTheme := p.Theme()
-		for i, nt := range s.cfg.Themes {
+		for i, nt := range ws.cfg.Themes {
 			if nt.Theme == curTheme {
 				cur = i
 				break
 			}
 		}
 	}
-	next := (cur + 1) % len(s.cfg.Themes)
-	for _, tab := range s.tabs {
+	next := (cur + 1) % len(ws.cfg.Themes)
+	for _, tab := range ws.tabs {
 		for _, tm := range tab.terms {
-			tm.SetTheme(s.cfg.Themes[next].Theme)
+			tm.SetTheme(ws.cfg.Themes[next].Theme)
 		}
 	}
-	s.w.UpdateWindow()
+	ws.w.UpdateWindow()
 }
 
 // onPaneTitle is called from the Term's OnTitle callback (via
-// QueueCommand, so on the main thread). It refreshes the session
+// QueueCommand, so on the main thread). It refreshes the workspace
 // view so the tab bar and window title reflect the new title.
-func (s *Session) onPaneTitle(leafID, title string) {
-	s.refresh()
+func (ws *Workspace) onPaneTitle(leafID, title string) {
+	ws.refresh()
 }
 
 // truncateTitle returns title truncated to max runes, appending "..." if

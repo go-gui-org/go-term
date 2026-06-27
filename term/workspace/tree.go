@@ -1,11 +1,11 @@
-// Package session manages multi-terminal workspaces with tabs and splits.
+// Package workspace manages multi-terminal workspaces with tabs and splits.
 //
-// Session sits above the term package, wiring *term.Term instances together
+// Workspace sits above the term package, wiring *term.Term instances together
 // through their public API. No pane logic lives inside term/widget.go.
 //
 // Model: workspace tabs + split panes (like kitty). Each tab contains a
 // binary split tree of independent terminals. No tabs within splits.
-package session
+package workspace
 
 // SplitDir is the split direction.
 type SplitDir uint8

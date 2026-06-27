@@ -7,20 +7,20 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-gui/gui/backend"
 	"github.com/go-gui-org/go-term/term"
-	"github.com/go-gui-org/go-term/term/session"
+	"github.com/go-gui-org/go-term/term/workspace"
 )
 
 func main() {
 	gui.SetTheme(gui.ThemeDark.WithBorders(true))
 
-	var s *session.Session
+	var s *workspace.Workspace
 	w := gui.NewWindow(gui.WindowCfg{
 		Title:  "go-term",
 		Width:  900,
 		Height: 600,
 		OnInit: func(w *gui.Window) {
 			var err error
-			s, err = session.New(w, session.Cfg{
+			s, err = workspace.New(w, workspace.Cfg{
 				TextStyle: gui.TextStyle{Family: "JetBrainsMono Nerd Font", Size: 12},
 				Themes: []term.NamedTheme{
 					{Name: "Default", Theme: term.DefaultTheme},
@@ -30,7 +30,7 @@ func main() {
 				},
 			})
 			if err != nil {
-				log.Fatalf("session.New: %v", err)
+				log.Fatalf("workspace.New: %v", err)
 			}
 			w.UpdateView(s.View)
 		},

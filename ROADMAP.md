@@ -20,7 +20,7 @@ Phase 39 is five sub-phases (39a–e), each its own PR.
 The pane/tab layer sits *above* `term`, not inside it. The `term`
 package already exposes the right surface: `Cfg.NoWindowHandler`,
 `Term.SetFocused`, `Term.HandleWindowEvent`, `Term.Rows/Cols/Write/PID/Alive`.
-A new package `term/session` owns the split tree, tab bar, keybindings,
+A new package `term/workspace` owns the split tree, tab bar, keybindings,
 layout persistence, and creates/destroys `*term.Term` instances.
 `term/widget.go` does not grow further — the pane manager wires Terms
 together through their public API only.
@@ -81,7 +81,7 @@ phases unlocked advanced apps (tmux, mouse-aware editors) and polish.
 multiplexing, turning the emulator into a full workspace without
 depending on `tmux`.
 
-**Package:** Pane/tab logic lives in a new `term/session` package.
+**Package:** Pane/tab logic lives in a new `term/workspace` package.
 The `term` package already exposes the necessary API
 (`Cfg.NoWindowHandler`, `SetFocused`, `HandleWindowEvent`, `Rows`,
 `Cols`, `Write`, `PID`, `Alive`, `OnExit`). No new surface in `term/`
@@ -103,12 +103,12 @@ colliding with macOS window shortcuts and common shell bindings:
 | Previous tab | Cmd+Shift+[ |
 
 Cmd+W is reserved for macOS window-close; panes close with Cmd+Shift+W
-instead. All bindings are overridable in session config (see 39e).
+instead. All bindings are overridable in workspace config (see 39e).
 
 **Focus traversal on close:** nearest sibling in the split tree; if none,
 the parent's other child; if the last pane in a tab closes, the tab is
 removed. Closing the last tab replaces it with a fresh single-pane tab
-so the session is never empty.
+so the workspace is never empty.
 
 #### Parser prerequisites (delivered in 39a or a small pre-PR)
 
@@ -120,7 +120,7 @@ so the session is never empty.
       (`CSI > 0 ; 0 ; 0 c`) so apps that query terminal identity
       don't fall back to lowest-common-denominator modes.
 
-#### 39a — Pane model (`term/session`)
+#### 39a — Pane model (`term/workspace`)
 
 - [ ] `pane` struct: owns a `*term.Term`, split-tree node, flex ratio,
       border style. Border is rendered by a shared go-gui canvas or
@@ -128,7 +128,7 @@ so the session is never empty.
 - [ ] Split tree: `SplitNode` with leaf-pane / horz-split / vert-split
       variants; `Add()`, `Remove()`, `Find()`, `Walk()` primitives.
 - [ ] Each pane calls `term.New(w, cfg)` with `NoWindowHandler: true`.
-- [ ] `Cfg.OnTitle` wired per-pane so the session layer captures OSC 0/2
+- [ ] `Cfg.OnTitle` wired per-pane so the workspace layer captures OSC 0/2
       for tab titles.
 
 **Verify:** Open two panes, `echo $$` in each returns different PIDs.
@@ -177,18 +177,18 @@ trees survive tab switches.
 
 #### 39e — Persistence / config
 
-- [ ] Save session to JSON: tab list → split tree → pane CWD, flex
+- [ ] Save workspace to JSON: tab list → split tree → pane CWD, flex
       ratio, shell command (if non-default). Writes to
-      `~/.config/go-term/session.json` by default.
-- [ ] Restore session on launch: parse JSON, spawn PTYs with saved CWD
+      `~/.config/go-term/workspace.json` by default.
+- [ ] Restore workspace on launch: parse JSON, spawn PTYs with saved CWD
       via OSC 7 write after shell starts, restore split ratios.
-- [ ] Keybinding map in session JSON; overrides the defaults listed
-      above. Stored per-session, not global.
-- [ ] CLI flag: `--session <path>` to load a named session file;
-      `--save-session <path>` to write on quit.
+- [ ] Keybinding map in workspace JSON; overrides the defaults listed
+      above. Stored per-workspace, not global.
+- [ ] CLI flag: `--workspace <path>` to load a named workspace file;
+      `--save-workspace <path>` to write on quit.
 
 **Verify:** Save a 3-tab layout with splits, quit, relaunch with
-`--session`. Terminals restore with correct CWDs, splits, and titles.
+`--workspace`. Terminals restore with correct CWDs, splits, and titles.
 
 ---
 
@@ -261,15 +261,15 @@ until real-world memory pressure warrants it.
 4. **Alt-screen scrollback:** suppress while alt is active (kitty/iTerm/ghostty default).
 5. **Cursor blink:** honor DECSCUSR; allow `Cfg.CursorBlink *bool` override.
 6. **Public API:** `Cfg`, `Term`, `Theme`, `NamedTheme`, `New`, `View`, `Close`, `Cwd`, `SetTheme`.
-7. **Pane/tab package location:** `term/session` — a layer above `term` that
+7. **Pane/tab package location:** `term/workspace` — a layer above `term` that
    wires `*term.Term` instances through their public API only. No pane logic
    inside `term/widget.go`.
 8. **Pane keybindings:** follow kitty/iTerm2 conventions. Cmd+D (vert split),
    Cmd+Shift+D (horz split), Cmd+[ / ] (cycle panes), Cmd+Shift+W (close pane).
    Cmd+W reserved for macOS window-close; not bound to pane actions.
-   All bindings overridable via session JSON.
+   All bindings overridable via workspace JSON.
 9. **Focus traversal on pane close:** nearest sibling → parent's other child →
    parent. Last pane in tab → close tab. Last tab → replace with fresh pane
-   so session never empty.
+   so workspace never empty.
 10. **Tab switching with no splits:** Cmd+Shift+[ / ] cycle tabs regardless
     of whether panes exist in the current tab. Cmd+[ / ] always cycle panes.
