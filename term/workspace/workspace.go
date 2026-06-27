@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strconv"
 
+	glyph "github.com/go-gui-org/go-glyph"
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-term/term"
 )
@@ -23,6 +24,9 @@ type Workspace struct {
 	tabs      []*Tab
 	activeTab int
 	nextTabID int
+
+	commands    []gui.Command // metadata source for the help overlay
+	helpVisible bool
 
 	prevOnEvent func(*gui.Event, *gui.Window)
 }
@@ -236,14 +240,109 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 	outer := tight(gui.FixedFixed)
 	outer.Width = float32(ww)
 	outer.Height = float32(wh)
+	var content []gui.View
 	if len(ws.tabs) > 1 {
 		area := tight(gui.FillFill)
 		area.Content = []gui.View{split}
-		outer.Content = []gui.View{ws.tabBarView(), gui.Column(area)}
+		content = []gui.View{ws.tabBarView(), gui.Column(area)}
 	} else {
-		outer.Content = []gui.View{split}
+		content = []gui.View{split}
 	}
+	if ws.helpVisible {
+		// Float children are excluded from normal flow, so the backdrop
+		// and panel overlay the panes without disturbing their layout.
+		content = append(content, ws.helpBackdrop(ww, wh), ws.helpPanel())
+	}
+	outer.Content = content
 	return gui.Column(outer)
+}
+
+// ToggleHelp shows or hides the keyboard-shortcut overlay and rebuilds
+// the view. Bound to Cmd+/ (toggle) and Escape (close, when visible).
+func (ws *Workspace) ToggleHelp() {
+	ws.helpVisible = !ws.helpVisible
+	ws.refresh()
+}
+
+// helpBackdrop is a window-sized translucent float behind the panel that
+// dims the panes and dismisses the overlay on click.
+func (ws *Workspace) helpBackdrop(ww, wh int) gui.View {
+	b := tight(gui.FixedFixed)
+	b.Width = float32(ww)
+	b.Height = float32(wh)
+	b.Float = true
+	b.FloatAnchor = gui.FloatTopLeft
+	b.FloatTieOff = gui.FloatTopLeft
+	b.FloatZIndex = 999
+	b.Color = gui.RGBA(0, 0, 0, 120)
+	b.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+		ws.helpVisible = false
+		ws.refresh()
+		e.IsHandled = true
+	}
+	return gui.Column(b)
+}
+
+// helpPanel is the centered float listing every keyboard shortcut. The
+// workspace section is generated from the live command registry; the
+// terminal section from term.Shortcuts(). Neither is hand-maintained.
+func (ws *Workspace) helpPanel() gui.View {
+	theme := gui.CurrentTheme()
+	rows := []gui.View{ws.helpHeader("Workspace", theme)}
+	for _, cmd := range ws.commands {
+		if cmd.Label == "" || !cmd.Shortcut.IsSet() {
+			continue
+		}
+		rows = append(rows, ws.helpRow(cmd.Label, cmd.Shortcut.String(), theme))
+	}
+	rows = append(rows, ws.helpHeader("Terminal", theme))
+	for _, s := range term.Shortcuts() {
+		rows = append(rows, ws.helpRow(s.Label, s.Keys, theme))
+	}
+
+	panel := tight(gui.FixedFit)
+	panel.Width = 460
+	panel.Float = true
+	panel.FloatAnchor = gui.FloatMiddleCenter
+	panel.FloatTieOff = gui.FloatMiddleCenter
+	panel.FloatZIndex = 1000
+	panel.Color = theme.ColorPanel
+	panel.ColorBorder = theme.ColorBorder
+	panel.SizeBorder = gui.SomeF(1)
+	panel.Radius = gui.SomeF(6)
+	panel.Padding = gui.SomeP(14, 18, 14, 18)
+	panel.Spacing = gui.SomeF(3)
+	// Swallow clicks so they don't fall through to the backdrop, which
+	// would dismiss the overlay when clicking inside the panel.
+	panel.OnClick = func(_ *gui.Layout, e *gui.Event, _ *gui.Window) { e.IsHandled = true }
+	panel.Content = rows
+	return gui.Column(panel)
+}
+
+// helpHeader renders a section label with spacing above it.
+func (ws *Workspace) helpHeader(text string, theme gui.Theme) gui.View {
+	style := theme.M5
+	style.Typeface = glyph.TypefaceBold
+	style.Color = theme.ColorActive
+	row := tight(gui.FillFit)
+	row.Padding = gui.SomeP(6, 0, 2, 0)
+	row.Content = []gui.View{gui.Text(gui.TextCfg{Text: text, TextStyle: style})}
+	return gui.Row(row)
+}
+
+// helpRow renders one "label … keys" line with the keys right-aligned.
+func (ws *Workspace) helpRow(label, keys string, theme gui.Theme) gui.View {
+	labelStyle := theme.M5
+	keyStyle := theme.M5
+	keyStyle.Color = theme.ColorActive
+	fill := tight(gui.FillFit)
+	row := tight(gui.FillFit)
+	row.Content = []gui.View{
+		gui.Text(gui.TextCfg{Text: label, TextStyle: labelStyle}),
+		gui.Row(fill),
+		gui.Text(gui.TextCfg{Text: keys, TextStyle: keyStyle}),
+	}
+	return gui.Row(row)
 }
 
 // focusPaneInTab switches focus to the given leaf.

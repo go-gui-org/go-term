@@ -86,6 +86,24 @@ func (ws *Workspace) registerCommands() {
 			Global:   true,
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.CycleTheme() },
 		},
+		// Help overlay.
+		{
+			ID:       "workspace.toggleHelp",
+			Label:    "Show / Hide Shortcuts",
+			Shortcut: gui.Shortcut{Key: gui.KeySlash, Modifiers: gui.ModSuper},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleHelp() },
+		},
+		{
+			// Escape dismisses the overlay. CanExecute gates on
+			// helpVisible so Escape still reaches the child process
+			// (vim, less, …) whenever the overlay is closed.
+			ID:         "workspace.closeHelp",
+			Shortcut:   gui.Shortcut{Key: gui.KeyEscape},
+			Global:     true,
+			CanExecute: func(_ *gui.Window) bool { return ws.helpVisible },
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.ToggleHelp() },
+		},
 	}
 	// Tab 1–9 shortcuts.
 	for i := 0; i < 9; i++ {
@@ -97,6 +115,10 @@ func (ws *Workspace) registerCommands() {
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.GoToTab(idx) },
 		})
 	}
+	// Retain Label+Shortcut metadata so the help overlay renders the live
+	// bindings rather than a hand-maintained copy. The tab 1–9 commands
+	// carry no Label and are skipped by the overlay.
+	ws.commands = cmds
 	_ = ws.w.RegisterCommands(cmds...)
 }
 

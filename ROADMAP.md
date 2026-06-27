@@ -101,6 +101,7 @@ colliding with macOS window shortcuts and common shell bindings:
 | Close tab | Cmd+Ctrl+W |
 | Next tab | Cmd+Shift+] |
 | Previous tab | Cmd+Shift+[ |
+| Show/hide shortcuts | Cmd+/ (Esc closes) |
 
 Cmd+W is reserved for macOS window-close; panes close with Cmd+Shift+W
 instead. All bindings are overridable in workspace config (see 39e).

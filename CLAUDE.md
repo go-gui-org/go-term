@@ -186,8 +186,9 @@ These are currently excluded from the roadmap. Each is a real chunk of work:
 - Comments wrap at ~90 columns.
 - Public API in `term/` is small on purpose: `Cfg`, `Term`, `NamedTheme`,
   `Theme`, `New`, `View`, `Close`, `Cwd`, `SetTheme`, `Rows`, `Cols`,
-  `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`. Keep it that
-  way; add unexported helpers freely.
+  `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`, plus
+  `Shortcuts`/`ShortcutInfo` (display metadata for help overlays). Keep it
+  that way; add unexported helpers freely.
 - Performance target: reduce heap allocations. The OnDraw hot path
   must not allocate per cell — keep `string(rune)` conversions and
   slice growth out of the inner loop if perf work begins.
