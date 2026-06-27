@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"math"
 	"strconv"
 
 	glyph "github.com/go-gui-org/go-glyph"
@@ -235,7 +236,15 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 	}
 	tab := ws.tabs[ws.activeTab]
 
-	split := ws.splitView(tab.root, tab)
+	// Thread the content-area pixel box into the split tree so each node
+	// can honor its flex Ratio. The tab bar (only present with 2+ tabs)
+	// consumes height above the panes.
+	contentW := float32(ww)
+	contentH := float32(wh)
+	if len(ws.tabs) > 1 {
+		contentH -= ws.tabBarHeight()
+	}
+	split := ws.splitView(tab.root, tab, contentW, contentH)
 
 	outer := tight(gui.FixedFixed)
 	outer.Width = float32(ww)
@@ -510,32 +519,52 @@ func (ws *Workspace) activateTab(idx int) {
 	ws.refresh()
 }
 
-// splitView renders a split tree using FillFill throughout. The parent
-// container determines actual dimensions, so the tree adapts correctly
-// when chrome (tab bar, etc.) consumes space. All FillFill siblings in
-// a split get equal space — matching the 0.5 default ratio.
-func (ws *Workspace) splitView(node *splitNode, tab *Tab) gui.View {
+// splitView renders a split tree into a box of boxW×boxH pixels, honoring
+// each node's flex Ratio. The first child of a split is sized Fixed along
+// the split axis (its ratio share, floored by ratioSplit); the second child
+// Fills the remainder so rounding never leaves a gap. Window resize re-runs
+// View with new dimensions, redistributing space proportionally.
+func (ws *Workspace) splitView(node *splitNode, tab *Tab, boxW, boxH float32) gui.View {
 	if node.First != nil {
 		const borderPx = float32(1)
-		first := ws.splitView(node.First, tab)
-		second := ws.splitView(node.Second, tab)
-
 		if node.Dir == SplitVertical {
+			avail := boxW - borderPx
+			firstW := ratioSplit(avail, node.Ratio)
+			first := ws.splitView(node.First, tab, firstW, boxH)
+			second := ws.splitView(node.Second, tab, avail-firstW, boxH)
+
+			firstC := tight(gui.FixedFill)
+			firstC.Width = firstW
+			firstC.Content = []gui.View{first}
 			border := tight(gui.FixedFill)
 			border.Width = borderPx
 			border.Color = gui.CurrentTheme().ColorBorder
+			secondC := tight(gui.FillFill)
+			secondC.Content = []gui.View{second}
+
 			row := tight(gui.FillFill)
-			row.Content = []gui.View{first, gui.Column(border), second}
+			row.Content = []gui.View{gui.Column(firstC), gui.Column(border), gui.Column(secondC)}
 			return gui.Row(row)
 		}
-		border := tight(gui.FixedFill)
+		avail := boxH - borderPx
+		firstH := ratioSplit(avail, node.Ratio)
+		first := ws.splitView(node.First, tab, boxW, firstH)
+		second := ws.splitView(node.Second, tab, boxW, avail-firstH)
+
+		firstC := tight(gui.FillFixed)
+		firstC.Height = firstH
+		firstC.Content = []gui.View{first}
+		border := tight(gui.FillFixed)
 		border.Height = borderPx
 		border.Color = gui.CurrentTheme().ColorBorder
+		secondC := tight(gui.FillFill)
+		secondC.Content = []gui.View{second}
+
 		col := tight(gui.FillFill)
-		col.Content = []gui.View{first, gui.Column(border), second}
+		col.Content = []gui.View{gui.Column(firstC), gui.Column(border), gui.Column(secondC)}
 		return gui.Column(col)
 	}
-	// Leaf: FillFill so the parent split determines actual size.
+	// Leaf: FillFill so the enclosing Fixed slot determines actual size.
 	// IDFocus ensures Tab navigation reaches this pane.
 	tm, ok := tab.terms[node.LeafID]
 	if !ok {
@@ -545,6 +574,23 @@ func (ws *Workspace) splitView(node *splitNode, tab *Tab) gui.View {
 	leaf.IDFocus = tm.FocusID()
 	leaf.Content = []gui.View{tm.View(ws.w)}
 	return gui.Column(leaf)
+}
+
+// tabBarHeight estimates the pixel height the tab bar consumes: one line of
+// the tab text style plus the 1px top and bottom padding in tabButton. A
+// measurer that reports a non-finite or non-positive line height is ignored
+// so the content-area height can never be poisoned by a bad measurement.
+func (ws *Workspace) tabBarHeight() float32 {
+	style := gui.CurrentTheme().M5
+	if tm := ws.w.TextMeasurer(); tm != nil {
+		if h := tm.FontHeight(style); h > 0 && !math.IsInf(float64(h), 1) {
+			return h + 2
+		}
+	}
+	if style.Size > 0 {
+		return style.Size + 2
+	}
+	return 18
 }
 
 // CycleTheme applies the next theme from cfg.Themes to every pane in

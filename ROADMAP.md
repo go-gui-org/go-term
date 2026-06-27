@@ -77,10 +77,9 @@ phases unlocked advanced apps (tmux, mouse-aware editors) and polish.
 
 ### Phase 39 — Native Splits, Panes, and Tabs ✅
 
-**Status:** Done. Splits, focus routing, and tabs ship in `term/workspace`.
-Two items deferred (tracked under "Deferred" below): 39c keyboard pane
-resize (Cmd+Ctrl+Arrow; splits are fixed 50/50, so flex-ratio relayout +
-min-size floor go with it) and all of 39e persistence/config.
+**Status:** Done. Splits, focus routing, tabs, flex-ratio layout, and
+keyboard pane resize ship in `term/workspace`. One item deferred (tracked
+under "Deferred" below): all of 39e persistence/config.
 
 **Why:** A defining feature of modern terminals is native window
 multiplexing, turning the emulator into a full workspace without
@@ -157,17 +156,18 @@ Cursor dims on unfocused panes.
 
 - [x] Cmd+D: split focused pane vertically (side-by-side).
 - [x] Cmd+Shift+D: split focused pane horizontally (stacked).
-- [ ] **DEFERRED** — Keyboard pane resize: Cmd+Ctrl+Arrow grows the
-      active pane toward that edge (shrinking its split sibling). Mutates
-      the split node's flex `Ratio`; clamped to a min-pane-size floor.
-      Direct chords, no resize mode (kitty-style mode rejected as less
-      discoverable). No mouse-drag handle — keyboard only.
-      _(Splits are fixed 50/50; `Ratio` is unused in `splitView`.)_
+- [x] Keyboard pane resize: Cmd+Ctrl+Arrow moves the focused pane's
+      nearest same-axis split divider toward that edge (Right/Down raise
+      the ratio, Left/Up lower it), so every arrow stays live regardless of
+      which side of the split the pane is on. Mutates the split node's flex
+      `Ratio` (`resizeActivePane` / `findResizeSplit`); clamped to
+      `[minRatio, maxRatio]` with a pixel floor at layout. Direct chords,
+      no resize mode. Keyboard only — no mouse-drag handle.
 - [x] Cmd+Shift+W: close focused pane (kill its PTY via `Term.Close`).
-- [ ] **DEFERRED** — Re-layout: `splitView` honors each node's flex
-      `Ratio` (today it ignores it and splits 50/50). Window resize
-      distributes space proportionally; a min-pane-size floor keeps no
-      pane from collapsing to zero. Shared foundation for keyboard resize.
+- [x] Re-layout: `splitView` threads a pixel box down the tree and honors
+      each node's flex `Ratio`. Window resize redistributes space
+      proportionally; `ratioSplit`'s `minPanePx` floor keeps no pane from
+      collapsing below 40px when there is room.
 
 **Verify:** Split → Cmd+Ctrl+Arrow resize → close leaves remaining panes
 correctly laid out. Window resize distributes space by flex ratio.
@@ -211,9 +211,7 @@ Deferred wholesale; no implementation yet. Candidate for a future phase.
 Phases 0–39 are done. Phase 31 (Disk-Backed Scrollback) was skipped — deferred
 until real-world memory pressure warrants it.
 
-**Deferred from Phase 39** (candidates for a future phase):
-- 39c keyboard pane resize (Cmd+Ctrl+Arrow), plus the flex-ratio relayout
-  and min-size floor that ship with it (splits are currently fixed 50/50).
+**Deferred from Phase 39** (candidate for a future phase):
 - 39e persistence/config (workspace JSON save/restore, keybinding overrides,
   `--workspace` / `--save-workspace` CLI flags).
 
@@ -258,7 +256,7 @@ until real-world memory pressure warrants it.
 | 36 | Kitty Graphics Protocol | `kitten icat` high-perf images |
 | 37 | Font ligatures | Fira Code `!=` → single glyph |
 | 38 | Bidirectional text (BiDi) + RTL | `echo "שלום"` RTL rendering |
-| 39 | Native splits, panes, tabs (`term/workspace`) | Built-in multiplexing; no `tmux` (keyboard pane-resize + 39e persistence deferred) |
+| 39 | Native splits, panes, tabs (`term/workspace`) | Built-in multiplexing; no `tmux` (39e persistence deferred) |
 
 ## End-to-end verification (every phase)
 

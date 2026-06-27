@@ -49,6 +49,36 @@ func (ws *Workspace) registerCommands() {
 			Global:   true,
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.PrevPane() },
 		},
+		// Pane resize: move the focused pane's nearest same-axis split
+		// divider toward the arrow direction.
+		{
+			ID:       "workspace.resizeLeft",
+			Label:    "Resize Pane Left",
+			Shortcut: gui.Shortcut{Key: gui.KeyLeft, Modifiers: gui.ModSuper | gui.ModCtrl},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.resizeActivePane(resizeLeft) },
+		},
+		{
+			ID:       "workspace.resizeRight",
+			Label:    "Resize Pane Right",
+			Shortcut: gui.Shortcut{Key: gui.KeyRight, Modifiers: gui.ModSuper | gui.ModCtrl},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.resizeActivePane(resizeRight) },
+		},
+		{
+			ID:       "workspace.resizeUp",
+			Label:    "Resize Pane Up",
+			Shortcut: gui.Shortcut{Key: gui.KeyUp, Modifiers: gui.ModSuper | gui.ModCtrl},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.resizeActivePane(resizeUp) },
+		},
+		{
+			ID:       "workspace.resizeDown",
+			Label:    "Resize Pane Down",
+			Shortcut: gui.Shortcut{Key: gui.KeyDown, Modifiers: gui.ModSuper | gui.ModCtrl},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.resizeActivePane(resizeDown) },
+		},
 		// Tab management.
 		{
 			ID:       "workspace.newTab",
