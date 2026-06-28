@@ -81,7 +81,7 @@ term/parser_apc.go       APC dispatch (Kitty Graphics Protocol)
         ▼
 term/grid.go             Cell buffer + cursor state + alt-screen. Pure data.
 term/grid_cursor.go      Cursor move, save/restore, DECSCUSR.
-term/grid_edit.go        Erase, insert/delete lines/chars.
+term/grid_edit.go        putCell write path; Put + streaming grapheme assembly.
 term/grid_mark.go        OSC 133 semantic shell marks.
 term/grid_reflow.go      Logical line reflow on resize.
 term/grid_scroll.go      Scroll regions; pixel-accurate ViewSubPx math.
@@ -140,22 +140,47 @@ Supports a modern xterm/kitty-compatible subset:
   16-color, 256-color, 24-bit truecolor.
 - CSI: cursor movement and positioning, erase in line/display, scroll
   regions (DECSTBM), IND/RI/NEL, IL/DL/ICH/DCH/SU/SD, DECSCUSR (cursor
-  shape/blink), DA1, tab stop clear (TBC).
+  shape/blink), DA1 (advertises Sixel via extension 4: `CSI ?1;2;4c`),
+  DA2, XTVERSION (`CSI > q` → `DCS >| go-term(ver) ST`), tab stop clear
+  (TBC).
 - Modes: alt screen (1049/1047/47), mouse (1000/1002/1003/1006/1016),
   bracketed paste (2004), focus reporting (1004), synchronized updates
-  (2026).
+  (2026), grapheme clustering (2027 — always on; DECRQM reports it
+  permanently set, DECSET/DECRST are no-ops).
 - Kitty Keyboard Protocol: `CSI > u` / `< u` / `= u` / `? u` (push/pop/
   set/query); key-release events; left/right modifier distinction.
 - DEC Special Graphics: `SI`/`SO`, `ESC (0` / `ESC (B`.
 - OSC: window title (0/1/2), CWD (7), hyperlinks (8), desktop
   notifications (9/777), dynamic colors (10/11/12), clipboard (52),
   semantic shell marks (133), iTerm2 inline images (1337).
-- DCS: DECRQSS, XTGETTCAP, sixel graphics, synchronized updates.
+- DCS: DECRQSS, XTGETTCAP (incl. `Smulx`/`Setulc` to advertise styled +
+  colored underlines), sixel graphics, synchronized updates.
 - APC: Kitty Graphics Protocol (transmit/display/place/delete; PNG, raw
   RGBA/RGB; chunked base64).
 
 When extending: add cases in the appropriate `parser_*.go` file.
 Don't let parser code reach into go-gui — it must stay grid-only.
+
+### Grapheme clusters
+
+Printable input is segmented into grapheme clusters (uniseg), not single
+runes. The streaming path is `grid.PutRune` (accumulates runes into `gphBuf`,
+commits a leading cluster only once a boundary is observed) and
+`grid.FlushGrapheme` (commits the pending cluster). The parser flushes before
+any control byte in ground state — so DSR/CPR see the advanced cursor — and at
+end of `Feed`. A cluster split exactly across the read buffer is the sole
+casualty (programs emit whole clusters per write). `grid.Put` is the
+immediate single-rune path, kept for tests and direct callers.
+
+Cluster width comes from uniseg (handles VS15/VS16, ZWJ, regional-indicator
+flags, combining marks), not per-rune `runeWidth`. Storage: `cell.Ch` holds
+the base rune; multi-codepoint clusters set `cell.clusterID`, indexing the
+grid-level intern pool `grid.clusters` (0 = single rune — the common,
+allocation-free case). The pool grows only, deduped via `clusterIDs`, capped
+at `maxClusters`; on exhaustion cells degrade to the base rune (width kept).
+Renderers (`drawFgPass`/`emitCell`/cursor) and selection copy use
+`cellText` / the pool; cluster cells always emit individually (run coalescing
+is base-rune-only). This is what Mode 2027 advertises.
 
 ### Keyboard input
 

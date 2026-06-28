@@ -1,17 +1,108 @@
 package term
 
-// Put writes ch at the cursor with current attrs and advances. Wraps
-// to the next line at right margin; scrolls up at bottom. Honors east-
-// asian wide / emoji widths via runeWidth: a width-2 rune occupies the
-// current cell and the cell to its right (the "continuation"), and
-// wraps early if only one column remains. Width-0 runes (combining
-// marks, ZWJ, etc.) are dropped — Phase 11 doesn't model combining.
+import (
+	"unicode/utf8"
+
+	"github.com/rivo/uniseg"
+)
+
+// Put writes a single rune at the cursor with current attrs and advances.
+// It is the immediate, non-clustering path used by tests and direct callers;
+// the parser's streaming input goes through PutRune/FlushGrapheme instead.
+// Honors east-asian wide / emoji widths via runeWidth; width-0 runes
+// (combining marks, ZWJ, etc.) are dropped.
 func (g *grid) Put(ch rune) {
 	ch = g.translateRune(ch)
 	w := runeWidth(ch)
 	if w == 0 {
 		return
 	}
+	g.putCell(ch, 0, w)
+}
+
+// PutRune feeds one rune of streaming input into the grapheme assembler.
+// Runes are accumulated into g.gphBuf and a leading cluster is committed to
+// the grid only once a cluster boundary is observed (i.e. when the next
+// rune cannot extend it). The trailing, possibly-incomplete cluster stays
+// pending until a boundary, FlushGrapheme, or end of Feed. Callers must
+// FlushGrapheme before any cursor/erase/report operation so the cursor
+// position reflects committed cells.
+func (g *grid) PutRune(r rune) {
+	r = g.translateRune(r)
+	g.gphBuf = utf8.AppendRune(g.gphBuf, r)
+	// With at most one rune appended since the last commit, FirstGraphemeCluster
+	// returns a non-empty rest only when r began a new cluster. The loop is
+	// belt-and-braces against a multi-boundary rest.
+	for {
+		cluster, rest, width, _ := uniseg.FirstGraphemeCluster(g.gphBuf, -1)
+		if len(rest) == 0 {
+			return // buffer is a single (still-growing) cluster; keep pending
+		}
+		g.commitCluster(cluster, width)
+		n := copy(g.gphBuf, rest)
+		g.gphBuf = g.gphBuf[:n]
+	}
+}
+
+// FlushGrapheme commits any pending grapheme cluster(s) to the grid. Called
+// before control sequences (so DSR/CPR see the advanced cursor) and at the
+// end of a Feed batch (so a trailing grapheme renders without lag).
+func (g *grid) FlushGrapheme() {
+	for len(g.gphBuf) > 0 {
+		cluster, rest, width, _ := uniseg.FirstGraphemeCluster(g.gphBuf, -1)
+		g.commitCluster(cluster, width)
+		n := copy(g.gphBuf, rest)
+		g.gphBuf = g.gphBuf[:n]
+	}
+}
+
+// commitCluster writes one grapheme cluster (UTF-8 bytes b, display width
+// width as measured by uniseg) to the grid at the cursor. Single-rune
+// clusters store the rune directly in cell.Ch; multi-rune clusters intern
+// the string and store the resulting clusterID. Width-0 clusters (a lone
+// combining/format run with no spacing base — only possible when split
+// across Feed calls) are dropped, matching legacy behavior.
+func (g *grid) commitCluster(b []byte, width int) {
+	if width <= 0 {
+		return
+	}
+	if width > 2 {
+		width = 2
+	}
+	base, sz := utf8.DecodeRune(b)
+	var cid uint16
+	if sz != len(b) {
+		cid = g.internCluster(string(b))
+	}
+	g.putCell(base, cid, width)
+}
+
+// internCluster returns the clusterID for s, allocating one on first sight.
+// Returns 0 (degrade to base rune) when the pool is exhausted.
+func (g *grid) internCluster(s string) uint16 {
+	if id, ok := g.clusterIDs[s]; ok {
+		return id
+	}
+	if len(g.clusters) >= maxClusters {
+		return 0
+	}
+	if g.clusterIDs == nil {
+		g.clusterIDs = make(map[string]uint16, 64)
+		g.clusters = make([]string, 1, 64) // index 0 reserved (clusterID 0 = none)
+	}
+	id := uint16(len(g.clusters))
+	g.clusters = append(g.clusters, s)
+	g.clusterIDs[s] = id
+	return id
+}
+
+// putCell writes a glyph (base rune ch, optional clusterID, display width w)
+// at the cursor with current attrs and advances. Wraps to the next line at
+// the right margin; scrolls up at bottom. A width-2 glyph occupies the
+// current cell and the cell to its right (the "continuation"), wrapping early
+// if only one column remains. Width and any clustering are resolved by the
+// caller; this is the shared write path for Put and commitCluster.
+func (g *grid) putCell(ch rune, clusterID uint16, w int) {
 	justWrapped := false
 	if !g.AutoWrap {
 		if g.CursorC >= g.Cols {
@@ -50,6 +141,7 @@ func (g *grid) Put(ch rune) {
 		Ch: ch, FG: g.CurFG, BG: g.CurBG,
 		Attrs: g.CurAttrs, Width: uint8(w), LinkID: g.CurLinkID,
 		ULStyle: g.CurULStyle, ULColor: g.CurULColor,
+		clusterID: clusterID,
 	}
 	if c := g.At(g.CursorR, g.CursorC); c != nil {
 		*c = head

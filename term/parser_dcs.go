@@ -56,6 +56,15 @@ func xtgettcapValue(name string) (string, bool) {
 		return "256", true
 	case "RGB":
 		return "8/8/8", true
+	case "Smulx":
+		// Styled underlines: SGR 4:x (single/double/curly/dotted/dashed).
+		// Presence advertises support; the value is the ncurses-standard
+		// extended-underline-style cap.
+		return "\x1b[4:%p1%dm", true
+	case "Setulc":
+		// Colored underlines: SGR 58 (underline color). Kitty-standard cap
+		// that decomposes a single RGB parameter into r:g:b.
+		return "\x1b[58:2::%p1%{65536}%/%d:%p1%{256}%/%{256}%m%d:%p1%{256}%m%dm", true
 	case "kcuu1":
 		return "\x1b[A", true
 	case "kcud1":

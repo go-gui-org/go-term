@@ -47,6 +47,11 @@ func (p *parser) dispatchCSI(final byte) {
 				if p.param(0, 0) == 0 && p.onReply != nil {
 					p.onReply([]byte(da2Reply))
 				}
+			case 'q':
+				// XTVERSION (CSI > q / CSI > 0 q): report name + version.
+				if p.param(0, 0) == 0 && p.onReply != nil {
+					p.onReply([]byte(xtversionReply))
+				}
 			}
 		case '<':
 
@@ -173,6 +178,10 @@ func (p *parser) applyDECMode(set bool) {
 			if !set {
 				p.g.SyncActive = false
 			}
+		case 2027:
+			// Grapheme clustering is unconditional (PutRune always clusters),
+			// so DECSET/DECRST 2027 are accepted as no-ops. decModeState
+			// reports it permanently set.
 		case 7:
 			p.g.AutoWrap = set
 		case 6:
@@ -241,6 +250,8 @@ func (p *parser) decModeState(n int) int {
 		return boolState(p.g.BracketedPaste)
 	case 2026:
 		return boolState(p.g.SyncOutput)
+	case 2027:
+		return 3 // PERMANENTLY_SET — grapheme clustering is always on
 	default:
 		return 0
 	}

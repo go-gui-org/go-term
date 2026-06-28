@@ -164,15 +164,22 @@ func rgbColor(r, g, b uint8) uint32 {
 // ULColor uses the same packed uint32 encoding as FG/BG. DefaultColor
 // means "use the cell's foreground color." ULStyle selects the decoration
 // shape; 0 (ulNone) means no underline regardless of ULColor.
+//
+// clusterID handles multi-codepoint grapheme clusters (combining marks,
+// ZWJ emoji, flags, variation selectors). 0 means the cell is a single
+// rune in Ch (the overwhelmingly common case, no sidecar lookup). Non-zero
+// indexes grid.clusters for the full cluster string; Ch still holds the
+// base (first) rune so width/RTL/geometry checks stay allocation-free.
 type cell struct {
-	Ch      rune
-	FG      uint32 // packed Color (palette index, RGB, or DefaultColor)
-	BG      uint32
-	ULColor uint32 // packed underline color; DefaultColor = use FG
-	Attrs   uint8
-	Width   uint8
-	ULStyle uint8  // ulNone..ulDashed
-	LinkID  uint16 // 0 = no link; non-zero indexes grid.links
+	Ch        rune
+	FG        uint32 // packed Color (palette index, RGB, or DefaultColor)
+	BG        uint32
+	ULColor   uint32 // packed underline color; DefaultColor = use FG
+	Attrs     uint8
+	Width     uint8
+	ULStyle   uint8  // ulNone..ulDashed
+	LinkID    uint16 // 0 = no link; non-zero indexes grid.links
+	clusterID uint16 // 0 = single rune (Ch); non-zero indexes grid.clusters
 }
 
 func defaultCell() cell {
@@ -194,6 +201,7 @@ func blankCell(fg, bg uint32, attrs uint8) cell {
 func (c cell) continuation() cell {
 	c.Ch = 0
 	c.Width = 0
+	c.clusterID = 0
 	return c
 }
 
@@ -228,6 +236,11 @@ const (
 
 // maxMarks caps the mark ring to avoid unbounded growth in very long sessions.
 const maxMarks = 10000
+
+// maxClusters caps the grapheme-cluster intern pool. clusterID is uint16, so
+// 65535 distinct multi-codepoint clusters is the hard ceiling; once full, new
+// clusters degrade to their base rune (width preserved, combining marks lost).
+const maxClusters = 1<<16 - 1
 
 // grid is a fixed-size character grid. All public methods are safe for
 // concurrent callers via Mu; the parser writes under Mu, OnDraw reads
@@ -275,6 +288,21 @@ type grid struct {
 	// don't re-allocate them from nil every time.
 	searchRunes []rune
 	searchCols  []int
+
+	// clusters interns multi-codepoint grapheme cluster strings. A cell's
+	// clusterID indexes here (0 = none, index 0 is unused). clusterIDs is the
+	// reverse map for deduplication. The pool grows only, bounded by the
+	// number of distinct clusters ever seen (capped at maxClusters); short
+	// sessions and a tiny realistic emoji/grapheme set keep it small.
+	clusters   []string
+	clusterIDs map[string]uint16
+
+	// gphBuf holds the UTF-8 of the in-progress grapheme cluster during
+	// streaming input (PutRune/FlushGrapheme). Reused across cells; only the
+	// trailing incomplete cluster is ever retained. Carries across Feed calls
+	// only when input ends mid-rune (so a cluster split by the read buffer
+	// still joins). Direct Put (tests) bypasses this entirely.
+	gphBuf []byte
 
 	// Scrollback ring of rows that have scrolled off the top. Index 0
 	// is oldest, Len()-1 is newest. Cap of 0 disables scrollback (rows

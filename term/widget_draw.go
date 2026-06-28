@@ -55,6 +55,16 @@ func (t *Term) termRuneStr(r rune) string {
 	return s
 }
 
+// cellText returns the text to render for a cell: the interned grapheme
+// cluster string for multi-codepoint cells, otherwise the (cached) single
+// rune. Caller holds grid.Mu (OnDraw does).
+func (t *Term) cellText(c cell) string {
+	if c.clusterID != 0 && int(c.clusterID) < len(t.grid.clusters) {
+		return t.grid.clusters[c.clusterID]
+	}
+	return t.termRuneStr(c.Ch)
+}
+
 func isGeometryGlyph(r rune) bool {
 	switch {
 	case r >= 0x2500 && r <= 0x25FF: // Box Drawing, Block Elements, Geometric Shapes
@@ -606,8 +616,10 @@ func (t *Term) drawFgPass(ds *drawState) {
 			// that differ from the monospace cellW measured via 'M'.
 			// Accumulated drift inside a coalesced text run can cause
 			// visual overlap with the next run. Emit individually so
-			// each glyph stays pinned to its cell origin.
-			if cell.Ch > 0x7F {
+			// each glyph stays pinned to its cell origin. Multi-codepoint
+			// clusters (clusterID != 0) must also emit individually so the
+			// full cluster string is drawn even when the base rune is ASCII.
+			if cell.Ch > 0x7F || cell.clusterID != 0 {
 				t.flushRun(dc, r, style, yOff, &fr)
 				t.emitCell(dc, float32(c)*t.cellW, float32(r)*t.cellH+yOff, cell, k, style)
 				continue
@@ -847,7 +859,7 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 		dc.FilledRect(x, y, t.cellW, t.cellH, fillColor.WithOpacity(opacity))
 		cs := style
 		cs.Color = t.grid.Theme.bg(cell)
-		dc.Text(x, y, t.termRuneStr(cell.Ch), cs)
+		dc.Text(x, y, t.cellText(cell), cs)
 	}
 }
 
@@ -921,7 +933,7 @@ func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell cell, k runKey, 
 	cs.Typeface = k.typeface
 	cs.Underline = false
 	cs.Strikethrough = k.strikethrough
-	dc.Text(x, y, t.termRuneStr(cell.Ch), cs)
+	dc.Text(x, y, t.cellText(cell), cs)
 	if k.ulStyle != ulNone {
 		t.drawUnderlineDecor(dc, x, y, float32(cell.Width)*t.cellW, k.ulStyle, k.ulColor)
 	}

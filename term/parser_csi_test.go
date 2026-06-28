@@ -991,6 +991,47 @@ func TestParser_DECRQM_Unrecognized(t *testing.T) {
 	}
 }
 
+func TestParser_DECRQM_Grapheme2027(t *testing.T) {
+	// Mode 2027 (grapheme clustering) is always on; DECRQM reports it
+	// permanently set (value 3), and DECSET/DECRST are no-ops.
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	feed(t, g, p, []byte("\x1b[?2027$p"))
+	want := []byte("\x1b[?2027;3$y")
+	if !bytes.Equal(reply, want) {
+		t.Errorf("DECRQM 2027 reply = %q, want %q", reply, want)
+	}
+	// A reset attempt must not change the permanently-set report.
+	reply = nil
+	feed(t, g, p, []byte("\x1b[?2027l\x1b[?2027$p"))
+	if !bytes.Equal(reply, want) {
+		t.Errorf("DECRQM 2027 after reset = %q, want %q", reply, want)
+	}
+}
+
+func TestParser_XTVERSION(t *testing.T) {
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	feed(t, g, p, []byte("\x1b[>q"))
+	want := []byte("\x1bP>|go-term(" + termVersion + ")\x1b\\")
+	if !bytes.Equal(reply, want) {
+		t.Errorf("XTVERSION reply = %q, want %q", reply, want)
+	}
+}
+
+func TestParser_XTVERSION_NonZeroParam(t *testing.T) {
+	// CSI > 1 q is not an XTVERSION request; must not reply.
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	feed(t, g, p, []byte("\x1b[>1q"))
+	if len(reply) != 0 {
+		t.Errorf("CSI > 1 q should not reply, got %q", reply)
+	}
+}
+
 func TestParser_DECRQM_NoDollar(t *testing.T) {
 	// CSI ? 25 p without $ intermediate must not trigger DECRQM. Mode 25
 	// has no meaning as a bare CSI final, so it falls through
