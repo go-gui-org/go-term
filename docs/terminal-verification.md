@@ -39,11 +39,18 @@ go test ./term -run TestConformance
 | Scroll regions, insert/delete line/char, IND/RI/NEL | `grid_test.go`, `parser_test.go` |
 | Alt screen save/restore | `grid_test.go`, `parser_test.go`, `emulator_replay_test.go` |
 | OSC title and OSC 7 working-directory updates | `parser_test.go`, `emulator_replay_test.go` |
-| Device replies (`DA1`, `DECRQSS`, `XTGETTCAP`) | `parser_test.go`, `emulator_replay_test.go` |
+| Device replies (`DA1`, `DA2`, `DECRQSS`, `DECRQM`, `XTGETTCAP`) | `parser_test.go`, `parser_csi_test.go`, `emulator_replay_test.go` |
 | Bracketed paste, focus reporting, mouse modes, sync output | `parser_test.go`, `widget_test.go`, `emulator_replay_test.go` |
+| Grapheme clusters, wide chars, emoji, VS15/16, ZWJ, flags (Mode 2027) | `grapheme_test.go`, `grid_test.go` |
+| Bidirectional text (UAX#9) | `bidi_test.go` |
+| Graphics: Sixel, Kitty (APC), iTerm2 (OSC 1337) | `graphics_test.go`, `parser_apc_test.go`, `parser_iterm2_test.go` |
+| Kitty Keyboard Protocol, function/keypad keys | `widget_keyboard_test.go`, `parser_csi_test.go` |
+| Semantic shell marks (OSC 133), search | `grid_mark_test.go`, `grid_search_test.go` |
 | PTY startup and resize plumbing | `pty_test.go` |
 | GUI-only selection, scrolling, clipboard, redraw behavior | `widget_test.go` plus manual demo runs |
+| Workspace splits, tabs, persistence, keybinding config | `term/workspace/*_test.go` |
 | Conformance smoke tests (vttest-parity) | `conformance_test.go` |
+| Fuzzed parser input | `parser_fuzz_test.go` |
 
 ## Manual Checks
 
@@ -74,6 +81,9 @@ Validate:
 | Paste | multi-line paste does not auto-execute in bracketed paste mode |
 | Alt screen | `vim` and `less` restore the main buffer on exit |
 | Mouse/focus | mouse-aware apps and focus events do not leak garbage text |
+| Splits/tabs | Cmd+D / Cmd+Shift+D split, Cmd+T new tab, Cmd+/ overlay |
+| Persistence | quit with `--save-workspace`, relaunch with `--workspace`, layout restores |
+| Graphics | `img2sixel` / `kitten icat` / `imgcat` render inline images |
 
 ## External Conformance Tools
 
