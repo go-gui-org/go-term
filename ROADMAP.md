@@ -77,9 +77,9 @@ phases unlocked advanced apps (tmux, mouse-aware editors) and polish.
 
 ### Phase 39 — Native Splits, Panes, and Tabs ✅
 
-**Status:** Done. Splits, focus routing, tabs, flex-ratio layout, and
-keyboard pane resize ship in `term/workspace`. One item deferred (tracked
-under "Deferred" below): all of 39e persistence/config.
+**Status:** 39a–39d done. Splits, focus routing, tabs, flex-ratio
+layout, and keyboard pane resize ship in `term/workspace`. 39e
+(persistence/config) is now planned in detail below — not yet implemented.
 
 **Why:** A defining feature of modern terminals is native window
 multiplexing, turning the emulator into a full workspace without
@@ -187,22 +187,203 @@ correctly laid out. Window resize distributes space by flex ratio.
 **Verify:** Create tabs, switch between them, close tabs; pane split
 trees survive tab switches.
 
-#### 39e — Persistence / config (DEFERRED)
+#### 39e — Persistence / config
 
-Deferred wholesale; no implementation yet. Candidate for a future phase.
+**Goal:** Save the full workspace (tabs → split trees → per-pane CWD,
+ratio, optional command) to JSON and restore it on launch, plus
+user-overridable keybindings. All persistence logic lives in
+`term/workspace`; the only `term/` change is a new `Cfg.Dir` field so a
+restored pane spawns its shell in the saved directory.
 
-- [ ] Save workspace to JSON: tab list → split tree → pane CWD, flex
-      ratio, shell command (if non-default). Writes to
-      `~/.config/go-term/workspace.json` by default.
-- [ ] Restore workspace on launch: parse JSON, spawn PTYs with saved CWD
-      via OSC 7 write after shell starts, restore split ratios.
-- [ ] Keybinding map in workspace JSON; overrides the defaults listed
-      above. Stored per-workspace, not global.
-- [ ] CLI flag: `--workspace <path>` to load a named workspace file;
-      `--save-workspace <path>` to write on quit.
+**Design decisions (proposed):**
 
-**Verify:** Save a 3-tab layout with splits, quit, relaunch with
-`--workspace`. Terminals restore with correct CWDs, splits, and titles.
+1. **CWD restore via `term.Cfg.Dir`, not OSC 7.** Add `Cfg.Dir string`
+   to `term.Cfg`; `startPTY` sets `cmd.Dir` when non-empty (falls back to
+   the process CWD when blank or the dir no longer exists — never fail the
+   spawn). OSC 7 is the shell *reporting* its CWD *to* the terminal; it
+   cannot set the directory, so the original roadmap note was wrong.
+   Writing `cd <dir>` into the PTY is rejected: it races shell startup and
+   pollutes shell history.
+2. **Capture uses existing API.** `Term.Cwd()` already returns the
+   OSC-7-reported directory; ratios, dirs, focus, and the split tree are
+   all in-memory. No new capture-side `term/` surface.
+3. **Schema is versioned.** Top-level `{"version":1, ...}`. Unknown
+   future versions → log + start fresh rather than erroring out.
+4. **Command field is reserved but unused for now.** The workspace only
+   ever spawns the default shell today, so `command`/`args` serialize as
+   empty. Field exists so a future custom-command pane round-trips.
+5. **Atomic writes.** Save writes to a temp file in the same dir then
+   `os.Rename` over the target, so a crash mid-write never corrupts an
+   existing workspace file.
+6. **Human config lives in a separate, hand-edited file — not the layout
+   JSON.** The two have opposite lifecycles: layout is machine-written and
+   overwritten on every quit; config is hand-authored and read-only to the
+   app. Bundling them would clobber user edits on save. Config uses a
+   comment-friendly INI-style format (`[section]` headers, `key = value`
+   lines), extensible to themes and future settings — not JSON, not TOML.
+   Keybindings are the `[keybindings]` section. See 39e-4.
+7. **Config root: prefer `~/.config/go-term`, fall back per platform.**
+   Terminal tooling conventionally uses `~/.config` even on macOS, so
+   `configDir()` resolves: (1) `$XDG_CONFIG_HOME/go-term` when
+   `XDG_CONFIG_HOME` is set; else (2) `~/.config/go-term` when `~/.config`
+   exists; else (3) `os.UserConfigDir()/go-term` (→ `~/Library/Application
+   Support/go-term` on macOS). On Linux (1)/(2) already match
+   `os.UserConfigDir()`, so the extra macOS-only check is the only
+   behavioral difference. Layout = `workspace.json`, human config =
+   `config` (extensionless, like git's). A single `configDir() (string,
+   error)` helper builds both paths.
+
+**Schema (`version 1`):**
+
+```json
+{
+  "version": 1,
+  "activeTab": 0,
+  "tabs": [
+    {
+      "activeLeaf": "tab-0-pane-1",
+      "root": {
+        "dir": "vertical",
+        "ratio": 0.5,
+        "first":  { "leafID": "tab-0-pane-0", "cwd": "/home/u",     "command": "", "args": null },
+        "second": { "leafID": "tab-0-pane-1", "cwd": "/home/u/src", "command": "", "args": null }
+      }
+    }
+  ]
+}
+```
+
+Keybindings are **not** in this file; they live in a separate hand-edited
+`config` file (see 39e-4).
+
+A node is a leaf when `first`/`second` are absent and `leafID` is set;
+otherwise it is a split. Leaf IDs are regenerated deterministically on
+load (`<tabID>-pane-N`); the persisted IDs are advisory, used only to wire
+`activeLeaf` back to the right node.
+
+##### 39e-1 — `term.Cfg.Dir` spawn directory
+
+- [ ] Add `Cfg.Dir string` (doc: "working directory for the child; empty
+      = inherit process CWD").
+- [ ] `startPTY` sets `cmd.Dir = cfg.Dir` when non-empty and the path
+      exists (`os.Stat` guard); otherwise leave unset.
+- [ ] Test: spawn with `Dir` set, run `pwd`, assert output matches.
+
+**Verify:** `term.New` with `Cfg.Dir: "/tmp"` → first prompt's `pwd` is
+`/tmp`.
+
+##### 39e-2 — Serialization (`term/workspace/persist.go`)
+
+- [ ] `persistedWorkspace`, `persistedTab`, `persistedNode` structs with
+      JSON tags matching the schema above.
+- [ ] `(*Workspace).snapshot() persistedWorkspace`: walk `ws.tabs`, each
+      tab's `root` tree, emit per-leaf `Cwd()` + ratio. Pure, no I/O,
+      grabs no locks beyond reading already-main-thread state.
+- [ ] `(*Workspace).Save(path string) error`: marshal `snapshot()`,
+      `MkdirAll(dir)`, atomic temp-write + rename.
+- [ ] `func configDir() (string, error)`: resolve in order —
+      `$XDG_CONFIG_HOME/go-term` if set, else `~/.config/go-term` if
+      `~/.config` exists, else `os.UserConfigDir()/go-term` (→ `~/Library/
+      Application Support/go-term` on macOS). `defaultWorkspacePath` =
+      `configDir()/workspace.json`; the human config file is `configDir()/config`.
+- [ ] Round-trip test: build a 2-tab / nested-split workspace in memory,
+      `snapshot()`, marshal, unmarshal, assert tree shape + ratios + dirs.
+
+##### 39e-3 — Restore on launch
+
+- [ ] `func Restore(w *gui.Window, cfg Cfg, path string) (*Workspace, error)`:
+      read+parse JSON; on missing file, empty file, or version mismatch,
+      fall back to `New(w, cfg)` (log the reason, never hard-fail).
+- [ ] `buildTabFromPersisted`: rebuild the `splitNode` tree, regenerate
+      leaf IDs, spawn each pane via `addPane` with `term.Cfg.Dir` set from
+      the saved `cwd`. Reuse the existing `termCfg` plumbing — thread a
+      per-pane `dir` argument through `newTab`/`addPane`/`termCfg`.
+- [ ] Restore `activeTab` and each tab's `focused` leaf; assert the
+      focus invariant ("active terminal owns IDFocus") via `refresh()`.
+- [ ] Test (no real PTY): inject a fake term constructor or assert tree
+      structure pre-spawn; confirms IDs/ratios/active selections wire up.
+
+##### 39e-4 — Human config file (`config`, INI-style)
+
+Hand-edited config in its own file, never touched by save-on-quit.
+INI-style: `[section]` headers; `key = value` lines; `#` starts a comment;
+blank lines ignored; whitespace around `=` trimmed. Designed to grow
+(themes, font, scrollback) — Phase 39e implements only `[keybindings]`.
+In that section the key is the short command name (suffix after
+`workspace.`), so the file stays terse:
+
+```
+# ~/Library/Application Support/go-term/config   (macOS)
+# ~/.config/go-term/config                        (Linux)
+
+[keybindings]
+# <command> = <chord>.  Unlisted commands keep their defaults.
+splitVertical = Cmd+E
+closePane     = Cmd+W
+nextTab       = Ctrl+Tab
+```
+
+- [ ] Minimal INI parser `parseConfig(r io.Reader) (config, []error)`:
+      tracks the current `[section]`, returns a struct with a
+      `keybindings map[string]string` (and room for future sections);
+      collects per-line errors without aborting. Keep it ~40 lines, no dep.
+- [ ] Define a **canonical, platform-independent** chord format: always
+      `+`-separated, `Cmd`=`ModSuper`, plus `Ctrl`/`Alt`/`Shift`, then the
+      key name (`A`–`Z`, `0`–`9`, `F1`–`F25`, `[`/`]`/`/`, `Tab`, `Enter`,
+      arrows, etc.). Do **not** reuse `gui.Shortcut.String()` — verified
+      display-only and platform-dependent (bare `⌘⇧` glyphs, no separator
+      on darwin; `Super+` text elsewhere) with no inverse parser in go-gui.
+- [ ] `parseShortcut(string) (gui.Shortcut, bool)` mapping modifier/key
+      names → exported `gui.Mod*` / `gui.Key*` constants. Keep the name
+      table local to workspace; go-gui's `keyNameMap` is unexported.
+      (`formatShortcut` only needed if a "dump current bindings" command is
+      added later — defer it.)
+- [ ] `Cfg.ConfigPath string` (empty = default `configDir()/config`).
+      Loaded in `New`/`Restore`; missing file is fine (defaults, no error).
+- [ ] `registerCommands` resolves each `[keybindings]` entry to a full
+      command ID, parses the chord, and swaps the default `Shortcut` when
+      it parses cleanly; parse errors and unknown command names are logged
+      and the default retained. Guard against a chord that collides with
+      another command (go-gui `RegisterCommand` already rejects duplicate
+      shortcuts — surface that error, keep the default).
+- [ ] The help overlay already renders from the live command registry, so
+      overridden bindings display correctly with no extra work.
+- [ ] Tests: valid `[keybindings]` overrides the right commands;
+      comments/blank lines/section headers handled; bad chord and unknown
+      command reported but don't abort; collision falls back to default.
+
+##### 39e-5 — CLI flags + save-on-quit (`examples/demo/main.go`)
+
+- [ ] `flag` parsing: `--workspace <path>` (load via `Restore`, default
+      path when flag omitted but file exists), `--save-workspace <path>`
+      (write on quit; defaults to the load path when set).
+- [ ] Wire save into the existing `OnCloseRequest` / quit path so the
+      layout is written before `w.Close()` (both the confirm-Yes branch
+      and the no-confirm branch).
+- [ ] Optional: a `Cmd+S`-style "Save Workspace" command — **defer unless
+      trivial**; quit-time save covers the verify scenario.
+
+**Verify:** Save a 3-tab layout with nested splits and distinct CWDs per
+pane, quit, relaunch with `--workspace`. Tabs, split trees, ratios, active
+tab/pane, and per-pane CWDs all restore. Add a `[keybindings]` override to
+the `config` file and confirm the new chord works and shows in the Cmd+/
+overlay.
+
+**Open questions:**
+
+1. ~~Confirm go-gui exposes a `gui.Shortcut` (de)serialization helper.~~
+   **Resolved:** it does not. `Shortcut.String()` exists but is display-only
+   and platform-dependent (mac glyphs, no separator) with no inverse, so
+   39e-4 hand-rolls `parseShortcut`. Keybindings also moved out of the
+   layout JSON into a separate hand-edited `config` file (INI-style,
+   extensible to themes/other settings) rooted at `os.UserConfigDir()`, so
+   save-on-quit never clobbers hand edits.
+2. Should restore validate that saved `cwd` paths still exist and silently
+   drop to `$HOME` when gone (proposed: yes, in 39e-1's stat guard)?
+3. Default-path behavior with no flags: auto-load+auto-save the default
+   file (sticky workspace, like kitty session) vs require explicit flags
+   (proposed: explicit flags only for the demo; auto-load is a later
+   opt-in to avoid surprising the existing single-shell demo UX).
 
 ---
 
@@ -211,9 +392,9 @@ Deferred wholesale; no implementation yet. Candidate for a future phase.
 Phases 0–39 are done. Phase 31 (Disk-Backed Scrollback) was skipped — deferred
 until real-world memory pressure warrants it.
 
-**Deferred from Phase 39** (candidate for a future phase):
-- 39e persistence/config (workspace JSON save/restore, keybinding overrides,
-  `--workspace` / `--save-workspace` CLI flags).
+**Phase 39e** (persistence/config) — planned in detail under "Recently
+completed → Phase 39", not yet implemented: workspace JSON save/restore,
+keybinding overrides, `--workspace` / `--save-workspace` CLI flags.
 
 | Phase | Description | Key capability unlocked |
 |-------|-------------|------------------------|
