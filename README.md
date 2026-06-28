@@ -25,7 +25,12 @@ can rely on and what may still shift.
 | `Term.View(w)` | method | Signature stable. The returned `gui.View` tree is an implementation detail. |
 | `Term.Close()` | method | Signature stable. Idempotent — safe to call multiple times. |
 | `Term.Cwd()` | method | Signature stable. |
-| `Term.SetTheme(th)` | method | Signature stable. |
+| `Term.SetTheme(th)` / `Term.Theme()` | method | Signature stable. |
+| `Term.Rows()` / `Term.Cols()` | method | Signature stable. Current grid dimensions. |
+| `Term.Write(p)` | method | Signature stable. Inject bytes as if typed. |
+| `Term.PID()` / `Term.Alive()` | method | Signature stable. Child process status. |
+| `Term.SetFocused(v)` / `Term.HandleWindowEvent(e)` | method | Signature stable. Multi-`Term` embedding (a pane manager routes focus + events). |
+| `Shortcuts()` / `ShortcutInfo` | func / struct | Signature stable. Display metadata for help overlays. |
 | `MaxGridDim` | constant | Stable. Grid rows/cols are clamped to this value. |
 | `MaxScrollbackCap` | constant | Stable. Scrollback rows are capped at this value. |
 
@@ -58,8 +63,8 @@ values won't shift in ways that break contrast.
   `New` starts the shell, `View` renders it, and `Close` tears it down.
 - **Render pass structure** — coalesced bg/fg/cursor passes, dirty-row
   tracking, and the tessellation cache are internal optimizations.
-- **`gui.DrawCanvas` IDs and versions** — the canvas ID `"term-canvas"` and
-  the draw-version counter are internal.
+- **`gui.DrawCanvas` IDs and versions** — the per-`Term` canvas ID
+  (`"term-canvas-N"`) and the draw-version counter are internal.
 - **Parser dispatch sites** — `dispatchCSI`, `dispatchOSC`, `dispatchDCS`,
   `dispatchAPC` are internal. Adding a new protocol extension doesn't change
   the public API.
@@ -86,9 +91,12 @@ pre-1.0 interpretation:
 - **Read the changelog** before bumping the minor version.
 - **Use `Cfg` zero values** for everything you don't explicitly set. New
   fields added in a minor bump are always zero-value-safe.
-- **Don't reach past the four public methods** — if you need something that
-  `View`/`Close`/`Cwd`/`SetTheme` doesn't provide, open an issue rather than
-  depending on internal state.
+- **Stick to the documented methods** — `View`/`Close`/`Cwd`/`SetTheme` cover
+  the single-`Term` case; the multi-`Term` embedding methods
+  (`SetFocused`/`HandleWindowEvent`/`Rows`/`Cols`/`Write`/`PID`/`Alive`) cover
+  pane managers. If you need something none of them provide, open an issue
+  rather than depending on internal state. (Or embed `term/workspace`, which
+  already wires these together — see below.)
 
 ---
 
@@ -121,6 +129,7 @@ pre-1.0 interpretation:
 | Keyboard | Printable chars, arrows, Enter, Backspace (DEL), Delete, Page Up/Down, Home/End, Ctrl+letter, F1–F12, numeric keypad |
 | Alt/Meta keys | ESC-prefix encoding for Alt+key combinations |
 | Kitty Keyboard Protocol | `CSI u` push/pop/set/query; key-release events; left/right modifier distinction |
+| IME composition | Inline pre-edit string rendered + underlined at the cursor; caret rect reported via `IMESetRect` (CJK, dead keys, emoji picker) |
 | Bracketed paste | DECSET 2004; strips embedded `\x1b[201~` markers |
 | Focus reporting | DECSET 1004 |
 
@@ -159,15 +168,44 @@ pre-1.0 interpretation:
 | OSC 1337 | iTerm2 inline images |
 | DCS sixel | Sixel graphics; 256-register color; RLE; up to 4096×4096 px; 256 retained per grid |
 | APC kitty | Kitty Graphics Protocol; chunked base64 transmission; PNG / raw RGBA / raw RGB; off-screen store; delete by ID |
-| DECRQSS / XTGETTCAP | Replied via `onReply` → PTY write |
-| Synchronized Updates | DCS `?2026` |
+| DECRQSS / XTGETTCAP | Terminfo/SGR capability queries; replied via `onReply` → PTY write. `Smulx`/`Setulc` advertise styled + colored underlines |
+| DA1 / DA2 | Primary attributes advertise Sixel (`CSI ?1;2;4c`); secondary identifies as go-term |
+| XTVERSION | `CSI > q` → `DCS >\| go-term(ver) ST` |
+| XTWINOPS | `CSI 14 t` / `CSI 16 t` pixel-geometry reports (text area / cell size); manipulation ops ignored |
+| DECRQM | Reports DEC private-mode state (set / reset / unrecognized) so apps can probe capabilities |
+| Synchronized Updates | DCS `?2026` — batches a frame so partial repaints don't flicker |
+| Grapheme clustering | Mode 2027 (always on); DECRQM reports it permanently set |
 
 ### Internationalization
 
 | Feature | Notes |
 |---|---|
-| East Asian Wide | CJK and wide emoji via `uniseg`; correct cursor advance and half-cell erasure |
-| Combining / ZWJ | Zero-width codepoints dropped (not double-advanced) |
+| Grapheme clusters | Input segmented into clusters via `uniseg` (Mode 2027, always on; advertised to `ucs-detect`); multi-codepoint clusters stored in a per-grid intern pool |
+| East Asian Wide | CJK and wide emoji; cluster width from `uniseg`; correct cursor advance and half-cell erasure |
+| Combining / ZWJ / VS15-16 / flags | Combining marks, ZWJ sequences, variation selectors, and regional-indicator flag pairs render as a single cell — not double-advanced |
+| Bidirectional text | Unicode BiDi Algorithm (UAX#9); RTL scripts (Hebrew, Arabic) reordered for display |
+
+### Workspace (splits, tabs, persistence)
+
+Native window multiplexing — no `tmux` required — lives in the
+`term/workspace` package, a layer *above* `term` that creates and wires
+`*term.Term` instances through their public API. The single-shell `term`
+widget has no awareness of panes.
+
+| Feature | Notes |
+|---|---|
+| Split panes | Vertical / horizontal splits over a flex-ratio split tree; keyboard-driven resize |
+| Tabs | Tab bar showing each active pane's OSC 0/2 title; create / close / cycle |
+| Focus routing | Click or keyboard cycles focus; active pane gets an accent border, others dim |
+| Persistence | Full layout (tabs → split trees → per-pane CWD + ratio) saved to versioned JSON, restored on launch |
+| Keybindings | Hand-edited INI-style `config` file (`[keybindings]` section); kitty/iTerm2-style defaults, all overridable |
+| Config root | `$XDG_CONFIG_HOME/go-term`, else `~/.config/go-term`, else `os.UserConfigDir()/go-term` |
+
+Default bindings (overridable): Cmd+D / Cmd+Shift+D split, Cmd+Shift+W close
+pane, Cmd+] / Cmd+[ cycle panes, Cmd+Ctrl+Arrow resize, Cmd+T new tab,
+Cmd+Ctrl+W close tab, Cmd+Shift+] / Cmd+Shift+[ cycle tabs, Cmd+/ shortcut
+overlay. The bundled `examples/demo` is built on `term/workspace` and accepts
+`--workspace <path>` / `--save-workspace <path>` flags.
 
 ### Performance
 
@@ -201,7 +239,8 @@ go run .
 
 Try `ls --color=always`, `vim`, `htop`, and window resize — then
 `stty size` inside the embedded shell to confirm the child process received
-the resize signal.
+the resize signal. Split panes with Cmd+D / Cmd+Shift+D, open tabs with
+Cmd+T, and press Cmd+/ for the full shortcut overlay.
 
 ---
 
@@ -246,10 +285,30 @@ func main() {
 
 ```go
 term.Cfg{
-    ScrollbackRows: 10000,          // default 5000
-    CursorBlink:    ptr(true),      // override DECSCUSR blink state
-    AllowOSC52Write: true,           // allow shell apps to set clipboard
-    OnTitle:        func(s string) { /* window title change */ },
+    // Process
+    Command: "/bin/bash",            // default: $SHELL, fallback /bin/sh
+    Args:    []string{"-l"},          // args for Command (or the default shell)
+    Env:     []string{"FOO=bar"},     // appended to os.Environ(); "KEY=" unsets
+    Dir:     "/tmp",                  // child working dir (empty = inherit CWD)
+
+    // Display
+    ScrollbackRows:  10000,           // default 5000; negative disables history
+    CursorBlink:     ptr(true),       // override DECSCUSR blink state
+    TextStyle:       gui.TextStyle{}, // override default monospace style
+    Themes:          myThemes,        // right-click theme menu; first is default
+    BellFlashDuration: 0,             // 0 = 100 ms; negative disables visual bell
+    ScrollbarWidth:    0,             // 0 = 4 px; negative hides the scrollbar
+    DisableGraphics:   false,         // skip Sixel/Kitty/iTerm2 image decoding
+
+    // Behavior / callbacks
+    AllowOSC52Write: true,            // allow shell apps to set the clipboard
+    OnTitle:  func(s string) {},      // OSC 0/1/2 title (nil → win.SetTitle)
+    OnNotify: func(title, body string) {}, // OSC 9/777 (nil → native notify)
+    OnExit:   func() {},              // child process exited
+    OnClickFocus: func() {},          // canvas clicked (multi-Term focus)
+
+    // Embedding
+    NoWindowHandler: true,            // a pane manager owns window-event dispatch
 }
 ```
 
@@ -264,7 +323,11 @@ Three layers; dependencies flow strictly downward. Each layer is split
 across multiple files by concern.
 
 ```
-examples/demo/main.go         gui.NewWindow + term.New + backend.Run
+examples/demo/main.go         gui.NewWindow + workspace.Restore + backend.Run
+        │
+        ▼
+term/workspace/*.go      Pane split tree, tab bar, keybindings, JSON
+                         persistence. Wires *term.Term via its public API.
         │
         ▼
 term/widget.go           Term struct, New, View, Close; reader goroutine.
@@ -273,6 +336,7 @@ term/widget_keyboard.go  onChar, onKeyDown, onKeyUp; KKP encoding.
 term/widget_mouse.go     Mouse button/motion/wheel; SGR encoding.
 term/widget_clipboard.go Cmd+C/V; opt-in OSC 52 clipboard write.
 term/widget_scroll.go    Scrollbar, momentum scroll, ViewSubPx math.
+term/widget_draw_graphics.go Graphics render pass (sixel/kitty/iTerm2).
         │
         ▼
 term/parser.go           VT state machine entry point. Bytes → grid mutations.
@@ -284,7 +348,7 @@ term/parser_apc.go       APC dispatch (Kitty Graphics Protocol)
         ▼
 term/grid.go             Cell buffer + cursor state + alt-screen. Pure data.
 term/grid_cursor.go      Cursor move, save/restore, DECSCUSR.
-term/grid_edit.go        Erase, insert/delete lines/chars.
+term/grid_edit.go        putCell write path; Put + streaming grapheme assembly.
 term/grid_mark.go        OSC 133 semantic shell marks.
 term/grid_reflow.go      Logical line reflow on resize.
 term/grid_scroll.go      Scroll regions; pixel-accurate ViewSubPx math.
@@ -330,9 +394,8 @@ and exercise resize, redraw, selection, paste, and application compatibility
 
 | Feature | Reason |
 |---|---|
-| IME composition / dead keys | Requires platform input-method integration |
 | Windows / ConPTY | PTY layer is POSIX-only |
-| Native splits and tabs | Phase 39 — active development (see ROADMAP.md) |
+| Disk-backed scrollback | Deferred until real-world memory pressure warrants it |
 
 ---
 

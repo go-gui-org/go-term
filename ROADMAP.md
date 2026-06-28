@@ -50,7 +50,7 @@ term/parser_apc.go       APC dispatch (Kitty Graphics Protocol)
         ▼
 term/grid.go             Cell buffer + cursor state + alt-screen. Pure data.
 term/grid_cursor.go      Cursor move, save/restore, DECSCUSR.
-term/grid_edit.go        Erase, insert/delete lines/chars.
+term/grid_edit.go        putCell write path; Put + streaming grapheme assembly.
 term/grid_mark.go        OSC 133 semantic shell marks.
 term/grid_reflow.go      Logical line reflow on resize.
 term/grid_scroll.go      Scroll regions; pixel-accurate ViewSubPx math.
@@ -444,8 +444,8 @@ keybinding overrides via `~/.config/go-term/config`, `--workspace` /
 1. `go vet ./...` clean.
 2. `go build ./...` clean.
 3. `go test -race -count=1 ./...` passes.
-4. `cd examples/demo && go run .` and verify visually.
-   For 39a+ also run `cd examples/panedemo && go run .`.
+4. `cd examples/demo && go run .` and verify visually. The demo is built on
+   `term/workspace`, so splits/tabs/persistence are exercised there directly.
 5. Smoke matrix: `ls --color`, `cat /etc/hosts`, `vim` + `:q!`, resize → `stty size`, Ctrl+C interrupts `sleep 100`.
 6. CI: `go vet`, `go build ./examples/...`, `go test -race -count=1 ./...`, `golangci-lint`.
 7. Multi-Term integration test: two `Term` instances with `NoWindowHandler`,
