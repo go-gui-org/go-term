@@ -48,7 +48,7 @@ func TestGrapheme_VS15(t *testing.T) {
 // cell with the whole cluster preserved.
 func TestGrapheme_ZWJ(t *testing.T) {
 	g, p := newParserGrid(1, 10)
-	seq := "\U0001f469‍\U0001f680" // 👩‍🚀 woman + ZWJ + rocket
+	seq := "\U0001f469\u200d\U0001f680" // woman + ZWJ + rocket
 	feedStr(t, g, p, seq)
 	if g.CursorC != 2 {
 		t.Fatalf("cursor col = %d, want 2", g.CursorC)
@@ -103,7 +103,7 @@ func TestGrapheme_FlushBeforeControl(t *testing.T) {
 	g, p := newParserGrid(1, 10)
 	var replies [][]byte
 	p.SetReplyHandler(func(b []byte) { replies = append(replies, append([]byte(nil), b...)) })
-	feedStr(t, g, p, "\U0001f469‍\U0001f680\x1b[6n") // ZWJ emoji then DSR
+	feedStr(t, g, p, "\U0001f469\u200d\U0001f680\x1b[6n") // ZWJ emoji then DSR
 	if len(replies) != 1 {
 		t.Fatalf("got %d replies, want 1", len(replies))
 	}

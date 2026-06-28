@@ -29,6 +29,17 @@ func (g *grid) Put(ch rune) {
 // position reflects committed cells.
 func (g *grid) PutRune(r rune) {
 	r = g.translateRune(r)
+	// Fast path for runs of printable ASCII (the common case). A pending
+	// single ASCII-printable rune is a complete width-1 cluster the moment
+	// another ASCII-printable rune arrives: ASCII printable never extends a
+	// prior cluster nor is extended by a following ASCII printable. Commit it
+	// directly and keep the new rune pending, skipping the uniseg segmenter.
+	if len(g.gphBuf) == 1 && g.gphBuf[0] >= 0x20 && g.gphBuf[0] < 0x7f &&
+		r >= 0x20 && r < 0x7f {
+		g.putCell(rune(g.gphBuf[0]), 0, 1)
+		g.gphBuf[0] = byte(r)
+		return
+	}
 	g.gphBuf = utf8.AppendRune(g.gphBuf, r)
 	// With at most one rune appended since the last commit, FirstGraphemeCluster
 	// returns a non-empty rest only when r began a new cluster. The loop is
