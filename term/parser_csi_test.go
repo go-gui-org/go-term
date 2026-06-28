@@ -1010,6 +1010,33 @@ func TestParser_DECRQM_Grapheme2027(t *testing.T) {
 	}
 }
 
+func TestParser_XTWINOPS_PixelGeometry(t *testing.T) {
+	g, p := newParserGrid(24, 80)
+	g.CellPxW, g.CellPxH = 8.0, 16.0
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+
+	// CSI 16 t -> cell size: CSI 6 ; height ; width t
+	feed(t, g, p, []byte("\x1b[16t"))
+	if want := []byte("\x1b[6;16;8t"); !bytes.Equal(reply, want) {
+		t.Errorf("CSI 16t reply = %q, want %q", reply, want)
+	}
+
+	// CSI 14 t -> text-area size: CSI 4 ; rows*h ; cols*w t
+	reply = nil
+	feed(t, g, p, []byte("\x1b[14t"))
+	if want := []byte("\x1b[4;384;640t"); !bytes.Equal(reply, want) {
+		t.Errorf("CSI 14t reply = %q, want %q", reply, want)
+	}
+
+	// Unhandled window op (e.g. raise, CSI 5 t) must not reply.
+	reply = nil
+	feed(t, g, p, []byte("\x1b[5t"))
+	if len(reply) != 0 {
+		t.Errorf("CSI 5t should not reply, got %q", reply)
+	}
+}
+
 func TestParser_XTVERSION(t *testing.T) {
 	g, p := newParserGrid(2, 10)
 	var reply []byte

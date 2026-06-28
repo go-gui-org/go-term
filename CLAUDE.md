@@ -141,8 +141,9 @@ Supports a modern xterm/kitty-compatible subset:
 - CSI: cursor movement and positioning, erase in line/display, scroll
   regions (DECSTBM), IND/RI/NEL, IL/DL/ICH/DCH/SU/SD, DECSCUSR (cursor
   shape/blink), DA1 (advertises Sixel via extension 4: `CSI ?1;2;4c`),
-  DA2, XTVERSION (`CSI > q` → `DCS >| go-term(ver) ST`), tab stop clear
-  (TBC).
+  DA2, XTVERSION (`CSI > q` → `DCS >| go-term(ver) ST`), XTWINOPS pixel
+  geometry (`CSI 14 t`/`CSI 16 t` → text-area / cell size in pixels;
+  manipulation ops ignored), tab stop clear (TBC).
 - Modes: alt screen (1049/1047/47), mouse (1000/1002/1003/1006/1016),
   bracketed paste (2004), focus reporting (1004), synchronized updates
   (2026), grapheme clustering (2027 — always on; DECRQM reports it

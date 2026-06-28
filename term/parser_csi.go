@@ -129,6 +129,23 @@ func (p *parser) dispatchCSI(final byte) {
 			row, col := p.g.CursorR+1, p.g.CursorC+1
 			p.onReply([]byte("\x1b[" + strconv.Itoa(row) + ";" + strconv.Itoa(col) + "R"))
 		}
+	case 't':
+		// XTWINOPS pixel-geometry reports. Only the read-only queries are
+		// honored — window manipulation ops (move/resize/raise…) are ignored,
+		// an embedded widget must not let the app drive the host window. Cell
+		// pixel sizes come from the widget's measurement (CellPxW/CellPxH, 0
+		// before the first frame); a 0 reply is valid and clients fall back.
+		if p.onReply != nil {
+			px := func(f float32) int { return int(f + 0.5) }
+			switch p.param(0, 0) {
+			case 14: // report text-area size in pixels: CSI 4 ; height ; width t
+				h, w := px(float32(p.g.Rows)*p.g.CellPxH), px(float32(p.g.Cols)*p.g.CellPxW)
+				p.onReply([]byte("\x1b[4;" + strconv.Itoa(h) + ";" + strconv.Itoa(w) + "t"))
+			case 16: // report cell size in pixels: CSI 6 ; height ; width t
+				h, w := px(p.g.CellPxH), px(p.g.CellPxW)
+				p.onReply([]byte("\x1b[6;" + strconv.Itoa(h) + ";" + strconv.Itoa(w) + "t"))
+			}
+		}
 	case 'g':
 
 		switch p.param(0, 0) {
