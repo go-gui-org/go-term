@@ -803,7 +803,7 @@ func (t *Term) drawOverlays(ds *drawState) {
 	}
 
 	// Visual bell: brief semi-transparent overlay.
-	if ds.now.Before(t.bell.flashUntil) {
+	if fu := t.bell.flashUntil.Load(); fu != 0 && ds.now.UnixNano() < fu {
 		ds.dc.FilledRect(0, 0, ds.dc.Width, ds.dc.Height, gui.RGBA(255, 255, 255, 40))
 	}
 }

@@ -174,6 +174,14 @@ const scrollbarWidth float32 = 4
 // scroll event while the viewport is back at the live bottom.
 const scrollbarDuration = 1500 * time.Millisecond
 
+// maxReplyQueueBytes caps the cumulative size of parser replies waiting to be
+// written to the pty. The reader goroutine enqueues without blocking, so if the
+// writer stalls (slave input buffer full) while an application keeps emitting
+// queries without reading their replies, the queue would otherwise grow without
+// bound. Past the cap, further replies are dropped — an application that floods
+// queries without draining the responses is already pathological.
+const maxReplyQueueBytes = 4 << 20 // 4 MiB
+
 // resizeState coalesces live-resize requests so continuous mouse-drag
 // frames don't trigger a full grid reflow (and its allocations) on every
 // redraw. The actual resize is deferred until the target dims have been
@@ -224,12 +232,14 @@ type searchState struct {
 	cacheRegex bool
 }
 
-// bellState tracks visual-bell flash timing. flashUntil is written from
-// the QueueCommand callback (main thread) and read in onDraw (main thread).
-// readCount is only accessed from readLoop. flashTimer is managed from the
-// QueueCommand callback and stopped in Close.
+// bellState tracks visual-bell flash timing. flashUntil holds the UnixNano
+// instant the flash ends (0 = no flash); it is written by applyChunk on the
+// reader goroutine and read by onDraw on the main thread, hence atomic.
+// seenCount/readCount are touched only by applyChunk (reader goroutine).
+// flashTimer is reset by scheduleBellClear (reader goroutine) and stopped in
+// Close, which first waits for readLoop to exit so the two never overlap.
 type bellState struct {
-	flashUntil time.Time
+	flashUntil atomic.Int64
 	flashTimer *time.Timer // reused per-BEL clear timer; lazy init
 	seenCount  uint64
 	readCount  uint64
@@ -335,13 +345,29 @@ type Term struct {
 	bell   bellState
 
 	// pendingReplies buffers parser-originated reply bytes (DA, DECRQSS,
-	// XTGETTCAP, ...) emitted during parser.Feed. Drained by applyChunk
-	// on the main thread after grid.Mu is released so pw.Write (which can
-	// block when the pty slave-side input buffer is full) cannot deadlock
-	// against onDraw waiting for the same lock. Append happens inside
-	// Feed (main thread); drain happens immediately after unlock.
+	// XTGETTCAP, ...) emitted during parser.Feed. Reader-goroutine local:
+	// onParserReply appends during Feed, applyChunk hands the batch to the
+	// reply writer (enqueueReplies) after grid.Mu is released, so no
+	// synchronization is needed here.
 	pendingReplies [][]byte
-	momentum       momentumState
+
+	// reply* form a single-producer/single-consumer queue feeding writeLoop,
+	// the dedicated goroutine that writes parser replies to the pty. Replies
+	// must NOT be written on the reader goroutine: a pty.Write blocks when
+	// the slave-side input buffer fills (e.g. an application mid-write of a
+	// large query batch that has not started reading replies yet). If the
+	// reader blocked there it would stop draining the master, deadlocking
+	// against the application's own blocked write. The reader enqueues under
+	// replyMu without doing I/O and returns to draining; writeLoop performs
+	// the blocking writes off both the reader and the render loop, so a
+	// query/response round-trip still costs microseconds, not a vsync frame.
+	replyMu    sync.Mutex
+	replyCond  *sync.Cond // signaled when replyQueue grows or replyDone is set
+	replyQueue [][]byte   // guarded by replyMu
+	replyBytes int        // guarded by replyMu; cumulative len of replyQueue, capped at maxReplyQueueBytes
+	replyDone  bool       // guarded by replyMu; set by Close to stop writeLoop
+
+	momentum momentumState
 
 	// ime tracks IME composition state and widget position for
 	// candidate-window placement. See imeState doc.
@@ -353,8 +379,8 @@ type Term struct {
 
 	mouse mouseState
 
-	// loopWg tracks the three auxiliary goroutines (blink, autoScroll,
-	// momentum) so Close can wait for them to exit before tearing down
+	// loopWg tracks the auxiliary goroutines (blink, autoScroll, momentum,
+	// reply writer) so Close can wait for them to exit before tearing down
 	// state they may still reference.
 	loopWg sync.WaitGroup
 
@@ -399,10 +425,12 @@ type Term struct {
 	ptyResizeRows    atomic.Int32
 	ptyResizeCols    atomic.Int32
 
-	// readCh carries raw PTY output from readLoop (reader goroutine) to
-	// drainReads (main thread). Buffered so the reader can keep pulling
-	// data off the PTY while the main thread is between frames.
-	readCh chan []byte
+	// redrawPending coalesces UpdateWindow requests from the reader
+	// goroutine: applyChunk only queues a redraw command when one is not
+	// already in flight, so a burst of PTY reads between frames does not
+	// pile up redundant closures on the command queue. Cleared by the
+	// queued callback before it asks for the repaint.
+	redrawPending atomic.Bool
 }
 
 // applyScrollbackConfig sets ScrollbackCap based on cfg.ScrollbackRows.
@@ -474,7 +502,6 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	t.mouse.lastR = -1
 	t.mouse.lastC = -1
 	t.momentum.kick = make(chan struct{}, 1)
-	t.readCh = make(chan []byte, 512)
 	t.mouse.hoverR.Store(-1)
 	t.mouse.hoverC.Store(-1)
 	if !cfg.DisableGraphics {
@@ -506,11 +533,13 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	}
 	t.focused.Store(true)
 	w.SetIDFocus(t.focusID)
+	t.replyCond = sync.NewCond(&t.replyMu)
 	go t.readLoop()
-	t.loopWg.Add(3)
+	t.loopWg.Add(4)
 	go t.blinkLoop()
 	go t.autoScrollLoop()
 	go t.momentumLoop()
+	go t.writeLoop()
 	return t, nil
 }
 
@@ -638,12 +667,13 @@ func (t *Term) scheduleResizeWake(d time.Duration) {
 	t.scheduleDelayedUpdate(d, &t.resize.timer)
 }
 
-// onParserReply queues parser-originated bytes (e.g. DA1 reply) for
-// writing back to the pty after applyChunk releases grid.Mu. Called from
-// inside parser.Feed which runs under Mu on the main thread — writing to
-// the pty directly here would risk a deadlock when the slave-side input
-// buffer is full (shell not reading), since onDraw on the main thread
-// would be blocked waiting for the same Mu.
+// onParserReply buffers parser-originated bytes (e.g. DA1 reply) in
+// pendingReplies; it does not write them. Called from inside parser.Feed,
+// which runs under grid.Mu on the reader goroutine. applyChunk hands the batch
+// to writeLoop (via enqueueReplies) once grid.Mu is released, and writeLoop
+// does the blocking pty.Write on its own goroutine — so a full slave-side input
+// buffer (shell not reading) never stalls the reader, which must keep draining
+// the master, nor onDraw, which waits on grid.Mu.
 func (t *Term) onParserReply(b []byte) {
 	if len(b) == 0 {
 		return
@@ -677,18 +707,57 @@ func sendDesktopNotify(title, body string) {
 	}
 }
 
-// flushPendingReplies writes all queued parser replies to the pty.
-// Called by applyChunk on the main thread after grid.Mu is released.
-// Errors are logged and the queue is drained even on partial failure.
-func (t *Term) flushPendingReplies() {
+// enqueueReplies hands this chunk's parser replies to writeLoop and returns
+// immediately. Runs on the reader goroutine after grid.Mu is released; it only
+// appends under replyMu (no I/O), so the reader goes straight back to draining
+// the pty and can never deadlock against an application blocked writing a query
+// batch. writeLoop performs the actual blocking pty.Write. Replies are dropped
+// once the queue exceeds maxReplyQueueBytes (see that const).
+func (t *Term) enqueueReplies() {
 	if len(t.pendingReplies) == 0 {
 		return
 	}
-	pending := t.pendingReplies
+	n := 0
+	for _, b := range t.pendingReplies {
+		n += len(b)
+	}
+	t.replyMu.Lock()
+	queued := t.replyBytes < maxReplyQueueBytes
+	if queued {
+		t.replyQueue = append(t.replyQueue, t.pendingReplies...)
+		t.replyBytes += n
+	}
+	t.replyMu.Unlock()
+	if queued {
+		t.replyCond.Signal()
+	}
 	t.pendingReplies = nil
-	for _, b := range pending {
-		if _, err := t.pw.Write(b); err != nil {
-			log.Printf("term: pty reply: %v", err)
+}
+
+// writeLoop is the dedicated reply-writer goroutine: it drains replyQueue and
+// writes each reply to the pty, blocking only this goroutine when the slave
+// input buffer is full. Exits once Close sets replyDone and the queue is
+// empty. Errors are logged; the queue is drained even on partial failure.
+func (t *Term) writeLoop() {
+	defer t.loopWg.Done()
+	defer recoverLoop("writeLoop")
+	for {
+		t.replyMu.Lock()
+		for len(t.replyQueue) == 0 && !t.replyDone {
+			t.replyCond.Wait()
+		}
+		if len(t.replyQueue) == 0 {
+			t.replyMu.Unlock()
+			return // replyDone with nothing left to write
+		}
+		batch := t.replyQueue
+		t.replyQueue = nil
+		t.replyBytes = 0
+		t.replyMu.Unlock()
+		for _, b := range batch {
+			if _, err := t.pw.Write(b); err != nil {
+				log.Printf("term: pty reply: %v", err)
+			}
 		}
 	}
 }
@@ -954,6 +1023,14 @@ func (t *Term) Close() error {
 	case <-t.readDone:
 	case <-readTimer.C:
 	}
+	// Stop the reply writer. The pty is already closed, so any pty.Write in
+	// flight returns an error and writeLoop loops back to observe replyDone.
+	t.replyMu.Lock()
+	t.replyDone = true
+	t.replyMu.Unlock()
+	if t.replyCond != nil {
+		t.replyCond.Signal()
+	}
 	// Wait for auxiliary goroutines to exit cleanly so they cannot
 	// reference t.cmd or other state after we return.
 	t.loopWg.Wait()
@@ -981,10 +1058,13 @@ func (t *Term) Close() error {
 	return err
 }
 
-// readLoop forwards raw PTY output to the main thread via a buffered
-// channel. Parsing and grid mutation happen on the main thread in
-// drainReads so that onDraw never contends with the reader for grid.Mu.
-// Exits when the pty is closed or returns EOF.
+// readLoop reads raw PTY output and feeds it straight to the parser on
+// this goroutine. Parser replies (DSR/CPR, DA, XTVERSION, ...) are written
+// back to the pty here, decoupled from the vsync-throttled render loop — so
+// a query/response round-trip costs microseconds instead of a full display
+// frame. Only the resulting repaint is handed to the main thread, via a
+// coalesced queueCommand(UpdateWindow). Exits when the pty is closed or
+// returns EOF.
 func (t *Term) readLoop() {
 	defer recoverLoop("readLoop")
 	defer func() {
@@ -1011,18 +1091,10 @@ func (t *Term) readLoop() {
 		}
 		n, err := t.pty.Read(buf)
 		if n > 0 {
-			// Ship raw bytes to the main thread for parsing + grid
-			// mutation. Copy so the main thread owns the slice.
-			data := make([]byte, n)
-			copy(data, buf[:n])
-			select {
-			case t.readCh <- data:
-			case <-t.blinkDone:
-				return
-			}
-			t.queueCommand(func(w *gui.Window) {
-				t.drainReads(w)
-			})
+			// Feed buf directly: parser.Feed consumes the slice
+			// synchronously (carry-over and reply bytes are copied
+			// internally), so reusing buf next iteration is safe.
+			t.applyChunk(buf[:n])
 		}
 		if err != nil {
 			return
@@ -1030,39 +1102,16 @@ func (t *Term) readLoop() {
 	}
 }
 
-// drainReads drains all pending PTY output from readCh and feeds it to
-// the parser. Runs on the main thread via queueCommand so grid mutation
-// and onDraw are serialized — no lock contention. Multiple callbacks may
-// be queued by rapid reads; only the first does real work; the rest find
-// the channel empty and return.
-func (t *Term) drainReads(w *gui.Window) {
-	needUpdate := false
-	for {
-		select {
-		case data := <-t.readCh:
-			if t.applyChunk(data) {
-				needUpdate = true
-			}
-		default:
-			// Flush parser replies once after all chunks so a
-			// blocking pty.Write cannot stall onDraw.
-			t.flushPendingReplies()
-			if needUpdate {
-				w.UpdateWindow()
-			}
-			return
-		}
-	}
-}
-
-// applyChunk feeds a single PTY read to the parser, handles bell flash,
-// and bumps the draw version. Runs on the main thread. Returns true
-// when a redraw is required.
+// applyChunk feeds a single PTY read to the parser, writes any parser
+// replies back to the pty, handles bell flash, and requests a repaint.
+// Runs on the reader goroutine. Returns true when a redraw was requested
+// (used by tests). grid.Mu is held only for the parse + dirty check, never
+// across the pty.Write below, so a full slave-input buffer stalls just this
+// goroutine and never blocks onDraw.
 func (t *Term) applyChunk(data []byte) bool {
-	var bellCount uint64
 	t.grid.Mu.Lock()
 	t.parser.Feed(data)
-	bellCount = t.grid.BellCount
+	bellCount := t.grid.BellCount
 	redraw := !t.grid.SyncOutput || !t.grid.SyncActive
 	dirty := t.grid.HasDirtyRows() || bellCount != t.bell.readCount
 	needUpdate := false
@@ -1072,12 +1121,26 @@ func (t *Term) applyChunk(data []byte) bool {
 		needUpdate = true
 	}
 	t.grid.Mu.Unlock()
+
+	// Replies are the latency-critical path: hand them to the writer
+	// goroutine immediately, off both the render loop and this read loop.
+	t.enqueueReplies()
+
 	if bellCount > t.bell.seenCount {
 		t.bell.seenCount = bellCount
 		if d := t.effectiveBellDuration(); d > 0 {
-			t.bell.flashUntil = time.Now().Add(d)
+			t.bell.flashUntil.Store(time.Now().Add(d).UnixNano())
 			t.scheduleBellClear(d)
 		}
+	}
+
+	// Coalesce: queue at most one outstanding UpdateWindow so a burst of
+	// reads between frames doesn't pile up redundant command closures.
+	if needUpdate && !t.redrawPending.Swap(true) {
+		t.queueCommand(func(w *gui.Window) {
+			t.redrawPending.Store(false)
+			w.UpdateWindow()
+		})
 	}
 	return needUpdate
 }
