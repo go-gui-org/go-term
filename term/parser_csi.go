@@ -47,6 +47,11 @@ func (p *parser) dispatchCSI(final byte) {
 				if p.param(0, 0) == 0 && p.onReply != nil {
 					p.onReply([]byte(da2Reply))
 				}
+			case 'q':
+				// XTVERSION (CSI > q / CSI > 0 q): report name + version.
+				if p.param(0, 0) == 0 && p.onReply != nil {
+					p.onReply([]byte(xtversionReply))
+				}
 			}
 		case '<':
 
@@ -124,6 +129,23 @@ func (p *parser) dispatchCSI(final byte) {
 			row, col := p.g.CursorR+1, p.g.CursorC+1
 			p.onReply([]byte("\x1b[" + strconv.Itoa(row) + ";" + strconv.Itoa(col) + "R"))
 		}
+	case 't':
+		// XTWINOPS pixel-geometry reports. Only the read-only queries are
+		// honored — window manipulation ops (move/resize/raise…) are ignored,
+		// an embedded widget must not let the app drive the host window. Cell
+		// pixel sizes come from the widget's measurement (CellPxW/CellPxH, 0
+		// before the first frame); a 0 reply is valid and clients fall back.
+		if p.onReply != nil {
+			px := func(f float32) int { return int(f + 0.5) }
+			switch p.param(0, 0) {
+			case 14: // report text-area size in pixels: CSI 4 ; height ; width t
+				h, w := px(float32(p.g.Rows)*p.g.CellPxH), px(float32(p.g.Cols)*p.g.CellPxW)
+				p.onReply([]byte("\x1b[4;" + strconv.Itoa(h) + ";" + strconv.Itoa(w) + "t"))
+			case 16: // report cell size in pixels: CSI 6 ; height ; width t
+				h, w := px(p.g.CellPxH), px(p.g.CellPxW)
+				p.onReply([]byte("\x1b[6;" + strconv.Itoa(h) + ";" + strconv.Itoa(w) + "t"))
+			}
+		}
 	case 'g':
 
 		switch p.param(0, 0) {
@@ -173,6 +195,10 @@ func (p *parser) applyDECMode(set bool) {
 			if !set {
 				p.g.SyncActive = false
 			}
+		case 2027:
+			// Grapheme clustering is unconditional (PutRune always clusters),
+			// so DECSET/DECRST 2027 are accepted as no-ops. decModeState
+			// reports it permanently set.
 		case 7:
 			p.g.AutoWrap = set
 		case 6:
@@ -241,6 +267,8 @@ func (p *parser) decModeState(n int) int {
 		return boolState(p.g.BracketedPaste)
 	case 2026:
 		return boolState(p.g.SyncOutput)
+	case 2027:
+		return 3 // PERMANENTLY_SET — grapheme clustering is always on
 	default:
 		return 0
 	}

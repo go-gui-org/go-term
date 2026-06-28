@@ -12,7 +12,7 @@ func TestParser_DA1_Reply(t *testing.T) {
 		replies = append(replies, append([]byte(nil), b...))
 	})
 	feed(t, g, p, []byte("\x1b[c"))
-	if len(replies) != 1 || !bytes.Equal(replies[0], []byte("\x1b[?1;2c")) {
+	if len(replies) != 1 || !bytes.Equal(replies[0], []byte("\x1b[?1;2;4c")) {
 		t.Errorf("DA1 reply: %q", replies)
 	}
 }
@@ -154,6 +154,8 @@ func TestXTGETTCAPValue_AllCaps(t *testing.T) {
 		{"query-os-name", "\x1b]0;?\x07", true},
 		{"smkx", "\x1b[?1h\x1b=", true},
 		{"rmkx", "\x1b[?1l\x1b>", true},
+		{"Smulx", "\x1b[4:%p1%dm", true},
+		{"Setulc", "\x1b[58:2::%p1%{65536}%/%d:%p1%{256}%/%{256}%m%d:%p1%{256}%m%dm", true},
 		{"nonexistent", "", false},
 		{"", "", false},
 	}

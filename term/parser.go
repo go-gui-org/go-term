@@ -54,14 +54,22 @@ const maxKittyPendingChunks = 64
 // new entry, bounding both memory and disk usage.
 const maxKittyStoreEntries = 256
 
-// da1Reply is the Primary Device Attribute response: VT100 with
-// advanced video. Apps like fish probe with CSI c at startup and
-// stall briefly waiting for it.
-var da1Reply = []byte("\x1b[?1;2c")
+// da1Reply is the Primary Device Attribute response: VT100 with advanced
+// video (1;2) plus Sixel graphics (extension 4). Apps like fish probe with
+// CSI c at startup and stall briefly waiting for it; sixel-aware apps and
+// ucs-detect read extension 4 to confirm Sixel support (term has a decoder).
+var da1Reply = []byte("\x1b[?1;2;4c")
 
 // da2Reply is the Secondary Device Attribute response: no terminal
 // version, firmware version, or hardware options.
 var da2Reply = []byte("\x1b[>0;0;0c")
+
+// xtversionReply answers XTVERSION (CSI > q): DCS > | name(version) ST.
+// blessed/ucs-detect parse the parenthesized form into name + version.
+var xtversionReply = []byte("\x1bP>|go-term(" + termVersion + ")\x1b\\")
+
+// termVersion is the advertised software version (XTVERSION). Bump on release.
+const termVersion = "0.1"
 
 // maxCSIParams caps the SGR/CSI parameter list to bound memory use against
 // pathological streams like "\x1b[1;1;1;...m".
@@ -185,7 +193,7 @@ func (p *parser) Feed(b []byte) {
 			b = b[1:]
 			if utf8.FullRune(p.utf[:p.utfLen]) {
 				r, size := utf8.DecodeRune(p.utf[:p.utfLen])
-				p.g.Put(r)
+				p.g.PutRune(r)
 				// DecodeRune may consume fewer bytes than we accumulated (invalid
 				// sequence). The unconsumed bytes were already removed from b —
 				// prepend them back so the main loop sees them.
@@ -207,6 +215,12 @@ func (p *parser) Feed(b []byte) {
 		c := b[i]
 		switch p.state {
 		case stGround:
+			// Any control byte (incl. ESC) ends the current printable run:
+			// commit the pending grapheme so cursor moves / reports / erases
+			// act on the just-written cells.
+			if c < 0x20 {
+				p.g.FlushGrapheme()
+			}
 			switch {
 			case c == 0x07:
 				p.g.Bell()
@@ -242,7 +256,7 @@ func (p *parser) Feed(b []byte) {
 					p.utfLen = n
 					return
 				}
-				p.g.Put(r)
+				p.g.PutRune(r)
 				i += sz
 			}
 		case stEsc:
@@ -427,6 +441,11 @@ func (p *parser) Feed(b []byte) {
 			}
 		}
 	}
+	// Commit any trailing grapheme so it renders this frame. The only bytes
+	// intentionally carried across Feed are an incomplete trailing UTF-8
+	// sequence (p.utf), which returns early above before reaching here; a
+	// cluster split exactly on the read boundary is the lone casualty.
+	p.g.FlushGrapheme()
 }
 
 // maxXTGETTCAPParts caps the number of capability names in one XTGETTCAP

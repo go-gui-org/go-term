@@ -45,9 +45,11 @@ func (g *grid) SelectedText() string {
 			}
 		}
 		for c := c0; c <= end; c++ {
-			ch := g.ContentCellAt(r, c).Ch
-			if ch != 0 {
-				b.WriteRune(ch)
+			cell := g.ContentCellAt(r, c)
+			if cell.clusterID != 0 && int(cell.clusterID) < len(g.clusters) {
+				b.WriteString(g.clusters[cell.clusterID])
+			} else if cell.Ch != 0 {
+				b.WriteRune(cell.Ch)
 			}
 		}
 		if r < e.Row {

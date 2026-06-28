@@ -1710,7 +1710,6 @@ func TestClose_FullIntegration(t *testing.T) {
 		notif:     desktopNotifier{},
 		blinkDone: make(chan struct{}),
 		readDone:  make(chan struct{}),
-		readCh:    make(chan []byte, 512),
 	}
 	tm.mouse.hoverR.Store(-1)
 	tm.mouse.hoverC.Store(-1)
@@ -1790,35 +1789,87 @@ func TestOpenURL_BlockedSchemes(t *testing.T) {
 	}
 }
 
-// --- flushPendingReplies ---
+// --- reply writer (enqueueReplies + writeLoop) ---
 
-func TestFlushPendingReplies_EmptyNoOp(t *testing.T) {
+// startReplyWriter starts tm.writeLoop with a fresh cond var and returns a
+// stop func that signals replyDone and waits for the goroutine to exit.
+func startReplyWriter(tm *Term) func() {
+	tm.replyCond = sync.NewCond(&tm.replyMu)
+	tm.loopWg.Add(1)
+	go tm.writeLoop()
+	return func() {
+		tm.replyMu.Lock()
+		tm.replyDone = true
+		tm.replyMu.Unlock()
+		tm.replyCond.Signal()
+		tm.loopWg.Wait()
+	}
+}
+
+// captureWriter returns an io.Writer that copies each write onto ch.
+func captureWriter(ch chan []byte, err error) writerFunc {
+	return writerFunc(func(b []byte) (int, error) {
+		cp := make([]byte, len(b))
+		copy(cp, b)
+		ch <- cp
+		return len(b), err
+	})
+}
+
+func TestEnqueueReplies_EmptyNoOp(t *testing.T) {
+	// Empty pendingReplies must not signal the writer or touch pw — and must
+	// not panic even when replyCond is nil (never started).
 	term := &Term{pw: writerFunc(func([]byte) (int, error) {
 		t.Error("pw.Write must not be called for empty queue")
 		return 0, nil
 	})}
-	term.flushPendingReplies() // must not panic or call pw.Write
+	term.enqueueReplies()
 }
 
-func TestFlushPendingReplies_ErrorPath(t *testing.T) {
-	calls := 0
-	term := &Term{
-		pw: writerFunc(func(b []byte) (int, error) {
-			calls++
-			return 0, errTestBoom
-		}),
-		pendingReplies: [][]byte{
-			[]byte("reply1"),
-			[]byte("reply2"),
-		},
+func TestEnqueueReplies_DropsPastCap(t *testing.T) {
+	// At/over the cap, further replies are dropped rather than queued — but
+	// pendingReplies is still cleared so the reader doesn't re-process them.
+	tm := &Term{
+		replyBytes:     maxReplyQueueBytes,
+		pendingReplies: [][]byte{[]byte("dropme")},
 	}
-	// Errors are logged, not returned; all pending replies are processed.
-	term.flushPendingReplies()
-	if calls != 2 {
-		t.Errorf("pw.Write called %d times, want 2", calls)
+	tm.replyCond = sync.NewCond(&tm.replyMu)
+	tm.enqueueReplies()
+	if len(tm.replyQueue) != 0 {
+		t.Errorf("reply should be dropped at cap, queue len = %d", len(tm.replyQueue))
 	}
-	if term.pendingReplies != nil {
-		t.Errorf("pendingReplies not cleared: %v", term.pendingReplies)
+	if tm.replyBytes != maxReplyQueueBytes {
+		t.Errorf("replyBytes = %d, want unchanged %d", tm.replyBytes, maxReplyQueueBytes)
+	}
+	if tm.pendingReplies != nil {
+		t.Error("pendingReplies should be cleared even when dropped")
+	}
+}
+
+func TestWriteLoop_ErrorPathDrainsAll(t *testing.T) {
+	ch := make(chan []byte, 4)
+	tm := &Term{
+		pw:             captureWriter(ch, errTestBoom),
+		pendingReplies: [][]byte{[]byte("reply1"), []byte("reply2")},
+	}
+	stop := startReplyWriter(tm)
+	defer stop()
+
+	// enqueue hands the batch to the writer goroutine, which writes both even
+	// though each write returns an error (logged, not fatal).
+	tm.enqueueReplies()
+	for i, want := range []string{"reply1", "reply2"} {
+		select {
+		case got := <-ch:
+			if string(got) != want {
+				t.Errorf("write %d = %q, want %q", i, got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for write %d", i)
+		}
+	}
+	if tm.pendingReplies != nil {
+		t.Errorf("pendingReplies not cleared: %v", tm.pendingReplies)
 	}
 }
 
@@ -1859,6 +1910,7 @@ func TestApplyChunk_DirtyCellsBumpsVersion(t *testing.T) {
 	tm := &Term{
 		grid:   g,
 		parser: newParser(g),
+		cmd:    &gui.Window{},
 	}
 	needUpdate := tm.applyChunk([]byte("A"))
 	if !needUpdate {
@@ -1908,6 +1960,7 @@ func TestApplyChunk_BellSchedulesFlash(t *testing.T) {
 	tm := &Term{
 		grid:   g,
 		parser: newParser(g),
+		cmd:    &gui.Window{},
 		cfg:    Cfg{BellFlashDuration: 50 * time.Millisecond},
 	}
 	// BEL (0x07) increments BellCount. Grid stays clean but the bell
@@ -1919,7 +1972,7 @@ func TestApplyChunk_BellSchedulesFlash(t *testing.T) {
 	if tm.bell.seenCount != 1 {
 		t.Errorf("bell.seenCount = %d, want 1", tm.bell.seenCount)
 	}
-	if tm.bell.flashUntil.IsZero() {
+	if tm.bell.flashUntil.Load() == 0 {
 		t.Error("bell.flashUntil should be set")
 	}
 	if tm.bell.flashTimer != nil {
@@ -1932,93 +1985,87 @@ func TestApplyChunk_BellFlashDisabled(t *testing.T) {
 	tm := &Term{
 		grid:   g,
 		parser: newParser(g),
+		cmd:    &gui.Window{},
 		cfg:    Cfg{BellFlashDuration: -1}, // disabled
 	}
 	tm.applyChunk([]byte("\x07"))
 	if tm.bell.seenCount != 1 {
 		t.Errorf("bell.seenCount = %d, want 1", tm.bell.seenCount)
 	}
-	if !tm.bell.flashUntil.IsZero() {
+	if tm.bell.flashUntil.Load() != 0 {
 		t.Error("bell.flashUntil should be zero when flash disabled")
 	}
 }
 
-func TestDrainReads_FlushesPendingReplies(t *testing.T) {
+func TestApplyChunk_HandsRepliesToWriter(t *testing.T) {
 	g := newGrid(24, 80)
-	var wrote [][]byte
+	ch := make(chan []byte, 4)
 	tm := &Term{
-		grid:   g,
-		parser: newParser(g),
-		pw: writerFunc(func(b []byte) (int, error) {
-			cp := make([]byte, len(b))
-			copy(cp, b)
-			wrote = append(wrote, cp)
-			return len(b), nil
-		}),
+		grid:           g,
+		parser:         newParser(g),
+		cmd:            &gui.Window{},
+		pw:             captureWriter(ch, nil),
 		pendingReplies: [][]byte{[]byte("r1"), []byte("r2")},
-		readCh:         make(chan []byte, 8),
 	}
-	// flushPendingReplies runs once after the drain loop,
-	// not per-chunk inside applyChunk. Feed a no-op chunk
-	// through the drain path.
-	tm.readCh <- []byte{}
-	tm.drainReads(&gui.Window{})
-	if len(wrote) != 2 {
-		t.Errorf("wrote %d replies, want 2", len(wrote))
+	stop := startReplyWriter(tm)
+	defer stop()
+
+	// applyChunk hands queued replies to the writer goroutine after releasing
+	// grid.Mu — decoupled from both the render loop and the read loop.
+	tm.applyChunk([]byte{})
+	for i, want := range []string{"r1", "r2"} {
+		select {
+		case got := <-ch:
+			if string(got) != want {
+				t.Errorf("reply %d = %q, want %q", i, got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for reply %d", i)
+		}
 	}
 	if tm.pendingReplies != nil {
-		t.Error("pendingReplies should be cleared after flush")
+		t.Error("pendingReplies should be cleared after enqueue")
 	}
 }
 
-// --- drainReads ---
+func TestApplyChunk_RepliesEmitPromptly(t *testing.T) {
+	// A DSR cursor-position query must produce a CPR reply promptly via the
+	// writer goroutine — this is the round-trip latency that made ucs-detect
+	// slow when replies were deferred to the main-thread render loop.
+	g := newGrid(24, 80)
+	ch := make(chan []byte, 4)
+	tm := &Term{
+		grid:   g,
+		parser: newParser(g),
+		cmd:    &gui.Window{},
+		pw:     captureWriter(ch, nil),
+	}
+	tm.parser.SetReplyHandler(tm.onParserReply)
+	stop := startReplyWriter(tm)
+	defer stop()
 
-func TestDrainReads_EmptyChannelNoUpdate(t *testing.T) {
+	tm.applyChunk([]byte("\x1b[6n")) // DSR 6 → expect CPR (ESC [ row;col R)
+	select {
+	case got := <-ch:
+		if !strings.HasPrefix(string(got), "\x1b[") || !strings.HasSuffix(string(got), "R") {
+			t.Errorf("expected CPR reply, got %q", string(got))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for CPR reply")
+	}
+}
+
+func TestApplyChunk_MultipleChunksEachBumpVersion(t *testing.T) {
 	g := newGrid(24, 80)
 	tm := &Term{
 		grid:   g,
 		parser: newParser(g),
-		readCh: make(chan []byte, 8),
+		cmd:    &gui.Window{},
 	}
-	prev := tm.drawVersion.Load()
-	tm.drainReads(&gui.Window{})
-	if tm.drawVersion.Load() != prev {
-		t.Error("drawVersion should not change when channel is empty")
-	}
-}
-
-func TestDrainReads_SingleChunkAppliesToGrid(t *testing.T) {
-	g := newGrid(24, 80)
-	tm := &Term{
-		grid:   g,
-		parser: newParser(g),
-		readCh: make(chan []byte, 8),
-	}
-	tm.readCh <- []byte("hello")
-	tm.drainReads(&gui.Window{})
-	if v := tm.drawVersion.Load(); v == 0 {
-		t.Error("drawVersion should be bumped after draining dirty chunk")
-	}
-	if len(tm.readCh) != 0 {
-		t.Errorf("readCh len = %d, want 0", len(tm.readCh))
-	}
-}
-
-func TestDrainReads_MultipleChunksEachApplied(t *testing.T) {
-	g := newGrid(24, 80)
-	tm := &Term{
-		grid:   g,
-		parser: newParser(g),
-		readCh: make(chan []byte, 8),
-	}
-	// Two separate dirty chunks — each should bump the version.
-	tm.readCh <- []byte("AB")
-	tm.readCh <- []byte("CD")
-	tm.drainReads(&gui.Window{})
-	if len(tm.readCh) != 0 {
-		t.Errorf("readCh len = %d after drain, want 0", len(tm.readCh))
-	}
-	// Each chunk bumped once → version = 2.
+	// Two separate dirty chunks — each bumps the version even though the
+	// coalesced UpdateWindow is queued at most once.
+	tm.applyChunk([]byte("AB"))
+	tm.applyChunk([]byte("CD"))
 	if v := tm.drawVersion.Load(); v != 2 {
 		t.Errorf("drawVersion = %d, want 2 (one per dirty chunk)", v)
 	}

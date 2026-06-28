@@ -555,7 +555,7 @@ func TestOnDraw_BellFlash(t *testing.T) {
 		g.Cells[i].Width = 1
 	}
 	tm.grid.Mu.Unlock()
-	tm.bell.flashUntil = time.Now().Add(time.Second)
+	tm.bell.flashUntil.Store(time.Now().Add(time.Second).UnixNano())
 	tm.onDraw(dc)
 	found := false
 	for _, b := range dc.Batches() {
