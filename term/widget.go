@@ -131,6 +131,11 @@ type Cfg struct {
 	// events to individual Terms via HandleWindowEvent. The standalone
 	// (false) default is correct for single-Term windows.
 	NoWindowHandler bool
+
+	// Dir sets the working directory for the child process. When non-empty
+	// and the path exists on disk, the shell starts there. Empty inherits
+	// the process CWD.
+	Dir string
 }
 
 // NamedTheme pairs a display name with a Theme for use in menus.

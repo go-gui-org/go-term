@@ -14,6 +14,12 @@ import (
 type Cfg struct {
 	TextStyle gui.TextStyle
 	Themes    []term.NamedTheme
+
+	// ConfigPath is the path to the human-edited config file (INI-style).
+	// When empty, the default location is used: $XDG_CONFIG_HOME/go-term/config,
+	// ~/.config/go-term/config, or os.UserConfigDir()/go-term/config.
+	// A missing file is silently ignored (defaults apply).
+	ConfigPath string
 }
 
 // Workspace manages a multi-tab, multi-pane terminal workspace.

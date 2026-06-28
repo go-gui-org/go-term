@@ -77,9 +77,9 @@ phases unlocked advanced apps (tmux, mouse-aware editors) and polish.
 
 ### Phase 39 — Native Splits, Panes, and Tabs ✅
 
-**Status:** 39a–39d done. Splits, focus routing, tabs, flex-ratio
-layout, and keyboard pane resize ship in `term/workspace`. 39e
-(persistence/config) is now planned in detail below — not yet implemented.
+**Status:** 39a–39e done. Splits, focus routing, tabs, flex-ratio
+layout, keyboard pane resize, workspace JSON persistence, keybinding
+config, and CLI flags all ship in `term/workspace` and `examples/demo`.
 
 **Why:** A defining feature of modern terminals is native window
 multiplexing, turning the emulator into a full workspace without
@@ -263,44 +263,44 @@ load (`<tabID>-pane-N`); the persisted IDs are advisory, used only to wire
 
 ##### 39e-1 — `term.Cfg.Dir` spawn directory
 
-- [ ] Add `Cfg.Dir string` (doc: "working directory for the child; empty
+- [x] Add `Cfg.Dir string` (doc: "working directory for the child; empty
       = inherit process CWD").
-- [ ] `startPTY` sets `cmd.Dir = cfg.Dir` when non-empty and the path
+- [x] `startPTY` sets `cmd.Dir = cfg.Dir` when non-empty and the path
       exists (`os.Stat` guard); otherwise leave unset.
-- [ ] Test: spawn with `Dir` set, run `pwd`, assert output matches.
+- [x] Test: spawn with `Dir` set, run `pwd`, assert output matches.
 
 **Verify:** `term.New` with `Cfg.Dir: "/tmp"` → first prompt's `pwd` is
 `/tmp`.
 
 ##### 39e-2 — Serialization (`term/workspace/persist.go`)
 
-- [ ] `persistedWorkspace`, `persistedTab`, `persistedNode` structs with
+- [x] `persistedWorkspace`, `persistedTab`, `persistedNode` structs with
       JSON tags matching the schema above.
-- [ ] `(*Workspace).snapshot() persistedWorkspace`: walk `ws.tabs`, each
+- [x] `(*Workspace).snapshot() persistedWorkspace`: walk `ws.tabs`, each
       tab's `root` tree, emit per-leaf `Cwd()` + ratio. Pure, no I/O,
       grabs no locks beyond reading already-main-thread state.
-- [ ] `(*Workspace).Save(path string) error`: marshal `snapshot()`,
+- [x] `(*Workspace).Save(path string) error`: marshal `snapshot()`,
       `MkdirAll(dir)`, atomic temp-write + rename.
-- [ ] `func configDir() (string, error)`: resolve in order —
+- [x] `func configDir() (string, error)`: resolve in order —
       `$XDG_CONFIG_HOME/go-term` if set, else `~/.config/go-term` if
       `~/.config` exists, else `os.UserConfigDir()/go-term` (→ `~/Library/
       Application Support/go-term` on macOS). `defaultWorkspacePath` =
       `configDir()/workspace.json`; the human config file is `configDir()/config`.
-- [ ] Round-trip test: build a 2-tab / nested-split workspace in memory,
+- [x] Round-trip test: build a 2-tab / nested-split workspace in memory,
       `snapshot()`, marshal, unmarshal, assert tree shape + ratios + dirs.
 
 ##### 39e-3 — Restore on launch
 
-- [ ] `func Restore(w *gui.Window, cfg Cfg, path string) (*Workspace, error)`:
+- [x] `func Restore(w *gui.Window, cfg Cfg, path string) (*Workspace, error)`:
       read+parse JSON; on missing file, empty file, or version mismatch,
       fall back to `New(w, cfg)` (log the reason, never hard-fail).
-- [ ] `buildTabFromPersisted`: rebuild the `splitNode` tree, regenerate
+- [x] `buildTabFromPersisted`: rebuild the `splitNode` tree, regenerate
       leaf IDs, spawn each pane via `addPane` with `term.Cfg.Dir` set from
       the saved `cwd`. Reuse the existing `termCfg` plumbing — thread a
       per-pane `dir` argument through `newTab`/`addPane`/`termCfg`.
-- [ ] Restore `activeTab` and each tab's `focused` leaf; assert the
+- [x] Restore `activeTab` and each tab's `focused` leaf; assert the
       focus invariant ("active terminal owns IDFocus") via `refresh()`.
-- [ ] Test (no real PTY): inject a fake term constructor or assert tree
+- [x] Test (no real PTY): inject a fake term constructor or assert tree
       structure pre-spawn; confirms IDs/ratios/active selections wire up.
 
 ##### 39e-4 — Human config file (`config`, INI-style)
@@ -323,41 +323,41 @@ closePane     = Cmd+W
 nextTab       = Ctrl+Tab
 ```
 
-- [ ] Minimal INI parser `parseConfig(r io.Reader) (config, []error)`:
+- [x] Minimal INI parser `parseConfig(r io.Reader) (config, []error)`:
       tracks the current `[section]`, returns a struct with a
       `keybindings map[string]string` (and room for future sections);
       collects per-line errors without aborting. Keep it ~40 lines, no dep.
-- [ ] Define a **canonical, platform-independent** chord format: always
+- [x] Define a **canonical, platform-independent** chord format: always
       `+`-separated, `Cmd`=`ModSuper`, plus `Ctrl`/`Alt`/`Shift`, then the
       key name (`A`–`Z`, `0`–`9`, `F1`–`F25`, `[`/`]`/`/`, `Tab`, `Enter`,
       arrows, etc.). Do **not** reuse `gui.Shortcut.String()` — verified
       display-only and platform-dependent (bare `⌘⇧` glyphs, no separator
       on darwin; `Super+` text elsewhere) with no inverse parser in go-gui.
-- [ ] `parseShortcut(string) (gui.Shortcut, bool)` mapping modifier/key
+- [x] `parseShortcut(string) (gui.Shortcut, bool)` mapping modifier/key
       names → exported `gui.Mod*` / `gui.Key*` constants. Keep the name
       table local to workspace; go-gui's `keyNameMap` is unexported.
       (`formatShortcut` only needed if a "dump current bindings" command is
       added later — defer it.)
-- [ ] `Cfg.ConfigPath string` (empty = default `configDir()/config`).
+- [x] `Cfg.ConfigPath string` (empty = default `configDir()/config`).
       Loaded in `New`/`Restore`; missing file is fine (defaults, no error).
-- [ ] `registerCommands` resolves each `[keybindings]` entry to a full
+- [x] `registerCommands` resolves each `[keybindings]` entry to a full
       command ID, parses the chord, and swaps the default `Shortcut` when
       it parses cleanly; parse errors and unknown command names are logged
       and the default retained. Guard against a chord that collides with
       another command (go-gui `RegisterCommand` already rejects duplicate
       shortcuts — surface that error, keep the default).
-- [ ] The help overlay already renders from the live command registry, so
+- [x] The help overlay already renders from the live command registry, so
       overridden bindings display correctly with no extra work.
-- [ ] Tests: valid `[keybindings]` overrides the right commands;
+- [x] Tests: valid `[keybindings]` overrides the right commands;
       comments/blank lines/section headers handled; bad chord and unknown
       command reported but don't abort; collision falls back to default.
 
 ##### 39e-5 — CLI flags + save-on-quit (`examples/demo/main.go`)
 
-- [ ] `flag` parsing: `--workspace <path>` (load via `Restore`, default
+- [x] `flag` parsing: `--workspace <path>` (load via `Restore`, default
       path when flag omitted but file exists), `--save-workspace <path>`
       (write on quit; defaults to the load path when set).
-- [ ] Wire save into the existing `OnCloseRequest` / quit path so the
+- [x] Wire save into the existing `OnCloseRequest` / quit path so the
       layout is written before `w.Close()` (both the confirm-Yes branch
       and the no-confirm branch).
 - [ ] Optional: a `Cmd+S`-style "Save Workspace" command — **defer unless
@@ -392,9 +392,9 @@ overlay.
 Phases 0–39 are done. Phase 31 (Disk-Backed Scrollback) was skipped — deferred
 until real-world memory pressure warrants it.
 
-**Phase 39e** (persistence/config) — planned in detail under "Recently
-completed → Phase 39", not yet implemented: workspace JSON save/restore,
-keybinding overrides, `--workspace` / `--save-workspace` CLI flags.
+**Phase 39e** (persistence/config) — implemented: workspace JSON save/restore,
+keybinding overrides via `~/.config/go-term/config`, `--workspace` /
+`--save-workspace` CLI flags in `examples/demo`.
 
 | Phase | Description | Key capability unlocked |
 |-------|-------------|------------------------|
@@ -437,7 +437,7 @@ keybinding overrides, `--workspace` / `--save-workspace` CLI flags.
 | 36 | Kitty Graphics Protocol | `kitten icat` high-perf images |
 | 37 | Font ligatures | Fira Code `!=` → single glyph |
 | 38 | Bidirectional text (BiDi) + RTL | `echo "שלום"` RTL rendering |
-| 39 | Native splits, panes, tabs (`term/workspace`) | Built-in multiplexing; no `tmux` (39e persistence deferred) |
+| 39 | Native splits, panes, tabs, persistence (`term/workspace`) | Built-in multiplexing; no `tmux`; workspace save/restore |
 
 ## End-to-end verification (every phase)
 

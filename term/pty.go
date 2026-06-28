@@ -56,6 +56,11 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	env = append(env, "TERM=xterm-256color")
 	env = append(env, cfg.Env...)
 	cmd.Env = env
+	if cfg.Dir != "" {
+		if _, err := os.Stat(cfg.Dir); err == nil {
+			cmd.Dir = cfg.Dir
+		}
+	}
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Rows: clampWinsize(rows),
 		Cols: clampWinsize(cols),

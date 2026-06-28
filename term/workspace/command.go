@@ -145,6 +145,11 @@ func (ws *Workspace) registerCommands() {
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.GoToTab(idx) },
 		})
 	}
+	// Apply any [keybindings] overrides from the config file before
+	// registering, so the help overlay reflects live bindings.
+	kbCfg := loadConfig(ws.cfg)
+	applyKeybindingOverrides(cmds, kbCfg.keybindings)
+
 	// Retain Label+Shortcut metadata so the help overlay renders the live
 	// bindings rather than a hand-maintained copy. The tab 1–9 commands
 	// carry no Label and are skipped by the overlay.
@@ -167,7 +172,7 @@ func (ws *Workspace) SplitPane(horizontal bool) {
 		old.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 	}
 	newLeafID := tab.allocLeafID()
-	if err := tab.addPane(ws.w, ws.cfg, newLeafID, ws.onPaneExit, ws.onPaneFocus, ws.onPaneTitle); err != nil {
+	if err := tab.addPane(ws.w, ws.cfg, newLeafID, "", ws.onPaneExit, ws.onPaneFocus, ws.onPaneTitle); err != nil {
 		return
 	}
 	newRoot := splitLeaf(tab.root, tab.focused, newLeafID, dir)

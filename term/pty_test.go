@@ -37,3 +37,26 @@ func TestPTY_StartResizeClose(t *testing.T) {
 	// the contract is that it doesn't panic and is safe to call.
 	_ = p.Close()
 }
+
+func TestPTY_StartWithDir(t *testing.T) {
+	p, err := startPTY(24, 80, Cfg{Dir: "/tmp"})
+	if err != nil {
+		t.Skipf("startPTY failed: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	if p.cmd.Dir != "/tmp" {
+		t.Errorf("cmd.Dir = %q, want /tmp", p.cmd.Dir)
+	}
+}
+
+func TestPTY_StartWithNonexistentDir(t *testing.T) {
+	// A non-existent Dir should be silently ignored (os.Stat guard).
+	p, err := startPTY(24, 80, Cfg{Dir: "/nonexistent-zzz-go-term-test"})
+	if err != nil {
+		t.Skipf("startPTY failed: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	if p.cmd.Dir != "" {
+		t.Errorf("cmd.Dir = %q, want empty for nonexistent path", p.cmd.Dir)
+	}
+}

@@ -2,8 +2,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-gui/gui/backend"
@@ -16,9 +18,41 @@ import (
 const confirmOnQuit = true
 
 func main() {
+	var workspacePath string
+	var saveWorkspacePath string
+	flag.StringVar(&workspacePath, "workspace", "", "workspace JSON to load on startup")
+	flag.StringVar(&saveWorkspacePath, "save-workspace", "", "workspace JSON to write on quit (defaults to --workspace path when set)")
+	flag.Parse()
+
+	// Auto-load default workspace when --workspace is not given but the
+	// default file already exists.
+	if workspacePath == "" {
+		if def, err := workspace.DefaultWorkspacePath(); err == nil {
+			if _, err := os.Stat(def); err == nil {
+				workspacePath = def
+			}
+		}
+	}
+
 	gui.SetTheme(gui.ThemeDark.WithBorders(true))
 
 	var s *workspace.Workspace
+
+	// Effective save path: --save-workspace if set, else --workspace if set.
+	savePath := saveWorkspacePath
+	if savePath == "" {
+		savePath = workspacePath
+	}
+
+	saveAndClose := func(w *gui.Window) {
+		if savePath != "" && s != nil {
+			if err := s.Save(savePath); err != nil {
+				log.Printf("workspace save: %v", err)
+			}
+		}
+		w.Close()
+	}
+
 	w := gui.NewWindow(gui.WindowCfg{
 		Title:  "go-term",
 		Width:  900,
@@ -48,15 +82,14 @@ func main() {
 					Title:      "Quit go-term?",
 					Body: fmt.Sprintf(
 						"%d active terminal(s) will be terminated. Quit anyway?", n),
-					OnOkYes: func(w *gui.Window) { w.Close() },
+					OnOkYes: func(w *gui.Window) { saveAndClose(w) },
 				})
 				return
 			}
-			w.Close()
+			saveAndClose(w)
 		},
 		OnInit: func(w *gui.Window) {
-			var err error
-			s, err = workspace.New(w, workspace.Cfg{
+			cfg := workspace.Cfg{
 				TextStyle: gui.TextStyle{Family: "JetBrainsMono Nerd Font", Size: 12},
 				Themes: []term.NamedTheme{
 					{Name: "Default", Theme: term.DefaultTheme},
@@ -64,9 +97,15 @@ func main() {
 					{Name: "Nord", Theme: term.NordTheme},
 					{Name: "Solarized Dark", Theme: term.SolarizedDarkTheme},
 				},
-			})
+			}
+			var err error
+			if workspacePath != "" {
+				s, err = workspace.Restore(w, cfg, workspacePath)
+			} else {
+				s, err = workspace.New(w, cfg)
+			}
 			if err != nil {
-				log.Fatalf("workspace.New: %v", err)
+				log.Fatalf("workspace init: %v", err)
 			}
 			w.UpdateView(s.View)
 		},

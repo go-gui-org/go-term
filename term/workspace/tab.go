@@ -34,7 +34,7 @@ func newTab(
 		titles: make(map[string]string),
 		nextID: 1,
 	}
-	tm, err := term.New(w, t.termCfg(w, cfg, leafID, onExit, onFocus, onTitle))
+	tm, err := term.New(w, t.termCfg(w, cfg, leafID, "", onExit, onFocus, onTitle))
 	if err != nil {
 		return nil, err
 	}
@@ -44,11 +44,13 @@ func newTab(
 	return t, nil
 }
 
-// termCfg builds a term.Cfg for a panel in this tab.
+// termCfg builds a term.Cfg for a pane. dir sets the child's working
+// directory (empty = inherit process CWD).
 func (t *Tab) termCfg(
 	w *gui.Window,
 	cfg Cfg,
 	panelID string,
+	dir string,
 	onExit func(leafID string),
 	onFocus func(leafID string),
 	onTitle func(leafID, title string),
@@ -57,6 +59,7 @@ func (t *Tab) termCfg(
 		NoWindowHandler: true,
 		TextStyle:       cfg.TextStyle,
 		Themes:          cfg.Themes,
+		Dir:             dir,
 		OnTitle: func(title string) {
 			w.QueueCommand(func(w *gui.Window) {
 				t.titles[panelID] = title
@@ -74,16 +77,18 @@ func (t *Tab) termCfg(
 	}
 }
 
-// addPane creates a new Term as a leaf in this tab.
+// addPane creates a new Term as a leaf in this tab. dir sets the child's
+// working directory (empty = inherit process CWD).
 func (t *Tab) addPane(
 	w *gui.Window,
 	cfg Cfg,
 	leafID string,
+	dir string,
 	onExit func(leafID string),
 	onFocus func(leafID string),
 	onTitle func(leafID, title string),
 ) error {
-	tm, err := term.New(w, t.termCfg(w, cfg, leafID, onExit, onFocus, onTitle))
+	tm, err := term.New(w, t.termCfg(w, cfg, leafID, dir, onExit, onFocus, onTitle))
 	if err != nil {
 		return err
 	}
