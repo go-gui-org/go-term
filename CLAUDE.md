@@ -168,10 +168,15 @@ Printable input is segmented into grapheme clusters (uniseg), not single
 runes. The streaming path is `grid.PutRune` (accumulates runes into `gphBuf`,
 commits a leading cluster only once a boundary is observed) and
 `grid.FlushGrapheme` (commits the pending cluster). The parser flushes before
-any control byte in ground state — so DSR/CPR see the advanced cursor — and at
-end of `Feed`. A cluster split exactly across the read buffer is the sole
-casualty (programs emit whole clusters per write). `grid.Put` is the
-immediate single-rune path, kept for tests and direct callers.
+any control byte in ground state — so DSR/CPR see the advanced cursor.
+`parser.Feed` (batch path, tests/direct callers) also flushes at the end;
+`parser.feedChunk` (the PTY reader's path) does not, so a grapheme cluster
+straddling a read boundary stays pending and is completed by the next chunk
+instead of being committed as broken pieces. `readLoop` defers the flush while
+the input burst is still draining (the read filled its buffer) and flushes on a
+short/final read, so a ZWJ emoji split at the 4096-byte edge renders correctly
+while interactive echo and trailing clusters still appear promptly. `grid.Put`
+is the immediate single-rune path, kept for tests and direct callers.
 
 Cluster width comes from uniseg (handles VS15/VS16, ZWJ, regional-indicator
 flags, combining marks), not per-rune `runeWidth`. Storage: `cell.Ch` holds

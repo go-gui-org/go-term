@@ -181,7 +181,21 @@ func newParser(g *grid) *parser {
 }
 
 // Feed processes b, mutating the grid. Caller holds g.Mu.
+// Feed parses b as a complete batch: it commits any trailing grapheme cluster
+// before returning, so a single Feed renders everything it was given. Tests and
+// direct callers use this. The streaming PTY reader uses feedChunk instead so a
+// grapheme cluster straddling a read boundary is not committed half-assembled.
 func (p *parser) Feed(b []byte) {
+	p.feedChunk(b)
+	p.g.FlushGrapheme()
+}
+
+// feedChunk parses b but leaves any trailing, still-growing grapheme cluster
+// pending in the grid's assembler. The caller commits it (via Grid.FlushGrapheme)
+// once the input burst has drained — see readLoop. Control bytes, cursor moves,
+// and reports still flush the pending cluster mid-stream (so DSR/CPR are
+// accurate); only a printable cluster at the very end of b is carried over.
+func (p *parser) feedChunk(b []byte) {
 
 	if p.utfLen > 0 {
 		// Complete the partial UTF-8 sequence carried over from the previous
@@ -441,11 +455,11 @@ func (p *parser) Feed(b []byte) {
 			}
 		}
 	}
-	// Commit any trailing grapheme so it renders this frame. The only bytes
-	// intentionally carried across Feed are an incomplete trailing UTF-8
-	// sequence (p.utf), which returns early above before reaching here; a
-	// cluster split exactly on the read boundary is the lone casualty.
-	p.g.FlushGrapheme()
+	// No trailing FlushGrapheme here: a printable grapheme cluster at the end
+	// of b may be the leading bytes of a cluster whose remaining code points
+	// arrive in the next chunk (a ZWJ emoji split across a PTY read boundary).
+	// Committing it now would write it as broken pieces. The caller flushes
+	// once the burst drains; Feed (the batch wrapper) flushes immediately.
 }
 
 // maxXTGETTCAPParts caps the number of capability names in one XTGETTCAP
