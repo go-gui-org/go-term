@@ -109,7 +109,7 @@ type benchRun struct {
 
 type benchSummary struct {
 	Name        string
-	NsPerOp     float64 // arithmetic mean
+	NsPerOp     float64 // median across runs (robust to CI-runner outliers)
 	BytesPerOp  float64 // arithmetic mean
 	AllocsPerOp float64 // arithmetic mean
 }
@@ -211,7 +211,10 @@ func parseBenchOutput(r io.Reader) ([]benchRun, error) {
 	return runs, sc.Err()
 }
 
-// summarize groups runs by name and computes arithmetic means.
+// summarize groups runs by name. ns/op uses the median to reject single-sample
+// outliers from noisy shared CI runners; B/op and allocs/op use the arithmetic
+// mean (they are deterministic across runs, so the choice is immaterial, and a
+// mean keeps the zero-alloc check exact).
 func summarize(runs []benchRun) []benchSummary {
 	m := make(map[string][]benchRun)
 	var order []string
@@ -224,21 +227,35 @@ func summarize(runs []benchRun) []benchSummary {
 	out := make([]benchSummary, 0, len(order))
 	for _, name := range order {
 		rs := m[name]
-		var nsSum, bSum, aSum float64
-		for _, r := range rs {
-			nsSum += r.NsPerOp
+		ns := make([]float64, len(rs))
+		var bSum, aSum float64
+		for i, r := range rs {
+			ns[i] = r.NsPerOp
 			bSum += float64(r.BytesPerOp)
 			aSum += float64(r.AllocsPerOp)
 		}
 		n := float64(len(rs))
 		out = append(out, benchSummary{
 			Name:        name,
-			NsPerOp:     nsSum / n,
+			NsPerOp:     median(ns),
 			BytesPerOp:  bSum / n,
 			AllocsPerOp: aSum / n,
 		})
 	}
 	return out
+}
+
+// median returns the median of xs. xs is sorted in place. Returns 0 for empty.
+func median(xs []float64) float64 {
+	n := len(xs)
+	if n == 0 {
+		return 0
+	}
+	sort.Float64s(xs)
+	if n%2 == 1 {
+		return xs[n/2]
+	}
+	return (xs[n/2-1] + xs[n/2]) / 2
 }
 
 // ---------------------------------------------------------------------------
