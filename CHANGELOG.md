@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-28
+
 ### Added
 
 - Fuzz testing for parser input on PRs that touch parser files.
