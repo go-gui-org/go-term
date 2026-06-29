@@ -136,12 +136,12 @@ func TestGrapheme_ViramaSpacingMarks(t *testing.T) {
 }
 
 // TestGrapheme_ViramaZWJConjunct verifies an explicit-conjunct request
-// (consonant + virama + ZWJ + consonant + vowel sign, Marathi "र्‍या") fuses
+// (consonant + virama + ZWJ + consonant + vowel sign, Marathi "र्<ZWJ>या") fuses
 // into one width-2 cell. The ZWJ-terminated cluster must still be recognized
 // as virama-ending for fusion.
 func TestGrapheme_ViramaZWJConjunct(t *testing.T) {
 	g, p := newParserGrid(1, 10)
-	feedStr(t, g, p, "र्‍या") // RA virama ZWJ YA AA
+	feedStr(t, g, p, "र्\u200dया") // RA virama ZWJ YA AA
 	if g.CursorC != 2 {
 		t.Fatalf("cursor col = %d, want 2", g.CursorC)
 	}
