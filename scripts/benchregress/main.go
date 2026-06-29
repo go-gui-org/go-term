@@ -108,10 +108,14 @@ type benchRun struct {
 }
 
 type benchSummary struct {
-	Name        string
-	NsPerOp     float64 // median across runs (robust to CI-runner outliers)
-	BytesPerOp  float64 // arithmetic mean
-	AllocsPerOp float64 // arithmetic mean
+	Name string
+	// NsPerOp is the median across runs. Advisory only: within-run variance on
+	// CI is ~0, so the median changes nothing for gating — ns/op is reported
+	// but never fails the build (see metricResult.Advisory). Median is kept as
+	// a sensible central estimate for the report.
+	NsPerOp     float64
+	BytesPerOp  float64 // arithmetic mean (deterministic; hard-gated)
+	AllocsPerOp float64 // arithmetic mean (deterministic; hard-gated)
 }
 
 type metricResult struct {
@@ -121,6 +125,13 @@ type metricResult struct {
 	Current  float64 `json:"current"`
 	DeltaPct float64 `json:"delta_pct"`
 	Pass     bool    `json:"pass"`
+	// Advisory metrics are reported but never fail the build. ns/op is
+	// advisory: on GitHub's shared ubuntu-latest fleet the CPU model varies
+	// per run, so absolute timings swing ±30%+ between runs with near-zero
+	// within-run variance — a fixed percentage gate is hardware luck, not a
+	// regression signal. allocs/op and B/op are deterministic across machines
+	// and stay hard-gated.
+	Advisory bool `json:"advisory,omitempty"`
 }
 
 type benchCmp struct {
@@ -211,10 +222,10 @@ func parseBenchOutput(r io.Reader) ([]benchRun, error) {
 	return runs, sc.Err()
 }
 
-// summarize groups runs by name. ns/op uses the median to reject single-sample
-// outliers from noisy shared CI runners; B/op and allocs/op use the arithmetic
-// mean (they are deterministic across runs, so the choice is immaterial, and a
-// mean keeps the zero-alloc check exact).
+// summarize groups runs by name. ns/op uses the median as a central estimate
+// for the (advisory) report; B/op and allocs/op use the arithmetic mean (they
+// are deterministic across runs, so the choice is immaterial, and a mean keeps
+// the zero-alloc check exact).
 func summarize(runs []benchRun) []benchSummary {
 	m := make(map[string][]benchRun)
 	var order []string
@@ -415,16 +426,18 @@ func compareBench(name string, base, cur benchSummary, threshold float64, zeroAl
 		name     string
 		baseline float64
 		current  float64
+		advisory bool
 	}{
-		{"ns/op", base.NsPerOp, cur.NsPerOp},
-		{"B/op", base.BytesPerOp, cur.BytesPerOp},
-		{"allocs/op", base.AllocsPerOp, cur.AllocsPerOp},
+		{"ns/op", base.NsPerOp, cur.NsPerOp, true},
+		{"B/op", base.BytesPerOp, cur.BytesPerOp, false},
+		{"allocs/op", base.AllocsPerOp, cur.AllocsPerOp, false},
 	}
 
 	for _, m := range metrics {
 		mr := compareMetric(threshold, m.name, m.baseline, m.current)
+		mr.Advisory = m.advisory
 		bc.Metrics = append(bc.Metrics, mr)
-		if !mr.Pass {
+		if !mr.Pass && !m.advisory {
 			bc.Status = "regression"
 		}
 	}
@@ -561,13 +574,22 @@ func printTextReport(w io.Writer, r report) {
 				if math.IsInf(m.DeltaPct, 1) {
 					deltaStr = "∞"
 				}
+				// Advisory metrics never fail; flag an over-threshold swing
+				// with "~" (informational) rather than "✗" (gating failure).
 				passStr := "✓"
-				if !m.Pass {
+				switch {
+				case m.Advisory && !m.Pass:
+					passStr = "~"
+				case !m.Pass:
 					passStr = "✗"
 				}
 				_, _ = fmt.Fprintf(w, "%-4s %-38s %-8s %12.0f %12.0f %8s %s\n",
 					status, nameCol, m.Metric, m.Baseline, m.Current, deltaStr, passStr)
-				if m.Message != "" && !m.Pass {
+				switch {
+				case m.Advisory && !m.Pass:
+					_, _ = fmt.Fprintf(w, "      → %s changed by %s (advisory, not gated — shared-runner CPU varies)\n",
+						m.Metric, deltaStr)
+				case m.Message != "" && !m.Pass:
 					_, _ = fmt.Fprintf(w, "      → %s\n", m.Message)
 				}
 			}
