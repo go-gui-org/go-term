@@ -15,24 +15,24 @@ can rely on and what may still shift.
 
 ### Public API (stable boundary)
 
-| Symbol | Kind | Guarantee |
-|---|---|---|
-| `Cfg` | struct | Fields are additive. Renames and removals will go through a deprecation cycle (at least one minor version with the old name still accepted). |
-| `NamedTheme` | struct | Stable. |
-| `Theme` | struct | Stable. |
-| `Term` | struct | Opaque handle. All fields are unexported; embedders interact only through methods. |
-| `New(w, cfg)` | constructor | Signature stable. |
-| `Term.View(w)` | method | Signature stable. The returned `gui.View` tree is an implementation detail. |
-| `Term.Close()` | method | Signature stable. Idempotent — safe to call multiple times. |
-| `Term.Cwd()` | method | Signature stable. |
-| `Term.SetTheme(th)` / `Term.Theme()` | method | Signature stable. |
-| `Term.Rows()` / `Term.Cols()` | method | Signature stable. Current grid dimensions. |
-| `Term.Write(p)` | method | Signature stable. Inject bytes as if typed. |
-| `Term.PID()` / `Term.Alive()` | method | Signature stable. Child process status. |
-| `Term.SetFocused(v)` / `Term.HandleWindowEvent(e)` | method | Signature stable. Multi-`Term` embedding (a pane manager routes focus + events). |
-| `Shortcuts()` / `ShortcutInfo` | func / struct | Signature stable. Display metadata for help overlays. |
-| `MaxGridDim` | constant | Stable. Grid rows/cols are clamped to this value. |
-| `MaxScrollbackCap` | constant | Stable. Scrollback rows are capped at this value. |
+| Symbol                                             | Kind          | Guarantee                                                                                                                                    |
+| -------------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Cfg`                                              | struct        | Fields are additive. Renames and removals will go through a deprecation cycle (at least one minor version with the old name still accepted). |
+| `NamedTheme`                                       | struct        | Stable.                                                                                                                                      |
+| `Theme`                                            | struct        | Stable.                                                                                                                                      |
+| `Term`                                             | struct        | Opaque handle. All fields are unexported; embedders interact only through methods.                                                           |
+| `New(w, cfg)`                                      | constructor   | Signature stable.                                                                                                                            |
+| `Term.View(w)`                                     | method        | Signature stable. The returned `gui.View` tree is an implementation detail.                                                                  |
+| `Term.Close()`                                     | method        | Signature stable. Idempotent — safe to call multiple times.                                                                                  |
+| `Term.Cwd()`                                       | method        | Signature stable.                                                                                                                            |
+| `Term.SetTheme(th)` / `Term.Theme()`               | method        | Signature stable.                                                                                                                            |
+| `Term.Rows()` / `Term.Cols()`                      | method        | Signature stable. Current grid dimensions.                                                                                                   |
+| `Term.Write(p)`                                    | method        | Signature stable. Inject bytes as if typed.                                                                                                  |
+| `Term.PID()` / `Term.Alive()`                      | method        | Signature stable. Child process status.                                                                                                      |
+| `Term.SetFocused(v)` / `Term.HandleWindowEvent(e)` | method        | Signature stable. Multi-`Term` embedding (a pane manager routes focus + events).                                                             |
+| `Shortcuts()` / `ShortcutInfo`                     | func / struct | Signature stable. Display metadata for help overlays.                                                                                        |
+| `MaxGridDim`                                       | constant      | Stable. Grid rows/cols are clamped to this value.                                                                                            |
+| `MaxScrollbackCap`                                 | constant      | Stable. Scrollback rows are capped at this value.                                                                                            |
 
 The pre-built `Theme` variables (`DefaultTheme`, `GruvboxTheme`, `NordTheme`,
 `SolarizedDarkTheme`) are stable — their names won't change and their color
@@ -104,102 +104,102 @@ pre-1.0 interpretation:
 
 ### Core emulation
 
-| Feature | Notes |
-|---|---|
-| PTY-backed shell | Spawns `$SHELL`, fallback `/bin/sh`; full `TIOCSWINSZ` resize |
-| VT state machine | C0, ESC, CSI, OSC, DCS, APC; xterm-compatible subset |
-| 16-color ANSI | Standard foreground / background palette |
-| 256-color palette | xterm 6×6×6 cube + 24-step grayscale |
-| 24-bit Truecolor | `CSI 38;2;r;g;b m` / `CSI 48;2;r;g;b m` |
-| SGR attributes | Bold, Dim, Italic, Underline, Inverse, Strikethrough |
-| Extended underlines | Single, double, curly, dotted, dashed; per-cell color (`CSI 58`) |
-| Cursor styles | Block, underline, bar — steady or blinking (DECSCUSR); `Cfg.CursorBlink` override |
-| Cursor save / restore | DECSC/DECRC (`ESC 7`/`ESC 8`, `CSI s`/`CSI u`); show/hide (`?25`) |
-| Scroll regions | DECSTBM (`CSI r`); IND/RI/NEL; `IL`/`DL`/`ICH`/`DCH` |
-| Alt screen | DECSET 47 / 1047 / 1049; scrollback suppressed while active |
-| Logical line reflow | Wrapped-row tracking; content re-wraps on every resize |
-| DEC Special Graphics | `SI`/`SO`, `ESC (0` / `ESC (B` line-drawing charset |
-| Tab stops | HTS (`ESC H`), TBC (`CSI g`); defaults to 8-column grid |
-| Visual bell | Brief screen flash on `BEL` (`\a`) |
+| Feature               | Notes                                                                             |
+| --------------------- | --------------------------------------------------------------------------------- |
+| PTY-backed shell      | Spawns `$SHELL`, fallback `/bin/sh`; full `TIOCSWINSZ` resize                     |
+| VT state machine      | C0, ESC, CSI, OSC, DCS, APC; xterm-compatible subset                              |
+| 16-color ANSI         | Standard foreground / background palette                                          |
+| 256-color palette     | xterm 6×6×6 cube + 24-step grayscale                                              |
+| 24-bit Truecolor      | `CSI 38;2;r;g;b m` / `CSI 48;2;r;g;b m`                                           |
+| SGR attributes        | Bold, Dim, Italic, Underline, Inverse, Strikethrough                              |
+| Extended underlines   | Single, double, curly, dotted, dashed; per-cell color (`CSI 58`)                  |
+| Cursor styles         | Block, underline, bar — steady or blinking (DECSCUSR); `Cfg.CursorBlink` override |
+| Cursor save / restore | DECSC/DECRC (`ESC 7`/`ESC 8`, `CSI s`/`CSI u`); show/hide (`?25`)                 |
+| Scroll regions        | DECSTBM (`CSI r`); IND/RI/NEL; `IL`/`DL`/`ICH`/`DCH`                              |
+| Alt screen            | DECSET 47 / 1047 / 1049; scrollback suppressed while active                       |
+| Logical line reflow   | Wrapped-row tracking; content re-wraps on every resize                            |
+| DEC Special Graphics  | `SI`/`SO`, `ESC (0` / `ESC (B` line-drawing charset                               |
+| Tab stops             | HTS (`ESC H`), TBC (`CSI g`); defaults to 8-column grid                           |
+| Visual bell           | Brief screen flash on `BEL` (`\a`)                                                |
 
 ### Input
 
-| Feature | Notes |
-|---|---|
-| Keyboard | Printable chars, arrows, Enter, Backspace (DEL), Delete, Page Up/Down, Home/End, Ctrl+letter, F1–F12, numeric keypad |
-| Alt/Meta keys | ESC-prefix encoding for Alt+key combinations |
-| Kitty Keyboard Protocol | `CSI u` push/pop/set/query; key-release events; left/right modifier distinction |
-| IME composition | Inline pre-edit string rendered + underlined at the cursor; caret rect reported via `IMESetRect` (CJK, dead keys, emoji picker) |
-| Bracketed paste | DECSET 2004; strips embedded `\x1b[201~` markers |
-| Focus reporting | DECSET 1004 |
+| Feature                 | Notes                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Keyboard                | Printable chars, arrows, Enter, Backspace (DEL), Delete, Page Up/Down, Home/End, Ctrl+letter, F1–F12, numeric keypad            |
+| Alt/Meta keys           | ESC-prefix encoding for Alt+key combinations                                                                                    |
+| Kitty Keyboard Protocol | `CSI u` push/pop/set/query; key-release events; left/right modifier distinction                                                 |
+| IME composition         | Inline pre-edit string rendered + underlined at the cursor; caret rect reported via `IMESetRect` (CJK, dead keys, emoji picker) |
+| Bracketed paste         | DECSET 2004; strips embedded `\x1b[201~` markers                                                                                |
+| Focus reporting         | DECSET 1004                                                                                                                     |
 
 ### Mouse
 
-| Feature | Notes |
-|---|---|
-| Button reporting | `?1000` (click), `?1002` (drag), `?1003` (any-motion) |
-| SGR encoding | `?1006`; suppressed while in scrollback |
-| SGR-Pixels mode | `?1016`; emits pixel-relative coordinates |
-| Mouse wheel | Scrollback navigation; forwarded to PTY in mouse-reporting mode |
+| Feature          | Notes                                                           |
+| ---------------- | --------------------------------------------------------------- |
+| Button reporting | `?1000` (click), `?1002` (drag), `?1003` (any-motion)           |
+| SGR encoding     | `?1006`; suppressed while in scrollback                         |
+| SGR-Pixels mode  | `?1016`; emits pixel-relative coordinates                       |
+| Mouse wheel      | Scrollback navigation; forwarded to PTY in mouse-reporting mode |
 
 ### Scrollback & display
 
-| Feature | Notes |
-|---|---|
-| Scrollback ring | Default 5 000 rows; configurable via `Cfg.ScrollbackRows` |
-| Pixel-perfect scrolling | Sub-row `ViewSubPx` offset; momentum scroll with two-phase friction; cancels on trackpad touch |
-| Scrollbar indicator | Auto-hides at live viewport; fades after inactivity |
-| Text selection | Left-drag; content-relative coordinates survive scroll and resize |
-| Clipboard copy/paste | `Cmd+C` / `Cmd+V`; OSC 52 write when explicitly enabled |
-| Search | `Cmd+F` literal search; `Ctrl+R` toggles RE2 regex mode; highlights all matches; `Enter`/`Shift+Enter` cycle |
-| Semantic shell marks | OSC 133 A/B/C/D; `Cmd+Up/Down` jumps between command boundaries |
+| Feature                 | Notes                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Scrollback ring         | Default 5 000 rows; configurable via `Cfg.ScrollbackRows`                                                    |
+| Pixel-perfect scrolling | Sub-row `ViewSubPx` offset; momentum scroll with two-phase friction; cancels on trackpad touch               |
+| Scrollbar indicator     | Auto-hides at live viewport; fades after inactivity                                                          |
+| Text selection          | Left-drag; content-relative coordinates survive scroll and resize                                            |
+| Clipboard copy/paste    | `Cmd+C` / `Cmd+V`; OSC 52 write when explicitly enabled                                                      |
+| Search                  | `Cmd+F` literal search; `Ctrl+R` toggles RE2 regex mode; highlights all matches; `Enter`/`Shift+Enter` cycle |
+| Semantic shell marks    | OSC 133 A/B/C/D; `Cmd+Up/Down` jumps between command boundaries                                              |
 
 ### OSC / protocol extensions
 
-| Sequence | Behavior |
-|---|---|
-| OSC 0 / 1 / 2 | Window title (`Cfg.OnTitle` callback, defaults to `win.SetTitle`) |
-| OSC 7 | CWD; exposed via `Term.Cwd()` |
-| OSC 8 | Hyperlinks; `Cmd+click` opens in OS default browser |
-| OSC 9 / 777 | Desktop notifications; injection-safe dispatch |
-| OSC 10 / 11 / 12 | Dynamic foreground / background / cursor-color set and query |
-| OSC 52 | Clipboard write (base64, disabled by default via `Cfg.AllowOSC52Write`); read requests silently dropped |
-| OSC 133 | Semantic shell integration (prompt / command / output marks) |
-| OSC 1337 | iTerm2 inline images |
-| DCS sixel | Sixel graphics; 256-register color; RLE; up to 4096×4096 px; 256 retained per grid |
-| APC kitty | Kitty Graphics Protocol; chunked base64 transmission; PNG / raw RGBA / raw RGB; off-screen store; delete by ID |
-| DECRQSS / XTGETTCAP | Terminfo/SGR capability queries; replied via `onReply` → PTY write. `Smulx`/`Setulc` advertise styled + colored underlines |
-| DA1 / DA2 | Primary attributes advertise Sixel (`CSI ?1;2;4c`); secondary identifies as go-term |
-| XTVERSION | `CSI > q` → `DCS >\| go-term(ver) ST` |
-| XTWINOPS | `CSI 14 t` / `CSI 16 t` pixel-geometry reports (text area / cell size); manipulation ops ignored |
-| DECRQM | Reports DEC private-mode state (set / reset / unrecognized) so apps can probe capabilities |
-| Synchronized Updates | DCS `?2026` — batches a frame so partial repaints don't flicker |
-| Grapheme clustering | Mode 2027 (always on); DECRQM reports it permanently set |
+| Sequence             | Behavior                                                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| OSC 0 / 1 / 2        | Window title (`Cfg.OnTitle` callback, defaults to `win.SetTitle`)                                                          |
+| OSC 7                | CWD; exposed via `Term.Cwd()`                                                                                              |
+| OSC 8                | Hyperlinks; `Cmd+click` opens in OS default browser                                                                        |
+| OSC 9 / 777          | Desktop notifications; injection-safe dispatch                                                                             |
+| OSC 10 / 11 / 12     | Dynamic foreground / background / cursor-color set and query                                                               |
+| OSC 52               | Clipboard write (base64, disabled by default via `Cfg.AllowOSC52Write`); read requests silently dropped                    |
+| OSC 133              | Semantic shell integration (prompt / command / output marks)                                                               |
+| OSC 1337             | iTerm2 inline images                                                                                                       |
+| DCS sixel            | Sixel graphics; 256-register color; RLE; up to 4096×4096 px; 256 retained per grid                                         |
+| APC kitty            | Kitty Graphics Protocol; chunked base64 transmission; PNG / raw RGBA / raw RGB; off-screen store; delete by ID             |
+| DECRQSS / XTGETTCAP  | Terminfo/SGR capability queries; replied via `onReply` → PTY write. `Smulx`/`Setulc` advertise styled + colored underlines |
+| DA1 / DA2            | Primary attributes advertise Sixel (`CSI ?1;2;4c`); secondary identifies as go-term                                        |
+| XTVERSION            | `CSI > q` → `DCS >\| go-term(ver) ST`                                                                                      |
+| XTWINOPS             | `CSI 14 t` / `CSI 16 t` pixel-geometry reports (text area / cell size); manipulation ops ignored                           |
+| DECRQM               | Reports DEC private-mode state (set / reset / unrecognized) so apps can probe capabilities                                 |
+| Synchronized Updates | DCS `?2026` — batches a frame so partial repaints don't flicker                                                            |
+| Grapheme clustering  | Mode 2027 (always on); DECRQM reports it permanently set                                                                   |
 
 ### Internationalization
 
-| Feature | Notes |
-|---|---|
-| Grapheme clusters | Input segmented into clusters via `uniseg` (Mode 2027, always on; advertised to `ucs-detect`); multi-codepoint clusters stored in a per-grid intern pool |
-| East Asian Wide | CJK and wide emoji; cluster width from `uniseg`; correct cursor advance and half-cell erasure |
-| Combining / ZWJ / VS15-16 / flags | Combining marks, ZWJ sequences, variation selectors, and regional-indicator flag pairs render as a single cell — not double-advanced |
-| Bidirectional text | Unicode BiDi Algorithm (UAX#9); RTL scripts (Hebrew, Arabic) reordered for display |
+| Feature                           | Notes                                                                                                                                                    |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Grapheme clusters                 | Input segmented into clusters via `uniseg` (Mode 2027, always on; advertised to `ucs-detect`); multi-codepoint clusters stored in a per-grid intern pool |
+| East Asian Wide                   | CJK and wide emoji; cluster width from `uniseg`; correct cursor advance and half-cell erasure                                                            |
+| Combining / ZWJ / VS15-16 / flags | Combining marks, ZWJ sequences, variation selectors, and regional-indicator flag pairs render as a single cell — not double-advanced                     |
+| Bidirectional text                | Unicode BiDi Algorithm (UAX#9); RTL scripts (Hebrew, Arabic) reordered for display                                                                       |
 
 ### Workspace (splits, tabs, persistence)
 
 Native window multiplexing — no `tmux` required — lives in the
-`term/workspace` package, a layer *above* `term` that creates and wires
+`term/workspace` package, a layer _above_ `term` that creates and wires
 `*term.Term` instances through their public API. The single-shell `term`
 widget has no awareness of panes.
 
-| Feature | Notes |
-|---|---|
-| Split panes | Vertical / horizontal splits over a flex-ratio split tree; keyboard-driven resize |
-| Tabs | Tab bar showing each active pane's OSC 0/2 title; create / close / cycle |
-| Focus routing | Click or keyboard cycles focus; active pane gets an accent border, others dim |
-| Persistence | Full layout (tabs → split trees → per-pane CWD + ratio) saved to versioned JSON, restored on launch |
-| Keybindings | Hand-edited INI-style `config` file (`[keybindings]` section); kitty/iTerm2-style defaults, all overridable |
-| Config root | `$XDG_CONFIG_HOME/go-term`, else `~/.config/go-term`, else `os.UserConfigDir()/go-term` |
+| Feature       | Notes                                                                                                       |
+| ------------- | ----------------------------------------------------------------------------------------------------------- |
+| Split panes   | Vertical / horizontal splits over a flex-ratio split tree; keyboard-driven resize                           |
+| Tabs          | Tab bar showing each active pane's OSC 0/2 title; create / close / cycle                                    |
+| Focus routing | Click or keyboard cycles focus; active pane gets an accent border, others dim                               |
+| Persistence   | Full layout (tabs → split trees → per-pane CWD + ratio) saved to versioned JSON, restored on launch         |
+| Keybindings   | Hand-edited INI-style `config` file (`[keybindings]` section); kitty/iTerm2-style defaults, all overridable |
+| Config root   | `$XDG_CONFIG_HOME/go-term`, else `~/.config/go-term`, else `os.UserConfigDir()/go-term`                     |
 
 Default bindings (overridable): Cmd+D / Cmd+Shift+D split, Cmd+Shift+W close
 pane, Cmd+] / Cmd+[ cycle panes, Cmd+Ctrl+Arrow resize, Cmd+T new tab,
@@ -209,12 +209,12 @@ overlay. The bundled `examples/demo` is built on `term/workspace` and accepts
 
 ### Performance
 
-| Mechanism | Effect |
-|---|---|
-| Dirty-row tracking | `readLoop` skips cache-bust when no cells changed |
-| Tessellation cache | `DrawCanvas` ID + version; `OnDraw` skipped by go-gui when version is unchanged |
-| Coalesced text runs | Cells with identical SGR batched into single `dc.Text` calls |
-| Zero allocs on draw path | `BenchmarkForegroundPass`: 37 µs, 0 allocs — 80×24, Apple M5 |
+| Mechanism                | Effect                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------- |
+| Dirty-row tracking       | `readLoop` skips cache-bust when no cells changed                               |
+| Tessellation cache       | `DrawCanvas` ID + version; `OnDraw` skipped by go-gui when version is unchanged |
+| Coalesced text runs      | Cells with identical SGR batched into single `dc.Text` calls                    |
+| Zero allocs on draw path | `BenchmarkForegroundPass`: 37 µs, 0 allocs — 80×24, Apple M5                    |
 
 ---
 
@@ -222,10 +222,6 @@ overlay. The bundled `examples/demo` is built on `term/workspace` and accepts
 
 - Go 1.26+
 - macOS or Linux
-- Sibling working trees of [`go-gui`](https://github.com/go-gui-org/go-gui)
-  and [`go-glyph`](https://github.com/go-gui-org/go-glyph) at `../go-gui`
-  and `../go-glyph`. Copy `go.work.example` to `go.work` to wire the
-  local siblings into the module graph (Go workspace mode).
 
 ---
 
@@ -392,9 +388,9 @@ and exercise resize, redraw, selection, paste, and application compatibility
 
 ## Out of scope
 
-| Feature | Reason |
-|---|---|
-| Windows / ConPTY | PTY layer is POSIX-only |
+| Feature                | Reason                                                |
+| ---------------------- | ----------------------------------------------------- |
+| Windows / ConPTY       | PTY layer is POSIX-only                               |
 | Disk-backed scrollback | Deferred until real-world memory pressure warrants it |
 
 ---
