@@ -1,6 +1,7 @@
 package term
 
 import (
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/rivo/uniseg"
@@ -21,10 +22,10 @@ func (g *grid) Put(ch rune) {
 }
 
 // PutRune feeds one rune of streaming input into the grapheme assembler.
-// Runes are accumulated into g.gphBuf and a leading cluster is committed to
-// the grid only once a cluster boundary is observed (i.e. when the next
-// rune cannot extend it). The trailing, possibly-incomplete cluster stays
-// pending until a boundary, FlushGrapheme, or end of Feed. Callers must
+// Runes are accumulated into g.gphBuf and a leading orthographic syllable is
+// committed to the grid only once its boundary is observed (i.e. when the
+// next rune cannot extend it). The trailing, possibly-incomplete syllable
+// stays pending until a boundary, FlushGrapheme, or end of Feed. Callers must
 // FlushGrapheme before any cursor/erase/report operation so the cursor
 // position reflects committed cells.
 func (g *grid) PutRune(r rune) {
@@ -41,30 +42,153 @@ func (g *grid) PutRune(r rune) {
 		return
 	}
 	g.gphBuf = utf8.AppendRune(g.gphBuf, r)
-	// With at most one rune appended since the last commit, FirstGraphemeCluster
-	// returns a non-empty rest only when r began a new cluster. The loop is
-	// belt-and-braces against a multi-boundary rest.
-	for {
-		cluster, rest, width, _ := uniseg.FirstGraphemeCluster(g.gphBuf, -1)
-		if len(rest) == 0 {
-			return // buffer is a single (still-growing) cluster; keep pending
+	g.drainAksharas(false)
+}
+
+// FlushGrapheme commits any pending orthographic syllable(s) to the grid.
+// Called before control sequences (so DSR/CPR see the advanced cursor) and at
+// the end of a Feed batch (so a trailing syllable renders without lag).
+func (g *grid) FlushGrapheme() {
+	g.drainAksharas(true)
+}
+
+// drainAksharas commits leading orthographic syllables from g.gphBuf. A
+// syllable is one or more uniseg grapheme clusters fused across a virama
+// (Indic/Brahmic conjunct) — see leadingAkshara. When flush is false the
+// trailing, still-extendable syllable stays pending in g.gphBuf; when flush
+// is true (end of input) it is committed as-is.
+func (g *grid) drainAksharas(flush bool) {
+	for len(g.gphBuf) > 0 {
+		n, width, complete := leadingAkshara(g.gphBuf)
+		if n == 0 || (!complete && !flush) {
+			return // nothing committable yet; keep pending
 		}
-		g.commitCluster(cluster, width)
-		n := copy(g.gphBuf, rest)
-		g.gphBuf = g.gphBuf[:n]
+		g.commitCluster(g.gphBuf[:n], width)
+		m := copy(g.gphBuf, g.gphBuf[n:])
+		g.gphBuf = g.gphBuf[:m]
 	}
 }
 
-// FlushGrapheme commits any pending grapheme cluster(s) to the grid. Called
-// before control sequences (so DSR/CPR see the advanced cursor) and at the
-// end of a Feed batch (so a trailing grapheme renders without lag).
-func (g *grid) FlushGrapheme() {
-	for len(g.gphBuf) > 0 {
-		cluster, rest, width, _ := uniseg.FirstGraphemeCluster(g.gphBuf, -1)
-		g.commitCluster(cluster, width)
-		n := copy(g.gphBuf, rest)
-		g.gphBuf = g.gphBuf[:n]
+// leadingAkshara reports the byte length n and display width of the leading
+// orthographic syllable in b. uniseg supplies grapheme-cluster boundaries;
+// clusters joined by a virama (optionally followed by ZWJ) are fused into one
+// syllable so a Brahmic conjunct such as "ꦏ꧀ꦏ" occupies a single cell group.
+// The syllable's width is uniseg's for non-Brahmic text (emoji, CJK, flags,
+// variation selectors) but recomputed by brahmicWidth for syllables carrying
+// a virama or spacing mark, since uniseg's per-rune widths diverge from the
+// terminal-cell model (wcwidth wcswidth / ucs-detect): it widths a dead
+// consonant base+virama at 2 (model: 1) and a base+spacing-mark at 1 in some
+// scripts (model: 2).
+//
+// complete is true only when a grapheme boundary is known to follow the
+// syllable — i.e. it cannot grow with more input. While false the caller
+// keeps the bytes pending (or commits them if at end of input).
+func leadingAkshara(b []byte) (n, width int, complete bool) {
+	for {
+		cluster, rest, w, _ := uniseg.FirstGraphemeCluster(b[n:], -1)
+		if len(cluster) == 0 {
+			break // no complete cluster (empty buffer)
+		}
+		n += len(cluster)
+		width += w
+		if len(rest) == 0 {
+			// Cluster consumed the buffer; uniseg cannot confirm a boundary
+			// past it, so the syllable may still grow. Keep pending.
+			break
+		}
+		if clusterFusesRight(cluster) {
+			continue // virama (or virama+ZWJ): fuse the following cluster
+		}
+		complete = true
+		break // self-contained cluster with a boundary after it
 	}
+	if brahmic, w := brahmicWidth(b[:n]); brahmic {
+		width = w
+	}
+	return n, width, complete
+}
+
+// clusterFusesRight reports whether a grapheme cluster should fuse with the
+// next one to form a single Brahmic syllable: it ends in a virama, or in a
+// virama immediately followed by a ZWJ (the explicit-conjunct request used in
+// Bengali/Malayalam/Devanagari, e.g. "र्‍या" = RA, virama, ZWJ, YA, sign AA).
+func clusterFusesRight(cluster []byte) bool {
+	r, sz := utf8.DecodeLastRune(cluster)
+	if r == 0x200D && sz < len(cluster) { // trailing ZWJ over a virama
+		r, _ = utf8.DecodeLastRune(cluster[:len(cluster)-sz])
+	}
+	return isVirama(r)
+}
+
+// brahmicWidth computes the terminal cell width of an orthographic syllable
+// under the wcwidth wcswidth model, returning brahmic=false (and width 0) when
+// b carries neither a virama nor a spacing combining mark — in which case the
+// caller keeps uniseg's width. The model: a virama is zero-width but caps the
+// conjunct it forms with the following consonant at 2 cells; a spacing mark
+// (category Mc) forces the syllable to 2 cells; ZWJ preserves a pending
+// virama, ZWNJ breaks it; non-spacing marks contribute nothing.
+func brahmicWidth(b []byte) (brahmic bool, width int) {
+	prevVirama := false
+	for i := 0; i < len(b); {
+		if b[i] < utf8.RuneSelf {
+			width += 1 // an ASCII base, e.g. a digit between marks
+			i++
+			continue
+		}
+		r, sz := utf8.DecodeRune(b[i:])
+		i += sz
+		switch {
+		case isVirama(r):
+			brahmic = true
+			prevVirama = true
+		case r == 0x200D: // ZWJ: consumed, conjunct intent preserved
+		case r == 0x200C: // ZWNJ: breaks the conjunct
+			prevVirama = false
+		case unicode.Is(unicode.Mc, r):
+			brahmic = true
+			if width > 0 {
+				width = 2
+			}
+			prevVirama = false
+		default:
+			w := runeWidth(r)
+			if w == 0 { // non-spacing combining mark
+				prevVirama = false
+				continue
+			}
+			switch {
+			case prevVirama:
+				width = 2
+			case width == 0:
+				width = w
+			default:
+				width += w
+			}
+			prevVirama = false
+		}
+	}
+	if width > 2 {
+		width = 2
+	}
+	return brahmic, width
+}
+
+// isVirama reports whether r is a Brahmic virama / halant / pangkon — the
+// dead-consonant sign that forms a conjunct with the following consonant.
+// Set per wcwidth's _ISC_VIRAMA_SET (Unicode general category derivation);
+// matching it lets leadingAkshara fuse conjuncts across scripts (Devanagari,
+// Tamil, Myanmar, Khmer, Balinese, Javanese, Brahmi-derived, …).
+func isVirama(r rune) bool {
+	switch r {
+	case 0x094D, 0x09CD, 0x0A4D, 0x0ACD, 0x0B4D, 0x0BCD, 0x0C4D, 0x0CCD,
+		0x0D4D, 0x0DCA, 0x1039, 0x17D2, 0x1A60, 0x1B44, 0x1BAB, 0xA806,
+		0xA8C4, 0xA9C0, 0xAAF6, 0x10A3F, 0x11046, 0x110B9, 0x11133,
+		0x111C0, 0x11235, 0x1134D, 0x113D0, 0x11442, 0x114C2, 0x115BF,
+		0x1163F, 0x116B6, 0x11839, 0x1193E, 0x119E0, 0x11A47, 0x11A99,
+		0x11C3F, 0x11D45, 0x11D97, 0x11F42:
+		return true
+	}
+	return false
 }
 
 // commitCluster writes one grapheme cluster (UTF-8 bytes b, display width

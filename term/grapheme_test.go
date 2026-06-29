@@ -96,6 +96,97 @@ func TestGrapheme_Combining(t *testing.T) {
 	}
 }
 
+// TestGrapheme_Virama verifies a Brahmic conjunct (consonant + virama +
+// consonant, here Javanese "ꦏ꧀ꦏ") fuses into one width-2 cell. uniseg's
+// UAX#29 boundaries would split it at the pangkon (U+A9C0) and over-advance;
+// leadingAkshara fuses across the virama to match the terminal-cell model.
+func TestGrapheme_Virama(t *testing.T) {
+	g, p := newParserGrid(1, 10)
+	seq := "ꦏ꧀ꦏ" // KA + PANGKON + KA
+	feedStr(t, g, p, seq)
+	if g.CursorC != 2 {
+		t.Fatalf("cursor col = %d, want 2", g.CursorC)
+	}
+	c := gcell(g, 0, 0)
+	if c.Width != 2 {
+		t.Errorf("width = %d, want 2", c.Width)
+	}
+	if c.Ch != 0xa98f {
+		t.Errorf("base rune = %U, want U+A98F", c.Ch)
+	}
+	if got := g.clusters[c.clusterID]; got != seq {
+		t.Errorf("cluster = %q, want full conjunct", got)
+	}
+}
+
+// TestGrapheme_ViramaSpacingMarks verifies a syllable with trailing spacing
+// vowel signs (Mc) caps at width 2 (Javanese "ꦏꦺꦴ" = KA + TALING + TARUNG,
+// which uniseg alone widths as 3) and that two such syllables advance 4.
+func TestGrapheme_ViramaSpacingMarks(t *testing.T) {
+	g, p := newParserGrid(1, 10)
+	feedStr(t, g, p, "ꦏꦺꦴꦏꦺꦴ")
+	if g.CursorC != 4 {
+		t.Fatalf("cursor col = %d, want 4", g.CursorC)
+	}
+	for _, col := range []int{0, 2} {
+		if w := gcell(g, 0, col).Width; w != 2 {
+			t.Errorf("col %d width = %d, want 2", col, w)
+		}
+	}
+}
+
+// TestGrapheme_ViramaZWJConjunct verifies an explicit-conjunct request
+// (consonant + virama + ZWJ + consonant + vowel sign, Marathi "र्‍या") fuses
+// into one width-2 cell. The ZWJ-terminated cluster must still be recognized
+// as virama-ending for fusion.
+func TestGrapheme_ViramaZWJConjunct(t *testing.T) {
+	g, p := newParserGrid(1, 10)
+	feedStr(t, g, p, "र्‍या") // RA virama ZWJ YA AA
+	if g.CursorC != 2 {
+		t.Fatalf("cursor col = %d, want 2", g.CursorC)
+	}
+	if w := gcell(g, 0, 0).Width; w != 2 {
+		t.Errorf("width = %d, want 2", w)
+	}
+}
+
+// TestGrapheme_DanglingVirama verifies a dead consonant shown in isolation
+// (base + trailing virama, no following consonant — Javanese "ꦏ꧀") is width 1:
+// the virama is zero-width in the cell model, even though uniseg widths the
+// pangkon cluster at 2.
+func TestGrapheme_DanglingVirama(t *testing.T) {
+	g, p := newParserGrid(1, 10)
+	feedStr(t, g, p, "ꦏ꧀") // KA + PANGKON
+	if g.CursorC != 1 {
+		t.Fatalf("cursor col = %d, want 1", g.CursorC)
+	}
+	if w := gcell(g, 0, 0).Width; w != 1 {
+		t.Errorf("width = %d, want 1", w)
+	}
+}
+
+// TestGrapheme_ViramaSplitFeed verifies a conjunct split across two feeds
+// (the PTY read-boundary case) still fuses: the pending virama-terminated
+// syllable waits for the trailing consonant instead of committing early.
+func TestGrapheme_ViramaSplitFeed(t *testing.T) {
+	g, p := newParserGrid(1, 10)
+	g.Mu.Lock()
+	p.feedChunk([]byte("ꦏ꧀")) // KA + PANGKON, mid-burst: stays pending
+	if g.CursorC != 0 {
+		g.Mu.Unlock()
+		t.Fatalf("virama committed early: col = %d, want 0 pending", g.CursorC)
+	}
+	p.feedChunk([]byte("ꦏ")) // KA arrives
+	g.FlushGrapheme()        // burst drained
+	g.Mu.Unlock()
+	if g.CursorC != 2 {
+		t.Fatalf("cursor col = %d, want 2", g.CursorC)
+	}
+	if w := gcell(g, 0, 0).Width; w != 2 {
+		t.Errorf("width = %d, want 2", w)
+	}
+}
+
 // TestGrapheme_FlushBeforeControl verifies the pending cluster is committed
 // before a CSI sequence so cursor-position reports are accurate. Here a DSR
 // after an emoji must reflect the advanced column.

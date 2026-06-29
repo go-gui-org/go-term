@@ -164,10 +164,21 @@ Don't let parser code reach into go-gui — it must stay grid-only.
 
 ### Grapheme clusters
 
-Printable input is segmented into grapheme clusters (uniseg), not single
-runes. The streaming path is `grid.PutRune` (accumulates runes into `gphBuf`,
-commits a leading cluster only once a boundary is observed) and
-`grid.FlushGrapheme` (commits the pending cluster). The parser flushes before
+Printable input is segmented into orthographic syllables (aksharas), not
+single runes. The streaming path is `grid.PutRune` (accumulates runes into
+`gphBuf`, committing a leading syllable only once its boundary is observed)
+and `grid.FlushGrapheme` (commits the pending syllable). Both go through
+`grid.drainAksharas` → `leadingAkshara`, which uses uniseg for grapheme-cluster
+boundaries but *fuses* clusters joined by a virama — optionally a virama+ZWJ
+explicit conjunct (`isVirama`, jquast's 41-codepoint set; `clusterFusesRight`)
+— into one Brahmic syllable, so Javanese `ꦏ꧀ꦏ` or Marathi `र्‍या` occupy a single
+cell group. Width matches the terminal-cell model (wcwidth `wcswidth` /
+ucs-detect), which diverges from uniseg's per-rune widths: `brahmicWidth`
+recomputes any syllable carrying a virama or spacing mark (category Mc) — a
+virama is zero-width but caps a conjunct at 2, an Mc mark forces width 2 (so
+Sinhala `කා`/Tamil `கா` are 2, not uniseg's 1), and a dangling dead consonant
+`ꦏ꧀` is 1, not uniseg's 2. Non-Brahmic clusters (emoji, CJK, RI flags,
+variation selectors) keep uniseg's width. The parser flushes before
 any control byte in ground state — so DSR/CPR see the advanced cursor.
 `parser.Feed` (batch path, tests/direct callers) also flushes at the end;
 `parser.feedChunk` (the PTY reader's path) does not, so a grapheme cluster
