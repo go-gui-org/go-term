@@ -1905,6 +1905,38 @@ func TestScheduleResizeWake_ClosedSkipsBump(t *testing.T) {
 
 // --- applyChunk ---
 
+// TestApplyChunk_GraphemeSplitAcrossReads verifies a ZWJ emoji cluster split
+// across a (buffer-filling) read boundary is assembled into one width-2 cell
+// rather than committed as broken pieces. Regression for the bug where the
+// unconditional end-of-Feed flush wrote the leading bytes as their own cells.
+func TestApplyChunk_GraphemeSplitAcrossReads(t *testing.T) {
+	cases := []string{
+		// woman health worker: woman + skin tone + ZWJ + ⚕ + VS16
+		"\U0001f469\U0001f3ff\u200d\u2695\ufe0f",
+		// kiss: woman, ZWJ heart+VS16, ZWJ kiss-mark, ZWJ man (multiple ZWJ)
+		"\U0001f469\U0001f3ff\u200d\u2764\ufe0f\u200d\U0001f48b\u200d\U0001f468\U0001f3fb",
+		// Unicode 16.0 emoji (U+1FAEF) inside a ZWJ sequence
+		"\U0001f469\U0001f3fe\u200d\U0001faef\u200d\U0001f469\U0001f3fb",
+	}
+	for _, seq := range cases {
+		b := []byte(seq)
+		for split := 1; split < len(b); split++ {
+			g := newGrid(24, 80)
+			tm := &Term{grid: g, parser: newParser(g), cmd: &gui.Window{}}
+			// First read fills its buffer (flush deferred); second read is
+			// the short tail (flush). Mirrors readLoop's burst draining.
+			tm.applyChunk(b[:split], false)
+			tm.applyChunk(b[split:], true)
+			if g.CursorC != 2 {
+				t.Errorf("seq %q split@%d: cursorC=%d, want 2", seq, split, g.CursorC)
+			}
+			if w := g.At(0, 0).Width; w != 2 {
+				t.Errorf("seq %q split@%d: head width=%d, want 2", seq, split, w)
+			}
+		}
+	}
+}
+
 func TestApplyChunk_DirtyCellsBumpsVersion(t *testing.T) {
 	g := newGrid(24, 80)
 	tm := &Term{
@@ -1912,7 +1944,7 @@ func TestApplyChunk_DirtyCellsBumpsVersion(t *testing.T) {
 		parser: newParser(g),
 		cmd:    &gui.Window{},
 	}
-	needUpdate := tm.applyChunk([]byte("A"))
+	needUpdate := tm.applyChunk([]byte("A"), true)
 	if !needUpdate {
 		t.Error("needUpdate should be true after dirty chunk")
 	}
@@ -1927,7 +1959,7 @@ func TestApplyChunk_NoOpDataNoChange(t *testing.T) {
 		grid:   g,
 		parser: newParser(g),
 	}
-	needUpdate := tm.applyChunk([]byte{})
+	needUpdate := tm.applyChunk([]byte{}, true)
 	if needUpdate {
 		t.Error("needUpdate should be false for no-op data")
 	}
@@ -1946,7 +1978,7 @@ func TestApplyChunk_SyncOutputGatesRedraw(t *testing.T) {
 	}
 	// Feed a character that would normally dirty the grid, but the
 	// synchronized-output gate suppresses the version bump.
-	needUpdate := tm.applyChunk([]byte("X"))
+	needUpdate := tm.applyChunk([]byte("X"), true)
 	if needUpdate {
 		t.Error("needUpdate should be false when sync gate is active")
 	}
@@ -1965,7 +1997,7 @@ func TestApplyChunk_BellSchedulesFlash(t *testing.T) {
 	}
 	// BEL (0x07) increments BellCount. Grid stays clean but the bell
 	// delta makes dirty=true, triggering a version bump and flash.
-	needUpdate := tm.applyChunk([]byte("\x07"))
+	needUpdate := tm.applyChunk([]byte("\x07"), true)
 	if !needUpdate {
 		t.Error("needUpdate should be true after BEL")
 	}
@@ -1988,7 +2020,7 @@ func TestApplyChunk_BellFlashDisabled(t *testing.T) {
 		cmd:    &gui.Window{},
 		cfg:    Cfg{BellFlashDuration: -1}, // disabled
 	}
-	tm.applyChunk([]byte("\x07"))
+	tm.applyChunk([]byte("\x07"), true)
 	if tm.bell.seenCount != 1 {
 		t.Errorf("bell.seenCount = %d, want 1", tm.bell.seenCount)
 	}
@@ -2012,7 +2044,7 @@ func TestApplyChunk_HandsRepliesToWriter(t *testing.T) {
 
 	// applyChunk hands queued replies to the writer goroutine after releasing
 	// grid.Mu — decoupled from both the render loop and the read loop.
-	tm.applyChunk([]byte{})
+	tm.applyChunk([]byte{}, true)
 	for i, want := range []string{"r1", "r2"} {
 		select {
 		case got := <-ch:
@@ -2044,7 +2076,7 @@ func TestApplyChunk_RepliesEmitPromptly(t *testing.T) {
 	stop := startReplyWriter(tm)
 	defer stop()
 
-	tm.applyChunk([]byte("\x1b[6n")) // DSR 6 → expect CPR (ESC [ row;col R)
+	tm.applyChunk([]byte("\x1b[6n"), true) // DSR 6 → expect CPR (ESC [ row;col R)
 	select {
 	case got := <-ch:
 		if !strings.HasPrefix(string(got), "\x1b[") || !strings.HasSuffix(string(got), "R") {
@@ -2064,8 +2096,8 @@ func TestApplyChunk_MultipleChunksEachBumpVersion(t *testing.T) {
 	}
 	// Two separate dirty chunks — each bumps the version even though the
 	// coalesced UpdateWindow is queued at most once.
-	tm.applyChunk([]byte("AB"))
-	tm.applyChunk([]byte("CD"))
+	tm.applyChunk([]byte("AB"), true)
+	tm.applyChunk([]byte("CD"), true)
 	if v := tm.drawVersion.Load(); v != 2 {
 		t.Errorf("drawVersion = %d, want 2 (one per dirty chunk)", v)
 	}

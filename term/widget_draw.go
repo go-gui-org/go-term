@@ -859,6 +859,7 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 		dc.FilledRect(x, y, t.cellW, t.cellH, fillColor.WithOpacity(opacity))
 		cs := style
 		cs.Color = t.grid.Theme.bg(cell)
+		cs.EmojiBoxWidth = float32(cell.Width) * t.cellW
 		dc.Text(x, y, t.cellText(cell), cs)
 	}
 }
@@ -933,6 +934,10 @@ func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell cell, k runKey, 
 	cs.Typeface = k.typeface
 	cs.Underline = false
 	cs.Strikethrough = k.strikethrough
+	// Tell go-glyph the cell box this glyph occupies so color/emoji fill the
+	// full reserved width (e.g. a width-2 emoji fills 2 cells) instead of the
+	// font's narrower natural emoji advance. Ignored for non-color glyphs.
+	cs.EmojiBoxWidth = float32(cell.Width) * t.cellW
 	dc.Text(x, y, t.cellText(cell), cs)
 	if k.ulStyle != ulNone {
 		t.drawUnderlineDecor(dc, x, y, float32(cell.Width)*t.cellW, k.ulStyle, k.ulColor)

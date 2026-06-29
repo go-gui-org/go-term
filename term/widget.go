@@ -1091,10 +1091,18 @@ func (t *Term) readLoop() {
 		}
 		n, err := t.pty.Read(buf)
 		if n > 0 {
-			// Feed buf directly: parser.Feed consumes the slice
+			// Feed buf directly: parser.feedChunk consumes the slice
 			// synchronously (carry-over and reply bytes are copied
 			// internally), so reusing buf next iteration is safe.
-			t.applyChunk(buf[:n])
+			//
+			// Defer the trailing-grapheme flush when the read filled buf:
+			// more bytes are likely already queued and a grapheme cluster
+			// may straddle the read boundary. Flushing now would commit a
+			// half-assembled cluster as broken pieces (e.g. a ZWJ emoji
+			// split at the 4096-byte edge). A short or final read means the
+			// burst has drained, so flush to render the trailing cluster.
+			flush := n < len(buf) || err != nil
+			t.applyChunk(buf[:n], flush)
 		}
 		if err != nil {
 			return
@@ -1107,10 +1115,19 @@ func (t *Term) readLoop() {
 // Runs on the reader goroutine. Returns true when a redraw was requested
 // (used by tests). grid.Mu is held only for the parse + dirty check, never
 // across the pty.Write below, so a full slave-input buffer stalls just this
-// goroutine and never blocks onDraw.
-func (t *Term) applyChunk(data []byte) bool {
+// goroutine and never blocks onDraw. flush commits a trailing grapheme
+// cluster; the reader passes false while the input burst is still draining
+// so a cluster split across reads is not committed half-assembled.
+func (t *Term) applyChunk(data []byte, flush bool) bool {
 	t.grid.Mu.Lock()
-	t.parser.Feed(data)
+	if flush {
+		t.parser.Feed(data)
+	} else {
+		// Burst still draining: feed without committing a trailing grapheme
+		// cluster, so one straddling this read boundary is completed by the
+		// next chunk rather than written as broken pieces.
+		t.parser.feedChunk(data)
+	}
 	bellCount := t.grid.BellCount
 	redraw := !t.grid.SyncOutput || !t.grid.SyncActive
 	dirty := t.grid.HasDirtyRows() || bellCount != t.bell.readCount

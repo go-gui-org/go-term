@@ -4,9 +4,10 @@ go 1.26.0
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/go-gui-org/go-glyph v1.11.0
-	github.com/go-gui-org/go-gui v0.28.2
+	github.com/go-gui-org/go-glyph v1.12.0
+	github.com/go-gui-org/go-gui v0.29.0
 	github.com/rivo/uniseg v0.4.7
+	golang.org/x/sys v0.46.0
 	golang.org/x/text v0.38.0
 )
 
@@ -21,5 +22,4 @@ require (
 	github.com/veandco/go-sdl2 v0.4.40 // indirect
 	github.com/yuin/goldmark v1.8.2 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 )
