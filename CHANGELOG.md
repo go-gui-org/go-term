@@ -15,6 +15,15 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - Whole-app replay fixtures covering tmux, paste, graphics, BiDi, and mouse.
 - `script2fixture` tool for capturing replay fixtures from `script(1)`
   typescripts.
+- Emoji fill their reserved cell box at any DPI via go-glyph's `EmojiBoxWidth`
+  hint (requires go-gui v0.29.0 / go-glyph v1.12.0).
+
+### Fixed
+
+- Grapheme clusters split across a PTY read boundary (e.g. a ZWJ emoji at the
+  4096-byte edge) are no longer committed as broken pieces; the trailing,
+  still-growing cluster is carried to the next read and flushed when the input
+  burst drains.
 
 ## [0.2.0-rc.1] - 2026-05-30
 
