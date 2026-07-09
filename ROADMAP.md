@@ -8,7 +8,7 @@ go-gui v1.0.
 ## Architecture
 
 ```
-examples/demo/main.go
+examples/loon/main.go
         │
         ▼
 term/widget.go           Term struct, New, View, Close; reader goroutine.
@@ -145,5 +145,5 @@ When go-gui ships v1.0.0:
 go build ./...                     # Build all
 go test -race -count=1 ./...       # Test suite
 golangci-lint run ./...            # Lint
-cd examples/demo && go run .       # Visual verification
+cd examples/loon && go run .       # Visual verification
 ```

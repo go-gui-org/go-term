@@ -204,7 +204,7 @@ widget has no awareness of panes.
 Default bindings (overridable): Cmd+D / Cmd+Shift+D split, Cmd+Shift+W close
 pane, Cmd+] / Cmd+[ cycle panes, Cmd+Ctrl+Arrow resize, Cmd+T new tab,
 Cmd+Ctrl+W close tab, Cmd+Shift+] / Cmd+Shift+[ cycle tabs, Cmd+/ shortcut
-overlay. The bundled `examples/demo` is built on `term/workspace` and accepts
+overlay. The bundled `examples/loon` is built on `term/workspace` and accepts
 `--workspace <path>` / `--save-workspace <path>` flags.
 
 ### Performance
@@ -229,7 +229,7 @@ overlay. The bundled `examples/demo` is built on `term/workspace` and accepts
 
 ```bash
 git clone https://github.com/go-gui-org/go-term.git
-cd go-term/examples/demo
+cd go-term/examples/loon
 go run .
 ```
 
@@ -319,7 +319,7 @@ Three layers; dependencies flow strictly downward. Each layer is split
 across multiple files by concern.
 
 ```
-examples/demo/main.go         gui.NewWindow + workspace.Restore + backend.Run
+examples/loon/main.go         gui.NewWindow + workspace.Restore + backend.Run
         │
         ▼
 term/workspace/*.go      Pane split tree, tab bar, keybindings, JSON
@@ -380,7 +380,7 @@ Replay-style emulator tests feed realistic byte streams into the parser and
 assert final screen state, cursor position, OSC side-effects, and host
 replies. See [docs/terminal-verification.md](docs/terminal-verification.md).
 
-Visual verification should complement the automated suite: run `examples/demo`
+Visual verification should complement the automated suite: run `examples/loon`
 and exercise resize, redraw, selection, paste, and application compatibility
 (`vim`, `htop`, `tmux`).
 

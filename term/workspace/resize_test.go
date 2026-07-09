@@ -194,7 +194,7 @@ func TestFindResizeSplit_SingleLeaf(t *testing.T) {
 // These exercise the early-return guards that never reach refresh(), so a
 // Workspace can be hand-built with a nil window (matching the convention in
 // workspace_test.go). The successful mutate-then-refresh path needs a live
-// *gui.Window and is covered visually via examples/demo.
+// *gui.Window and is covered visually via examples/loon.
 // ---------------------------------------------------------------------------
 
 func TestResizeActivePane_NoActiveTabNoop(t *testing.T) {

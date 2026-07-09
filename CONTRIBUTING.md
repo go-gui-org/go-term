@@ -29,7 +29,7 @@ Edits in `../go-glyph` and `../go-gui` are picked up immediately by
 
 ```bash
 # Run the demo window
-cd examples/demo && go run .
+cd examples/loon && go run .
 
 # Build everything
 go build ./...
@@ -86,7 +86,7 @@ surface only when there is a clear caller need.
 2. `go vet ./...` passes
 3. `go test -race ./...` passes
 4. New tests for new pure-logic code
-5. Manual smoke test of `examples/demo` for any change touching
+5. Manual smoke test of `examples/loon` for any change touching
    `widget.go`, `pty.go`, or render/input paths
 6. CHANGELOG entry under `## [Unreleased]`
 
