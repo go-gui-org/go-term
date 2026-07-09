@@ -356,14 +356,20 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 // handleSearchKey handles the search bar lifecycle: Cmd+F opens it,
 // Cmd+Up/Down jumps between prompt marks, and while active, editing and
 // navigation keys are intercepted. Returns true when the event was consumed.
+// isPrimaryChord reports whether e's modifiers are the primary shortcut
+// modifier (see modPrimary), optionally with Shift, and nothing else. Shift is
+// tolerated so '+' on the '=' key still counts; Ctrl/Alt beyond the primary are
+// rejected so layered bindings (pane resize, etc.) pass through.
+func isPrimaryChord(m gui.Modifier) bool {
+	return m.Has(modPrimary) && m&^(modPrimary|gui.ModShift) == 0
+}
+
 func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
-	cmd := e.Modifiers.Has(gui.ModSuper)
 	ctrl := e.Modifiers.Has(gui.ModCtrl)
-	alt := e.Modifiers.Has(gui.ModAlt)
 	shift := e.Modifiers.Has(gui.ModShift)
 
-	// Cmd+F opens the search bar.
-	if e.KeyCode == gui.KeyF && cmd {
+	// Primary+F opens the search bar (Cmd+F on macOS, Ctrl+Shift+F on Windows).
+	if e.KeyCode == gui.KeyF && isPrimaryChord(e.Modifiers) {
 		t.search.active = true
 		t.search.query = ""
 		t.search.matches = nil
@@ -374,8 +380,8 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 		return true
 	}
 
-	// Cmd+Up/Down: jump between OSC 133 prompt marks (shell integration).
-	if cmd && !ctrl && !alt && (e.KeyCode == gui.KeyUp || e.KeyCode == gui.KeyDown) {
+	// Primary+Up/Down: jump between OSC 133 prompt marks (shell integration).
+	if isPrimaryChord(e.Modifiers) && (e.KeyCode == gui.KeyUp || e.KeyCode == gui.KeyDown) {
 		t.jumpToMark(e.KeyCode == gui.KeyUp, w)
 		e.IsHandled = true
 		return true
@@ -447,13 +453,13 @@ func (t *Term) handleClipboardKey(e *gui.Event, w *gui.Window) bool {
 	return false
 }
 
-// handleDisplayKey intercepts Cmd+= (increase font size) and Cmd+-
-// (decrease font size) before they reach the pty. Returns true when
-// the event was consumed.
+// handleDisplayKey intercepts Primary+= (increase font size) and Primary+-
+// (decrease font size) before they reach the pty — Cmd+= / Cmd+- on macOS,
+// Ctrl+Shift+= / Ctrl+Shift+- on Windows. Has (not exact) so the Shift used to
+// type '+' on the '=' key is tolerated. Returns true when the event was
+// consumed.
 func (t *Term) handleDisplayKey(e *gui.Event, w *gui.Window) bool {
-	cmd := e.Modifiers.Has(gui.ModSuper)
-	ctrl := e.Modifiers.Has(gui.ModCtrl)
-	if cmd && !ctrl {
+	if isPrimaryChord(e.Modifiers) {
 		if e.KeyCode == gui.KeyEqual {
 			t.AdjustFontSize(0.25)
 			e.IsHandled = true

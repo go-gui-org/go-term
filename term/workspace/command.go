@@ -159,6 +159,13 @@ func (ws *Workspace) registerCommands() {
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.GoToTab(idx) },
 		})
 	}
+	// Remap the Super-based defaults to platform-appropriate modifiers
+	// (identity except on Windows, where Super is OS-reserved — see remapMod).
+	// Applied before config overrides so explicit user bindings are honored
+	// verbatim.
+	for i := range cmds {
+		cmds[i].Shortcut.Modifiers = remapMod(cmds[i].Shortcut.Modifiers)
+	}
 	// Apply any [keybindings] overrides from the config file before
 	// registering, so the help overlay reflects live bindings.
 	kbCfg := loadConfig(ws.cfg)
