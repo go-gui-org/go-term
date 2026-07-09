@@ -72,3 +72,5 @@ deep-dive/
 
 # Zed
 .zed/
+
+.codegraph/

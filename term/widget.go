@@ -394,6 +394,11 @@ type Term struct {
 	// zero until the first OnDraw.
 	cellW, cellH float32
 
+	// fontSize is the effective font size in points. Zero means "use the
+	// configured TextStyle.Size." Adjusted via Cmd+=/Cmd+- and clamped to
+	// [4, 72] pt.
+	fontSize float32
+
 	// focused is set by a pane manager via SetFocused to control whether
 	// this terminal claims IDFocus. Defaults to true in New so a
 	// standalone Term (no pane manager) works without extra setup.
@@ -497,6 +502,9 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		readDone:    make(chan struct{}),
 		focusID:     uint32(seqID),
 		canvasID:    "term-canvas-" + strconv.FormatUint(seqID, 10),
+	}
+	if s := t.style(); s.Size > 0 {
+		t.fontSize = s.Size
 	}
 	t.win = w
 	t.mouse.lastR = -1
@@ -1162,12 +1170,48 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 	return needUpdate
 }
 
-// style returns the resolved text style for this terminal.
+// style returns the resolved text style for this terminal. When fontSize
+// is non-zero it overrides the configured Size.
 func (t *Term) style() gui.TextStyle {
-	if t.cfg.TextStyle != (gui.TextStyle{}) {
-		return t.cfg.TextStyle
+	ts := t.cfg.TextStyle
+	if ts == (gui.TextStyle{}) {
+		ts = gui.CurrentTheme().M5
 	}
-	return gui.CurrentTheme().M5
+	if t.fontSize > 0 {
+		ts.Size = t.fontSize
+	}
+	return ts
+}
+
+// AdjustFontSize shifts the terminal font size by delta points and
+// triggers a full remeasure + redraw. Clamps the result to [4, 72] pt.
+// Main-thread only (called from onKeyDown, which writes cellW/runeCache
+// without grid.Mu — onDraw is the only concurrent reader and also runs
+// on the main thread).
+func (t *Term) AdjustFontSize(delta float32) {
+	if !realNumber(delta) {
+		return
+	}
+	if t.fontSize == 0 {
+		if s := t.style(); s.Size > 0 {
+			t.fontSize = s.Size
+		}
+		if t.fontSize == 0 {
+			return
+		}
+	}
+	t.fontSize += delta
+	const minSize, maxSize float32 = 4, 72
+	if t.fontSize < minSize {
+		t.fontSize = minSize
+	}
+	if t.fontSize > maxSize {
+		t.fontSize = maxSize
+	}
+	t.cellW = 0
+	t.draw.runeCache = nil
+	t.bumpVersion()
+	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
 }
 
 // effectiveBellDuration returns the configured visual-bell duration,

@@ -360,6 +360,29 @@ type syncScheduler struct{}
 
 func (syncScheduler) QueueCommand(fn func(*gui.Window)) { fn(&gui.Window{}) }
 
+// newTestTermWithScheduler creates a Term bare enough for keyboard / font
+// adjust tests. cmd is wired to syncScheduler so queueCommand runs inline,
+// and pw captures byte output.
+func newTestTermWithScheduler(fontSize float32, cfg Cfg) (*Term, *[]byte) {
+	if cfg.TextStyle == (gui.TextStyle{}) {
+		cfg.TextStyle = gui.TextStyle{Size: 12}
+	}
+	buf := make([]byte, 0, 64)
+	t := &Term{
+		grid:     newGrid(4, 8),
+		cfg:      cfg,
+		cmd:      syncScheduler{},
+		fontSize: fontSize,
+	}
+	t.mouse.lastR = -1
+	t.mouse.lastC = -1
+	t.pw = writerFunc(func(b []byte) (int, error) {
+		buf = append(buf, b...)
+		return len(b), nil
+	})
+	return t, &buf
+}
+
 // testTextMeasurer implements gui.TextMeasurer with fixed cell dimensions.
 // TextWidth returns cellW * len(text) so "M" measures as cellW.
 type testTextMeasurer struct {
@@ -3187,5 +3210,219 @@ func TestAlive_AfterClose(t *testing.T) {
 	}
 	if tm.Alive() {
 		t.Error("Alive must return false after Close")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// style fontSize override
+// ---------------------------------------------------------------------------
+
+func TestTerm_Style_FontSizeOverridesConfig(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(14, cfg)
+	if got := term.style().Size; got != 14 {
+		t.Errorf("fontSize should override config Size: got %v, want 14", got)
+	}
+}
+
+func TestTerm_Style_ZeroFontSizeUsesConfig(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(0, cfg)
+	if got := term.style().Size; got != 12 {
+		t.Errorf("fontSize=0 should use config Size: got %v, want 12", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AdjustFontSize
+// ---------------------------------------------------------------------------
+
+func TestAdjustFontSize_Increase(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	term.AdjustFontSize(1.5)
+	if term.fontSize != 13.5 {
+		t.Errorf("fontSize after +1.5: got %v, want 13.5", term.fontSize)
+	}
+}
+
+func TestAdjustFontSize_Decrease(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	term.AdjustFontSize(-0.5)
+	if term.fontSize != 11.5 {
+		t.Errorf("fontSize after -0.5: got %v, want 11.5", term.fontSize)
+	}
+}
+
+func TestAdjustFontSize_ClampMin(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 4}}
+	term, _ := newTestTermWithScheduler(4, cfg)
+	term.AdjustFontSize(-0.5)
+	if term.fontSize != 4 {
+		t.Errorf("fontSize clamped to min 4: got %v", term.fontSize)
+	}
+}
+
+func TestAdjustFontSize_ClampMax(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 72}}
+	term, _ := newTestTermWithScheduler(72, cfg)
+	term.AdjustFontSize(0.5)
+	if term.fontSize != 72 {
+		t.Errorf("fontSize clamped to max 72: got %v", term.fontSize)
+	}
+}
+
+func TestAdjustFontSize_NaNNoOp(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	prev := term.fontSize
+	term.AdjustFontSize(float32(math.NaN()))
+	if term.fontSize != prev {
+		t.Errorf("NaN delta must be no-op: fontSize changed from %v to %v", prev, term.fontSize)
+	}
+}
+
+func TestAdjustFontSize_InfNoOp(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	prev := term.fontSize
+	term.AdjustFontSize(float32(math.Inf(1)))
+	if term.fontSize != prev {
+		t.Errorf("+Inf delta must be no-op: fontSize changed from %v to %v", prev, term.fontSize)
+	}
+}
+
+func TestAdjustFontSize_ResetsCellW(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	term.cellW = 8.5
+	term.AdjustFontSize(1)
+	if term.cellW != 0 {
+		t.Errorf("AdjustFontSize must reset cellW: got %v, want 0", term.cellW)
+	}
+}
+
+func TestAdjustFontSize_ResetsRuneCache(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	term.draw.runeCache = map[rune]string{'a': "a"}
+	term.AdjustFontSize(1)
+	if term.draw.runeCache != nil {
+		t.Error("AdjustFontSize must reset runeCache to nil")
+	}
+}
+
+func TestAdjustFontSize_BumpsVersion(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	prev := term.drawVersion.Load()
+	term.AdjustFontSize(1)
+	if term.drawVersion.Load() == prev {
+		t.Error("AdjustFontSize must bump drawVersion")
+	}
+}
+
+func TestAdjustFontSize_ZeroFontSizeInitsFromStyle(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 14}}
+	term, _ := newTestTermWithScheduler(0, cfg) // fontSize starts at 0
+	term.AdjustFontSize(1)
+	if term.fontSize != 15 {
+		t.Errorf("fontSize should init from style: got %v, want 15", term.fontSize)
+	}
+}
+
+func TestAdjustFontSize_ZeroFontSizeZeroStyleNoPanic(t *testing.T) {
+	cfg := Cfg{} // no TextStyle, fallback to gui.CurrentTheme().M5
+	term, _ := newTestTermWithScheduler(0, cfg)
+	term.fontSize = 0
+	term.cfg = Cfg{} // zero cfg
+
+	term.AdjustFontSize(1)
+}
+
+// ---------------------------------------------------------------------------
+// handleDisplayKey
+// ---------------------------------------------------------------------------
+
+func TestHandleDisplayKey_CmdEqualIncreasesFontSize(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	e := &gui.Event{KeyCode: gui.KeyEqual, Modifiers: gui.ModSuper}
+	if !term.handleDisplayKey(e, &gui.Window{}) {
+		t.Error("Cmd+= should be handled")
+	}
+	if !e.IsHandled {
+		t.Error("Cmd+= should set e.IsHandled")
+	}
+	if term.fontSize != 12.25 {
+		t.Errorf("Cmd+= should increase fontSize by 0.25: got %v, want 12.25", term.fontSize)
+	}
+}
+
+func TestHandleDisplayKey_CmdMinusDecreasesFontSize(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	e := &gui.Event{KeyCode: gui.KeyMinus, Modifiers: gui.ModSuper}
+	if !term.handleDisplayKey(e, &gui.Window{}) {
+		t.Error("Cmd+- should be handled")
+	}
+	if !e.IsHandled {
+		t.Error("Cmd+- should set e.IsHandled")
+	}
+	if term.fontSize != 11.75 {
+		t.Errorf("Cmd+- should decrease fontSize by 0.25: got %v, want 11.75", term.fontSize)
+	}
+}
+
+func TestHandleDisplayKey_CmdCtrlEqual_PassesThrough(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	prev := term.fontSize
+	e := &gui.Event{KeyCode: gui.KeyEqual, Modifiers: gui.ModSuper | gui.ModCtrl}
+	if term.handleDisplayKey(e, &gui.Window{}) {
+		t.Error("Cmd+Ctrl+= should NOT be handled (pass through to pty)")
+	}
+	if term.fontSize != prev {
+		t.Errorf("Cmd+Ctrl+= must not change fontSize: %v -> %v", prev, term.fontSize)
+	}
+}
+
+func TestHandleDisplayKey_OtherKeyWithCmd_PassesThrough(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	prev := term.fontSize
+	e := &gui.Event{KeyCode: gui.KeyF, Modifiers: gui.ModSuper}
+	if term.handleDisplayKey(e, &gui.Window{}) {
+		t.Error("Cmd+F should NOT be handled by handleDisplayKey")
+	}
+	if term.fontSize != prev {
+		t.Errorf("unrelated key must not change fontSize: %v -> %v", prev, term.fontSize)
+	}
+}
+
+func TestHandleDisplayKey_EqualWithoutCmd_PassesThrough(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	prev := term.fontSize
+	e := &gui.Event{KeyCode: gui.KeyEqual}
+	if term.handleDisplayKey(e, &gui.Window{}) {
+		t.Error("= without Cmd should NOT be handled")
+	}
+	if term.fontSize != prev {
+		t.Errorf("= without Cmd must not change fontSize: %v -> %v", prev, term.fontSize)
+	}
+}
+
+func TestHandleDisplayKey_MinusWithoutCmd_PassesThrough(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	prev := term.fontSize
+	e := &gui.Event{KeyCode: gui.KeyMinus}
+	if term.handleDisplayKey(e, &gui.Window{}) {
+		t.Error("- without Cmd should NOT be handled")
+	}
+	if term.fontSize != prev {
+		t.Errorf("- without Cmd must not change fontSize: %v -> %v", prev, term.fontSize)
 	}
 }
