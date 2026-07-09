@@ -90,7 +90,8 @@ func main() {
 		},
 		OnInit: func(w *gui.Window) {
 			cfg := workspace.Cfg{
-				TextStyle: gui.TextStyle{Family: "JetBrainsMono Nerd Font", Size: 12},
+				TextStyle:              gui.TextStyle{Family: "JetBrainsMono Nerd Font", Size: 12},
+				ExitWhenLastShellExits: true,
 				Themes: []term.NamedTheme{
 					{Name: "Default", Theme: term.DefaultTheme},
 					{Name: "Gruvbox", Theme: term.GruvboxTheme},

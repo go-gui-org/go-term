@@ -20,6 +20,10 @@ type Cfg struct {
 	// ~/.config/go-term/config, or os.UserConfigDir()/go-term/config.
 	// A missing file is silently ignored (defaults apply).
 	ConfigPath string
+
+	// ExitWhenLastShellExits closes the window when the last shell
+	// process exits, rather than replacing it with a fresh tab.
+	ExitWhenLastShellExits bool
 }
 
 // Workspace manages a multi-tab, multi-pane terminal workspace.
@@ -138,6 +142,14 @@ func (ws *Workspace) onPaneExit(leafID string) {
 func (ws *Workspace) closePaneInTab(tab *Tab, leafID string) {
 	tab.removePane(leafID)
 	if tab.root.isLeaf() {
+		// Last pane in this tab — if it's also the only tab and we
+		// should exit when the last shell dies, close the window
+		// instead of spawning a replacement tab.
+		if ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1 {
+			ws.tabs = nil
+			ws.w.Close()
+			return
+		}
 		removed := false
 		for i, t := range ws.tabs {
 			if t == tab {
