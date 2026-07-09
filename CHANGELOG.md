@@ -95,4 +95,4 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   erase-in-line, erase-in-display, and SGR for the ANSI 16-color
   palette plus bold / underline / inverse.
 - 16-color palette (VS Code Dark+ approximation) with default fg/bg.
-- `examples/demo` example window.
+- `examples/loon` example window.

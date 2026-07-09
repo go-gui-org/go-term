@@ -1,4 +1,4 @@
-// Command demo runs the go-term widget with multi-tab, multi-pane support.
+// Command loon runs the go-term widget with multi-tab, multi-pane support.
 package main
 
 import (

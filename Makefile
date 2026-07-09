@@ -1,8 +1,8 @@
 .PHONY: bench bench-verbose bench-save bench-regress test test-race vet lint \
-	build clean app clean-app
+	build clean app clean-app build-loon
 
-DEMO_BIN     := got
-APP_NAME     := Got
+DEMO_BIN     := loon
+APP_NAME     := Loon
 BUILDAPP_DIR := ../go-gui/cmd/buildapp
 BUILDAPP_BIN := $(BUILDAPP_DIR)/buildapp
 
@@ -46,18 +46,18 @@ lint:
 build:
 	go build ./...
 
-# Build the demo binary (ensures it compiles).
-build-demo:
-	go build ./examples/demo
+# Build the loon binary (ensures it compiles).
+build-loon:
+	go build ./examples/loon
 
-# Package demo as a macOS .app bundle.
+# Package loon as a macOS .app bundle.
 app: $(APP_NAME).app
 
 $(BUILDAPP_BIN):
 	cd $(BUILDAPP_DIR) && go build -o buildapp .
 
 $(APP_NAME).app: $(BUILDAPP_BIN)
-	cd examples/demo && go build -o $(CURDIR)/$(DEMO_BIN) .
+	cd examples/loon && go build -o $(CURDIR)/$(DEMO_BIN) .
 	$(BUILDAPP_BIN) -bundle-deps -o . -name $(APP_NAME) \
 		-id github.com.go-gui-org.go-term $(DEMO_BIN)
 

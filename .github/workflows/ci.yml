@@ -40,9 +40,9 @@ jobs:
         working-directory: go-term
         run: go vet ./...
 
-      - name: Build demo
+      - name: Build loon
         working-directory: go-term
-        run: go build ./examples/demo
+        run: go build ./examples/loon
 
       - name: Test
         working-directory: go-term
@@ -78,9 +78,9 @@ jobs:
         working-directory: go-term
         run: go vet ./...
 
-      - name: Build demo
+      - name: Build loon
         working-directory: go-term
-        run: go build ./examples/demo
+        run: go build ./examples/loon
 
       - name: Test
         working-directory: go-term
