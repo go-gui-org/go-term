@@ -59,6 +59,8 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	if cfg.Dir != "" {
 		if _, err := os.Stat(cfg.Dir); err == nil {
 			cmd.Dir = cfg.Dir
+		} else if home, err := os.UserHomeDir(); err == nil {
+			cmd.Dir = home
 		}
 	}
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{
