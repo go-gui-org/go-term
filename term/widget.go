@@ -291,8 +291,8 @@ type Term struct {
 	// Set in New so the cursor starts in the "on" half-cycle.
 	cursorEpoch time.Time
 
-	// pw writes bytes to the pty slave. In production this is the *ptyDev
-	// itself (*os.File satisfies io.Writer). Tests replace it with a buffer
+	// pw writes bytes to the pty master. In production this is the ptyDev
+	// itself (*ptyDev satisfies io.Writer). Tests replace it with a buffer
 	// sink so key/focus behavior can be asserted without a live pty.
 	pw io.Writer
 
@@ -306,7 +306,7 @@ type Term struct {
 
 	grid   *grid
 	parser *parser
-	pty    *ptyDev
+	pty    ptyIO
 
 	// win is the *gui.Window this Term is bound to. Stored so Close can
 	// restore the original OnEvent handler and prevent the handler chain
@@ -712,6 +712,8 @@ func sendDesktopNotify(title, body string) {
 			args = []string{clean(title), clean(body)}
 		}
 		exec.Command("notify-send", args...).Run() //nolint:errcheck
+	case "windows":
+		// No-op: Windows toast notifications not yet implemented.
 	}
 }
 
@@ -865,10 +867,10 @@ func (t *Term) Cwd() string {
 
 // PID returns the child process ID, or 0 if the PTY is not started.
 func (t *Term) PID() int {
-	if t.pty == nil || t.pty.cmd == nil || t.pty.cmd.Process == nil {
+	if t.pty == nil {
 		return 0
 	}
-	return t.pty.cmd.Process.Pid
+	return t.pty.PID()
 }
 
 // Alive reports whether the child process is still running. Returns
