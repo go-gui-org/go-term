@@ -341,6 +341,9 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if t.scrollbackIntercept(e, w, shift, ctrl) {
 		return
 	}
+	if t.handleDisplayKey(e, w) {
+		return
+	}
 	out := t.encodeKeyEvent(e, w, shift, ctrl)
 	if len(out) == 0 {
 		return
@@ -440,6 +443,27 @@ func (t *Term) handleClipboardKey(e *gui.Event, w *gui.Window) bool {
 		t.pasteFromClipboard(w)
 		e.IsHandled = true
 		return true
+	}
+	return false
+}
+
+// handleDisplayKey intercepts Cmd+= (increase font size) and Cmd+-
+// (decrease font size) before they reach the pty. Returns true when
+// the event was consumed.
+func (t *Term) handleDisplayKey(e *gui.Event, w *gui.Window) bool {
+	cmd := e.Modifiers.Has(gui.ModSuper)
+	ctrl := e.Modifiers.Has(gui.ModCtrl)
+	if cmd && !ctrl {
+		if e.KeyCode == gui.KeyEqual {
+			t.AdjustFontSize(0.25)
+			e.IsHandled = true
+			return true
+		}
+		if e.KeyCode == gui.KeyMinus {
+			t.AdjustFontSize(-0.25)
+			e.IsHandled = true
+			return true
+		}
 	}
 	return false
 }
