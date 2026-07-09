@@ -379,7 +379,9 @@ overlay.
    extensible to themes/other settings) rooted at `os.UserConfigDir()`, so
    save-on-quit never clobbers hand edits.
 2. Should restore validate that saved `cwd` paths still exist and silently
-   drop to `$HOME` when gone (proposed: yes, in 39e-1's stat guard)?
+    drop to `$HOME` when gone (proposed: yes, in 39e-1's stat guard)?
+    **Resolved:** implemented — `startPTY` falls back to `os.UserHomeDir()`
+    when the saved CWD no longer exists.
 3. Default-path behavior with no flags: auto-load+auto-save the default
    file (sticky workspace, like kitty session) vs require explicit flags
    (proposed: explicit flags only for the demo; auto-load is a later
