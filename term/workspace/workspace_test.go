@@ -122,6 +122,90 @@ func TestPrevTab_SingleTabNoop(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// MoveTabLeft / MoveTabRight — no-op guard paths
+//
+// The active paths (swapping then calling refresh()) need a live *gui.Window
+// and are covered visually via examples/demo. These exercise the early-return
+// guards: single/empty tabs, edge positions, and negative activeTab.
+// ---------------------------------------------------------------------------
+
+func TestMoveTabLeft_SingleTabNoop(t *testing.T) {
+	ws := &Workspace{tabs: []*Tab{{id: "a"}}, activeTab: 0}
+	ws.MoveTabLeft()
+	if ws.activeTab != 0 {
+		t.Errorf("activeTab = %d, want 0", ws.activeTab)
+	}
+	if ws.tabs[0].id != "a" {
+		t.Errorf("tab order changed for single-tab workspace")
+	}
+}
+
+func TestMoveTabLeft_FirstTabNoop(t *testing.T) {
+	ws := &Workspace{tabs: []*Tab{{id: "a"}, {id: "b"}}, activeTab: 0}
+	ws.MoveTabLeft()
+	if ws.activeTab != 0 {
+		t.Errorf("activeTab = %d, want 0", ws.activeTab)
+	}
+	if ws.tabs[0].id != "a" || ws.tabs[1].id != "b" {
+		t.Errorf("tab order changed when moving left from first tab")
+	}
+}
+
+func TestMoveTabLeft_EmptyTabsNoop(t *testing.T) {
+	ws := &Workspace{tabs: nil, activeTab: 0}
+	ws.MoveTabLeft()
+	if ws.activeTab != 0 {
+		t.Errorf("activeTab = %d, want 0", ws.activeTab)
+	}
+}
+
+func TestMoveTabLeft_NegativeActiveTabNoop(t *testing.T) {
+	ws := &Workspace{tabs: []*Tab{{id: "a"}, {id: "b"}}, activeTab: -1}
+	ws.MoveTabLeft()
+	if ws.activeTab != -1 {
+		t.Errorf("activeTab = %d, want -1", ws.activeTab)
+	}
+}
+
+func TestMoveTabRight_SingleTabNoop(t *testing.T) {
+	ws := &Workspace{tabs: []*Tab{{id: "a"}}, activeTab: 0}
+	ws.MoveTabRight()
+	if ws.activeTab != 0 {
+		t.Errorf("activeTab = %d, want 0", ws.activeTab)
+	}
+	if ws.tabs[0].id != "a" {
+		t.Errorf("tab order changed for single-tab workspace")
+	}
+}
+
+func TestMoveTabRight_LastTabNoop(t *testing.T) {
+	ws := &Workspace{tabs: []*Tab{{id: "a"}, {id: "b"}}, activeTab: 1}
+	ws.MoveTabRight()
+	if ws.activeTab != 1 {
+		t.Errorf("activeTab = %d, want 1", ws.activeTab)
+	}
+	if ws.tabs[0].id != "a" || ws.tabs[1].id != "b" {
+		t.Errorf("tab order changed when moving right from last tab")
+	}
+}
+
+func TestMoveTabRight_EmptyTabsNoop(t *testing.T) {
+	ws := &Workspace{tabs: nil, activeTab: 0}
+	ws.MoveTabRight()
+	if ws.activeTab != 0 {
+		t.Errorf("activeTab = %d, want 0", ws.activeTab)
+	}
+}
+
+func TestMoveTabRight_NegativeActiveTabNoop(t *testing.T) {
+	ws := &Workspace{tabs: []*Tab{{id: "a"}, {id: "b"}}, activeTab: -1}
+	ws.MoveTabRight()
+	if ws.activeTab != -1 {
+		t.Errorf("activeTab = %d, want -1", ws.activeTab)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // LiveTermCount — zero/empty paths
 //
 // The counting branch (tm.Alive() → n++) needs real *term.Term values with a

@@ -1,7 +1,7 @@
 # go-term: Roadmap
 
 `go-term` is a full-featured terminal-emulator widget for
-[go-gui](https://github.com/go-gui-org/go-gui). 39 of 43 phases shipped;
+[go-gui](https://github.com/go-gui-org/go-gui). 40 of 43 phases shipped;
 work remaining: 40–43 (API stabilisation). Phase 44 (v1.0.0) blocked on
 go-gui v1.0.
 
@@ -44,13 +44,13 @@ Public API: `Cfg`, `Term`, `Theme`, `NamedTheme`, `New`, `View`, `Close`, `Cwd`,
 ### Phase 40 — Tab reordering
 
 Tabs are created/closed in insertion order; no reorder. Keyboard approach:
-`Cmd+Ctrl+Shift+[` / `]` to swap current tab left/right (simple slice swap).
+`Cmd+Alt+[` / `]` to swap current tab left/right (simple slice swap).
 Drag-to-reorder depends on go-gui container support — investigate; ship
 keyboard-only if upstream work is non-trivial.
 
-- [ ] go-gui: does the container system support drag reorder?
-- [ ] Keyboard swap: `Cmd+Ctrl+Shift+[` / `Cmd+Ctrl+Shift+]`
-- [ ] Persistence: already correct (tab order is JSON array order)
+- [x] go-gui: does the container system support drag reorder? Yes, via TabControl with Reorderable+OnReorder; deferred in favor of keyboard swap to preserve per-tab close buttons.
+- [x] Keyboard move: `Cmd+Alt+[` / `Cmd+Alt+]`
+- [x] Persistence: already correct (tab order is JSON array order)
 
 ### Phase 41 — Export audit + Godoc pass
 
@@ -137,6 +137,7 @@ When go-gui ships v1.0.0:
 | 37 | Font ligatures | Fira Code `!=` → single glyph |
 | 38 | BiDi / RTL text | `echo "שלום"` |
 | 39 | Splits, panes, tabs, persistence | Built-in multiplexing; workspace save/restore |
+| 40 | Tab reordering | Cmd+Alt+[/] move tab left/right |
 
 ## Commands
 
