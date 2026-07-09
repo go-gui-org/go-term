@@ -95,6 +95,20 @@ func (ws *Workspace) registerCommands() {
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.CloseTab() },
 		},
 		{
+			ID:       "workspace.moveTabLeft",
+			Label:    "Move Tab Left",
+			Shortcut: gui.Shortcut{Key: gui.KeyLeftBracket, Modifiers: gui.ModSuper | gui.ModAlt},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.MoveTabLeft() },
+		},
+		{
+			ID:       "workspace.moveTabRight",
+			Label:    "Move Tab Right",
+			Shortcut: gui.Shortcut{Key: gui.KeyRightBracket, Modifiers: gui.ModSuper | gui.ModAlt},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.MoveTabRight() },
+		},
+		{
 			ID:       "workspace.nextTab",
 			Label:    "Next Tab",
 			Shortcut: gui.Shortcut{Key: gui.KeyRightBracket, Modifiers: gui.ModSuper | gui.ModShift},
@@ -234,6 +248,30 @@ func (ws *Workspace) AddTab() {
 // a fresh single-pane tab.
 func (ws *Workspace) CloseTab() {
 	ws.closeTabAt(ws.activeTab)
+}
+
+// MoveTabLeft swaps the active tab with the one to its left.
+// No-op when the active tab is already the first tab.
+func (ws *Workspace) MoveTabLeft() {
+	if ws.activeTab <= 0 || len(ws.tabs) < 2 {
+		return
+	}
+	ws.tabs[ws.activeTab], ws.tabs[ws.activeTab-1] =
+		ws.tabs[ws.activeTab-1], ws.tabs[ws.activeTab]
+	ws.activeTab--
+	ws.refresh()
+}
+
+// MoveTabRight swaps the active tab with the one to its right.
+// No-op when the active tab is already the last tab.
+func (ws *Workspace) MoveTabRight() {
+	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs)-1 || len(ws.tabs) < 2 {
+		return
+	}
+	ws.tabs[ws.activeTab], ws.tabs[ws.activeTab+1] =
+		ws.tabs[ws.activeTab+1], ws.tabs[ws.activeTab]
+	ws.activeTab++
+	ws.refresh()
 }
 
 // NextTab switches to the next tab (wraps around).
