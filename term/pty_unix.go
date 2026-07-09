@@ -11,6 +11,12 @@ import (
 	"github.com/creack/pty"
 )
 
+// ptyDev wraps a pty master (file) and the child shell process (cmd).
+type ptyDev struct {
+	cmd  *exec.Cmd
+	file *os.File
+}
+
 // startPTY spawns the shell configured in cfg (default $SHELL, fallback
 // /bin/sh) attached to a new pty sized rows×cols. TERM is forced to
 // xterm-256color so apps emit standard SGR sequences. cfg.Command, cfg.Args,

@@ -59,7 +59,8 @@
 //
 // # Supported platforms
 //
-// macOS and Linux. Windows / ConPTY is not supported.
+// macOS, Linux, and Windows. The PTY boundary uses creack/pty on Unix and
+// the ConPTY API on Windows; everything above it is platform-agnostic.
 //
 // [go-gui]: https://github.com/go-gui-org/go-gui
 package term
