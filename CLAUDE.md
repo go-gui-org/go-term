@@ -12,7 +12,7 @@ at the repo root. Tick boxes there as work lands.
 `go-term` is a full-featured terminal-emulator widget built on the `go-gui`
 framework (sibling repo `../go-gui`). It spawns a real shell via PTY and
 renders the cell grid through `gui.DrawCanvas` (GPU-accelerated). Targets
-macOS + Linux only.
+macOS, Linux, and Windows (ConPTY).
 
 ## Common commands
 
@@ -91,7 +91,9 @@ term/scrollback.go       Scrollback ring buffer.
 term/bidi.go             Unicode Bidirectional Algorithm (UAX#9) for RTL text.
 term/graphics.go         Graphic type; sixel decoder; PNG data-URL encoder.
 
-term/pty.go              creack/pty wrapper. Spawns $SHELL, resize ioctl.
+term/pty.go              ptyIO interface + shared helpers (clampWinsize…).
+term/pty_unix.go         creack/pty wrapper (!windows). Spawns $SHELL, resize ioctl.
+term/pty_windows.go      ConPTY wrapper (windows). Spawns ComSpec, ResizePseudoConsole.
 term/palette.go          256-color ANSI table (16 + 6×6×6 cube + 24 grayscale) +
                          RGB resolution helpers.
 ```
@@ -216,12 +218,6 @@ The widget claims focus via `IDFocus` set to a unique per-Term `focusID`
 on its outer `gui.Column`. In multi-Term windows the pane manager calls
 `SetFocused` to route `IDFocus` to the active Term.
 If keystrokes don't reach the PTY, focus is the first place to look.
-
-## Out-of-scope (don't add casually)
-
-These are currently excluded from the roadmap. Each is a real chunk of work:
-
-- Windows / ConPTY support
 
 ## Conventions
 

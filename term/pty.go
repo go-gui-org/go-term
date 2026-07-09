@@ -1,10 +1,6 @@
 package term
 
-import (
-	"os"
-	"os/exec"
-	"strings"
-)
+import "strings"
 
 // ptyIO is the PTY interface: platform-specific implementations
 // satisfy this. Read, Write, Resize, Close, and PID cover the
@@ -17,13 +13,9 @@ type ptyIO interface {
 	PID() int
 }
 
-// ptyDev wraps a pseudoterminal master and the child shell process.
-// Fields are the same on all platforms so tests can construct it
-// directly; method bodies live in pty_unix.go / pty_windows.go.
-type ptyDev struct {
-	cmd  *exec.Cmd
-	file *os.File
-}
+// ptyDev wraps a pseudoterminal master and the child shell process. The
+// concrete struct is platform-specific (pty_unix.go / pty_windows.go); both
+// keep cmd and file fields so cross-platform tests can construct it directly.
 
 // clampWinsize bounds rows/cols to the uint16 range expected by the
 // kernel ioctl, with a sane lower bound so a degenerate caller can't
