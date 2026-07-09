@@ -18,9 +18,22 @@ type ShortcutInfo struct {
 }
 
 // sc formats a single key+modifier combo using go-gui's platform-aware
-// renderer (⌘C on darwin, Super+C elsewhere).
+// renderer (⌘C on darwin, Super+C on Linux, Ctrl+Shift+C on Windows). Modifiers
+// are run through remapMod so the displayed combo matches what the handlers
+// accept on each platform.
 func sc(key gui.KeyCode, mods gui.Modifier) string {
-	return gui.Shortcut{Key: key, Modifiers: mods}.String()
+	return gui.Shortcut{Key: key, Modifiers: remapMod(mods)}.String()
+}
+
+// scPair renders two combos for one action, collapsing to a single combo when
+// the platform remap makes them identical (e.g. Super and Ctrl+Shift both
+// render as Ctrl+Shift on Windows).
+func scPair(key gui.KeyCode, a, b gui.Modifier) string {
+	sa, sb := sc(key, a), sc(key, b)
+	if sa == sb {
+		return sa
+	}
+	return sa + " / " + sb
 }
 
 // Shortcuts returns the Term-level keyboard shortcuts in display order.
@@ -28,8 +41,8 @@ func sc(key gui.KeyCode, mods gui.Modifier) string {
 // command registry and are listed separately by the help overlay.
 func Shortcuts() []ShortcutInfo {
 	return []ShortcutInfo{
-		{"Copy", sc(gui.KeyC, gui.ModSuper) + " / " + sc(gui.KeyC, gui.ModCtrl|gui.ModShift)},
-		{"Paste", sc(gui.KeyV, gui.ModSuper) + " / " + sc(gui.KeyV, gui.ModCtrl|gui.ModShift)},
+		{"Copy", scPair(gui.KeyC, gui.ModSuper, gui.ModCtrl|gui.ModShift)},
+		{"Paste", scPair(gui.KeyV, gui.ModSuper, gui.ModCtrl|gui.ModShift)},
 		{"Find", sc(gui.KeyF, gui.ModSuper)},
 		{"Toggle regex (in Find)", sc(gui.KeyR, gui.ModCtrl)},
 		{"Next match (in Find)", sc(gui.KeyEnter, 0)},

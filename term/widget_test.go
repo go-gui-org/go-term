@@ -3348,43 +3348,45 @@ func TestAdjustFontSize_ZeroFontSizeZeroStyleNoPanic(t *testing.T) {
 func TestHandleDisplayKey_CmdEqualIncreasesFontSize(t *testing.T) {
 	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
 	term, _ := newTestTermWithScheduler(12, cfg)
-	e := &gui.Event{KeyCode: gui.KeyEqual, Modifiers: gui.ModSuper}
+	e := &gui.Event{KeyCode: gui.KeyEqual, Modifiers: modPrimary}
 	if !term.handleDisplayKey(e, &gui.Window{}) {
-		t.Error("Cmd+= should be handled")
+		t.Error("primary+= should be handled")
 	}
 	if !e.IsHandled {
-		t.Error("Cmd+= should set e.IsHandled")
+		t.Error("primary+= should set e.IsHandled")
 	}
 	if term.fontSize != 12.25 {
-		t.Errorf("Cmd+= should increase fontSize by 0.25: got %v, want 12.25", term.fontSize)
+		t.Errorf("primary+= should increase fontSize by 0.25: got %v, want 12.25", term.fontSize)
 	}
 }
 
 func TestHandleDisplayKey_CmdMinusDecreasesFontSize(t *testing.T) {
 	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
 	term, _ := newTestTermWithScheduler(12, cfg)
-	e := &gui.Event{KeyCode: gui.KeyMinus, Modifiers: gui.ModSuper}
+	e := &gui.Event{KeyCode: gui.KeyMinus, Modifiers: modPrimary}
 	if !term.handleDisplayKey(e, &gui.Window{}) {
-		t.Error("Cmd+- should be handled")
+		t.Error("primary+- should be handled")
 	}
 	if !e.IsHandled {
-		t.Error("Cmd+- should set e.IsHandled")
+		t.Error("primary+- should set e.IsHandled")
 	}
 	if term.fontSize != 11.75 {
-		t.Errorf("Cmd+- should decrease fontSize by 0.25: got %v, want 11.75", term.fontSize)
+		t.Errorf("primary+- should decrease fontSize by 0.25: got %v, want 11.75", term.fontSize)
 	}
 }
 
-func TestHandleDisplayKey_CmdCtrlEqual_PassesThrough(t *testing.T) {
+func TestHandleDisplayKey_PrimaryAltEqual_PassesThrough(t *testing.T) {
 	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
 	term, _ := newTestTermWithScheduler(12, cfg)
 	prev := term.fontSize
-	e := &gui.Event{KeyCode: gui.KeyEqual, Modifiers: gui.ModSuper | gui.ModCtrl}
+	// Adding a non-primary modifier (Alt) beyond the primary chord must pass
+	// through — reserved for layered bindings on both macOS and Windows.
+	e := &gui.Event{KeyCode: gui.KeyEqual, Modifiers: modPrimary | gui.ModAlt}
 	if term.handleDisplayKey(e, &gui.Window{}) {
-		t.Error("Cmd+Ctrl+= should NOT be handled (pass through to pty)")
+		t.Error("primary+Alt+= should NOT be handled (pass through to pty)")
 	}
 	if term.fontSize != prev {
-		t.Errorf("Cmd+Ctrl+= must not change fontSize: %v -> %v", prev, term.fontSize)
+		t.Errorf("primary+Alt+= must not change fontSize: %v -> %v", prev, term.fontSize)
 	}
 }
 
