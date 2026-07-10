@@ -25,13 +25,14 @@ type cmdScheduler interface {
 }
 
 // notifier sends desktop notifications. The production implementation
-// shells out to osascript (macOS) or notify-send (Linux). Tests replace it
-// with a no-op or recorder.
+// shells out to osascript (macOS), notify-send (Linux), or a WinRT toast
+// via PowerShell (Windows). Tests replace it with a no-op or recorder.
 type notifier interface {
 	Notify(title, body string)
 }
 
-// desktopNotifier is the production notifier backed by osascript / notify-send.
+// desktopNotifier is the production notifier backed by osascript /
+// notify-send / WinRT toast.
 type desktopNotifier struct{}
 
 func (desktopNotifier) Notify(title, body string) { sendDesktopNotify(title, body) }
@@ -49,9 +50,9 @@ type Cfg struct {
 
 	// OnNotify, if non-nil, is called for OSC 9 / OSC 777 desktop
 	// notification requests. title may be empty (OSC 9). When nil,
-	// the widget fires a native OS notification via osascript (macOS)
-	// or notify-send (Linux). Called on a background goroutine — safe
-	// to block.
+	// the widget fires a native OS notification via osascript (macOS),
+	// notify-send (Linux), or a WinRT toast (Windows). Called on a
+	// background goroutine — safe to block.
 	OnNotify func(title, body string)
 
 	// CursorBlink, if non-nil, overrides the application's DECSCUSR
@@ -713,9 +714,35 @@ func sendDesktopNotify(title, body string) {
 		}
 		exec.Command("notify-send", args...).Run() //nolint:errcheck
 	case "windows":
-		// No-op: Windows toast notifications not yet implemented.
+		// WinRT toast via PowerShell — no extra dependency. Title and body
+		// reach the script only through environment variables, never as
+		// interpolated source, so hostile content cannot inject PowerShell.
+		// The PowerShell AppUserModelID is borrowed so the toast surfaces
+		// in Action Center without registering our own AUMID.
+		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive",
+			"-ExecutionPolicy", "Bypass", "-Command", winToastScript)
+		cmd.Env = append(os.Environ(),
+			"GOTERM_NOTIFY_TITLE="+clean(title),
+			"GOTERM_NOTIFY_BODY="+clean(body))
+		cmd.Run() //nolint:errcheck
 	}
 }
+
+// winToastScript builds and shows a Windows toast from GOTERM_NOTIFY_TITLE /
+// GOTERM_NOTIFY_BODY. Show() hands the toast to the platform and returns, so
+// no sleep is needed to keep it alive. Errors are swallowed by the caller.
+const winToastScript = `
+$ErrorActionPreference = 'Stop'
+$null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+$null = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
+$tpl = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$texts = $tpl.GetElementsByTagName('text')
+$null = $texts.Item(0).AppendChild($tpl.CreateTextNode([string]$env:GOTERM_NOTIFY_TITLE))
+$null = $texts.Item(1).AppendChild($tpl.CreateTextNode([string]$env:GOTERM_NOTIFY_BODY))
+$toast = [Windows.UI.Notifications.ToastNotification]::new($tpl)
+$aumid = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($aumid).Show($toast)
+`
 
 // enqueueReplies hands this chunk's parser replies to writeLoop and returns
 // immediately. Runs on the reader goroutine after grid.Mu is released; it only

@@ -52,19 +52,19 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 		return nil, err
 	}
 	if err := windows.CreatePipe(&outR, &outW, nil, 0); err != nil {
-		windows.CloseHandle(inR)
-		windows.CloseHandle(inW)
+		_ = windows.CloseHandle(inR)
+		_ = windows.CloseHandle(inW)
 		return nil, err
 	}
 
 	var hpc windows.Handle
 	err := windows.CreatePseudoConsole(coordSize(rows, cols), inR, outW, 0, &hpc)
 	// ConPTY dup'd (or failed on) the console-side ends; release them locally.
-	windows.CloseHandle(inR)
-	windows.CloseHandle(outW)
+	_ = windows.CloseHandle(inR)
+	_ = windows.CloseHandle(outW)
 	if err != nil {
-		windows.CloseHandle(inW)
-		windows.CloseHandle(outR)
+		_ = windows.CloseHandle(inW)
+		_ = windows.CloseHandle(outR)
 		return nil, err
 	}
 	inFile := os.NewFile(uintptr(inW), "conpty-in")
@@ -99,7 +99,7 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	}
 	// Force the child onto the pseudoconsole's std handles instead of
 	// inheriting the parent's real console.
-	si.StartupInfo.Flags |= windows.STARTF_USESTDHANDLES
+	si.Flags |= windows.STARTF_USESTDHANDLES
 
 	env := append(os.Environ(), "TERM=xterm-256color")
 	env = append(env, cfg.Env...)
@@ -168,10 +168,10 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	// Alive() and ExitWhenLastShellExits). This goroutine owns the process and
 	// thread handles.
 	go func() {
-		windows.WaitForSingleObject(p.proc, windows.INFINITE)
+		_, _ = windows.WaitForSingleObject(p.proc, windows.INFINITE)
 		p.release()
-		windows.CloseHandle(p.thread)
-		windows.CloseHandle(p.proc)
+		_ = windows.CloseHandle(p.thread)
+		_ = windows.CloseHandle(p.proc)
 	}()
 
 	return p, nil

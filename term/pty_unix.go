@@ -116,3 +116,20 @@ func darwinSystemPath() string {
 	}
 	return ""
 }
+
+// replaceEnv replaces the first occurrence of key in env with key=val,
+// or appends key=val if key is not present. The caller's slice is not
+// mutated; a new slice is returned only when a replacement is made.
+func replaceEnv(env []string, key, val string) []string {
+	prefix := key + "="
+	entry := prefix + val
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			out := make([]string, len(env))
+			copy(out, env)
+			out[i] = entry
+			return out
+		}
+	}
+	return append(env, entry)
+}
