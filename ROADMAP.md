@@ -5,6 +5,11 @@
 work remaining: 40–43 (API stabilisation). Phase 44 (v1.0.0) blocked on
 go-gui v1.0.
 
+Platforms: macOS, Linux, and Windows all supported. The Windows/ConPTY
+backend (issue #15) shipped — including native toast notifications — so the
+PTY boundary is the only platform-specific layer; everything above it is
+platform-agnostic.
+
 ## Architecture
 
 ```
@@ -29,7 +34,7 @@ term/parser_apc.go       APC dispatch (Kitty Graphics)
 term/grid.go             Cell buffer + cursor state + alt-screen.
 term/grid_*.go           Scroll, reflow, search, selection, marks, BiDi, graphics.
 term/scrollback.go       Ring buffer.
-term/pty.go              creack/pty wrapper.
+term/pty.go              ptyIO interface; creack/pty (Unix) + ConPTY (Windows).
 term/palette.go          256-color table.
 
 term/workspace/          Panes/tabs/persistence — sits above term, public API only.
