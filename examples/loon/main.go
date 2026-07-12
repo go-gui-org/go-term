@@ -17,6 +17,12 @@ import (
 // terminal panes still have a live shell. Set to false to quit silently.
 const confirmOnQuit = true
 
+// defaultFontFamily is the JetBrains Mono Nerd Font (Mono variant) family
+// name as reported by go-glyph's pure-Go go-text font discovery. go-text
+// reads the abbreviated "NF"/"NFM" family from the font's name table
+// (not the spelled-out "Nerd Font"), so the request must use that form.
+const defaultFontFamily = "JetBrainsMono NFM"
+
 func main() {
 	var workspacePath string
 	var saveWorkspacePath string
