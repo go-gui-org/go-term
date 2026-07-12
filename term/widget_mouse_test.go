@@ -31,6 +31,25 @@ func TestPosToCell_ClampedToBounds(t *testing.T) {
 	}
 }
 
+// TestPosToCell_SubPixelScroll verifies the pixel→row inversion accounts for
+// ViewSubPx. When smooth-scrolled the renderer shifts each visible row down by
+// ViewSubPx, so row r spans [r*cellH+ViewSubPx, (r+1)*cellH+ViewSubPx). A click
+// in the bottom sliver of a row (past the next cell boundary but before the
+// shifted next row starts) must still map to that row, not the one below.
+func TestPosToCell_SubPixelScroll(t *testing.T) {
+	tm, _ := newMouseTerm(24, 80) // cellH = 20
+	tm.grid.ViewSubPx = 8
+	// Row 0 band is [8, 28). y=25 is past the cellH=20 boundary but still in
+	// row 0's shifted band. Pre-fix int(25/20)=1 selected the wrong row.
+	if r, _ := tm.posToCell(5, 25); r != 0 {
+		t.Fatalf("y=25 with ViewSubPx=8: got row %d, want 0", r)
+	}
+	// Row 1 band is [28, 48). y=30 must map to row 1.
+	if r, _ := tm.posToCell(5, 30); r != 1 {
+		t.Fatalf("y=30 with ViewSubPx=8: got row %d, want 1", r)
+	}
+}
+
 func TestPosToCell_ZeroCellMetrics(t *testing.T) {
 	tm := &Term{grid: newGrid(4, 8), cellW: 0, cellH: 0}
 	r, c := tm.posToCell(50, 100)

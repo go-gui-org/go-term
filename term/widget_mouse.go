@@ -116,7 +116,14 @@ func (t *Term) posToCell(x, y float32) (int, int) {
 	if !realNumber(y) {
 		y = 0
 	}
-	r := int(y / t.cellH)
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	// When smooth-scrolled the renderer shifts every visible row down by
+	// ViewSubPx (drawState.renderYOff), so viewport row r spans the pixel
+	// band [r*cellH+ViewSubPx, (r+1)*cellH+ViewSubPx). Invert with the same
+	// offset — floor, not truncation, so the band math holds at r == 0 —
+	// or clicks land a row off while the viewport is between cells.
+	r := int(math.Floor(float64((y - t.grid.ViewSubPx) / t.cellH)))
 	c := int(x / t.cellW)
 	if r < 0 {
 		r = 0
@@ -124,8 +131,6 @@ func (t *Term) posToCell(x, y float32) (int, int) {
 	if c < 0 {
 		c = 0
 	}
-	t.grid.Mu.Lock()
-	defer t.grid.Mu.Unlock()
 	if r >= t.grid.Rows {
 		r = t.grid.Rows - 1
 	}
