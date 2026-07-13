@@ -13,29 +13,32 @@ func (g *grid) selOrder() (start, end contentPos) {
 
 // SelectedText extracts the selection as a UTF-8 string. Trailing
 // blanks per row are trimmed; row breaks emit '\n' (kitty convention).
-// Returns "" when nothing is selected. Coordinates are content-relative
-// and are clamped to [0, len(Scrollback)+Rows-1] so stale coords from
-// a Resize never produce a negative span.
+// Returns "" when nothing is selected. Column coordinates are cell
+// *boundaries* (0..Cols) and the span is half-open [s.Col, e.Col), so a
+// one-cell drag yields one cell. Coordinates are content-relative and are
+// clamped so stale coords from a Resize never produce a negative span.
 func (g *grid) SelectedText() string {
 	if !g.SelActive || g.Rows <= 0 || g.Cols <= 0 {
 		return ""
 	}
 	total := g.Scrollback.Len() + g.Rows
 	s, e := g.selOrder()
-	s.Row, s.Col = clamp(s.Row, 0, total-1), clamp(s.Col, 0, g.Cols-1)
-	e.Row, e.Col = clamp(e.Row, 0, total-1), clamp(e.Col, 0, g.Cols-1)
+	s.Row, s.Col = clamp(s.Row, 0, total-1), clamp(s.Col, 0, g.Cols)
+	e.Row, e.Col = clamp(e.Row, 0, total-1), clamp(e.Col, 0, g.Cols)
 	if s == e {
 		return ""
 	}
 	var b strings.Builder
 	b.Grow((e.Row-s.Row+1)*g.Cols + (e.Row - s.Row))
 	for r := s.Row; r <= e.Row; r++ {
+		// Half-open: c1 is the last cell index (boundary e.Col minus 1) on the
+		// end row; full row width otherwise.
 		c0, c1 := 0, g.Cols-1
 		if r == s.Row {
 			c0 = s.Col
 		}
 		if r == e.Row {
-			c1 = e.Col
+			c1 = e.Col - 1
 		}
 
 		end := c0 - 1

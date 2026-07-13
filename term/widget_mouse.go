@@ -140,6 +140,32 @@ func (t *Term) posToCell(x, y float32) (int, int) {
 	return r, c
 }
 
+// posToSelCol maps shape-local x pixels to a selection boundary column in
+// [0, Cols]. Selection endpoints are cell *boundaries* (nearest edge), not cell
+// indices, so a one-cell drag spans exactly one cell and the selected span is
+// half-open [min, max) — matching macOS Terminal / Ghostty. Nearest-edge
+// snapping (round, not floor) keeps the behavior symmetric in both drag
+// directions. Compare posToCell, which floors to a cell index for xterm mouse
+// reports.
+func (t *Term) posToSelCol(x float32) int {
+	if !finite(t.cellW) {
+		return 0
+	}
+	if !realNumber(x) {
+		x = 0
+	}
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	b := int(math.Floor(float64(x/t.cellW) + 0.5))
+	if b < 0 {
+		b = 0
+	}
+	if b > t.grid.Cols {
+		b = t.grid.Cols
+	}
+	return b
+}
+
 // writeMouse emits an SGR mouse report. When pixels is true (?1016 active),
 // pixX/pixY (0-based widget pixels) are used; otherwise col/row (0-based
 // cell indices) are used. Both forms report 1-based coordinates per spec.
@@ -191,12 +217,13 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if e.MouseButton != gui.MouseLeft {
 		return
 	}
+	selCol := t.posToSelCol(e.MouseX)
 	func() {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
 		contentR := t.grid.viewportToContent(r)
-		t.grid.SelAnchor = contentPos{Row: contentR, Col: c}
-		t.grid.SelHead = contentPos{Row: contentR, Col: c}
+		t.grid.SelAnchor = contentPos{Row: contentR, Col: selCol}
+		t.grid.SelHead = contentPos{Row: contentR, Col: selCol}
 		t.grid.SelActive = false
 	}()
 	t.mouse.dragging = true
@@ -257,6 +284,7 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		t.updateHover(r, c, w)
 		return
 	}
+	selCol := t.posToSelCol(e.MouseX)
 	func() {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
@@ -275,7 +303,7 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 			}
 		}
 		contentR := t.grid.viewportToContent(r)
-		t.grid.SelHead = contentPos{Row: contentR, Col: c}
+		t.grid.SelHead = contentPos{Row: contentR, Col: selCol}
 		if t.grid.SelHead != t.grid.SelAnchor {
 			t.grid.SelActive = true
 		}

@@ -179,6 +179,54 @@ func TestGrid_EraseInDisplay_Modes(t *testing.T) {
 	}
 }
 
+// TestGrid_EraseInDisplay_Mode3_ClearsScrollback verifies ED 3 ("erase
+// saved lines") drops the scrollback buffer, trims marks/graphics into it,
+// and snaps the viewport back to live — while ED 2 leaves scrollback alone.
+func TestGrid_EraseInDisplay_Mode3_ClearsScrollback(t *testing.T) {
+	mk := func() *grid {
+		g := newGrid(3, 3)
+		g.ScrollbackCap = 100
+		g.CellPxW, g.CellPxH = 8, 16
+		for range 4 {
+			g.scrollUpRegion(1)
+		}
+		if g.Scrollback.Len() != 4 {
+			t.Fatalf("setup: scrollback len=%d, want 4", g.Scrollback.Len())
+		}
+		g.CursorR = 0
+		g.AddMark(markPromptStart)
+		g.AddGraphic("/tmp/fake.png", 8, 16)
+		g.ViewOffset = 2
+		g.SelActive = true
+		g.SelAnchor = contentPos{Row: 0, Col: 0}
+		g.SelHead = contentPos{Row: 1, Col: 2}
+		return g
+	}
+
+	g := mk()
+	g.EraseInDisplay(3)
+	if g.Scrollback.Len() != 0 {
+		t.Errorf("mode 3: scrollback len=%d, want 0", g.Scrollback.Len())
+	}
+	if g.ViewOffset != 0 {
+		t.Errorf("mode 3: ViewOffset=%d, want 0", g.ViewOffset)
+	}
+	if g.SelActive {
+		t.Errorf("mode 3: selection should be cleared (content coords shifted)")
+	}
+	for _, c := range g.Cells {
+		if c.Ch != ' ' {
+			t.Errorf("mode 3 should clear all cells: %v", c.Ch)
+		}
+	}
+
+	g = mk()
+	g.EraseInDisplay(2)
+	if g.Scrollback.Len() != 4 {
+		t.Errorf("mode 2 must not clear scrollback: len=%d, want 4", g.Scrollback.Len())
+	}
+}
+
 func TestGrid_NewlineAtRegionBottom(t *testing.T) {
 	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {

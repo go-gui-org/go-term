@@ -317,7 +317,9 @@ type grid struct {
 	// ViewOffset changes). SelActive == false means no selection (single-click
 	// position pre-drag). Anchor and Head may appear in any order; helpers
 	// normalize. contentPos row: 0..len(Scrollback)-1 for scrollback rows,
-	// len(Scrollback)..len(Scrollback)+Rows-1 for live rows.
+	// len(Scrollback)..len(Scrollback)+Rows-1 for live rows. Col is a cell
+	// *boundary* in [0, Cols]; the selected span is half-open [start, end), so a
+	// one-cell drag selects exactly one cell.
 	SelAnchor contentPos
 	SelHead   contentPos
 	Rows      int

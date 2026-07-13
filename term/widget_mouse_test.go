@@ -1,6 +1,7 @@
 package term
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -59,11 +60,66 @@ func TestPosToCell_ZeroCellMetrics(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// posToSelCol
+// ---------------------------------------------------------------------------
+
+func TestPosToSelCol_Basic(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8) // cellW=10
+	// x=5  → 5/10=0.5 → floor(1.0)=1 (boundary after cell 0)
+	if got := tm.posToSelCol(5); got != 1 {
+		t.Errorf("x=5: got %d, want 1", got)
+	}
+	// x=14 → 14/10=1.4 → floor(1.9)=1 (still in cell 1)
+	if got := tm.posToSelCol(14); got != 1 {
+		t.Errorf("x=14: got %d, want 1", got)
+	}
+	// x=15 → 15/10=1.5 → floor(2.0)=2 (tie rounds up)
+	if got := tm.posToSelCol(15); got != 2 {
+		t.Errorf("x=15: got %d, want 2", got)
+	}
+}
+
+func TestPosToSelCol_ZeroCellW(t *testing.T) {
+	tm := &Term{grid: newGrid(4, 8), cellW: 0, cellH: 20}
+	if got := tm.posToSelCol(50); got != 0 {
+		t.Errorf("zero cellW: got %d, want 0", got)
+	}
+}
+
+func TestPosToSelCol_NegativeCellW(t *testing.T) {
+	tm := &Term{grid: newGrid(4, 8), cellW: -1, cellH: 20}
+	if got := tm.posToSelCol(50); got != 0 {
+		t.Errorf("negative cellW: got %d, want 0", got)
+	}
+}
+
+func TestPosToSelCol_ClampedToBounds(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8) // cellW=10, Cols=8
+	if got := tm.posToSelCol(-50); got != 0 {
+		t.Errorf("negative x: got %d, want 0", got)
+	}
+	if got := tm.posToSelCol(999); got != 8 {
+		t.Errorf("overflow x: got %d, want 8", got)
+	}
+}
+
+func TestPosToSelCol_NaNInf(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.posToSelCol(float32(math.NaN())); got != 0 {
+		t.Errorf("NaN: got %d, want 0", got)
+	}
+	if got := tm.posToSelCol(float32(math.Inf(1))); got != 0 {
+		t.Errorf("+Inf: got %d, want 0", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // onClick
 // ---------------------------------------------------------------------------
 
 func TestOnClick_LeftButtonSelectionAnchor(t *testing.T) {
 	tm, buf := newMouseTerm(4, 8)
+	// MouseX=15 is the center of cell 1 (cellW=10); nearest boundary is 2.
 	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
 	tm.onClick(nil, e, &gui.Window{})
 	if !tm.mouse.dragging || tm.mouse.dragReport {
@@ -78,8 +134,8 @@ func TestOnClick_LeftButtonSelectionAnchor(t *testing.T) {
 	func() {
 		tm.grid.Mu.Lock()
 		defer tm.grid.Mu.Unlock()
-		if tm.grid.SelAnchor != (contentPos{Row: 1, Col: 1}) {
-			t.Errorf("SelAnchor = %v", tm.grid.SelAnchor)
+		if tm.grid.SelAnchor != (contentPos{Row: 1, Col: 2}) {
+			t.Errorf("SelAnchor = %v, want {Row:1 Col:2}", tm.grid.SelAnchor)
 		}
 	}()
 }
@@ -190,7 +246,8 @@ func TestOnMouseMove_SelectionExtend(t *testing.T) {
 	tm.grid.Mu.Unlock()
 	tm.mouse.dragging = true
 	tm.mouse.dragReport = false
-	// Move to row 3, col 5 (65/20=3, 55/10=5).
+	// Move to row 3 (65/20=3); MouseX=55 is the center of cell 5, nearest
+	// boundary 6.
 	e := &gui.Event{MouseX: 55, MouseY: 65}
 	tm.onMouseMove(nil, e, &gui.Window{})
 	if len(*buf) != 0 {
@@ -199,13 +256,39 @@ func TestOnMouseMove_SelectionExtend(t *testing.T) {
 	func() {
 		tm.grid.Mu.Lock()
 		defer tm.grid.Mu.Unlock()
-		if tm.grid.SelHead != (contentPos{Row: 3, Col: 5}) {
-			t.Errorf("SelHead = %v, want col=5", tm.grid.SelHead)
+		if tm.grid.SelHead != (contentPos{Row: 3, Col: 6}) {
+			t.Errorf("SelHead = %v, want col=6", tm.grid.SelHead)
 		}
 		if !tm.grid.SelActive {
 			t.Error("selection should be active after extend")
 		}
 	}()
+}
+
+// TestOnMouseMove_SingleCharSelect is the regression guard for the boundary
+// selection model: pressing on a character and dragging one cell to the right
+// must select exactly that one character, not two. With cell-index inclusive
+// selection this returned "ab".
+func TestOnMouseMove_SingleCharSelect(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8) // cellW=10, cellH=20
+	tm.grid.Mu.Lock()
+	tm.grid.Cells[0].Ch = 'a'
+	tm.grid.Cells[1].Ch = 'b'
+	tm.grid.Mu.Unlock()
+
+	// Press near the left edge of cell 0 → boundary 0.
+	down := &gui.Event{MouseX: 2, MouseY: 5, MouseButton: gui.MouseLeft}
+	tm.onClick(nil, down, &gui.Window{})
+	// Drag to the left part of cell 1 → boundary 1. Half-open [0,1) = cell 0.
+	move := &gui.Event{MouseX: 12, MouseY: 5}
+	tm.onMouseMove(nil, move, &gui.Window{})
+
+	tm.grid.Mu.Lock()
+	got := tm.grid.SelectedText()
+	tm.grid.Mu.Unlock()
+	if got != "a" {
+		t.Errorf("one-cell drag selected %q, want %q", got, "a")
+	}
 }
 
 func TestOnMouseMove_AutoScrollUp(t *testing.T) {

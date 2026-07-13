@@ -411,7 +411,10 @@ func (g *grid) EraseInLine(mode int) {
 }
 
 // EraseInDisplay implements CSI J. mode: 0 = cursor to end of screen,
-// 1 = start of screen to cursor, 2/3 = entire screen.
+// 1 = start of screen to cursor, 2 = entire screen. Mode 3 (ED 3, "erase
+// saved lines") blanks the screen like mode 2 and additionally drops the
+// scrollback buffer, so `clear` (which emits CSI 3 J then CSI 2 J) wipes
+// history as it does in xterm/iTerm/kitty.
 func (g *grid) EraseInDisplay(mode int) {
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	switch mode {
@@ -434,6 +437,19 @@ func (g *grid) EraseInDisplay(mode int) {
 	case 2, 3:
 		for i := range g.Cells {
 			g.Cells[i] = blank
+		}
+		// Mode 3 additionally erases saved lines (scrollback). Dropping
+		// scrollback shifts the content-row coordinate space, so marks,
+		// graphics, and any active selection (all content-row based) must be
+		// trimmed/cleared, matching EnterAlt/ExitAlt on a buffer swap.
+		if mode == 3 {
+			if sb := g.Scrollback.Len(); sb > 0 {
+				g.Scrollback.Reset()
+				g.trimMarks(sb)
+				g.trimGraphics(sb)
+			}
+			g.ClearSelection()
+			g.ResetView()
 		}
 		g.markAllDirty()
 	}
