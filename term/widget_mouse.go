@@ -446,14 +446,19 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		return
 	}
 
-	// Mouse wheel detection: SDL populates PreciseY (float) for trackpad and
-	// falls back to integer Y for discrete mouse wheels. go-gui merges them
-	// into ScrollY, so integer-valued ScrollY reliably signals a mouse wheel.
-	isMouseWheel := e.ScrollY == float32(int32(e.ScrollY))
+	// Mouse-wheel vs trackpad: mouse wheels produce near-integer deltas
+	// (e.g. 10.0 after the Metal backend's ×10 scaling), while trackpads
+	// produce continuous fractional values. Use a tolerance to survive
+	// macOS scroll-acceleration that can make mouse-wheel deltas slightly
+	// non-integer (e.g. 10.3).
+	const mouseWheelTol = 0.001
+	rounded := float32(math.Round(float64(e.ScrollY)))
+	isMouseWheel := e.ScrollY >= rounded-mouseWheelTol &&
+		e.ScrollY <= rounded+mouseWheelTol
 
 	// Pixel-perfect scroll: pass the raw scaled delta directly to ScrollViewPx
 	// which accumulates it into ViewOffset + ViewSubPx. No integer truncation.
-	const scrollSensitivity float32 = 15
+	const scrollSensitivity float32 = 5
 	deltaPx := e.ScrollY * scrollSensitivity
 	changed := func() bool {
 		t.grid.Mu.Lock()
@@ -478,9 +483,9 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// updating when the new sample is larger in magnitude or direction
 	// reverses. Cap prevents a huge flick from coasting forever.
 	const (
-		momentumScale = 12.0 // match scrollSensitivity so coast starts at live-scroll speed
+		momentumScale = 5.0 // match scrollSensitivity so coast starts at live-scroll speed
 		momentumCap   = 600.0
-		coastDelay    = 40 * time.Millisecond
+		coastDelay    = 50 * time.Millisecond
 	)
 	func() {
 		t.momentum.mu.Lock()
