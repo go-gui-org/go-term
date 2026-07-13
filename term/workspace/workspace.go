@@ -431,6 +431,8 @@ func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 	style := theme.M5
 	if isActive {
 		bg = theme.ColorActive
+	} else {
+		style.Color = style.Color.WithOpacity(0.65)
 	}
 	title := tab.focusedTitle()
 	title = truncateTitle(title, 30)
@@ -490,7 +492,7 @@ func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 	// The child closeBtn's own OnHover (above) takes over when the pointer
 	// is directly on the glyph, brightening it to full opacity.
 	if len(ws.tabs) > 1 && !isActive {
-		revealColor := style.Color.WithOpacity(0.6)
+		revealColor := theme.M5.Color.WithOpacity(0.6)
 		outer.OnHover = func(layout *gui.Layout, _ *gui.Event, w *gui.Window) {
 			setTextColorByID(layout, closeID, revealColor)
 		}
