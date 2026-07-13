@@ -704,3 +704,45 @@ func TestDrawUnderlineDecor_Dashed(t *testing.T) {
 		t.Error("expected batches for dashed underline")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// prepareSelection — half-open boundary span
+// ---------------------------------------------------------------------------
+
+// TestPrepareSelection_HalfOpenSpan verifies the highlight span for the end
+// row stops one cell short of the boundary column (c1 == e.Col-1), matching
+// the half-open selection model used by SelectedText.
+func TestPrepareSelection_HalfOpenSpan(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.SelActive = true
+	g.SelAnchor = contentPos{Row: 0, Col: 2}
+	g.SelHead = contentPos{Row: 0, Col: 5} // half-open cols 2..4
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	tm.prepareSelection(ds)
+	rb := ds.rowSel[0]
+	if !rb.active || rb.c0 != 2 || rb.c1 != 4 {
+		t.Errorf("half-open span: got %+v, want {c0:2 c1:4 active:true}", rb)
+	}
+}
+
+// TestPrepareSelection_EmptySpanNotHighlighted verifies that an end row whose
+// boundary collapses to zero width (e.Col-1 < c0) is not highlighted, so a
+// selection ending exactly at a row's start column leaves that row clean.
+func TestPrepareSelection_EmptySpanNotHighlighted(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.SelActive = true
+	// Anchor at start of row 1, head at boundary 0 of row 1: c1 = -1 < c0 = 0.
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 0}
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	tm.prepareSelection(ds)
+	if ds.rowSel[1].active {
+		t.Errorf("row 1 empty span should not be highlighted: %+v", ds.rowSel[1])
+	}
+	// Row 0 (the full start row) should still be highlighted end-to-end.
+	if rb := ds.rowSel[0]; !rb.active || rb.c0 != 0 || rb.c1 != g.Cols-1 {
+		t.Errorf("row 0 span: got %+v, want full row", rb)
+	}
+}

@@ -11,7 +11,7 @@ func TestGrid_SelectedText_RowRange(t *testing.T) {
 		g.At(1, c).Ch = r
 	}
 	g.SelAnchor = contentPos{Row: 0, Col: 0}
-	g.SelHead = contentPos{Row: 1, Col: 4}
+	g.SelHead = contentPos{Row: 1, Col: 5} // boundary after col 4
 	g.SelActive = true
 	if got := g.SelectedText(); got != "hello\nworld" {
 		t.Errorf("got %q, want %q", got, "hello\nworld")
@@ -27,7 +27,7 @@ func TestGrid_SelectedText_TrailingBlankTrim(t *testing.T) {
 		g.At(1, c).Ch = r
 	}
 	g.SelAnchor = contentPos{Row: 0, Col: 0}
-	g.SelHead = contentPos{Row: 1, Col: 7}
+	g.SelHead = contentPos{Row: 1, Col: 8} // boundary past end of row
 	g.SelActive = true
 
 	if got := g.SelectedText(); got != "abc\nde" {
@@ -41,7 +41,7 @@ func TestGrid_SelectedText_ColumnRangeWithinRow(t *testing.T) {
 		g.At(0, c).Ch = r
 	}
 	g.SelAnchor = contentPos{Row: 0, Col: 3}
-	g.SelHead = contentPos{Row: 0, Col: 6}
+	g.SelHead = contentPos{Row: 0, Col: 7} // half-open: cols 3..6 → "defg"
 	g.SelActive = true
 	if got := g.SelectedText(); got != "defg" {
 		t.Errorf("got %q, want %q", got, "defg")
@@ -57,7 +57,7 @@ func TestGrid_SelectedText_BackwardDragNormalized(t *testing.T) {
 		g.At(1, c).Ch = r
 	}
 
-	g.SelAnchor = contentPos{Row: 1, Col: 1}
+	g.SelAnchor = contentPos{Row: 1, Col: 2} // boundary past col 1
 	g.SelHead = contentPos{Row: 0, Col: 0}
 	g.SelActive = true
 	if got := g.SelectedText(); got != "ab\ncd" {
@@ -92,7 +92,7 @@ func TestGrid_SelectedText_AcrossScrollbackBoundary(t *testing.T) {
 	}
 
 	g.SelAnchor = contentPos{Row: 0, Col: 0}
-	g.SelHead = contentPos{Row: 1, Col: 2}
+	g.SelHead = contentPos{Row: 1, Col: 3} // boundary past end of row
 	g.SelActive = true
 	if got := g.SelectedText(); got != "abc\nxyz" {
 		t.Errorf("ViewOffset=0: got %q, want %q", got, "abc\nxyz")
@@ -129,7 +129,7 @@ func TestGrid_SelectedText_RowWithEmptySpan(t *testing.T) {
 	g.At(0, 1).Ch = 'b'
 	g.At(0, 2).Ch = 'c'
 	g.SelAnchor = contentPos{Row: 0, Col: 0}
-	g.SelHead = contentPos{Row: 0, Col: 2}
+	g.SelHead = contentPos{Row: 0, Col: 3} // boundary past end of row
 	g.SelActive = true
 	if got := g.SelectedText(); got != "abc" {
 		t.Errorf("baseline: got %q want %q", got, "abc")
@@ -148,7 +148,7 @@ func TestGrid_SelectedText_ContentCoords_IndependentOfViewOffset(t *testing.T) {
 		g.At(0, c).Ch = ch
 	}
 	g.SelAnchor = contentPos{Row: 0, Col: 0}
-	g.SelHead = contentPos{Row: 1, Col: 2}
+	g.SelHead = contentPos{Row: 1, Col: 3} // boundary past end of row
 	g.SelActive = true
 
 	for _, off := range []int{0, 1} {

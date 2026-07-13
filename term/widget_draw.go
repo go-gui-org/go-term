@@ -442,12 +442,19 @@ func (t *Term) prepareSelection(ds *drawState) {
 		if cr < s.Row || cr > e.Row {
 			continue
 		}
+		// Columns are cell boundaries; the span is half-open [s.Col, e.Col).
+		// c1 is the last selected cell index, so the end row stops one cell
+		// short of the boundary. Rows whose span collapses (c1 < c0) are not
+		// highlighted.
 		c0, c1 := 0, cols-1
 		if cr == s.Row {
 			c0 = s.Col
 		}
 		if cr == e.Row {
-			c1 = e.Col
+			c1 = e.Col - 1
+		}
+		if c1 < c0 {
+			continue
 		}
 		ds.rowSel[r] = rowBounds{c0, c1, true}
 	}
