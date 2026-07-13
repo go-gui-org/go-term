@@ -42,13 +42,16 @@ func TestScrollbarGeometry_TopView(t *testing.T) {
 }
 
 func TestScrollbarGeometry_MidView(t *testing.T) {
-	// ViewOffset=half scrollback: thumb midpoint should be near viewport midpoint.
+	// ViewOffset=half scrollback: thumb midpoint should be near viewport
+	// midpoint. rows=0 tests the degenerate case where the min-thumb clamp
+	// kicks in, shifting the midpoint by minScrollbarThumbH/2.
 	const sb, rows, h = 100, 0, 100.0 // rows=0 so total=sb; mid is exact
 	mid := sb / 2
 	y, th := scrollbarThumb(sb, rows, mid, h)
 	thumbMid := y + th/2
-	if math.Abs(float64(thumbMid-h/2)) > 1.0 {
-		t.Errorf("mid view: thumb midpoint = %.3f, want ~%.3f", thumbMid, float32(h/2))
+	wantMid := float32(h/2) + minScrollbarThumbH/2
+	if math.Abs(float64(thumbMid-wantMid)) > 0.01 {
+		t.Errorf("mid view: thumb midpoint = %.3f, want ~%.3f", thumbMid, wantMid)
 	}
 }
 
@@ -901,6 +904,28 @@ func TestScrollbarGeometry_ZeroTotal_NoPanic(t *testing.T) {
 	y, h := scrollbarGeometry(0, 0, 0, 100)
 	if y != 0 || h != 0 {
 		t.Errorf("zero total: got y=%v h=%v, want (0,0)", y, h)
+	}
+}
+
+func TestScrollbarGeometry_MinThumbClamp(t *testing.T) {
+	// Large scrollback → thumb would be tiny; clamp must keep it ≥ min.
+	const sb, rows, h = 100000, 24, 480.0
+	_, th := scrollbarThumb(sb, rows, 0, h)
+	if th < minScrollbarThumbH {
+		t.Errorf("thumbH = %.3f, want ≥ %.3f", th, minScrollbarThumbH)
+	}
+}
+
+func TestScrollbarGeometry_NaNInfViewH(t *testing.T) {
+	nan := float32(math.NaN())
+	inf := float32(math.Inf(1))
+	ninf := float32(math.Inf(-1))
+
+	for _, vh := range []float32{0, -1, nan, inf, ninf} {
+		y, h := scrollbarGeometry(100, 24, 0, vh)
+		if y != 0 || h != 0 {
+			t.Errorf("viewH=%v: got y=%v h=%v, want (0,0)", vh, y, h)
+		}
 	}
 }
 

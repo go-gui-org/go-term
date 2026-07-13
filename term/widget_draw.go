@@ -80,12 +80,21 @@ func isGeometryGlyph(r rune) bool {
 
 // scrollbarGeometry computes the scrollbar thumb Y position and height.
 // sbLen = len(Scrollback), viewH = canvas pixel height. Caller ensures sbLen > 0.
+const minScrollbarThumbH float32 = 10
+
 func scrollbarGeometry(sbLen, rows int, viewOffset float32, viewH float32) (thumbY, thumbH float32) {
+	if viewH <= 0 || math.IsNaN(float64(viewH)) || math.IsInf(float64(viewH), 0) ||
+		math.IsNaN(float64(viewOffset)) || math.IsInf(float64(viewOffset), 0) {
+		return
+	}
 	total := float32(sbLen + rows)
 	if total <= 0 {
 		return
 	}
 	thumbH = float32(rows) / total * viewH
+	if thumbH < minScrollbarThumbH {
+		thumbH = minScrollbarThumbH
+	}
 	thumbY = (float32(sbLen) - viewOffset) / total * viewH
 	return
 }
