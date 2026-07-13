@@ -246,15 +246,39 @@ type bellState struct {
 	readCount  uint64
 }
 
-// scrollbarState manages the auto-hide scrollbar thumb timer. Main-thread
-// only (created lazily in showScrollbar). The until field is read under
-// grid.Mu in drawOverlays but written without Mu in showScrollbar; both
-// call sites are main-thread-only so this is not a race, but future
-// refactors should keep showScrollbar on the main thread or switch to
-// an atomic.Time.
+// scrollbarState manages the auto-hide scrollbar thumb timer plus the
+// hit-test geometry needed to click/drag the thumb. Main-thread only
+// (until/timer created lazily in showScrollbar; the geometry fields are
+// written by drawOverlays and read by the mouse handlers, all on the GUI
+// main thread). The until field is read under grid.Mu in drawOverlays but
+// written without Mu in showScrollbar; both call sites are main-thread-only
+// so this is not a race, but future refactors should keep showScrollbar on
+// the main thread or switch to an atomic.Time.
 type scrollbarState struct {
 	until time.Time
 	timer *time.Timer
+
+	// Geometry recorded each frame by drawOverlays so the mouse handlers
+	// can hit-test without a DrawContext. hitX0 is the left edge of the
+	// clickable region (extends inward from the thumb, so the grabbable
+	// area is wider than the drawn thumb while the thumb itself stays clear
+	// of the OS window-resize band); viewH is the canvas height. active is
+	// true when the thumb is interactive this frame (scrollback present and
+	// scrollbar not hidden).
+	hitX0  float32
+	viewH  float32
+	active bool
+
+	// hovered is true when the pointer is over the scrollbar hit region
+	// (track or thumb). Set by onMouseMove, consumed by drawOverlays to
+	// brighten the thumb.
+	hovered bool
+
+	// dragging is true while the user holds the thumb; grabDy is the
+	// pointer offset from the thumb top captured at grab time so the thumb
+	// tracks the cursor without snapping its center to the pointer.
+	dragging bool
+	grabDy   float32
 }
 
 // mouseState tracks pointer state for selection drags, host-side mouse

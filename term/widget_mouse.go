@@ -198,6 +198,13 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if t.cfg.OnClickFocus != nil {
 		t.cfg.OnClickFocus()
 	}
+	// Scrollbar takes priority over selection and host mouse reporting: it is
+	// a local overlay drawn on top of the grid. Only interactive while the
+	// thumb is visible, so a faded scrollbar never swallows clicks.
+	if e.MouseButton == gui.MouseLeft && t.scrollbarClick(e, w) {
+		e.IsHandled = true
+		return
+	}
 	r, c := t.posToCell(e.MouseX, e.MouseY)
 	snap := t.mouseSnap()
 	if snap.shouldReport() {
@@ -243,6 +250,23 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 // any-motion report. Falls through to selection extension when this
 // drag was started outside of a reporting mode.
 func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	// Track scrollbar hover for thumb brightness.
+	if t.scrollbar.active && realNumber(e.MouseX) && realNumber(e.MouseY) {
+		inHit := e.MouseX >= t.scrollbar.hitX0 &&
+			e.MouseY >= 0 && e.MouseY < t.scrollbar.viewH
+		if inHit != t.scrollbar.hovered {
+			t.scrollbar.hovered = inHit
+			t.bumpVersion()
+			w.UpdateWindow()
+		}
+	}
+
+	// Scrollbar thumb drag: repositions the viewport, independent of the
+	// selection / mouse-report paths below.
+	if t.scrollbar.dragging {
+		t.scrollbarDrag(e, w)
+		return
+	}
 	// Any pointer motion means the user's hand is on the input device again;
 	// cancel a coasting momentum scroll so they get immediate control.
 	t.momentum.mu.Lock()
@@ -342,6 +366,15 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 // emits a release report regardless of whether the mode is still on
 // (the host expects every press to be paired with a release).
 func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	// Scrollbar thumb drag release: unlock and stop dragging. The scrollbar
+	// drag path never sets t.mouse.dragging, so handle it before that guard.
+	if t.scrollbar.dragging {
+		t.scrollbar.dragging = false
+		w.MouseUnlock()
+		t.scheduleViewUpdate(w)
+		e.IsHandled = true
+		return
+	}
 	if !t.mouse.dragging {
 		return
 	}

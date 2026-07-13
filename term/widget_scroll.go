@@ -26,6 +26,73 @@ func (t *Term) showScrollbar() {
 	t.scheduleDelayedUpdate(scrollbarDuration+time.Millisecond, &t.scrollbar.timer)
 }
 
+// scrollbarClick handles a left button-down over the scrollbar. Returns
+// false when the pointer is outside the (visible) thumb's hit region so the
+// caller falls through to selection / mouse-report handling. Clicking the
+// thumb begins a drag; clicking elsewhere in the track jumps the viewport so
+// the thumb centers on the pointer, then also begins a drag. Main-thread only.
+func (t *Term) scrollbarClick(e *gui.Event, w *gui.Window) bool {
+	if !t.scrollbar.active || !finite(t.cellH) {
+		return false
+	}
+	if !realNumber(e.MouseX) || !realNumber(e.MouseY) {
+		return false
+	}
+	if e.MouseX < t.scrollbar.hitX0 {
+		return false
+	}
+
+	// Grabbing the thumb takes over the viewport; cancel any coasting
+	// momentum so it doesn't fight the drag.
+	t.cancelMomentum()
+
+	sb, rows, viewOffsetVal := func() (int, int, float32) {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		return t.grid.Scrollback.Len(), t.grid.Rows,
+			float32(t.grid.ViewOffset) + t.grid.ViewSubPx/t.cellH
+	}()
+	viewH := t.scrollbar.viewH
+	thumbY, thumbH := scrollbarGeometry(sb, rows, viewOffsetVal, viewH)
+
+	if e.MouseY >= thumbY && e.MouseY < thumbY+thumbH {
+		// On the thumb: start a drag, remembering the grab offset.
+		t.scrollbar.grabDy = e.MouseY - thumbY
+	} else {
+		// In the track above/below the thumb: jump so the thumb centers on
+		// the pointer, then drag from its center.
+		t.scrollbar.grabDy = thumbH / 2
+		t.jumpScrollbarTo(e.MouseY - t.scrollbar.grabDy)
+	}
+	t.scrollbar.dragging = true
+	w.MouseLock(gui.MouseLockCfg{
+		MouseMove: t.onMouseMove,
+		MouseUp:   t.onMouseUp,
+	})
+	t.scheduleViewUpdate(w)
+	return true
+}
+
+// scrollbarDrag repositions the viewport during a thumb drag so the thumb top
+// tracks the pointer (minus the grab offset). Main-thread only.
+func (t *Term) scrollbarDrag(e *gui.Event, w *gui.Window) {
+	if !finite(t.cellH) || !realNumber(e.MouseY) {
+		return
+	}
+	t.jumpScrollbarTo(e.MouseY - t.scrollbar.grabDy)
+	t.scheduleViewUpdate(w)
+}
+
+// jumpScrollbarTo positions the viewport so the thumb top lands at pixel
+// thumbTopY. Caller ensures cellH is finite. Takes grid.Mu.
+func (t *Term) jumpScrollbarTo(thumbTopY float32) {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	off := scrollbarOffsetForY(t.grid.Scrollback.Len(), t.grid.Rows, thumbTopY, t.scrollbar.viewH)
+	t.grid.ClearSelection()
+	t.grid.SetViewFractional(off, t.cellH)
+}
+
 // snapToLive clears any scrollback view-offset and selection so subsequent
 // input is rendered at the live grid. No-op when already at the bottom.
 func (t *Term) snapToLive() {

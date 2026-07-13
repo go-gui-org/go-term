@@ -72,6 +72,44 @@ func TestScrollbarGeometry_SubPixel(t *testing.T) {
 	}
 }
 
+func TestScrollbarOffsetForY_RoundTrip(t *testing.T) {
+	// scrollbarOffsetForY must invert scrollbarGeometry's thumbY formula:
+	// mapping thumbY back to a view offset should recover the original.
+	const sb, rows, h = 100, 24, 480.0
+	for _, off := range []float32{0, 12.5, 50, 87.25, 100} {
+		thumbY, _ := scrollbarGeometry(sb, rows, off, h)
+		got := scrollbarOffsetForY(sb, rows, thumbY, h)
+		if math.Abs(float64(got-off)) > 0.001 {
+			t.Errorf("off=%v: thumbY=%v → offset=%v, want %v", off, thumbY, got, off)
+		}
+	}
+}
+
+func TestScrollbarOffsetForY_Clamps(t *testing.T) {
+	const sb, rows, h = 100, 24, 480.0
+	// y below the top clamps to the oldest row (sb); y past the bottom to 0.
+	if got := scrollbarOffsetForY(sb, rows, -100, h); got != sb {
+		t.Errorf("y<0: got %v, want %v", got, float32(sb))
+	}
+	if got := scrollbarOffsetForY(sb, rows, h*2, h); got != 0 {
+		t.Errorf("y>>h: got %v, want 0", got)
+	}
+	// Degenerate inputs return 0.
+	if got := scrollbarOffsetForY(0, rows, 10, h); got != 0 {
+		t.Errorf("sb=0: got %v, want 0", got)
+	}
+	if got := scrollbarOffsetForY(sb, rows, 10, 0); got != 0 {
+		t.Errorf("viewH=0: got %v, want 0", got)
+	}
+	// NaN/Inf y returns 0.
+	if got := scrollbarOffsetForY(sb, rows, float32(math.NaN()), h); got != 0 {
+		t.Errorf("y=NaN: got %v, want 0", got)
+	}
+	if got := scrollbarOffsetForY(sb, rows, float32(math.Inf(1)), h); got != 0 {
+		t.Errorf("y=Inf: got %v, want 0", got)
+	}
+}
+
 func TestSearchOverlap_NoScroll_OneRow(t *testing.T) {
 	// 24 rows × 20px = 480px. Search bar at [460,480). Row 23's text
 	// footprint [460,480) overlaps → 1 row reserved.

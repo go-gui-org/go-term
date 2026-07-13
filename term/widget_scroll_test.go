@@ -207,3 +207,48 @@ func TestShowScrollbar_SetsTimer(t *testing.T) {
 	}
 	tm.scrollbar.timer.Stop()
 }
+
+// ---------------------------------------------------------------------------
+// jumpScrollbarTo — maps a thumb-top pixel back to a viewport offset
+// ---------------------------------------------------------------------------
+
+func TestJumpScrollbarTo(t *testing.T) {
+	tm := newScrollTerm(24, 80)
+	tm.grid.Mu.Lock()
+	tm.grid.Scrollback.SetGeom(200, 80)
+	row := make([]cell, 80)
+	for i := range row {
+		row[i] = defaultCell()
+	}
+	for range 100 {
+		tm.grid.Scrollback.Push(row, false)
+	}
+	tm.grid.ViewOffset = 0
+	tm.grid.Mu.Unlock()
+	tm.scrollbar.viewH = 480
+
+	// Dragging the thumb to the very top pins the viewport at the oldest row.
+	tm.jumpScrollbarTo(0)
+	tm.grid.Mu.Lock()
+	if tm.grid.ViewOffset != tm.grid.Scrollback.Len() {
+		t.Errorf("thumb top: ViewOffset=%d, want %d", tm.grid.ViewOffset, tm.grid.Scrollback.Len())
+	}
+	tm.grid.Mu.Unlock()
+
+	// Dragging past the bottom snaps back to the live grid.
+	tm.jumpScrollbarTo(tm.scrollbar.viewH)
+	tm.grid.Mu.Lock()
+	if tm.grid.ViewOffset != 0 || tm.grid.ViewSubPx != 0 {
+		t.Errorf("thumb bottom: got (%d,%v), want (0,0)", tm.grid.ViewOffset, tm.grid.ViewSubPx)
+	}
+	tm.grid.Mu.Unlock()
+
+	// A mid-track position lands somewhere in between.
+	tm.jumpScrollbarTo(tm.scrollbar.viewH / 2)
+	tm.grid.Mu.Lock()
+	off := tm.grid.ViewOffset
+	tm.grid.Mu.Unlock()
+	if off <= 0 || off >= tm.grid.Scrollback.Len() {
+		t.Errorf("mid track: ViewOffset=%d, want strictly between 0 and %d", off, tm.grid.Scrollback.Len())
+	}
+}
