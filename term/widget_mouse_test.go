@@ -417,6 +417,53 @@ func TestOnMouseUp_LocalReleaseClearsSelection(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// canvas offset — mouse-lock callbacks use absolute coords
+// ---------------------------------------------------------------------------
+
+func TestOnMouseMove_CanvasOffset(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8) // cellH=20
+	tm.ime.layoutY = 20         // simulate tab-bar offset
+
+	tm.grid.Mu.Lock()
+	tm.grid.SelAnchor = contentPos{Row: 0, Col: 0}
+	tm.grid.SelHead = contentPos{Row: 0, Col: 0}
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = false
+
+	// Absolute Y=25 → canvas Y=5 → row 0. Without fix: r=1 (one row off).
+	e := &gui.Event{MouseX: 10, MouseY: 25}
+	tm.onMouseMove(nil, e, &gui.Window{})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelHead.Row != 0 {
+		t.Errorf("offset canvas: SelHead.Row = %d, want 0", tm.grid.SelHead.Row)
+	}
+}
+
+func TestOnMouseUp_CanvasOffset(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8) // cellH=20, cellW=10
+	tm.ime.layoutY = 20
+
+	tm.grid.Mu.Lock()
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+
+	// Absolute Y=25 → canvas Y=5 → r=0 → SGR row=1. Without fix: r=1 → row=2.
+	e := &gui.Event{MouseX: 10, MouseY: 25}
+	tm.onMouseUp(nil, e, &gui.Window{})
+
+	got := string(*buf)
+	if !strings.Contains(got, ";1m") {
+		t.Errorf("offset canvas SGR: got %q, want row 1", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // onMouseScroll
 // ---------------------------------------------------------------------------
 

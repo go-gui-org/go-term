@@ -589,7 +589,6 @@ func (ws *Workspace) splitView(node *splitNode, tab *Tab, boxW, boxH float32) gu
 		return gui.Column(tight(gui.FillFill))
 	}
 	leaf := tight(gui.FillFill)
-	leaf.IDFocus = tm.FocusID()
 	leaf.Content = []gui.View{tm.View(ws.w)}
 	return gui.Column(leaf)
 }
