@@ -250,6 +250,14 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 // any-motion report. Falls through to selection extension when this
 // drag was started outside of a reporting mode.
 func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	// Mouse-lock callbacks (drag, scrollbar) receive absolute window
+	// coordinates, unlike OnClick which goes through callRelative.
+	// Convert to canvas-relative so posToCell and scrollbar hit-tests
+	// work correctly when the canvas is offset by e.g. a tab bar.
+	if t.mouse.dragging || t.scrollbar.dragging {
+		e.MouseX -= t.ime.layoutX
+		e.MouseY -= t.ime.layoutY
+	}
 	// Track scrollbar hover for thumb brightness.
 	if t.scrollbar.active && realNumber(e.MouseX) && realNumber(e.MouseY) {
 		inHit := e.MouseX >= t.scrollbar.hitX0 &&
@@ -366,6 +374,12 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 // emits a release report regardless of whether the mode is still on
 // (the host expects every press to be paired with a release).
 func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	// Mouse-lock callbacks receive absolute window coordinates.
+	// Convert to canvas-relative for posToCell and SGR reports.
+	if t.mouse.dragging || t.scrollbar.dragging {
+		e.MouseX -= t.ime.layoutX
+		e.MouseY -= t.ime.layoutY
+	}
 	// Scrollbar thumb drag release: unlock and stop dragging. The scrollbar
 	// drag path never sets t.mouse.dragging, so handle it before that guard.
 	if t.scrollbar.dragging {
