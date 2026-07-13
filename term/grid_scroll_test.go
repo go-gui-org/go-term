@@ -408,3 +408,64 @@ func BenchmarkGrid_ScrollDownRegion_FullScreen(b *testing.B) {
 		g.scrollDownRegion(1)
 	}
 }
+
+func TestGrid_SetViewFractional(t *testing.T) {
+	g := newGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 8 {
+		g.scrollUpRegion(1)
+	}
+	if g.Scrollback.Len() != 8 {
+		t.Fatalf("setup: len=%d", g.Scrollback.Len())
+	}
+	const cellH = 20
+
+	// Whole-row offset: no sub-pixel remainder.
+	g.SetViewFractional(3, cellH)
+	if g.ViewOffset != 3 || g.ViewSubPx != 0 {
+		t.Errorf("off=3: got (%d,%v), want (3,0)", g.ViewOffset, g.ViewSubPx)
+	}
+
+	// Fractional offset: remainder scaled by cellH.
+	g.SetViewFractional(2.5, cellH)
+	if g.ViewOffset != 2 || g.ViewSubPx != 10 {
+		t.Errorf("off=2.5: got (%d,%v), want (2,10)", g.ViewOffset, g.ViewSubPx)
+	}
+
+	// Clamp above scrollback length.
+	g.SetViewFractional(99, cellH)
+	if g.ViewOffset != 8 || g.ViewSubPx != 0 {
+		t.Errorf("upper clamp: got (%d,%v), want (8,0)", g.ViewOffset, g.ViewSubPx)
+	}
+
+	// Clamp below zero.
+	g.SetViewFractional(-5, cellH)
+	if g.ViewOffset != 0 || g.ViewSubPx != 0 {
+		t.Errorf("lower clamp: got (%d,%v), want (0,0)", g.ViewOffset, g.ViewSubPx)
+	}
+}
+
+func TestGrid_SetViewFractional_NoOpGuards(t *testing.T) {
+	g := newGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	g.SetViewFractional(2, 20)
+	off, sub := g.ViewOffset, g.ViewSubPx
+
+	for _, bad := range []struct {
+		off, cellH float32
+		name       string
+	}{
+		{2, 0, "zero cellH"},
+		{2, -1, "negative cellH"},
+		{float32(math.NaN()), 20, "NaN off"},
+		{float32(math.Inf(1)), 20, "Inf off"},
+	} {
+		g.SetViewFractional(bad.off, bad.cellH)
+		if g.ViewOffset != off || g.ViewSubPx != sub {
+			t.Errorf("%s changed state: (%d,%v)", bad.name, g.ViewOffset, g.ViewSubPx)
+		}
+	}
+}

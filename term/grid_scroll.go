@@ -158,3 +158,23 @@ func (g *grid) ScrollViewTop() {
 	g.ViewOffset = g.Scrollback.Len()
 	g.ViewSubPx = 0
 }
+
+// SetViewFractional positions the viewport at a fractional row offset from
+// the live bottom (0 = live, Scrollback.Len() = oldest). Whole rows go to
+// ViewOffset; the fractional remainder, scaled by cellH, goes to ViewSubPx so
+// the scrollbar thumb tracks the pointer sub-cell smoothly. Clamped to
+// [0, Scrollback.Len()]. Non-finite off or cellH <= 0 is a no-op.
+func (g *grid) SetViewFractional(off, cellH float32) {
+	if cellH <= 0 || math.IsNaN(float64(off)) || math.IsInf(float64(off), 0) {
+		return
+	}
+	maxOff := float32(g.Scrollback.Len())
+	if off < 0 {
+		off = 0
+	} else if off > maxOff {
+		off = maxOff
+	}
+	rows := int(off)
+	g.ViewOffset = rows
+	g.ViewSubPx = (off - float32(rows)) * cellH
+}

@@ -82,6 +82,20 @@ func isGeometryGlyph(r rune) bool {
 // sbLen = len(Scrollback), viewH = canvas pixel height. Caller ensures sbLen > 0.
 const minScrollbarThumbH float32 = 10
 
+// scrollbarInset is the horizontal gap between the window's right edge and
+// the drawn thumb, applied only to panes flush against that edge. macOS
+// reserves an interior band just inside a resizable window's frame where
+// mouseDown starts a live resize before the event reaches the content view;
+// insetting the thumb keeps it (and its hit region) clear of that band.
+const scrollbarInset float32 = 6
+
+// scrollbarHitWidth is the minimum width of the clickable thumb region. The
+// grabbable area extends inward (leftward) from the thumb's right edge so a
+// narrow visual thumb is still easy to hit; the drawn thumb width is
+// unchanged. Decoupling hit width from visual width is what makes an
+// edge-hugging scrollbar usable despite the OS resize band.
+const scrollbarHitWidth float32 = 16
+
 func scrollbarGeometry(sbLen, rows int, viewOffset float32, viewH float32) (thumbY, thumbH float32) {
 	if viewH <= 0 || math.IsNaN(float64(viewH)) || math.IsInf(float64(viewH), 0) ||
 		math.IsNaN(float64(viewOffset)) || math.IsInf(float64(viewOffset), 0) {
@@ -97,6 +111,26 @@ func scrollbarGeometry(sbLen, rows int, viewOffset float32, viewH float32) (thum
 	}
 	thumbY = (float32(sbLen) - viewOffset) / total * viewH
 	return
+}
+
+// scrollbarOffsetForY inverts scrollbarGeometry: given a desired thumb-top
+// pixel y, it returns the fractional view offset (in rows, matching
+// ViewOffset+ViewSubPx/cellH) that places the thumb there. Used for
+// click-to-jump and thumb drag. Clamped to [0, sbLen]. Mirrors the thumbY
+// formula: y = (sbLen - off)/total * viewH  ⇒  off = sbLen - y*total/viewH.
+func scrollbarOffsetForY(sbLen, rows int, y, viewH float32) float32 {
+	if viewH <= 0 || sbLen <= 0 ||
+		math.IsNaN(float64(y)) || math.IsInf(float64(y), 0) {
+		return 0
+	}
+	total := float32(sbLen + rows)
+	off := float32(sbLen) - y*total/viewH
+	if off < 0 {
+		off = 0
+	} else if off > float32(sbLen) {
+		off = float32(sbLen)
+	}
+	return off
 }
 
 // searchOverlap returns the number of grid rows whose text footprint
@@ -296,6 +330,15 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			t.mouse.dragging = false
 			t.autoScrollDir.Store(0)
 			t.grid.ClearSelection()
+			t.win.MouseUnlock()
+		}
+	}
+	// Same rationale for a scrollbar thumb drag: a resize gesture can steal
+	// the mouse-up, leaving dragging stuck true so every later frame keeps
+	// repositioning the viewport. Drop the drag when the grid reflows.
+	if t.scrollbar.dragging && (rows != t.grid.Rows || cols != t.grid.Cols) {
+		t.scrollbar.dragging = false
+		if t.win != nil {
 			t.win.MouseUnlock()
 		}
 	}
@@ -804,14 +847,36 @@ func (t *Term) drawCursor(ds *drawState) {
 func (t *Term) drawOverlays(ds *drawState) {
 	g := ds.g
 	// Scrollbar: pill-shaped thumb on the right edge. Visible while scrolled
-	// back or within scrollbarDuration of the last scroll event.
+	// back or within scrollbarDuration of the last scroll event. Held visible
+	// for the whole drag so releasing the thumb doesn't hide it mid-gesture.
 	sb := g.Scrollback.Len()
 	sw := t.effectiveScrollbarWidth()
-	if (ds.now.Before(t.scrollbar.until) || g.ViewOffset > 0 || g.ViewSubPx > 0) && sb > 0 && ds.dc.Width >= sw && sw > 0 {
+	visible := ds.now.Before(t.scrollbar.until) || g.ViewOffset > 0 || g.ViewSubPx > 0 || t.scrollbar.dragging
+	active := visible && sb > 0 && ds.dc.Width >= sw && sw > 0
+	t.scrollbar.active = active
+	if active {
+		// Inset the thumb from the window's right edge only for panes flush
+		// against it, so the thumb clears the OS window-resize band. The
+		// clickable region extends inward (leftward) to scrollbarHitWidth so
+		// the grabbable area stays wide even when the visual thumb is narrow.
+		inset := t.scrollbarEdgeInset(ds.dc.Width)
+		thumbX := ds.dc.Width - sw - inset
 		viewOffsetVal := float32(g.ViewOffset) + g.ViewSubPx/t.cellH
 		thumbY, thumbH := scrollbarGeometry(sb, g.Rows, viewOffsetVal, ds.dc.Height)
-		ds.dc.FilledRoundedRect(ds.dc.Width-sw, thumbY, sw, thumbH,
-			sw/2, gui.RGBA(128, 128, 128, 120))
+		thumbColor := gui.RGBA(128, 128, 128, 120)
+		if t.scrollbar.hovered {
+			thumbColor = gui.RGBA(180, 180, 180, 150)
+		}
+		ds.dc.FilledRoundedRect(thumbX, thumbY, sw, thumbH,
+			sw/2, thumbColor)
+		hitX0 := thumbX + sw - scrollbarHitWidth
+		if hitX0 < 0 {
+			hitX0 = 0
+		}
+		t.scrollbar.hitX0 = hitX0
+		t.scrollbar.viewH = ds.dc.Height
+	} else {
+		t.scrollbar.hovered = false
 	}
 
 	if t.search.active {
@@ -822,6 +887,27 @@ func (t *Term) drawOverlays(ds *drawState) {
 	if fu := t.bell.flashUntil.Load(); fu != 0 && ds.now.UnixNano() < fu {
 		ds.dc.FilledRect(0, 0, ds.dc.Width, ds.dc.Height, gui.RGBA(255, 255, 255, 40))
 	}
+}
+
+// scrollbarEdgeInset returns the horizontal gap to leave between the drawn
+// scrollbar thumb and the pane's right edge. It is scrollbarInset only when
+// the pane is flush against the window's right edge (where the OS reserves a
+// resize band); interior panes get 0. canvasW is the pane's canvas width;
+// t.ime.layoutX is the pane's absolute left X (set by onAmendLayout).
+func (t *Term) scrollbarEdgeInset(canvasW float32) float32 {
+	if t.win == nil || !realNumber(canvasW) {
+		return 0
+	}
+	winW, _ := t.win.WindowSize()
+	if winW <= 0 {
+		return 0
+	}
+	rightEdge := t.ime.layoutX + canvasW
+	// 1px tolerance absorbs fractional layout/rounding at the window edge.
+	if float32(winW)-rightEdge <= 1 {
+		return scrollbarInset
+	}
+	return 0
 }
 
 // cursorBlinkOff reports whether the cursor is currently in the
