@@ -488,8 +488,7 @@ func TestOnMouseScroll_LocalScrollBack(t *testing.T) {
 	func() {
 		tm.grid.Mu.Lock()
 		defer tm.grid.Mu.Unlock()
-		// scrollSensitivity=15, 1*15=15px, cellH=20 → ViewOffset stays 0,
-		// ViewSubPx moves to 15.
+		// scrollSensitivity=5, 1*5=5px, cellH=20 → ViewSubPx=5.
 		if tm.grid.ViewSubPx == 0 && tm.grid.ViewOffset == 0 {
 			t.Error("expected viewport movement after scroll")
 		}
@@ -510,6 +509,59 @@ func TestOnMouseScroll_FractionalDeltaStartsMomentum(t *testing.T) {
 	}
 	if tm.momentum.coasting {
 		t.Error("coasting should not start during active scroll")
+	}
+}
+
+// TestOnMouseScroll_NearIntegerIsMouseWheel verifies that a scroll delta
+// that is very close to (but not exactly) an integer is classified as a
+// mouse wheel and cancels momentum. This is the key fix: the old exact-
+// integer check failed for FP-approximate values.
+func TestOnMouseScroll_NearIntegerIsMouseWheel(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.Scrollback.SetGeom(10, 8)
+	row := make([]cell, 8)
+	for i := range row {
+		row[i] = defaultCell()
+	}
+	for range 5 {
+		tm.grid.Scrollback.Push(row, false)
+	}
+	tm.grid.Mu.Unlock()
+	// Pre-seed momentum state so we can observe cancellation.
+	tm.momentum.mu.Lock()
+	tm.momentum.coasting = true
+	tm.momentum.vel = 50
+	tm.momentum.mu.Unlock()
+	e := &gui.Event{ScrollY: 0.9999} // near-integer, old check would fail
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	// scrollSensitivity=5, 0.9999*5≈5px, cellH=20 → ViewSubPx≈5.
+	if tm.grid.ViewSubPx == 0 && tm.grid.ViewOffset == 0 {
+		t.Error("expected viewport movement from near-integer scroll")
+	}
+	tm.momentum.mu.Lock()
+	defer tm.momentum.mu.Unlock()
+	if tm.momentum.coasting || tm.momentum.vel != 0 {
+		t.Error("momentum should be cancelled for near-integer (mouse wheel) delta")
+	}
+}
+
+// TestOnMouseScroll_NearIntegerReverse confirms that a small near-integer
+// negative delta also cancels momentum.
+func TestOnMouseScroll_NearIntegerReverse(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.momentum.mu.Lock()
+	tm.momentum.coasting = true
+	tm.momentum.vel = -50
+	tm.momentum.mu.Unlock()
+	e := &gui.Event{ScrollY: -1.0001}
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.momentum.mu.Lock()
+	defer tm.momentum.mu.Unlock()
+	if tm.momentum.coasting || tm.momentum.vel != 0 {
+		t.Error("momentum should be cancelled for near-integer negative delta")
 	}
 }
 
