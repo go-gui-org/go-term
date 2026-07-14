@@ -293,6 +293,12 @@ type mouseState struct {
 	lastC      int
 	hoverR     atomic.Int32 // sentinel -1 = not yet set
 	hoverC     atomic.Int32
+
+	// Wheel-report accumulator (see wheelReportTicks): pixels of scroll
+	// distance not yet emitted as an SGR wheel tick, and the direction
+	// (+1 up / -1 down / 0 initial) it was accumulated in.
+	wheelResidual float32
+	wheelDir      int
 }
 
 // drawBufs holds per-frame scratch buffers reused across onDraw calls.

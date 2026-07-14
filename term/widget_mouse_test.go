@@ -535,7 +535,7 @@ func TestOnMouseScroll_LocalScrollBack(t *testing.T) {
 	func() {
 		tm.grid.Mu.Lock()
 		defer tm.grid.Mu.Unlock()
-		// scrollSensitivity=5, 1*5=5px, cellH=20 → ViewSubPx=5.
+		// wheelSensitivity=5, 1*5=5px, cellH=20 → ViewSubPx=5.
 		if tm.grid.ViewSubPx == 0 && tm.grid.ViewOffset == 0 {
 			t.Error("expected viewport movement after scroll")
 		}
@@ -547,23 +547,22 @@ func TestOnMouseScroll_LocalScrollBack(t *testing.T) {
 
 func TestOnMouseScroll_FractionalDeltaStartsMomentum(t *testing.T) {
 	tm, _ := newMouseTerm(4, 8)
-	e := &gui.Event{ScrollY: 2.5} // fractional = trackpad
+	e := &gui.Event{ScrollY: 2.5, ScrollPrecise: true} // trackpad
 	tm.onMouseScroll(nil, e, &gui.Window{})
 	tm.momentum.mu.Lock()
 	defer tm.momentum.mu.Unlock()
 	if tm.momentum.vel <= 0 {
-		t.Error("velocity should be set by fractional scroll")
+		t.Error("velocity should be set by precise (trackpad) scroll")
 	}
 	if tm.momentum.coasting {
 		t.Error("coasting should not start during active scroll")
 	}
 }
 
-// TestOnMouseScroll_NearIntegerIsMouseWheel verifies that a scroll delta
-// that is very close to (but not exactly) an integer is classified as a
-// mouse wheel and cancels momentum. This is the key fix: the old exact-
-// integer check failed for FP-approximate values.
-func TestOnMouseScroll_NearIntegerIsMouseWheel(t *testing.T) {
+// TestOnMouseScroll_NonPreciseIsMouseWheel verifies that a scroll delta
+// without ScrollPrecise is classified as a mouse wheel and cancels
+// momentum, regardless of the delta's fractional value.
+func TestOnMouseScroll_NonPreciseIsMouseWheel(t *testing.T) {
 	tm, _ := newMouseTerm(4, 8)
 	tm.grid.Mu.Lock()
 	tm.grid.Scrollback.SetGeom(10, 8)
@@ -580,24 +579,24 @@ func TestOnMouseScroll_NearIntegerIsMouseWheel(t *testing.T) {
 	tm.momentum.coasting = true
 	tm.momentum.vel = 50
 	tm.momentum.mu.Unlock()
-	e := &gui.Event{ScrollY: 0.9999} // near-integer, old check would fail
+	e := &gui.Event{ScrollY: 2.5} // fractional but non-precise = wheel
 	tm.onMouseScroll(nil, e, &gui.Window{})
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
-	// scrollSensitivity=5, 0.9999*5≈5px, cellH=20 → ViewSubPx≈5.
+	// wheelSensitivity=5, 2.5*5=12.5px, cellH=20 → ViewSubPx=12.5.
 	if tm.grid.ViewSubPx == 0 && tm.grid.ViewOffset == 0 {
-		t.Error("expected viewport movement from near-integer scroll")
+		t.Error("expected viewport movement from wheel scroll")
 	}
 	tm.momentum.mu.Lock()
 	defer tm.momentum.mu.Unlock()
 	if tm.momentum.coasting || tm.momentum.vel != 0 {
-		t.Error("momentum should be cancelled for near-integer (mouse wheel) delta")
+		t.Error("momentum should be cancelled for non-precise (mouse wheel) delta")
 	}
 }
 
-// TestOnMouseScroll_NearIntegerReverse confirms that a small near-integer
+// TestOnMouseScroll_NonPreciseReverse confirms that a small non-precise
 // negative delta also cancels momentum.
-func TestOnMouseScroll_NearIntegerReverse(t *testing.T) {
+func TestOnMouseScroll_NonPreciseReverse(t *testing.T) {
 	tm, _ := newMouseTerm(4, 8)
 	tm.momentum.mu.Lock()
 	tm.momentum.coasting = true
@@ -608,7 +607,180 @@ func TestOnMouseScroll_NearIntegerReverse(t *testing.T) {
 	tm.momentum.mu.Lock()
 	defer tm.momentum.mu.Unlock()
 	if tm.momentum.coasting || tm.momentum.vel != 0 {
-		t.Error("momentum should be cancelled for near-integer negative delta")
+		t.Error("momentum should be cancelled for non-precise negative delta")
+	}
+}
+
+// TestOnMouseScroll_TrackpadSensitivity verifies that precise deltas use
+// the trackpad factor: ScrollY=0.5 precise → 0.5*10=5px at cellH=20 →
+// ViewSubPx=5 (a wheel delta of 0.5 would only move 2.5px).
+func TestOnMouseScroll_TrackpadSensitivity(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.Scrollback.SetGeom(10, 8)
+	row := make([]cell, 8)
+	for i := range row {
+		row[i] = defaultCell()
+	}
+	for range 5 {
+		tm.grid.Scrollback.Push(row, false)
+	}
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{ScrollY: 0.5, ScrollPrecise: true}
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got := tm.grid.ViewSubPx; got != 5 {
+		t.Errorf("ViewSubPx = %v, want 5", got)
+	}
+}
+
+// countReports returns the number of SGR reports in buf with the given
+// prefix, e.g. "\x1b[<64;" for unmodified wheel-up.
+func countReports(buf []byte, prefix string) int {
+	return strings.Count(string(buf), prefix)
+}
+
+// TestOnMouseScroll_SGRWheelDeltaMultiplier verifies that a large wheel
+// delta emits multiple SGR wheel reports — one per cellH of scaled scroll
+// distance — instead of a single tick per event. cellH=20,
+// wheelSensitivity=5: ScrollY=10 → 50px → 2 ticks.
+func TestOnMouseScroll_SGRWheelDeltaMultiplier(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 10}
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 2 {
+		t.Errorf("ticks = %d, want 2 (buf %q)", got, *buf)
+	}
+}
+
+// TestOnMouseScroll_SGRWheelResidualAccumulates verifies that the
+// fractional remainder carries across events: two ScrollY=10 events are
+// 100px total → 5 ticks at cellH=20 (2 then 3).
+func TestOnMouseScroll_SGRWheelResidualAccumulates(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 10}
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	e = &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 10}
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 5 {
+		t.Errorf("ticks = %d, want 5 (buf %q)", got, *buf)
+	}
+}
+
+// TestOnMouseScroll_SGRWheelMinOneTick verifies that a small delta still
+// emits exactly one report so a slow notch never feels dead.
+func TestOnMouseScroll_SGRWheelMinOneTick(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 1}
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 1 {
+		t.Errorf("ticks = %d, want 1 (buf %q)", got, *buf)
+	}
+}
+
+// TestOnMouseScroll_SGRWheelDirectionResetsResidual verifies that
+// reversing scroll direction discards the accumulated residual: up
+// ScrollY=10 leaves 10px residual, then down ScrollY=10 must emit
+// floor(50/20)=2 down ticks, not 3.
+func TestOnMouseScroll_SGRWheelDirectionResetsResidual(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 10}
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	e = &gui.Event{MouseX: 35, MouseY: 45, ScrollY: -10}
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	if got := countReports(*buf, "\x1b[<65;4;3M"); got != 2 {
+		t.Errorf("down ticks = %d, want 2 (buf %q)", got, *buf)
+	}
+}
+
+// TestOnMouseScroll_SGRWheelTickCap verifies a huge delta is capped so a
+// single event cannot flood the pty.
+func TestOnMouseScroll_SGRWheelTickCap(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 1e6}
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != maxWheelTicks {
+		t.Errorf("ticks = %d, want cap %d", got, maxWheelTicks)
+	}
+}
+
+// TestOnMouseScroll_SGRTrackpadTicks verifies that precise deltas use the
+// trackpad factor in the report path: ScrollY=4 precise → 4*10=40px at
+// cellH=20 → 2 ticks (a wheel delta of 4 would emit only 1).
+func TestOnMouseScroll_SGRTrackpadTicks(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 4, ScrollPrecise: true}
+	tm.onMouseScroll(nil, e, &gui.Window{})
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 2 {
+		t.Errorf("ticks = %d, want 2 (buf %q)", got, *buf)
+	}
+}
+
+// TestWheelReportTicks_NaNReturnsOne verifies that NaN scrollY returns 1
+// tick rather than propagating NaN or panicking.
+func TestWheelReportTicks_NaNReturnsOne(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	got := tm.wheelReportTicks(float32(math.NaN()), false)
+	if got != 1 {
+		t.Errorf("ticks = %d, want 1", got)
+	}
+}
+
+// TestWheelReportTicks_InfReturnsOne verifies that Inf scrollY returns 1
+// tick (capped, not infinite).
+func TestWheelReportTicks_InfReturnsOne(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	got := tm.wheelReportTicks(float32(math.Inf(1)), false)
+	if got != 1 {
+		t.Errorf("ticks = %d, want 1", got)
+	}
+}
+
+// TestWheelReportTicks_ZeroCellHReturnsOne verifies that a zero cell
+// height (before first measure) returns 1 tick instead of dividing.
+func TestWheelReportTicks_ZeroCellHReturnsOne(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.cellH = 0
+	got := tm.wheelReportTicks(10, false)
+	if got != 1 {
+		t.Errorf("ticks = %d, want 1", got)
+	}
+}
+
+// TestScrollSensitivityFor_PreciseVsWheel verifies that the precise flag
+// selects the trackpad factor (20) while non-precise gets the wheel
+// factor (5).
+func TestScrollSensitivityFor_PreciseVsWheel(t *testing.T) {
+	if got := scrollSensitivityFor(true); got != trackpadSensitivity {
+		t.Errorf("precise factor = %v, want %v", got, trackpadSensitivity)
+	}
+	if got := scrollSensitivityFor(false); got != wheelSensitivity {
+		t.Errorf("wheel factor = %v, want %v", got, wheelSensitivity)
 	}
 }
 
