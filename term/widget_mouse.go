@@ -465,6 +465,68 @@ func openURL(rawURL string) {
 	}
 }
 
+// wheelSensitivity converts a discrete mouse-wheel delta into scroll
+// pixels. The Metal backend pre-scales one notch to ~2.5, so this lands
+// a notch at ~12.5px before macOS scroll acceleration.
+const wheelSensitivity float32 = 5
+
+// trackpadSensitivity converts a precise (trackpad / high-res) delta
+// into scroll pixels. The Metal backend pre-scales precise deltas by
+// 0.075; at 10 the effective finger-travel multiplier is ~0.75×.
+const trackpadSensitivity float32 = 10
+
+// scrollSensitivityFor selects the delta→pixel factor for a scroll
+// event. Backends that don't distinguish (everything non-Metal today)
+// leave ScrollPrecise false and get the wheel factor.
+func scrollSensitivityFor(precise bool) float32 {
+	if precise {
+		return trackpadSensitivity
+	}
+	return wheelSensitivity
+}
+
+// maxWheelTicks caps the SGR wheel reports emitted for a single scroll
+// event so a huge accelerated delta cannot flood the pty.
+const maxWheelTicks = 32
+
+// wheelReportTicks converts a wheel delta into the number of SGR wheel
+// reports to emit. The delta is scaled to pixels (wheel or trackpad
+// factor per the precise flag) and divided by the cell height, so one
+// report is sent per row of scroll distance — matching how far the
+// local scrollback viewport would move. The fractional remainder
+// accumulates in mouse.wheelResidual across events (reset on direction
+// change) so trackpad pans add up instead of being truncated. Always at
+// least 1 tick, so a single slow notch never feels dead. Main-thread only.
+func (t *Term) wheelReportTicks(scrollY float32, precise bool) int {
+	if !realNumber(scrollY) || !finite(t.cellH) {
+		return 1
+	}
+	dir := 1
+	if scrollY < 0 {
+		dir = -1
+	}
+	if dir != t.mouse.wheelDir {
+		t.mouse.wheelDir = dir
+		t.mouse.wheelResidual = 0
+	}
+	total := float64(t.mouse.wheelResidual) +
+		math.Abs(float64(scrollY))*float64(scrollSensitivityFor(precise))
+	ticks := int(total / float64(t.cellH))
+	if ticks < 1 {
+		// Below one row of travel: emit a single tick and drop the
+		// residual so slow continuous pans stay at one tick per event
+		// (the pre-multiplier behavior) rather than bursting later.
+		t.mouse.wheelResidual = 0
+		return 1
+	}
+	if ticks > maxWheelTicks {
+		ticks = maxWheelTicks
+		total = float64(maxWheelTicks) * float64(t.cellH)
+	}
+	t.mouse.wheelResidual = float32(total - float64(ticks)*float64(t.cellH))
+	return ticks
+}
+
 // onMouseScroll forwards wheel events to the application as SGR mouse
 // reports when reporting + SGR are active and the viewport is live;
 // otherwise moves the local scrollback viewport. Positive ScrollY
@@ -485,7 +547,10 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		if e.ScrollY < 0 {
 			base = 65
 		}
-		t.writeMouse(base+mouseModBits(e.Modifiers), c, r, e.MouseX, e.MouseY, snap.pixels, true)
+		cb := base + mouseModBits(e.Modifiers)
+		for range t.wheelReportTicks(e.ScrollY, e.ScrollPrecise) {
+			t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+		}
 		e.IsHandled = true
 		return
 	}
@@ -493,20 +558,15 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		return
 	}
 
-	// Mouse-wheel vs trackpad: mouse wheels produce near-integer deltas
-	// (e.g. 10.0 after the Metal backend's ×10 scaling), while trackpads
-	// produce continuous fractional values. Use a tolerance to survive
-	// macOS scroll-acceleration that can make mouse-wheel deltas slightly
-	// non-integer (e.g. 10.3).
-	const mouseWheelTol = 0.001
-	rounded := float32(math.Round(float64(e.ScrollY)))
-	isMouseWheel := e.ScrollY >= rounded-mouseWheelTol &&
-		e.ScrollY <= rounded+mouseWheelTol
+	// Mouse-wheel vs trackpad: the backend flags precise (trackpad /
+	// high-res) deltas via ScrollPrecise. Non-precise deltas are discrete
+	// wheel notches — no momentum. Backends that never set the flag get
+	// wheel behavior throughout, matching the pre-flag feel.
+	isMouseWheel := !e.ScrollPrecise
 
 	// Pixel-perfect scroll: pass the raw scaled delta directly to ScrollViewPx
 	// which accumulates it into ViewOffset + ViewSubPx. No integer truncation.
-	const scrollSensitivity float32 = 5
-	deltaPx := e.ScrollY * scrollSensitivity
+	deltaPx := e.ScrollY * scrollSensitivityFor(e.ScrollPrecise)
 	changed := func() bool {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
@@ -530,7 +590,7 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// updating when the new sample is larger in magnitude or direction
 	// reverses. Cap prevents a huge flick from coasting forever.
 	const (
-		momentumScale = 5.0 // match scrollSensitivity so coast starts at live-scroll speed
+		momentumScale = float64(trackpadSensitivity) // coast starts at live-scroll speed
 		momentumCap   = 600.0
 		coastDelay    = 50 * time.Millisecond
 	)
