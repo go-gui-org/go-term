@@ -186,7 +186,7 @@ func (ws *Workspace) SplitPane(horizontal bool) {
 	if horizontal {
 		dir = SplitHorizontal
 	}
-	// Unfocus the old pane so it stops asserting IDFocus during layout.
+	// Unfocus the old pane so it stops asserting focus during layout.
 	// The new pane defaults to focused=true.
 	if old, ok := tab.terms[tab.focused]; ok {
 		old.SetFocused(false)
