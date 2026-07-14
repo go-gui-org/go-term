@@ -231,12 +231,12 @@ func tight(sizing gui.Sizing) gui.ContainerCfg {
 // refresh updates the window title from the active tab's focused pane
 // and schedules a view rebuild. Call after any state change that affects
 // the title or layout. It also ensures the active pane has pane focus so
-// the invariant "active terminal always owns IDFocus" holds regardless of
+// the invariant "active terminal always owns keyboard focus" holds regardless of
 // which code path triggered the refresh.
 func (ws *Workspace) refresh() {
 	if ws.activeTab >= 0 && ws.activeTab < len(ws.tabs) {
 		ws.w.SetTitle(ws.tabs[ws.activeTab].focusedTitle())
-		// Ensure the active pane owns IDFocus. No-op when already
+		// Ensure the active pane owns keyboard focus. No-op when already
 		// correct — cheap atomic compare-and-swap.
 		tab := ws.tabs[ws.activeTab]
 		if t, ok := tab.terms[tab.focused]; ok {
@@ -585,7 +585,7 @@ func (ws *Workspace) splitView(node *splitNode, tab *Tab, boxW, boxH float32) gu
 		return gui.Column(col)
 	}
 	// Leaf: FillFill so the enclosing Fixed slot determines actual size.
-	// IDFocus ensures Tab navigation reaches this pane.
+	// Focus ID ensures Tab navigation reaches this pane.
 	tm, ok := tab.terms[node.LeafID]
 	if !ok {
 		return gui.Column(tight(gui.FillFill))

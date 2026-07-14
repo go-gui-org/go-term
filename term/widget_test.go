@@ -2362,9 +2362,9 @@ func TestTerm_IMECompositionState(t *testing.T) {
 }
 
 // TestTerm_View_RestoresFocus verifies that View() reasserts
-// w.SetIDFocus when the Term is focused. go-gui post-v0.26.0
-// clears idFocus during UpdateView; View() must restore it so
-// keystrokes reach onChar/onKeyDown without requiring a prior click.
+// w.SetFocus when the Term is focused. go-gui clears the focus ID
+// during UpdateView; View() must restore it so keystrokes reach
+// onChar/onKeyDown without requiring a prior click.
 func TestTerm_View_RestoresFocus(t *testing.T) {
 	win := gui.NewWindow(gui.WindowCfg{Width: 640, Height: 480})
 	term, err := New(win, Cfg{})
@@ -2374,23 +2374,23 @@ func TestTerm_View_RestoresFocus(t *testing.T) {
 	defer func() { _ = term.Close() }()
 
 	// Simulate what UpdateView does: clear focus, then rebuild.
-	win.SetIDFocus(0)
-	if got := win.IDFocus(); got != 0 {
-		t.Fatalf("SetIDFocus(0) = %d, want 0", got)
+	win.ClearFocus()
+	if got := win.FocusID(); got != "" {
+		t.Fatalf("ClearFocus() = %q, want empty", got)
 	}
 
 	// View() must restore focus when the Term is focused.
 	_ = term.View(win)
-	if got := win.IDFocus(); got != term.focusID {
-		t.Errorf("after View, IDFocus = %d, want %d", got, term.focusID)
+	if got := win.FocusID(); got != term.focusID {
+		t.Errorf("after View, FocusID = %q, want %q", got, term.focusID)
 	}
 
 	// When unfocused, View() must not overwrite focus.
 	term.SetFocused(false)
-	win.SetIDFocus(0)
+	win.ClearFocus()
 	_ = term.View(win)
-	if got := win.IDFocus(); got != 0 {
-		t.Errorf("unfocused: after View, IDFocus = %d, want 0", got)
+	if got := win.FocusID(); got != "" {
+		t.Errorf("unfocused: after View, FocusID = %q, want empty", got)
 	}
 }
 
@@ -2508,7 +2508,7 @@ func TestTerm_SetFocused_GainQueuesFocusClaim(t *testing.T) {
 	if len(rec.calls) != 1 {
 		t.Fatalf("gain focus: expected 1 QueueCommand, got %d", len(rec.calls))
 	}
-	// The callback must call SetIDFocus on the window.
+	// The callback must call SetFocus on the window.
 	rec.calls[0](&gui.Window{})
 }
 

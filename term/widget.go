@@ -431,13 +431,13 @@ type Term struct {
 	fontSize float32
 
 	// focused is set by a pane manager via SetFocused to control whether
-	// this terminal claims IDFocus. Defaults to true in New so a
+	// this terminal claims keyboard focus. Defaults to true in New so a
 	// standalone Term (no pane manager) works without extra setup.
 	focused atomic.Bool
 
-	// focusID is a unique per-Term IDFocus value so multiple terminals
+	// focusID is a unique per-Term focus ID so multiple terminals
 	// in the same window don't compete for the same focus slot.
-	focusID uint32
+	focusID string
 
 	// closed guards Close so multiple calls are safe.
 	closed atomic.Bool
@@ -531,7 +531,7 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		cursorEpoch: time.Now(),
 		blinkDone:   make(chan struct{}),
 		readDone:    make(chan struct{}),
-		focusID:     uint32(seqID),
+		focusID:     "term-" + strconv.FormatUint(seqID, 10),
 		canvasID:    "term-canvas-" + strconv.FormatUint(seqID, 10),
 	}
 	if s := t.style(); s.Size > 0 {
@@ -571,7 +571,7 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		}
 	}
 	t.focused.Store(true)
-	w.SetIDFocus(t.focusID)
+	w.SetFocus(t.focusID)
 	t.replyCond = sync.NewCond(&t.replyMu)
 	go t.readLoop()
 	t.loopWg.Add(4)
@@ -962,25 +962,25 @@ func (t *Term) SetTheme(th Theme) {
 
 // SetFocused sets whether this terminal has pane focus. The pane
 // manager calls this when the user switches between panes. When
-// focused, the container claims IDFocus (so go-gui routes keystrokes
-// here) and the cursor renders normally. When unfocused, the cursor
-// is dimmed. New defaults to focused=true for standalone use.
+// focused, the container claims keyboard focus (so go-gui routes
+// keystrokes here) and the cursor renders normally. When unfocused,
+// the cursor is dimmed. New defaults to focused=true for standalone use.
 func (t *Term) SetFocused(v bool) {
 	if t.focused.Swap(v) == v {
 		return // no change
 	}
 	if v && t.cmd != nil {
 		t.queueCommand(func(w *gui.Window) {
-			w.SetIDFocus(t.focusID)
+			w.SetFocus(t.focusID)
 		})
 	}
 	t.bumpVersion()
 }
 
-// FocusID returns the go-gui IDFocus value for this terminal.
+// FocusID returns the go-gui focus ID for this terminal.
 // Multi-Term embedders use this to detect which pane has focus
 // after a mouse click.
-func (t *Term) FocusID() uint32 { return t.focusID }
+func (t *Term) FocusID() string { return t.focusID }
 
 // termSeq provides unique per-Term identifiers (canvas IDs etc.).
 var termSeq atomic.Uint64
@@ -1046,16 +1046,17 @@ func (t *Term) View(w *gui.Window) gui.View {
 		Content:     []gui.View{canvas},
 	}
 	if t.focused.Load() {
-		colCfg.IDFocus = t.focusID
-		// UpdateView → clearViewStateLocked zeros idFocus (go-gui
-		// post-v0.26.0). Reassert after every full layout rebuild so
+		colCfg.ID = t.focusID
+		colCfg.Focusable = true
+		// UpdateView → clearViewStateLocked clears the window's
+		// focus ID. Reassert after every full layout rebuild so
 		// keystrokes reach onChar/onKeyDown without requiring a
 		// prior click. Skip while a modal dialog is up: go-gui routes
 		// keys to the dialog layer, and re-asserting here would steal
-		// idFocus back to the terminal, breaking Tab/Esc/Enter in the
+		// focus back to the terminal, breaking Tab/Esc/Enter in the
 		// dialog. DialogDismiss restores focus to this pane on close.
 		if !w.DialogIsVisible() {
-			w.SetIDFocus(t.focusID)
+			w.SetFocus(t.focusID)
 		}
 	}
 	// FillFill without explicit Width/Height: the Term may be embedded
