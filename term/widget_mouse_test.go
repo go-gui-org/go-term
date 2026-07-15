@@ -430,6 +430,7 @@ func TestOnMouseMove_CanvasOffset(t *testing.T) {
 	tm.grid.Mu.Unlock()
 	tm.mouse.dragging = true
 	tm.mouse.dragReport = false
+	tm.mouse.locked = true // selection drag holds a mouse lock
 
 	// Absolute Y=25 → canvas Y=5 → row 0. Without fix: r=1 (one row off).
 	e := &gui.Event{MouseX: 10, MouseY: 25}
@@ -439,6 +440,34 @@ func TestOnMouseMove_CanvasOffset(t *testing.T) {
 	defer tm.grid.Mu.Unlock()
 	if tm.grid.SelHead.Row != 0 {
 		t.Errorf("offset canvas: SelHead.Row = %d, want 0", tm.grid.SelHead.Row)
+	}
+}
+
+// A drag reported to the pty (?1000/?1002/?1003 — what full-screen apps such
+// as Claude Code / opencode use) never takes a mouse lock, so its motion
+// events arrive through the canvas config already relative. Translating them
+// again would shift every report down by the tab-bar height.
+func TestOnMouseMove_CanvasOffset_ReportingDragIsRelative(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8) // cellH=20, cellW=10
+	tm.ime.layoutY = 20           // simulate tab-bar offset
+
+	tm.grid.Mu.Lock()
+	tm.grid.MouseSGR = true
+	tm.grid.MouseTrackBtn = true // ?1002 — report motion while a button is held
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+	tm.mouse.lastR, tm.mouse.lastC = -1, -1
+
+	// Relative Y=25 → r=1 → SGR row=2. Pre-fix: absolute-coord translation
+	// dropped it to r=0 → row=1, one line off.
+	e := &gui.Event{MouseX: 10, MouseY: 25}
+	tm.onMouseMove(nil, e, &gui.Window{})
+
+	got := string(*buf)
+	if !strings.Contains(got, ";2M") {
+		t.Errorf("unlocked reporting drag: got %q, want row 2", got)
 	}
 }
 
@@ -452,6 +481,7 @@ func TestOnMouseUp_CanvasOffset(t *testing.T) {
 	tm.mouse.dragging = true
 	tm.mouse.dragReport = true
 	tm.mouse.dragButton = gui.MouseLeft
+	tm.mouse.locked = true
 
 	// Absolute Y=25 → canvas Y=5 → r=0 → SGR row=1. Without fix: r=1 → row=2.
 	e := &gui.Event{MouseX: 10, MouseY: 25}
@@ -460,6 +490,96 @@ func TestOnMouseUp_CanvasOffset(t *testing.T) {
 	got := string(*buf)
 	if !strings.Contains(got, ";1m") {
 		t.Errorf("offset canvas SGR: got %q, want row 1", got)
+	}
+}
+
+// Release of an unlocked (reported) drag: coords are already relative.
+func TestOnMouseUp_CanvasOffset_ReportingDragIsRelative(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8) // cellH=20, cellW=10
+	tm.ime.layoutY = 20
+
+	tm.grid.Mu.Lock()
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+
+	// Relative Y=25 → r=1 → SGR row=2. Pre-fix: row=1.
+	e := &gui.Event{MouseX: 10, MouseY: 25}
+	tm.onMouseUp(nil, e, &gui.Window{})
+
+	got := string(*buf)
+	if !strings.Contains(got, ";2m") {
+		t.Errorf("unlocked reporting release: got %q, want row 2", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// lockMouse / unlockMouse / toCanvasRel helpers
+// ---------------------------------------------------------------------------
+
+func TestLockMouse_SetsLockedFlag(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.lockMouse(&gui.Window{})
+	if !tm.mouse.locked {
+		t.Error("lockMouse should set locked = true")
+	}
+}
+
+func TestUnlockMouse_ClearsLockedFlag(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.mouse.locked = true
+	tm.unlockMouse(&gui.Window{})
+	if tm.mouse.locked {
+		t.Error("unlockMouse should set locked = false")
+	}
+}
+
+func TestLockMouse_NilWindowNoPanic(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.lockMouse(nil) // must not panic
+	if tm.mouse.locked {
+		t.Error("lockMouse with nil Window should not set locked flag")
+	}
+}
+
+func TestUnlockMouse_NilWindowNoPanic(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.mouse.locked = true
+	tm.unlockMouse(nil) // must not panic
+	if tm.mouse.locked {
+		t.Error("unlockMouse with nil Window should still clear locked flag")
+	}
+}
+
+func TestToCanvasRel_LockedOffsetsCoords(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.ime.layoutX = 10
+	tm.ime.layoutY = 20
+	tm.mouse.locked = true
+
+	e := &gui.Event{MouseX: 100, MouseY: 80}
+	tm.toCanvasRel(e)
+
+	if e.MouseX != 90 || e.MouseY != 60 {
+		t.Errorf("toCanvasRel (locked): got (%0.f, %0.f), want (90, 60)",
+			e.MouseX, e.MouseY)
+	}
+}
+
+func TestToCanvasRel_NotLockedNoOp(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.ime.layoutX = 10
+	tm.ime.layoutY = 20
+	tm.mouse.locked = false
+
+	e := &gui.Event{MouseX: 100, MouseY: 80}
+	tm.toCanvasRel(e)
+
+	if e.MouseX != 100 || e.MouseY != 80 {
+		t.Errorf("toCanvasRel (not locked): got (%0.f, %0.f), want (100, 80)",
+			e.MouseX, e.MouseY)
 	}
 }
 

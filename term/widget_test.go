@@ -509,6 +509,33 @@ func TestTerm_OnWindowEvent_NilEventNoPanic(t *testing.T) {
 	term.HandleWindowEvent(nil) // must not panic
 }
 
+// TestHandleWindowEvent_MouseUpClearsDragAndLock verifies the stuck-drag
+// safety net: when a window-resize gesture steals the mouse-up, the next
+// window-level EventMouseUp resets dragging, dragReport, autoScrollDir, and
+// the mouse lock flag (via unlockMouse).
+func TestHandleWindowEvent_MouseUpClearsDragAndLock(t *testing.T) {
+	term, _ := newTestTermCapture()
+	term.mouse.dragging = true
+	term.mouse.dragReport = true
+	term.mouse.locked = true
+	term.autoScrollDir.Store(1)
+
+	term.HandleWindowEvent(&gui.Event{Type: gui.EventMouseUp})
+
+	if term.mouse.dragging {
+		t.Error("dragging should be false after window mouse-up")
+	}
+	if term.mouse.dragReport {
+		t.Error("dragReport should be false after window mouse-up")
+	}
+	if term.mouse.locked {
+		t.Error("locked should be false after window mouse-up")
+	}
+	if term.autoScrollDir.Load() != 0 {
+		t.Error("autoScrollDir should be reset after window mouse-up")
+	}
+}
+
 func TestTerm_OnKeyDown_AppCursor(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.AppCursorKeys = true

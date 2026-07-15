@@ -191,6 +191,44 @@ func (t *Term) writeMouse(cb, col, row int, pixX, pixY float32, pixels, press bo
 	}
 }
 
+// lockMouse engages a gui mouse lock routing motion/release to the widget's
+// handlers, and records that lock-callback coordinates are now absolute.
+// Every MouseLock must go through here so t.mouse.locked stays truthful.
+func (t *Term) lockMouse(w *gui.Window) {
+	if w == nil {
+		return
+	}
+	t.mouse.locked = true
+	w.MouseLock(gui.MouseLockCfg{
+		MouseMove: t.onMouseMove,
+		MouseUp:   t.onMouseUp,
+	})
+}
+
+// unlockMouse releases the mouse lock and clears the absolute-coordinate
+// flag. Safe to call when no lock is held. Counterpart to lockMouse; every
+// MouseUnlock must go through here, including the stuck-drag safety nets.
+func (t *Term) unlockMouse(w *gui.Window) {
+	t.mouse.locked = false
+	if w != nil {
+		w.MouseUnlock()
+	}
+}
+
+// toCanvasRel converts a mouse event's coordinates from absolute window
+// space to canvas-relative when the event arrived through a mouse-lock
+// callback. Lock callbacks bypass go-gui's callRelative, so without this a
+// canvas offset by UI chrome (e.g. a tab bar) shifts every hit-test by the
+// chrome's height. Events dispatched to the same handlers via the canvas
+// config are already relative and must be left alone.
+func (t *Term) toCanvasRel(e *gui.Event) {
+	if !t.mouse.locked {
+		return
+	}
+	e.MouseX -= t.ime.layoutX
+	e.MouseY -= t.ime.layoutY
+}
+
 // onClick handles a button-down event. Under mouse reporting, encodes
 // a press report for any supported button and arms drag tracking.
 // Otherwise (the default) starts a left-button selection anchor.
@@ -236,10 +274,7 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	t.mouse.dragging = true
 	t.mouse.dragButton = e.MouseButton
 	t.mouse.dragReport = false
-	w.MouseLock(gui.MouseLockCfg{
-		MouseMove: t.onMouseMove,
-		MouseUp:   t.onMouseUp,
-	})
+	t.lockMouse(w)
 	t.bumpVersion()
 	w.UpdateWindow()
 	e.IsHandled = true
@@ -250,14 +285,7 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 // any-motion report. Falls through to selection extension when this
 // drag was started outside of a reporting mode.
 func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-	// Mouse-lock callbacks (drag, scrollbar) receive absolute window
-	// coordinates, unlike OnClick which goes through callRelative.
-	// Convert to canvas-relative so posToCell and scrollbar hit-tests
-	// work correctly when the canvas is offset by e.g. a tab bar.
-	if t.mouse.dragging || t.scrollbar.dragging {
-		e.MouseX -= t.ime.layoutX
-		e.MouseY -= t.ime.layoutY
-	}
+	t.toCanvasRel(e)
 	// Track scrollbar hover for thumb brightness.
 	if t.scrollbar.active && realNumber(e.MouseX) && realNumber(e.MouseY) {
 		inHit := e.MouseX >= t.scrollbar.hitX0 &&
@@ -374,17 +402,12 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 // emits a release report regardless of whether the mode is still on
 // (the host expects every press to be paired with a release).
 func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-	// Mouse-lock callbacks receive absolute window coordinates.
-	// Convert to canvas-relative for posToCell and SGR reports.
-	if t.mouse.dragging || t.scrollbar.dragging {
-		e.MouseX -= t.ime.layoutX
-		e.MouseY -= t.ime.layoutY
-	}
+	t.toCanvasRel(e)
 	// Scrollbar thumb drag release: unlock and stop dragging. The scrollbar
 	// drag path never sets t.mouse.dragging, so handle it before that guard.
 	if t.scrollbar.dragging {
 		t.scrollbar.dragging = false
-		w.MouseUnlock()
+		t.unlockMouse(w)
 		t.scheduleViewUpdate(w)
 		e.IsHandled = true
 		return
@@ -393,7 +416,7 @@ func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		return
 	}
 	t.autoScrollDir.Store(0)
-	w.MouseUnlock()
+	t.unlockMouse(w)
 	r, c := t.posToCell(e.MouseX, e.MouseY)
 	if t.mouse.dragReport {
 		snap := t.mouseSnap()

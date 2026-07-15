@@ -65,10 +65,7 @@ func (t *Term) scrollbarClick(e *gui.Event, w *gui.Window) bool {
 		t.jumpScrollbarTo(e.MouseY - t.scrollbar.grabDy)
 	}
 	t.scrollbar.dragging = true
-	w.MouseLock(gui.MouseLockCfg{
-		MouseMove: t.onMouseMove,
-		MouseUp:   t.onMouseUp,
-	})
+	t.lockMouse(w)
 	t.scheduleViewUpdate(w)
 	return true
 }

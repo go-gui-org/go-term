@@ -330,7 +330,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 			t.mouse.dragging = false
 			t.autoScrollDir.Store(0)
 			t.grid.ClearSelection()
-			t.win.MouseUnlock()
+			t.unlockMouse(t.win)
 		}
 	}
 	// Same rationale for a scrollbar thumb drag: a resize gesture can steal
@@ -338,9 +338,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	// repositioning the viewport. Drop the drag when the grid reflows.
 	if t.scrollbar.dragging && (rows != t.grid.Rows || cols != t.grid.Cols) {
 		t.scrollbar.dragging = false
-		if t.win != nil {
-			t.win.MouseUnlock()
-		}
+		t.unlockMouse(t.win)
 	}
 
 	// Phase order matters: prepareFastPath sets ds.renderRows / ds.live which
