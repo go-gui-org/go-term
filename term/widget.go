@@ -864,6 +864,17 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 		t.autoScrollDir.Store(0)
 		t.unlockMouse(t.win)
 	}
+	// When the window resizes during a drag, the host platform (notably
+	// macOS) takes over mouse tracking and swallows the mouse-up. On the
+	// next pointer move the terminal would still see a stale drag flag
+	// and extend the selection from the now-lost anchor. Cancel any
+	// active drag on every resize so it can't leak across the boundary.
+	if e.Type == gui.EventResized && t.mouse.dragging {
+		t.mouse.dragging = false
+		t.mouse.dragReport = false
+		t.autoScrollDir.Store(0)
+		t.unlockMouse(t.win)
+	}
 	var report []byte
 	t.grid.Mu.Lock()
 	focus := t.grid.FocusReporting

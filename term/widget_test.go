@@ -536,6 +536,34 @@ func TestHandleWindowEvent_MouseUpClearsDragAndLock(t *testing.T) {
 	}
 }
 
+// TestHandleWindowEvent_ResizedClearsDrag verifies that EventResized clears a
+// stale drag that was started before the resize began. On macOS a window-resize
+// drag swallows the mouse-up, so the terminal never sees onMouseUp; the drag
+// state would otherwise persist and spuriously extend the selection on the next
+// pointer move.
+func TestHandleWindowEvent_ResizedClearsDrag(t *testing.T) {
+	term, _ := newTestTermCapture()
+	term.mouse.dragging = true
+	term.mouse.dragReport = true
+	term.mouse.locked = true
+	term.autoScrollDir.Store(1)
+
+	term.HandleWindowEvent(&gui.Event{Type: gui.EventResized})
+
+	if term.mouse.dragging {
+		t.Error("dragging should be false after window resize")
+	}
+	if term.mouse.dragReport {
+		t.Error("dragReport should be false after window resize")
+	}
+	if term.mouse.locked {
+		t.Error("locked should be false after window resize")
+	}
+	if term.autoScrollDir.Load() != 0 {
+		t.Error("autoScrollDir should be reset after window resize")
+	}
+}
+
 func TestTerm_OnKeyDown_AppCursor(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.AppCursorKeys = true
