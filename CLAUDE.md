@@ -238,3 +238,9 @@ If keystrokes don't reach the PTY, focus is the first place to look.
 - `dispatchCSI`, `dispatchOSC`, `dispatchDCS`, `dispatchAPC` are the
   single dispatch sites for their respective sequences — extend, don't
   add parallel dispatchers.
+- When rendering visual dividers (horizontal or vertical lines in UI
+  overlays), use `gui.Rectangle` with `FillFixed` (horizontal: fill width,
+  fixed height) or `FixedFill` (vertical: fixed width, fill height).
+  `Rectangle` has no padding, no axis, and no child layout — unlike
+  `gui.Column`/`gui.Row` wrappers, it won't pick up theme container
+  padding that indents the edges.

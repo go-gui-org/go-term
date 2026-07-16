@@ -346,22 +346,31 @@ func (ws *Workspace) helpPanel() gui.View {
 	return gui.Column(panel)
 }
 
-// helpHeader renders a section label with spacing above it.
+// helpHeader renders a section label with a thin divider below.
 func (ws *Workspace) helpHeader(text string, theme gui.Theme) gui.View {
 	style := theme.M5
 	style.Typeface = glyph.TypefaceBold
-	style.Color = theme.ColorActive
-	row := tight(gui.FillFit)
-	row.Padding = gui.SomeP(6, 0, 2, 0)
-	row.Content = []gui.View{gui.Text(gui.TextCfg{Text: text, TextStyle: style})}
-	return gui.Row(row)
+	headerRow := tight(gui.FillFit)
+	headerRow.Padding = gui.SomeP(6, 0, 2, 0)
+	headerRow.Content = []gui.View{gui.Text(gui.TextCfg{Text: text, TextStyle: style})}
+
+	col := tight(gui.FillFit)
+	col.Spacing = gui.SomeF(0)
+	col.Content = []gui.View{
+		gui.Row(headerRow),
+		gui.Rectangle(gui.RectangleCfg{
+			Sizing: gui.FillFixed,
+			Height: 1.2,
+			Color:  theme.ColorBorder,
+		}),
+	}
+	return gui.Column(col)
 }
 
 // helpRow renders one "label … keys" line with the keys right-aligned.
 func (ws *Workspace) helpRow(label, keys string, theme gui.Theme) gui.View {
 	labelStyle := theme.M5
 	keyStyle := theme.M5
-	keyStyle.Color = theme.ColorActive
 	fill := tight(gui.FillFit)
 	row := tight(gui.FillFit)
 	row.Content = []gui.View{
