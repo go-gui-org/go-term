@@ -303,6 +303,17 @@ func (ws *Workspace) helpBackdrop(ww, wh int) gui.View {
 	b.FloatZIndex = 999
 	b.Color = gui.RGBA(0, 0, 0, 120)
 	b.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+		// Ignore clicks near window edges — the platform (notably
+		// macOS) dispatches MouseDown to the content view even when
+		// the user is starting a window-resize drag at a corner or
+		// edge. Without this guard the dialog would dismiss on the
+		// first touch of a resize instead of on an intentional
+		// click-outside-to-dismiss.
+		const edgePx = float32(30)
+		if e.MouseX < edgePx || e.MouseX > float32(ww)-edgePx ||
+			e.MouseY < edgePx || e.MouseY > float32(wh)-edgePx {
+			return
+		}
 		ws.helpVisible = false
 		ws.refresh()
 		e.IsHandled = true
