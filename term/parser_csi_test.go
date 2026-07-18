@@ -395,6 +395,11 @@ func TestParser_DECMode_FocusSyncCursorKeypad(t *testing.T) {
 		t.Fatalf("mode set failed: focus=%v sync=%v ckm=%v keypad=%v",
 			g.FocusReporting, g.SyncOutput, g.AppCursorKeys, g.AppKeypad)
 	}
+	// DECSET 2026 is itself "begin synchronized update" in the CSI form —
+	// there is no separate capability handshake.
+	if !g.SyncActive {
+		t.Fatal("DECSET 2026 should begin a sync block")
+	}
 	feed(t, g, p, []byte("\x1bP=1s\x1b\\"))
 	if !g.SyncActive {
 		t.Fatal("sync begin not set")
@@ -1007,6 +1012,32 @@ func TestParser_DECRQM_Grapheme2027(t *testing.T) {
 	feed(t, g, p, []byte("\x1b[?2027l\x1b[?2027$p"))
 	if !bytes.Equal(reply, want) {
 		t.Errorf("DECRQM 2027 after reset = %q, want %q", reply, want)
+	}
+}
+
+func TestParser_DECRQM_Sync2026(t *testing.T) {
+	// Mode 2026 reports whether a synchronized-update block is currently
+	// open (SyncActive), not merely that DECSET was ever seen — after a
+	// forced end (widget watchdog) an app querying must observe reset.
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	feed(t, g, p, []byte("\x1b[?2026$p"))
+	if want := []byte("\x1b[?2026;2$y"); !bytes.Equal(reply, want) {
+		t.Errorf("DECRQM 2026 initial reply = %q, want %q", reply, want)
+	}
+	reply = nil
+	feed(t, g, p, []byte("\x1b[?2026h\x1b[?2026$p"))
+	if want := []byte("\x1b[?2026;1$y"); !bytes.Equal(reply, want) {
+		t.Errorf("DECRQM 2026 in-block reply = %q, want %q", reply, want)
+	}
+	// Simulate the widget watchdog force-ending the block: the mode is
+	// still "supported" but no block is open, so the report is reset.
+	g.EndSync()
+	reply = nil
+	feed(t, g, p, []byte("\x1b[?2026$p"))
+	if want := []byte("\x1b[?2026;2$y"); !bytes.Equal(reply, want) {
+		t.Errorf("DECRQM 2026 after forced end = %q, want %q", reply, want)
 	}
 }
 

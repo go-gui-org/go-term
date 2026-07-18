@@ -146,9 +146,9 @@ func (p *parser) dispatchDCS() {
 	case p.g.SyncOutput && len(p.dcs) >= 3 && p.dcs[0] == '=' && p.dcs[2] == 's':
 		switch p.dcs[1] {
 		case '1':
-			p.g.SyncActive = true
+			p.g.BeginSync()
 		case '2':
-			p.g.SyncActive = false
+			p.g.EndSync()
 		}
 	default:
 

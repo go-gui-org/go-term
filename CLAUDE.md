@@ -156,7 +156,9 @@ Supports a modern xterm/kitty-compatible subset:
   manipulation ops ignored), tab stop clear (TBC).
 - Modes: alt screen (1049/1047/47), mouse (1000/1002/1003/1006/1016),
   bracketed paste (2004), focus reporting (1004), synchronized updates
-  (2026), grapheme clustering (2027 — always on; DECRQM reports it
+  (2026 — DECSET begins a block, DECRST ends + flushes; a 500 ms watchdog
+  in the widget force-ends a block whose end never arrives),
+  grapheme clustering (2027 — always on; DECRQM reports it
   permanently set, DECSET/DECRST are no-ops).
 - Kitty Keyboard Protocol: `CSI > u` / `< u` / `= u` / `? u` (push/pop/
   set/query); key-release events; left/right modifier distinction.

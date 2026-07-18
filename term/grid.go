@@ -3,6 +3,7 @@ package term
 import (
 	"math"
 	"sync"
+	"time"
 
 	"github.com/rivo/uniseg"
 )
@@ -126,6 +127,26 @@ func clampDim(n int) int {
 		return MaxGridDim
 	}
 	return n
+}
+
+// BeginSync starts a synchronized-update block (mode 2026 DECSET or the
+// legacy DCS =1s): repaints are suppressed until EndSync or the widget's
+// watchdog timeout. A begin while a block is already open is idempotent —
+// SyncBegan is NOT refreshed, so an app spamming BSU without ever ending
+// cannot extend suppression past one timeout window. Legit frame cycles
+// (begin → draw → end) each get a full window because EndSync clears
+// SyncActive between frames.
+func (g *grid) BeginSync() {
+	if !g.SyncActive {
+		g.SyncBegan = time.Now()
+	}
+	g.SyncActive = true
+}
+
+// EndSync ends a synchronized-update block; the caller's next redraw
+// check observes SyncActive == false and flushes accumulated dirty rows.
+func (g *grid) EndSync() {
+	g.SyncActive = false
 }
 
 // cell.FG and cell.BG are packed uint32 values. The high byte is the
@@ -395,10 +416,15 @@ type grid struct {
 	CursorVisible  bool  // hidden via DEC ?25 l, shown via ?25 h
 	BracketedPaste bool  // DEC ?2004 — wrap pasted text in markers
 	FocusReporting bool  // DEC ?1004 — report focus in/out to host
-	SyncOutput     bool  // DEC ?2026 — allow synchronized updates
-	SyncActive     bool  // currently inside a synchronized update block
+	SyncOutput     bool  // DEC ?2026 — set/reset via DECSET/DECRST; gates the legacy DCS BSU/ESU form
+	SyncActive     bool  // currently inside a synchronized update block (DECRQM-reported)
 	AppCursorKeys  bool  // DEC ?1 — application cursor key mode
 	AppKeypad      bool  // DECNKM — application keypad mode
+
+	// SyncBegan records when the current synchronized-update block started
+	// (see BeginSync). The widget's watchdog uses it as the deadline base so
+	// a block whose end never arrives cannot suppress repaints forever.
+	SyncBegan time.Time
 
 	// Cursor shape + blink. Set via DECSCUSR (CSI Ps SP q). Default is
 	// a steady block. Embedders can override blink via
