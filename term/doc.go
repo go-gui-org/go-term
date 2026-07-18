@@ -62,5 +62,54 @@
 // macOS, Linux, and Windows. The PTY boundary uses creack/pty on Unix and
 // the ConPTY API on Windows; everything above it is platform-agnostic.
 //
+// # Stability
+//
+// go-term is pre-1.0. The public API is deliberately small so embedders
+// have a narrow, well-defined contract to code against.
+//
+// Stable: [NamedTheme], [Theme], and the built-in theme variables
+// ([DefaultTheme], [GruvboxTheme], [NordTheme], [SolarizedDarkTheme]) —
+// their names won't change and their color values won't shift in ways
+// that break contrast; the [MaxGridDim] and [MaxScrollbackCap] constants;
+// the [New] constructor; every exported [Term] method ([Term.View],
+// [Term.Close] — idempotent, [Term.Cwd], [Term.Theme], [Term.SetTheme],
+// [Term.Rows], [Term.Cols], [Term.Write], [Term.PID], [Term.Alive],
+// [Term.SetFocused], [Term.HandleWindowEvent]); and [Shortcuts] /
+// [ShortcutInfo]. Term is an opaque handle: all fields are unexported,
+// so embedders interact only through methods.
+//
+// What may change before 1.0:
+//   - Cfg fields: new fields may be added. Renames and removals go
+//     through a deprecation cycle (at least one minor version with the
+//     old name still accepted). New fields are always zero-value-safe,
+//     so untouched configs keep working across minor bumps.
+//   - Term methods: new methods may appear; existing signatures stay.
+//   - The gui.View tree returned by [Term.View] is an implementation
+//     detail and may gain new widgets; embedders only pass the result
+//     to UpdateView, and that contract holds.
+//   - Internal layout: import only this package; the source-file
+//     organisation within it is not a contract.
+//   - Go version: the go directive in go.mod reflects the oldest Go
+//     release tested against and may advance on minor version bumps.
+//
+// Concurrency details, render-pass structure, canvas IDs and draw
+// versions, and parser dispatch sites are internal and not part of the
+// contract.
+//
+// # Versioning
+//
+// Semantic Versioning with a pre-1.0 interpretation:
+//   - Patch (0.x.Y): bug fix; no new API surface. Safe to upgrade.
+//   - Minor (0.X.0): new feature; may add Cfg fields or Term methods,
+//     but existing signatures stay backwards compatible. Read the
+//     changelog before upgrading.
+//   - Major (1.0.0): first stable release; standard semver afterwards.
+//
+// Guidance for embedders: pin a minor version in go.mod; use Cfg zero
+// values for everything you don't explicitly set; stick to the
+// documented methods and open an issue rather than depending on
+// internal state. The term/workspace package wires the multi-Term
+// methods together for split-pane and tab embedding.
+//
 // [go-gui]: https://github.com/go-gui-org/go-gui
 package term
