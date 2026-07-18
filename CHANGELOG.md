@@ -6,6 +6,56 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-17
+
+### Added
+
+- Mode 2026 synchronized-update watchdog with a 500 ms timeout that
+  force-ends a block whose end never arrives (#50).
+- Dedicated PTY resize goroutine (`resizeLoop`) for responsive resize
+  that doesn't stall the reader (#49).
+- `GOTERM_CAPTURE` debug tee that records each PTY's raw output to
+  `<prefix>-<seq>.bin` for offline replay and debugging (#49).
+- `lockMouse`/`unlockMouse` helpers on `Term` (#42).
+- Multi-tick SGR mouse wheel reports with `ScrollPrecise`-based
+  wheel-vs-trackpad detection (#37).
+- **Windows support** via ConPTY backend (#19): `ptyIO` interface with
+  split Unix/Windows PTY implementations (#17), platform-aware shortcut
+  modifiers (#20), and toast notifications (#23).
+- `ExitWhenLastShellExits` workspace option (#14).
+- `Cmd+=`/`Cmd+-` keyboard shortcuts to adjust font size by 0.25 pt (#13).
+- Tab reordering via `Cmd+Alt+[` / `Cmd+Alt+]` (#12).
+
+### Fixed
+
+- Cancel drag on window resize; guard the help-dialog backdrop from edge
+  clicks (#46).
+- Mouse-selection off-by-one when the canvas is vertically offset by a
+  tab bar (#34).
+- `posToCell` row mapping when smooth-scrolled (ViewSubPx) (#29).
+- Clear scrollback on CSI 3 J (#30).
+- Mouse reporting-drag coordinate offset when canvas is offset (#42).
+- Fall back to `$HOME` when the saved CWD directory no longer exists.
+- Brahmic akshara cell width: virama fusion, Mc marks, and dangling
+  virama are now sized correctly.
+- Benchmark regression gate: `ns/op` is advisory-only; the hard gate
+  checks only `allocs/B-op` (#7).
+
+### Changed
+
+- Help dialog: headings and key labels use the default text color;
+  sections separated by thin dividers (#45).
+- Inactive tab title text is dimmed to distinguish active from inactive
+  tabs (#35).
+- Scrollbar now has hover brightness, click/drag, and an edge inset
+  (#33); the thumb is clamped to a minimum pixel height (#31).
+- Mouse-wheel scroll sensitivity reduced from 15 to 5 rows (#32).
+- Scroll momentum decay shortened (#36).
+- Selection boundaries use half-open intervals (#30).
+- Renamed `examples/demo` to `examples/loon` (#16); consolidated the
+  font-family constant (#26).
+- Compressed ROADMAP from 606 to 135 lines.
+
 ## [0.4.0] - 2026-06-28
 
 ### Added
