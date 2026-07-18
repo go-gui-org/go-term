@@ -286,6 +286,13 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 // drag was started outside of a reporting mode.
 func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	t.toCanvasRel(e)
+	// Track Cmd state for hyperlink styling. When it changes, the next
+	// frame will reflect the new state via cmdHeld in the draw pass.
+	cmd := e.Modifiers.Has(gui.ModSuper)
+	prevCmd := t.mouse.cmdHeld.Swap(cmd)
+	if cmd != prevCmd {
+		t.bumpVersion()
+	}
 	// Track scrollbar hover for thumb brightness.
 	if t.scrollbar.active && realNumber(e.MouseX) && realNumber(e.MouseY) {
 		inHit := e.MouseX >= t.scrollbar.hitX0 &&
@@ -373,10 +380,19 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	t.updateHover(r, c, w)
 }
 
-// updateHover updates t.hoverR/C and requests a redraw when entering or
-// leaving a hyperlinked cell run.
+// updateHover updates t.hoverR/C, requests a redraw when entering or leaving
+// a hyperlinked cell run, and sets the cursor to a pointing hand when Cmd is
+// held over a link.
 func (t *Term) updateHover(r, c int, w *gui.Window) {
 	oldR, oldC := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
+
+	// Set pointing-hand cursor over a linked cell only when Cmd is held.
+	// go-gui resets the cursor to Arrow at the top of every mouse-move
+	// event, so we re-apply even when coords haven't changed.
+	if t.mouse.cmdHeld.Load() && linkCell(r, c, t.grid) {
+		w.SetMouseCursorPointingHand()
+	}
+
 	if oldR == r && oldC == c {
 		return
 	}
@@ -396,6 +412,13 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 		t.bumpVersion()
 		w.UpdateWindow()
 	}
+}
+
+// linkCell reports whether the cell at (r,c) has a non-zero link ID.
+func linkCell(r, c int, g *grid) bool {
+	g.Mu.Lock()
+	defer g.Mu.Unlock()
+	return g.ViewCellAt(r, c).LinkID != 0
 }
 
 // onMouseUp handles button-release. A drag started under reporting

@@ -321,11 +321,12 @@ type mouseState struct {
 	// two apart — see toCanvasRel. Not every drag locks: a drag that is
 	// being reported to the pty (?1000/?1002/?1003) leaves the pointer
 	// unlocked, so keying off dragging would mis-translate those events.
-	locked bool
-	lastR  int // dedupe motion reports under ?1003
-	lastC  int
-	hoverR atomic.Int32 // sentinel -1 = not yet set
-	hoverC atomic.Int32
+	locked  bool
+	lastR   int // dedupe motion reports under ?1003
+	lastC   int
+	hoverR  atomic.Int32 // sentinel -1 = not yet set
+	hoverC  atomic.Int32
+	cmdHeld atomic.Bool // true when Super (Cmd) is held
 
 	// Wheel-report accumulator (see wheelReportTicks): pixels of scroll
 	// distance not yet emitted as an SGR wheel tick, and the direction
