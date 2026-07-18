@@ -360,7 +360,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.grid.Mu.Unlock()
 
 	if ds.doResize {
-		// Defer pty resize to the readLoop goroutine so the
+		// Defer pty resize to the resizeLoop goroutine so the
 		// TIOCSWINSZ ioctl never runs on the main thread.
 		// During live resize on macOS, onDraw is called from
 		// within SDL's event watch callback inside Cocoa's
@@ -369,9 +369,18 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		// during the next FrameFn from the same callback) can
 		// deadlock against the SDL event queue when the shell's
 		// SIGWINCH response causes readLoop to push a user event.
+		// Store the dims before setting pending; resizeLoop reads
+		// them only after observing pending via Swap.
 		t.ptyResizeRows.Store(int32(ds.rows))
 		t.ptyResizeCols.Store(int32(ds.cols))
 		t.ptyResizePending.Store(true)
+		// Non-blocking: a buffered kick already in flight is enough —
+		// resizeLoop re-reads the latch after every wake. Nil channel
+		// (bare test Terms) falls through to default.
+		select {
+		case t.ptyResizeKick <- struct{}{}:
+		default:
+		}
 	}
 }
 

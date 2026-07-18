@@ -160,6 +160,11 @@ const defaultScrollbackRows = 5000
 // apply feels instant.
 const resizeDebounce = 50 * time.Millisecond
 
+// initRows/initCols size the pty and grid before the first draw has
+// measured real cell metrics. resizeLoop also seeds its last-applied
+// size from these so it can detect a same-size re-apply (see resizeLoop).
+const initRows, initCols = 24, 80
+
 // bellFlashDuration is the default visual-bell flash duration.
 // Override via Cfg.BellFlashDuration; see effectiveBellDuration().
 const bellFlashDuration = 100 * time.Millisecond
@@ -418,8 +423,8 @@ type Term struct {
 	mouse mouseState
 
 	// loopWg tracks the auxiliary goroutines (blink, autoScroll, momentum,
-	// reply writer) so Close can wait for them to exit before tearing down
-	// state they may still reference.
+	// reply writer, pty resizer) so Close can wait for them to exit before
+	// tearing down state they may still reference.
 	loopWg sync.WaitGroup
 
 	// drawVersion is incremented on every visual state change so that
@@ -460,13 +465,21 @@ type Term struct {
 	autoScrollDir atomic.Int32
 
 	// ptyResizeRows/Cols carry a pending TIOCSWINSZ from onDraw to
-	// readLoop. onDraw writes them under grid.Mu and sets pending.
-	// readLoop consumes them before its next Read call so the ioctl
-	// never runs on the main thread — avoids deadlock with the SDL
-	// event queue during macOS live-resize.
+	// resizeLoop, the dedicated goroutine that applies pty resizes.
+	// onDraw writes them under grid.Mu, sets pending, then kicks the
+	// channel. Keeping the ioctl off the main thread avoids deadlock
+	// with the SDL event queue during macOS live-resize; keeping it off
+	// the reader goroutine means an idle child (no pty output) still
+	// receives SIGWINCH promptly instead of on its next write.
 	ptyResizePending atomic.Bool
 	ptyResizeRows    atomic.Int32
 	ptyResizeCols    atomic.Int32
+	ptyResizeKick    chan struct{} // buffered(1); nil in bare test Terms
+
+	// capture is the opt-in raw pty-output tee (GOTERM_CAPTURE env var).
+	// Set once in New, written only by the reader goroutine, closed in
+	// Close after readLoop exits. Nil when capture is disabled.
+	capture *os.File
 
 	// redrawPending coalesces UpdateWindow requests from the reader
 	// goroutine: applyChunk only queues a redraw command when one is not
@@ -518,7 +531,6 @@ func applyTheme(g *grid, cfg Cfg) {
 // goroutine and auxiliary loops (blink, auto-scroll, momentum) are
 // spawned before New returns. Call Close to tear down.
 func New(w *gui.Window, cfg Cfg) (*Term, error) {
-	const initRows, initCols = 24, 80
 	pty, err := startPTY(initRows, initCols, cfg)
 	if err != nil {
 		return nil, err
@@ -540,7 +552,9 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 		readDone:    make(chan struct{}),
 		focusID:     "term-" + strconv.FormatUint(seqID, 10),
 		canvasID:    "term-canvas-" + strconv.FormatUint(seqID, 10),
+		capture:     openCapture(seqID),
 	}
+	t.ptyResizeKick = make(chan struct{}, 1)
 	if s := t.style(); s.Size > 0 {
 		t.fontSize = s.Size
 	}
@@ -581,12 +595,86 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	w.SetFocus(t.focusID)
 	t.replyCond = sync.NewCond(&t.replyMu)
 	go t.readLoop()
-	t.loopWg.Add(4)
+	t.loopWg.Add(5)
 	go t.blinkLoop()
 	go t.autoScrollLoop()
 	go t.momentumLoop()
 	go t.writeLoop()
+	go t.resizeLoop()
 	return t, nil
+}
+
+// openCapture opens the raw pty-output capture file when the GOTERM_CAPTURE
+// environment variable is set. The value is a path prefix; each Term appends
+// "-<seq>.bin" so multi-terminal windows produce one stream per pty. The file
+// receives the exact bytes the pty master delivered, so a rendering bug can be
+// replayed byte-for-byte: `cat <file>` inside a reference terminal (kitty,
+// Terminal.app) to compare visuals, or feed it to CaptureFixture /
+// script2fixture for the EmulatorReplay harness. Returns nil (capture
+// disabled) when the variable is unset or the file cannot be created.
+func openCapture(seq uint64) *os.File {
+	prefix := os.Getenv("GOTERM_CAPTURE")
+	if prefix == "" {
+		return nil
+	}
+	path := prefix + "-" + strconv.FormatUint(seq, 10) + ".bin"
+	f, err := os.Create(path)
+	if err != nil {
+		log.Printf("term: GOTERM_CAPTURE: %v", err)
+		return nil
+	}
+	log.Printf("term: capturing pty output to %s", path)
+	return f
+}
+
+// resizeLoop is the dedicated goroutine that applies pty resizes latched by
+// onDraw. The TIOCSWINSZ ioctl must not run on the main thread (deadlock with
+// the SDL event queue during macOS live-resize — see onDraw), and running it
+// on the reader goroutine (the previous design) delayed it until the child's
+// next write: readLoop only re-checked the latch after its blocking Read
+// returned, so resizing over an idle full-screen app left the app unaware of
+// its new size — and stale on screen — until the next keystroke produced
+// output.
+//
+// The same-size heal below closes a subtler race that design allowed: with
+// the child quiet, the grid could resize A→B (clipping content) and back to
+// A before the latch was ever applied. The coalesced latch then carried A —
+// the size the kernel already had — so TIOCSWINSZ delivered no SIGWINCH and
+// a diff-rendering app never repainted the cells the clip destroyed. When
+// the latched size equals the last size this loop applied, bounce through a
+// one-row-off size first so the child gets two real SIGWINCHes and repaints.
+func (t *Term) resizeLoop() {
+	defer t.loopWg.Done()
+	defer recoverLoop("resizeLoop")
+	lastRows, lastCols := initRows, initCols
+	for {
+		select {
+		case <-t.blinkDone:
+			return
+		case <-t.ptyResizeKick:
+		}
+		if !t.ptyResizePending.Swap(false) {
+			continue
+		}
+		rows := clampDim(int(t.ptyResizeRows.Load()))
+		cols := clampDim(int(t.ptyResizeCols.Load()))
+		if rows == lastRows && cols == lastCols {
+			// Same-size re-apply: the grid diverged and returned while
+			// no intermediate size reached the kernel. Bump one row off
+			// and back to force SIGWINCH delivery (see doc comment).
+			bump := rows - 1
+			if bump < 1 {
+				bump = rows + 1
+			}
+			if err := t.pty.Resize(bump, cols); err != nil && !t.closed.Load() {
+				log.Printf("term: pty resize: %v", err)
+			}
+		}
+		if err := t.pty.Resize(rows, cols); err != nil && !t.closed.Load() {
+			log.Printf("term: pty resize: %v", err)
+		}
+		lastRows, lastCols = rows, cols
+	}
 }
 
 // recoverLoop logs and suppresses panics in background goroutines so a
@@ -1109,6 +1197,13 @@ func (t *Term) Close() error {
 	case <-t.readDone:
 	case <-readTimer.C:
 	}
+	// readLoop has exited (or is deemed stuck); the capture tee has no
+	// writer left, so the file can be closed. Skipped on the stuck path
+	// only if readLoop later revives — acceptable for a debug-only tee.
+	if t.capture != nil {
+		_ = t.capture.Close()
+		t.capture = nil
+	}
 	// Stop the reply writer. The pty is already closed, so any pty.Write in
 	// flight returns an error and writeLoop loops back to observe replyDone.
 	t.replyMu.Lock()
@@ -1164,19 +1259,20 @@ func (t *Term) readLoop() {
 	}()
 	buf := make([]byte, 4096)
 	for {
-		// Apply a pending pty resize before blocking in Read so
-		// the TIOCSWINSZ ioctl runs on this goroutine, not the
-		// main thread. Avoids deadlock with the SDL event queue
-		// during macOS live-resize (see onDraw).
-		if t.ptyResizePending.Swap(false) {
-			rows := int(t.ptyResizeRows.Load())
-			cols := int(t.ptyResizeCols.Load())
-			if err := t.pty.Resize(rows, cols); err != nil {
-				log.Printf("term: pty resize: %v", err)
-			}
-		}
 		n, err := t.pty.Read(buf)
 		if n > 0 {
+			// Opt-in debugging tee (GOTERM_CAPTURE): record the exact
+			// bytes delivered by the pty master before parsing, so a
+			// rendering bug can be replayed against a reference
+			// terminal or the EmulatorReplay harness. On write failure
+			// disable capture rather than losing pty throughput.
+			if t.capture != nil {
+				if _, werr := t.capture.Write(buf[:n]); werr != nil {
+					log.Printf("term: capture write: %v", werr)
+					_ = t.capture.Close()
+					t.capture = nil
+				}
+			}
 			// Feed buf directly: parser.feedChunk consumes the slice
 			// synchronously (carry-over and reply bytes are copied
 			// internally), so reusing buf next iteration is safe.

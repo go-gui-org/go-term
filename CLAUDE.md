@@ -36,6 +36,14 @@ go vet ./...
 go mod tidy
 ```
 
+### Debugging rendering bugs
+
+Set `GOTERM_CAPTURE=<path-prefix>` before launching to tee each pty's raw
+output to `<prefix>-<seq>.bin` (one file per Term). Replay with `cat` in a
+reference terminal (kitty, Terminal.app) to assign blame — same corruption
+there means the child app is at fault — or feed the bytes to
+`CaptureFixture` / `script2fixture` for the EmulatorReplay harness.
+
 There are automated tests for the grid, parser, PTY, widget helpers,
 and replay-style emulator behavior. The widget itself is still partly
 GUI-bound, so keep validating visually by running `examples/loon` and trying
