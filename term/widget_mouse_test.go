@@ -933,3 +933,30 @@ func TestUpdateHover_NewCellUpdatesCoords(t *testing.T) {
 	// For a plain cell, no version bump is expected.
 	_ = prevVer
 }
+
+// ---------------------------------------------------------------------------
+// linkCell
+// ---------------------------------------------------------------------------
+
+func TestLinkCell_NonZeroLinkID(t *testing.T) {
+	g := newGrid(4, 8)
+	g.Cells[0].LinkID = 42
+	if !linkCell(0, 0, g) {
+		t.Error("linkCell should return true for cell with non-zero LinkID")
+	}
+}
+
+func TestLinkCell_ZeroLinkID(t *testing.T) {
+	g := newGrid(4, 8)
+	if linkCell(0, 0, g) {
+		t.Error("linkCell should return false for cell with zero LinkID")
+	}
+}
+
+func TestLinkCell_OutOfBounds(t *testing.T) {
+	g := newGrid(4, 8)
+	// ViewCellAt returns defaultCell() for OOB, which has LinkID=0.
+	if linkCell(-1, -1, g) {
+		t.Error("linkCell should return false for out-of-bounds coords")
+	}
+}

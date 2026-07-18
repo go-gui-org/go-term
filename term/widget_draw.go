@@ -181,7 +181,8 @@ type runKey struct {
 
 // cellRunKey computes the runKey for cell, applying attribute and
 // hyperlink-hover color transforms. Must be called under grid.Mu.
-func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int) runKey {
+// Link underline is always applied; hover recolor is gated on cmdHeld.
+func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int, cmdHeld bool) runKey {
 	rawFG := g.Theme.fg(cell)
 	color := rawFG
 	if cell.Attrs&attrDim != 0 {
@@ -206,7 +207,7 @@ func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int) runK
 		if ulStyle == ulNone {
 			ulStyle = ulSingle
 		}
-		if hoverR >= 0 && hoverC >= 0 {
+		if cmdHeld && hoverR >= 0 && hoverC >= 0 {
 			if g.ViewCellAt(hoverR, hoverC).LinkID == cell.LinkID {
 				col := color
 				color = gui.RGB(col.R/2, col.G/2, 255)
@@ -644,6 +645,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 	cols := ds.cols
 	g := ds.g
 	hR, hC := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
+	cmdHeld := t.mouse.cmdHeld.Load()
 
 	// Partial top row: per-cell emit, no run coalescing.
 	if ds.partialRow != nil {
@@ -656,7 +658,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 			if cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0 {
 				continue
 			}
-			k := cellRunKey(cell, style, g, hR, hC)
+			k := cellRunKey(cell, style, g, hR, hC, cmdHeld)
 			t.emitCell(dc, float32(c)*t.cellW, partialY, cell, k, style)
 		}
 	}
@@ -671,7 +673,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 			if cell.Width == 0 && cell.Ch == 0 {
 				continue // continuation cell; skip without breaking run
 			}
-			k := cellRunKey(cell, style, g, hR, hC)
+			k := cellRunKey(cell, style, g, hR, hC, cmdHeld)
 			isPlainSpace := cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0
 			if cell.Width == 2 {
 				t.flushRun(dc, r, style, yOff, &fr)
