@@ -165,6 +165,15 @@ const resizeDebounce = 50 * time.Millisecond
 // size from these so it can detect a same-size re-apply (see resizeLoop).
 const initRows, initCols = 24, 80
 
+// syncUpdateTimeout bounds a mode-2026 synchronized-update block. An
+// application that begins a block (CSI ?2026h / DCS =1s) and stalls or dies
+// before ending it would otherwise suppress repaints forever, freezing the
+// pane on a stale frame. The watchdog clears the block and repaints after
+// this long. 500 ms sits between alacritty (150 ms) and kitty (2 s): long
+// enough to mask a GC pause or tool-call stall mid-frame, short enough
+// that a wedged app doesn't look hung.
+const syncUpdateTimeout = 500 * time.Millisecond
+
 // bellFlashDuration is the default visual-bell flash duration.
 // Override via Cfg.BellFlashDuration; see effectiveBellDuration().
 const bellFlashDuration = 100 * time.Millisecond
@@ -197,6 +206,18 @@ type resizeState struct {
 	timer        *time.Timer // wakes main thread to apply after debounce
 	pendingRows  int
 	pendingCols  int
+}
+
+// syncState is the mode-2026 synchronized-update watchdog. applyChunk
+// (reader goroutine) arms the timer when a chunk leaves a newly begun sync
+// block open; onSyncTimeout runs on the timer's goroutine and touches only
+// grid.Mu-guarded state plus the thread-safe queueCommand path. armedAt
+// tracks which BeginSync the timer was armed for so re-arming happens once
+// per block, not once per chunk. Both fields are written only by the
+// reader goroutine (Close stops the timer after readLoop has exited).
+type syncState struct {
+	timer   *time.Timer
+	armedAt time.Time
 }
 
 // imeState holds transient IME composition and widget-position state.
@@ -386,6 +407,7 @@ type Term struct {
 	// embedded grouped state — see each struct's doc comment.
 	resize resizeState
 	bell   bellState
+	sync   syncState
 
 	// pendingReplies buffers parser-originated reply bytes (DA, DECRQSS,
 	// XTGETTCAP, ...) emitted during parser.Feed. Reader-goroutine local:
@@ -1224,6 +1246,12 @@ func (t *Term) Close() error {
 	if t.bell.flashTimer != nil {
 		t.bell.flashTimer.Stop()
 	}
+	// Reader goroutine has exited (readDone above), so the sync watchdog
+	// can no longer be re-armed; a fire that already started is a no-op
+	// via the closed guard in queueCommand.
+	if t.sync.timer != nil {
+		t.sync.timer.Stop()
+	}
 	if t.gfxDir != "" {
 		if err := os.RemoveAll(t.gfxDir); err != nil {
 			log.Printf("term: gfx dir cleanup: %v", err)
@@ -1319,7 +1347,29 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 		t.bumpVersion()
 		needUpdate = true
 	}
+	// This chunk left a sync block open: arm the watchdog so a stalled or
+	// dead application cannot suppress repaints past syncUpdateTimeout.
+	// armedAt keys on SyncBegan so each block arms exactly once.
+	var syncDeadline time.Time
+	if t.grid.SyncActive && t.grid.SyncBegan != t.sync.armedAt {
+		t.sync.armedAt = t.grid.SyncBegan
+		syncDeadline = t.grid.SyncBegan.Add(syncUpdateTimeout)
+	}
 	t.grid.Mu.Unlock()
+
+	if !syncDeadline.IsZero() {
+		d := time.Until(syncDeadline)
+		if d < 0 {
+			d = 0
+		}
+		if t.sync.timer == nil {
+			t.sync.timer = time.AfterFunc(d, t.onSyncTimeout)
+		} else {
+			// Reset without Stop is safe: onSyncTimeout re-checks the
+			// deadline under grid.Mu, so a stale fire is a no-op.
+			t.sync.timer.Reset(d)
+		}
+	}
 
 	// Replies are the latency-critical path: hand them to the writer
 	// goroutine immediately, off both the render loop and this read loop.
@@ -1342,6 +1392,40 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 		})
 	}
 	return needUpdate
+}
+
+// onSyncTimeout is the mode-2026 watchdog callback: a sync block was begun
+// at least syncUpdateTimeout ago and never ended — the application stalled
+// mid-frame or died. End the block and flush whatever arrived so the pane
+// shows the partial frame instead of freezing on a stale one. The deadline
+// re-check makes stale fires (a newer block re-armed the timer, or the
+// block already ended) harmless no-ops.
+func (t *Term) onSyncTimeout() {
+	// Mirror scheduleDelayedUpdate's guard: after Close (or on a bare Term
+	// with no scheduler) do nothing — the pane is going away, so flushing
+	// a partial frame is pointless and the grid may be tearing down.
+	if t.closed.Load() || t.cmd == nil {
+		return
+	}
+	t.grid.Mu.Lock()
+	expired := t.grid.SyncActive &&
+		!t.grid.SyncBegan.IsZero() &&
+		time.Since(t.grid.SyncBegan) >= syncUpdateTimeout
+	if expired {
+		t.grid.EndSync()
+	}
+	dirty := expired && t.grid.HasDirtyRows()
+	t.grid.Mu.Unlock()
+	if !dirty {
+		return
+	}
+	t.bumpVersion()
+	if !t.redrawPending.Swap(true) {
+		t.queueCommand(func(w *gui.Window) {
+			t.redrawPending.Store(false)
+			w.UpdateWindow()
+		})
+	}
 }
 
 // style returns the resolved text style for this terminal. When fontSize

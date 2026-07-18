@@ -191,9 +191,18 @@ func (p *parser) applyDECMode(set bool) {
 		case 1004:
 			p.g.FocusReporting = set
 		case 2026:
+			// Mode 2026 synchronized updates: DECSET *begins* a sync
+			// block (repaints suppressed), DECRST ends it and flushes.
+			// There is no separate capability handshake in the CSI form —
+			// treating h as "enable only" would silently render torn
+			// frames for every modern client. SyncOutput gates the legacy
+			// iTerm2 DCS =1s/=2s form; DECRQM reports SyncActive (see
+			// decModeState) so a watchdog-forced end is observable.
 			p.g.SyncOutput = set
-			if !set {
-				p.g.SyncActive = false
+			if set {
+				p.g.BeginSync()
+			} else {
+				p.g.EndSync()
 			}
 		case 2027:
 			// Grapheme clustering is unconditional (PutRune always clusters),
@@ -266,7 +275,12 @@ func (p *parser) decModeState(n int) int {
 	case 2004:
 		return boolState(p.g.BracketedPaste)
 	case 2026:
-		return boolState(p.g.SyncOutput)
+		// Report whether a synchronized-update block is currently open —
+		// per the mode-2026 spec ("currently in synchronized output
+		// mode"), and matching kitty/alacritty after a timeout-forced
+		// end. SyncOutput alone would go stale when the widget's
+		// watchdog force-ends a block.
+		return boolState(p.g.SyncActive)
 	case 2027:
 		return 3 // PERMANENTLY_SET — grapheme clustering is always on
 	default:
