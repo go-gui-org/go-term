@@ -77,8 +77,17 @@ func (r *scrollbackRing) SetGeom(capacity, cols int) {
 	r.cap, r.cols = capacity, cols
 	r.head, r.size = 0, 0
 	if capacity > 0 && cols > 0 {
-		r.cells = make([]cell, capacity*cols)
-		r.wrapped = make([]bool, capacity)
+		need := capacity * cols
+		if cap(r.cells) >= need && cap(r.cells) <= need*4 {
+			r.cells = r.cells[:need]
+		} else {
+			r.cells = make([]cell, need)
+		}
+		if cap(r.wrapped) >= capacity && cap(r.wrapped) <= capacity*4 {
+			r.wrapped = r.wrapped[:capacity]
+		} else {
+			r.wrapped = make([]bool, capacity)
+		}
 		return
 	}
 	r.cells = nil

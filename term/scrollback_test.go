@@ -364,6 +364,59 @@ func TestScrollbackRing_EnsureGeom_NegativeClamp(t *testing.T) {
 	}
 }
 
+func TestScrollbackRing_SetGeom_ShrinkRegrow(t *testing.T) {
+	r := scrollbackRing{}
+	// Allocate a large backing: 10 rows × 100 cols = 1K cells.
+	r.SetGeom(10, 100)
+	for _, s := range []string{"1", "2", "3", "4", "5"} {
+		r.Push(makeRow(s), false)
+	}
+	if r.Len() != 5 {
+		t.Fatalf("after fill: Len()=%d, want 5", r.Len())
+	}
+
+	// Shrink cols enough to trigger the >4x waste heuristic:
+	// old cap=1000, new need=10*5=50, 1000 > 200 → shrink.
+	// Content is dropped because cols change.
+	r.SetGeom(10, 5)
+	if r.Len() != 0 {
+		t.Fatalf("after shrink: Len()=%d, want 0", r.Len())
+	}
+	// No rows accessible beyond size.
+	if r.Row(0) != nil {
+		t.Error("Row(0) after shrink: want nil")
+	}
+
+	// Push fresh rows into the shrunk backing.
+	r.Push(makeRow("aa"), false)
+	r.Push(makeRow("bb"), false)
+	if r.Len() != 2 {
+		t.Fatalf("after shrink-push: Len()=%d, want 2", r.Len())
+	}
+	if r.Row(0)[0].Ch != 'a' {
+		t.Errorf("shrink row 0 Ch=%q, want 'a'", r.Row(0)[0].Ch)
+	}
+	if r.Row(1)[1].Ch != 'b' {
+		t.Errorf("shrink row 1 Ch=%q, want 'b'", r.Row(1)[1].Ch)
+	}
+	if r.Row(2) != nil {
+		t.Error("Row(2) beyond size: want nil")
+	}
+
+	// Regrow back to original cols — fresh alloc needed.
+	r.SetGeom(10, 100)
+	if r.Len() != 0 {
+		t.Fatalf("after regrow: Len()=%d, want 0", r.Len())
+	}
+	r.Push(makeRow("zzzz"), false)
+	if r.Row(0)[0].Ch != 'z' {
+		t.Errorf("regrow row 0 Ch=%q, want 'z'", r.Row(0)[0].Ch)
+	}
+	if r.Row(1) != nil {
+		t.Error("Row(1) beyond size after regrow: want nil")
+	}
+}
+
 // ---- Benchmarks ----
 
 func BenchmarkScrollback_EnsureGeom(b *testing.B) {

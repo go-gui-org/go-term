@@ -311,7 +311,7 @@ func TestRewrapLine_PreserveAttributes(t *testing.T) {
 	c := cell{Ch: '🍣', Width: 2, FG: 1, BG: 2, Attrs: attrBold, LinkID: 42}
 	cells := []cell{c, {Width: 0}} // wide char + continuation
 
-	rows := rewrapLine(cells, 10)
+	rows := rewrapLine(cells, 10, &rowArena{rowW: 10})
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
