@@ -6,6 +6,22 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-19
+
+### Added
+
+- Expand XTGETTCAP capability table to the full xterm-256color subset,
+  improving capability queries for `tput`, `vim`, and other terminal
+  programs (#53).
+
+### Changed
+
+- Hyperlink hover recolor and pointing-hand cursor are now gated on Cmd
+  being held, matching the activation model (#54).
+- Reuse SetGeom backing store and arena-carve reflow rows to reduce
+  allocations during resize and scrolling (#55, #56) (#57).
+- Bump go-glyph to v1.17.3 and go-gui to v0.40.0 (#58).
+
 ## [0.5.0] - 2026-07-17
 
 ### Added
