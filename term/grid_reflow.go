@@ -48,21 +48,49 @@ func isDefaultBlank(c cell) bool {
 		c.Attrs == 0 && c.Width == 1 && c.LinkID == 0 && c.ULStyle == 0
 }
 
+// rowArena carves fixed-width row slices from lazy-allocated flat blocks
+// so reflow does not pay one heap allocation per physical row. Blocks are
+// 256 rows each; growth never copies, so rows carved from earlier blocks
+// remain valid after the arena grows.
+type rowArena struct {
+	buf  []cell
+	off  int
+	rowW int
+}
+
+// next returns a zero-length row slice whose capacity is exactly rowW
+// (three-index slice), so append can fill it but never bleed into the
+// next row. Returns a nil slice when rowW <= 0 (defense-in-depth; all
+// upstream callers pass positive widths).
+func (a *rowArena) next() []cell {
+	if a.rowW <= 0 {
+		return nil
+	}
+	if a.off+a.rowW > len(a.buf) {
+		a.buf = make([]cell, a.rowW*256)
+		a.off = 0
+	}
+	row := a.buf[a.off : a.off : a.off+a.rowW]
+	a.off += a.rowW
+	return row
+}
+
 // rewrapLine re-wraps a flat slice of cells (the content of one logical
 // line, with continuation cells already stripped) into physical rows of
 // newCols columns. All rows except the last are marked wrapped=true.
 // An empty input produces a single blank row.
-func rewrapLine(cells []cell, newCols int) []physRow {
+// Rows are carved from arena to avoid per-row heap allocations.
+func rewrapLine(cells []cell, newCols int, arena *rowArena) []physRow {
 	if len(cells) == 0 {
-		blank := make([]cell, newCols)
-		for i := range blank {
-			blank[i] = defaultCell()
+		blank := arena.next()
+		for len(blank) < newCols {
+			blank = append(blank, defaultCell())
 		}
 		return []physRow{{cells: blank, wrapped: false}}
 	}
 
 	var rows []physRow
-	cur := make([]cell, 0, newCols)
+	cur := arena.next()
 
 	for i := 0; i < len(cells); {
 		c := cells[i]
@@ -82,7 +110,7 @@ func rewrapLine(cells []cell, newCols int) []physRow {
 				cur = append(cur, defaultCell())
 			}
 			rows = append(rows, physRow{cells: cur, wrapped: true})
-			cur = make([]cell, 0, newCols)
+			cur = arena.next()
 		}
 		cur = append(cur, c)
 		if w == 2 {
@@ -271,6 +299,10 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 	// lineCells is reused across logical lines to avoid per-line allocation.
 	var lineCells []cell
 
+	// Transient arena for rewrapLine: rows are carved from flat blocks
+	// instead of allocated individually.
+	arena := rowArena{rowW: newCols}
+
 	for li, ll := range lines {
 		// Collect cells for this logical line. Trim trailing default
 		// blanks from the last physical row to avoid padding from creating
@@ -304,7 +336,7 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 			lineCells = append(lineCells, row[:trimTo]...)
 		}
 
-		rewrapped := rewrapLine(lineCells, newCols)
+		rewrapped := rewrapLine(lineCells, newCols, &arena)
 		if li == cursorLineIdx {
 			cursorNewPhysStart = len(allNew)
 			cursorLineRewrapped = rewrapped
