@@ -19,7 +19,8 @@ type ptyDev struct {
 
 // startPTY spawns the shell configured in cfg (default $SHELL, fallback
 // /bin/sh) attached to a new pty sized rows×cols. TERM is forced to
-// xterm-256color so apps emit standard SGR sequences. cfg.Command, cfg.Args,
+// xterm-256color so apps emit standard SGR sequences, and a UTF-8 LANG is
+// supplied when the environment carries no locale. cfg.Command, cfg.Args,
 // and cfg.Env allow callers to override the command and environment.
 func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	shell := cfg.Command
@@ -42,7 +43,15 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 			env = replaceEnv(env, "PATH", sp)
 		}
 	}
+	// A GUI launch (Finder, or any parent shell without LANG set) leaves the
+	// child in the "C" locale, where ncurses and friends cannot emit UTF-8 —
+	// wide glyphs arrive as mangled bytes. Supply a UTF-8 locale only when
+	// the inherited environment pins none, so an explicit LC_ALL=C is kept.
+	if !hasLocaleEnv(env) {
+		env = replaceEnv(env, "LANG", defaultUTF8Locale())
+	}
 	env = append(env, "TERM=xterm-256color")
+	// cfg.Env goes last so callers can override anything set above.
 	env = append(env, cfg.Env...)
 	cmd.Env = env
 	if cfg.Dir != "" {
