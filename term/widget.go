@@ -109,9 +109,15 @@ type Cfg struct {
 	// widgets that never need history.
 	ScrollbackRows int
 
+	// BellMode selects how a BEL (0x07) is signalled to the user. The
+	// zero value plays the system alert sound, falling back to the
+	// visual flash only where no such sound exists.
+	BellMode BellMode
+
 	// BellFlashDuration overrides how long the visual-bell overlay stays
 	// visible. Zero (default) uses the built-in 100 ms. Negative disables
-	// the visual bell entirely.
+	// the visual bell entirely. Only consulted when BellMode actually
+	// flashes.
 	BellFlashDuration time.Duration
 
 	// ScrollbarWidth overrides the pixel width of the scrollbar thumb.
@@ -183,6 +189,47 @@ const bellFlashDuration = 100 * time.Millisecond
 // maxBellDuration caps the user-configurable BellFlashDuration so that
 // arithmetic (d + time.Millisecond) cannot overflow time.Duration.
 const maxBellDuration = 5 * time.Second
+
+// BellMode selects how a BEL (0x07) is signalled to the user.
+type BellMode int
+
+const (
+	// BellAuto plays the system alert sound where the platform has one
+	// and falls back to the visual flash where it does not (mobile,
+	// wasm, Linux without canberra-gtk-play). This is the zero value:
+	// an audible bell matches what native terminals do, respects the
+	// user's system alert-sound and mute settings, and does not disturb
+	// what is on screen.
+	BellAuto BellMode = iota
+	// BellAudible plays the system alert sound only, with no visual
+	// fallback — silent on platforms that cannot beep.
+	BellAudible
+	// BellVisual flashes the pane only, never plays a sound.
+	BellVisual
+	// BellBoth flashes and plays the alert sound.
+	BellBoth
+	// BellNone ignores BEL entirely.
+	BellNone
+)
+
+// beepInterval rate-limits the audible bell. A program emitting BEL in
+// a tight loop (a stuck `yes $'\a'`, a pathological build log) would
+// otherwise machine-gun the alert sound; on Linux each one also costs a
+// process spawn. Bells inside this window after an audible one are
+// dropped rather than queued, so the sound never lags the output.
+const beepInterval = 250 * time.Millisecond
+
+// bellFlashPeakAlpha is the alpha of the visual-bell overlay at the instant
+// the BEL arrives; it eases to zero across the flash duration. Kept low
+// deliberately — a bell is an incidental event (an ambiguous completion, a
+// pager hitting the end of its buffer), so the flash should register
+// peripherally without washing out the text underneath.
+const bellFlashPeakAlpha = 22
+
+// bellFadeFrame paces the intermediate frames of the bell fade. A hard
+// on/off overlay reads as a jarring strobe, so the alpha is stepped down
+// over roughly this interval (~60 Hz) for the life of the flash.
+const bellFadeFrame = 16 * time.Millisecond
 
 // scrollbarWidth is the pixel width of the scrollbar thumb.
 const scrollbarWidth float32 = 4
@@ -261,15 +308,21 @@ type searchState struct {
 	cacheRegex bool
 }
 
-// bellState tracks visual-bell flash timing. flashUntil holds the UnixNano
-// instant the flash ends (0 = no flash); it is written by applyChunk on the
-// reader goroutine and read by onDraw on the main thread, hence atomic.
+// bellState tracks bell signalling. flashUntil holds the UnixNano instant
+// the visual flash ends (0 = no flash) and flashNanos the full duration of
+// that flash; together they let onDraw derive how far the fade has
+// progressed. Both are written from the ringBell command and read by onDraw,
+// and are atomic because a scheduled Close can race the read.
 // seenCount/readCount are touched only by applyChunk (reader goroutine).
-// flashTimer is reset by scheduleBellClear (reader goroutine) and stopped in
-// Close, which first waits for readLoop to exit so the two never overlap.
+// The remaining fields are main-thread only: startBellFlash, drawOverlays
+// and allowBeep all run on the GUI thread (the first via queueCommand), and
+// Close touches the timers only after readLoop has exited.
 type bellState struct {
 	flashUntil atomic.Int64
+	flashNanos atomic.Int64
 	flashTimer *time.Timer // reused per-BEL clear timer; lazy init
+	fadeTimer  *time.Timer // reused fade-frame timer; lazy init
+	lastBeep   time.Time   // rate-limit stamp; see beepInterval
 	seenCount  uint64
 	readCount  uint64
 }
@@ -1249,6 +1302,9 @@ func (t *Term) Close() error {
 	if t.bell.flashTimer != nil {
 		t.bell.flashTimer.Stop()
 	}
+	if t.bell.fadeTimer != nil {
+		t.bell.fadeTimer.Stop()
+	}
 	// Reader goroutine has exited (readDone above), so the sync watchdog
 	// can no longer be re-armed; a fire that already started is a no-op
 	// via the closed guard in queueCommand.
@@ -1380,10 +1436,7 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 
 	if bellCount > t.bell.seenCount {
 		t.bell.seenCount = bellCount
-		if d := t.effectiveBellDuration(); d > 0 {
-			t.bell.flashUntil.Store(time.Now().Add(d).UnixNano())
-			t.scheduleBellClear(d)
-		}
+		t.ringBell()
 	}
 
 	// Coalesce: queue at most one outstanding UpdateWindow so a burst of
@@ -1473,6 +1526,58 @@ func (t *Term) AdjustFontSize(delta float32) {
 	t.draw.runeCache = nil
 	t.bumpVersion()
 	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+}
+
+// ringBell signals a BEL according to Cfg.BellMode.
+//
+// Everything runs inside the queued command: the beep has to happen on
+// the GUI thread (AppKit requires it), BeepAvailable is only answerable
+// there, and routing the flash through the same path keeps the bell
+// timers main-thread-only rather than shared with the reader goroutine.
+func (t *Term) ringBell() {
+	mode := t.cfg.BellMode
+	if mode == BellNone {
+		return
+	}
+	t.queueCommand(func(w *gui.Window) {
+		audible := mode != BellVisual && w.BeepAvailable()
+		if audible && t.allowBeep(time.Now()) {
+			w.Beep()
+		}
+		// BellAudible stays silent rather than flashing when the
+		// platform cannot beep; BellAuto is the mode that degrades.
+		flash := mode == BellVisual || mode == BellBoth ||
+			(mode == BellAuto && !audible)
+		if flash {
+			t.startBellFlash()
+		}
+	})
+}
+
+// allowBeep reports whether enough time has passed since the last
+// audible bell, and records now when it has. Main-thread only (called
+// from the ringBell command).
+func (t *Term) allowBeep(now time.Time) bool {
+	if !t.bell.lastBeep.IsZero() && now.Sub(t.bell.lastBeep) < beepInterval {
+		return false
+	}
+	t.bell.lastBeep = now
+	return true
+}
+
+// startBellFlash arms the visual-bell overlay for the configured
+// duration. Main-thread only (called from the ringBell command).
+func (t *Term) startBellFlash() {
+	d := t.effectiveBellDuration()
+	if d <= 0 {
+		return
+	}
+	// Store the duration alongside the end instant so drawOverlays can
+	// derive fade progress without knowing the config.
+	t.bell.flashNanos.Store(int64(d))
+	t.bell.flashUntil.Store(time.Now().Add(d).UnixNano())
+	t.bumpVersion()
+	t.scheduleBellClear(d)
 }
 
 // effectiveBellDuration returns the configured visual-bell duration,

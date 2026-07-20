@@ -546,7 +546,12 @@ func TestOnDraw_ScrollbarHiddenLive(t *testing.T) {
 // Bell flash
 // ---------------------------------------------------------------------------
 
-func TestOnDraw_BellFlash(t *testing.T) {
+// bellFlashAlpha runs one onDraw on a fresh Term/DrawContext with the flash
+// ending at until (over a total-long flash) and reports the alpha of the
+// white overlay, or 0 when no overlay was emitted. A fresh context per call
+// matters: DrawContext accumulates batches, so reusing one across samples
+// would keep matching the first sample's overlay.
+func bellFlashAlpha(until time.Time, total time.Duration) uint8 {
 	tm, dc := newDrawTerm(4, 8, 10, 20)
 	tm.grid.Mu.Lock()
 	g := tm.grid
@@ -554,18 +559,52 @@ func TestOnDraw_BellFlash(t *testing.T) {
 		g.Cells[i].Ch = ' '
 		g.Cells[i].Width = 1
 	}
+	// The block cursor also paints an opaque white rect; suppress it so
+	// only the bell overlay can match.
+	g.CursorVisible = false
 	tm.grid.Mu.Unlock()
-	tm.bell.flashUntil.Store(time.Now().Add(time.Second).UnixNano())
+
+	tm.bell.flashNanos.Store(int64(total))
+	tm.bell.flashUntil.Store(until.UnixNano())
 	tm.onDraw(dc)
-	found := false
 	for _, b := range dc.Batches() {
-		if b.Color == gui.RGBA(255, 255, 255, 40) {
-			found = true
-			break
+		if b.Color.R == 255 && b.Color.G == 255 && b.Color.B == 255 &&
+			b.Color.A > 0 {
+			return b.Color.A
 		}
 	}
-	if !found {
-		t.Error("expected bell flash overlay")
+	return 0
+}
+
+func TestOnDraw_BellFlash(t *testing.T) {
+	// Just-fired bell: overlay present, at or just below the peak alpha.
+	alpha := bellFlashAlpha(time.Now().Add(time.Second), time.Second)
+	if alpha == 0 {
+		t.Fatal("expected bell flash overlay")
+	}
+	if alpha > bellFlashPeakAlpha {
+		t.Errorf("alpha %d exceeds peak %d", alpha, bellFlashPeakAlpha)
+	}
+}
+
+func TestOnDraw_BellFlashFadesOut(t *testing.T) {
+	const total = time.Second
+	// Sample early / mid / late in the flash by moving the end instant
+	// closer to now; alpha must decrease monotonically.
+	early := bellFlashAlpha(time.Now().Add(total), total)
+	mid := bellFlashAlpha(time.Now().Add(total/2), total)
+	late := bellFlashAlpha(time.Now().Add(total/20), total)
+
+	if early <= mid || mid <= late {
+		t.Errorf("expected fade-out, got early=%d mid=%d late=%d",
+			early, mid, late)
+	}
+}
+
+func TestOnDraw_BellFlashExpired(t *testing.T) {
+	// Flash window already elapsed: no overlay at all.
+	if a := bellFlashAlpha(time.Now().Add(-time.Second), time.Second); a != 0 {
+		t.Errorf("expected no overlay after flash expiry, got alpha %d", a)
 	}
 }
 
