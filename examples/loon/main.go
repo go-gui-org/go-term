@@ -1,4 +1,10 @@
-// Command loon runs the go-term widget with multi-tab, multi-pane support.
+// Loon is a full-featured terminal emulator built on go-term and the go-gui
+// framework. It spawns a real shell over a PTY and renders through a
+// GPU-accelerated DrawCanvas, covering the protocol surface expected by modern
+// CLI tools and TUI frameworks (e.g. vim, less, htop). Supports multi-tab,
+// multi-pane workspaces, workspace save/restore, and multiple color themes.
+// Targets macOS, Linux, and Windows (ConPTY). Used as a daily-driver terminal
+// on macOS.
 package main
 
 import (

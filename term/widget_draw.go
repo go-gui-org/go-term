@@ -892,10 +892,55 @@ func (t *Term) drawOverlays(ds *drawState) {
 		t.drawSearchBar(ds.dc, ds.style)
 	}
 
-	// Visual bell: brief semi-transparent overlay.
-	if fu := t.bell.flashUntil.Load(); fu != 0 && ds.now.UnixNano() < fu {
-		ds.dc.FilledRect(0, 0, ds.dc.Width, ds.dc.Height, gui.RGBA(255, 255, 255, 40))
+	// Visual bell: a faint white wash that eases out over the flash
+	// duration rather than switching on and off, so an incidental BEL
+	// registers peripherally instead of strobing the whole pane.
+	t.drawBellFlash(ds)
+}
+
+// drawBellFlash paints the visual-bell overlay at an alpha derived from how
+// much of the flash duration remains, and schedules the next fade frame
+// while the flash is still running. Main-thread only (called from
+// drawOverlays), which is what makes the unsynchronized fadeTimer access
+// safe.
+func (t *Term) drawBellFlash(ds *drawState) {
+	fu := t.bell.flashUntil.Load()
+	if fu == 0 {
+		return
 	}
+	remaining := fu - ds.now.UnixNano()
+	if remaining <= 0 {
+		return
+	}
+	total := t.bell.flashNanos.Load()
+	if total <= 0 {
+		return
+	}
+	// progress runs 0→1 across the flash; clamped because a BEL landing
+	// between the Store of flashNanos and flashUntil can briefly make
+	// remaining exceed total.
+	progress := 1 - float64(remaining)/float64(total)
+	if progress < 0 {
+		progress = 0
+	}
+	// Ease out quadratically: near-peak at the leading edge where the eye
+	// catches the event, then a long shallow tail instead of a cliff.
+	fade := (1 - progress) * (1 - progress)
+	alpha := uint8(float64(bellFlashPeakAlpha)*fade + 0.5)
+	if alpha == 0 {
+		return
+	}
+	ds.dc.FilledRect(0, 0, ds.dc.Width, ds.dc.Height,
+		gui.RGBA(255, 255, 255, alpha))
+
+	// Drive the next step of the fade. scheduleBellClear already covers the
+	// final repaint that removes the overlay; this only fills in the frames
+	// between, and stops on its own once remaining hits zero.
+	next := time.Duration(remaining)
+	if next > bellFadeFrame {
+		next = bellFadeFrame
+	}
+	t.scheduleDelayedUpdate(next, &t.bell.fadeTimer)
 }
 
 // scrollbarEdgeInset returns the horizontal gap to leave between the drawn

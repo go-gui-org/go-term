@@ -2149,8 +2149,12 @@ func TestApplyChunk_BellSchedulesFlash(t *testing.T) {
 	tm := &Term{
 		grid:   g,
 		parser: newParser(g),
-		cmd:    &gui.Window{},
-		cfg:    Cfg{BellFlashDuration: 50 * time.Millisecond},
+		// syncScheduler runs the queued bell command inline; the flash
+		// is armed on the GUI thread, not in applyChunk. Its zero
+		// gui.Window has no native platform, so BeepAvailable is false
+		// and the default BellAuto mode falls back to the flash.
+		cmd: syncScheduler{},
+		cfg: Cfg{BellFlashDuration: 50 * time.Millisecond},
 	}
 	// BEL (0x07) increments BellCount. Grid stays clean but the bell
 	// delta makes dirty=true, triggering a version bump and flash.
@@ -2174,7 +2178,7 @@ func TestApplyChunk_BellFlashDisabled(t *testing.T) {
 	tm := &Term{
 		grid:   g,
 		parser: newParser(g),
-		cmd:    &gui.Window{},
+		cmd:    syncScheduler{},
 		cfg:    Cfg{BellFlashDuration: -1}, // disabled
 	}
 	tm.applyChunk([]byte("\x07"), true)
@@ -2183,6 +2187,86 @@ func TestApplyChunk_BellFlashDisabled(t *testing.T) {
 	}
 	if tm.bell.flashUntil.Load() != 0 {
 		t.Error("bell.flashUntil should be zero when flash disabled")
+	}
+}
+
+// newBellTerm builds a Term whose queued commands run inline. The zero
+// gui.Window handed to syncScheduler reports BeepAvailable false, which
+// is the "platform cannot beep" case.
+func newBellTerm(mode BellMode) *Term {
+	g := newGrid(24, 80)
+	return &Term{
+		grid:   g,
+		parser: newParser(g),
+		cmd:    syncScheduler{},
+		cfg:    Cfg{BellMode: mode, BellFlashDuration: 50 * time.Millisecond},
+	}
+}
+
+func TestRingBell_ModeSelectsFlash(t *testing.T) {
+	// With no beep available, only the modes that can flash should.
+	tests := []struct {
+		mode      BellMode
+		wantFlash bool
+	}{
+		{BellAuto, true},     // degrades to visual when it cannot beep
+		{BellAudible, false}, // sound only; stays silent instead
+		{BellVisual, true},
+		{BellBoth, true},
+		{BellNone, false},
+	}
+	for _, tc := range tests {
+		tm := newBellTerm(tc.mode)
+		tm.applyChunk([]byte("\x07"), true)
+		got := tm.bell.flashUntil.Load() != 0
+		if got != tc.wantFlash {
+			t.Errorf("mode %d: flash armed = %v, want %v",
+				tc.mode, got, tc.wantFlash)
+		}
+		if tm.bell.flashTimer != nil {
+			tm.bell.flashTimer.Stop()
+		}
+	}
+}
+
+func TestRingBell_NoneIgnoresBell(t *testing.T) {
+	tm := newBellTerm(BellNone)
+	tm.applyChunk([]byte("\x07"), true)
+	// The BEL is still counted (the grid saw it) but nothing is signalled.
+	if tm.bell.seenCount != 1 {
+		t.Errorf("bell.seenCount = %d, want 1", tm.bell.seenCount)
+	}
+	if tm.bell.flashUntil.Load() != 0 {
+		t.Error("BellNone should not arm the flash")
+	}
+}
+
+func TestAllowBeep_RateLimits(t *testing.T) {
+	tm := newBellTerm(BellAudible)
+	base := time.Now()
+
+	if !tm.allowBeep(base) {
+		t.Fatal("first beep should be allowed")
+	}
+	if tm.allowBeep(base.Add(beepInterval / 2)) {
+		t.Error("beep within beepInterval should be suppressed")
+	}
+	if !tm.allowBeep(base.Add(beepInterval + time.Millisecond)) {
+		t.Error("beep after beepInterval should be allowed")
+	}
+}
+
+func TestAllowBeep_SuppressedBeepDoesNotAdvanceStamp(t *testing.T) {
+	// A storm of bells must not push the next allowed beep further out
+	// each time, or a tight BEL loop would silence the bell entirely.
+	tm := newBellTerm(BellAudible)
+	base := time.Now()
+	tm.allowBeep(base)
+	for i := range 10 {
+		tm.allowBeep(base.Add(time.Duration(i) * time.Millisecond))
+	}
+	if !tm.allowBeep(base.Add(beepInterval + time.Millisecond)) {
+		t.Error("suppressed beeps advanced the rate-limit stamp")
 	}
 }
 

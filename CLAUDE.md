@@ -233,8 +233,8 @@ If keystrokes don't reach the PTY, focus is the first place to look.
 
 - Comments wrap at ~90 columns.
 - Public API in `term/` is small on purpose: `Cfg`, `Term`, `NamedTheme`,
-  `Theme`, `New`, `View`, `Close`, `Cwd`, `SetTheme`, `Rows`, `Cols`,
-  `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`, plus
+  `Theme`, `BellMode`, `New`, `View`, `Close`, `Cwd`, `SetTheme`, `Rows`,
+  `Cols`, `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`, plus
   `Shortcuts`/`ShortcutInfo` (display metadata for help overlays). Keep it
   that way; add unexported helpers freely.
 - Performance target: reduce heap allocations. The OnDraw hot path
