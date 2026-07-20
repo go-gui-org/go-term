@@ -223,6 +223,56 @@ func TestScrollbackRing_Reset(t *testing.T) {
 	}
 }
 
+func TestScrollbackRing_DropBacking_ReleasesMemory(t *testing.T) {
+	r := scrollbackRing{}
+	r.SetGeom(10, 100)
+	for range r.cap {
+		r.Push(makeRow("x"), false)
+	}
+	if r.cells == nil {
+		t.Fatal("cells nil before DropBacking")
+	}
+	r.DropBacking()
+	if r.cells != nil {
+		t.Error("cells want nil after DropBacking")
+	}
+	if r.wrapped != nil {
+		t.Error("wrapped want nil after DropBacking")
+	}
+	if r.head != 0 || r.size != 0 {
+		t.Errorf("head=%d size=%d, want 0,0", r.head, r.size)
+	}
+}
+
+func TestScrollbackRing_DropBacking_LazyReallocOnPush(t *testing.T) {
+	r := scrollbackRing{}
+	r.SetGeom(3, 5)
+	r.Push(makeRow("aaa"), false)
+	r.DropBacking()
+	// Push after drop: backing must be lazy-allocated.
+	evicted := r.Push(makeRow("zzz"), false)
+	if evicted {
+		t.Error("first Push after drop: want evicted=false")
+	}
+	if r.Len() != 1 {
+		t.Errorf("Len() = %d, want 1", r.Len())
+	}
+	if r.Row(0)[0].Ch != 'z' {
+		t.Error("row content wrong after lazy realloc")
+	}
+}
+
+func TestScrollbackRing_DropBacking_ZeroCap(t *testing.T) {
+	r := scrollbackRing{}
+	r.SetGeom(0, 80)
+	r.DropBacking()
+	// Push with cap=0 after drop must remain safe.
+	evicted := r.Push(makeRow("hi"), false)
+	if evicted {
+		t.Error("Push after drop with cap=0 want evicted=false")
+	}
+}
+
 // ---- SetGeom ----
 
 func TestScrollbackRing_SetGeom_Basic(t *testing.T) {

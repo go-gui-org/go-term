@@ -444,7 +444,7 @@ func (g *grid) EraseInDisplay(mode int) {
 		// trimmed/cleared, matching EnterAlt/ExitAlt on a buffer swap.
 		if mode == 3 {
 			if sb := g.Scrollback.Len(); sb > 0 {
-				g.Scrollback.Reset()
+				g.Scrollback.DropBacking()
 				g.trimMarks(sb)
 				g.trimGraphics(sb)
 			}
