@@ -85,9 +85,11 @@ type Cfg struct {
 	Args []string
 
 	// Env appends to the child process environment. When nil or empty,
-	// the child inherits os.Environ() plus TERM=xterm-256color. Entries
-	// are appended after the inherited environment, so they override
-	// inherited values. Use "KEY=" (trailing equals) to unset.
+	// the child inherits os.Environ() plus TERM=xterm-256color, and — on
+	// unix, only when the inherited environment sets no LC_ALL/LC_CTYPE/LANG
+	// — a UTF-8 LANG so wide characters survive. Entries are appended after
+	// the inherited environment, so they override inherited values. Use
+	// "KEY=" (trailing equals) to unset.
 	Env []string
 
 	// TextStyle overrides the default monospace text style. When set to
