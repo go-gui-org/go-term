@@ -208,6 +208,9 @@ func TestGrid_EraseInDisplay_Mode3_ClearsScrollback(t *testing.T) {
 	if g.Scrollback.Len() != 0 {
 		t.Errorf("mode 3: scrollback len=%d, want 0", g.Scrollback.Len())
 	}
+	if g.Scrollback.cells != nil || g.Scrollback.wrapped != nil {
+		t.Error("mode 3: DropBacking should nil the scrollback backing arrays")
+	}
 	if g.ViewOffset != 0 {
 		t.Errorf("mode 3: ViewOffset=%d, want 0", g.ViewOffset)
 	}
@@ -219,11 +222,22 @@ func TestGrid_EraseInDisplay_Mode3_ClearsScrollback(t *testing.T) {
 			t.Errorf("mode 3 should clear all cells: %v", c.Ch)
 		}
 	}
+	// Scrollback must lazy-reallocate on new content after ED 3.
+	g.scrollUpRegion(1)
+	if g.Scrollback.Len() != 1 {
+		t.Errorf("mode 3: after scroll, scrollback len=%d, want 1", g.Scrollback.Len())
+	}
+	if r := g.Scrollback.Row(0); r == nil || r[0].Ch != ' ' {
+		t.Error("mode 3: scrollback Row(0) should exist after lazy realloc")
+	}
 
 	g = mk()
 	g.EraseInDisplay(2)
 	if g.Scrollback.Len() != 4 {
 		t.Errorf("mode 2 must not clear scrollback: len=%d, want 4", g.Scrollback.Len())
+	}
+	if g.Scrollback.cells == nil {
+		t.Error("mode 2 must not drop scrollback backing")
 	}
 }
 

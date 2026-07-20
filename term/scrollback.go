@@ -42,6 +42,11 @@ func (r *scrollbackRing) Push(src []cell, wrapped bool) bool {
 	if r.cap == 0 || r.cols == 0 {
 		return false
 	}
+	// Lazy-allocate backing if it was dropped by DropBacking.
+	if r.cells == nil {
+		r.cells = make([]cell, r.cap*r.cols)
+		r.wrapped = make([]bool, r.cap)
+	}
 	var slot int
 	evicted := r.size == r.cap
 	if evicted {
@@ -59,6 +64,16 @@ func (r *scrollbackRing) Push(src []cell, wrapped bool) bool {
 }
 
 func (r *scrollbackRing) Reset() { r.head, r.size = 0, 0 }
+
+// DropBacking releases the backing arrays (cells and wrapped) so the GC can
+// reclaim them. cap and cols are preserved; Push will lazy-allocate fresh
+// backing on the next write.
+func (r *scrollbackRing) DropBacking() {
+	r.cells = nil
+	r.wrapped = nil
+	r.head = 0
+	r.size = 0
+}
 
 // SetGeom reallocates at (capacity, cols), dropping stored rows. Negative
 // inputs clamp to zero; an absurd capacity*cols is bounded so make can't
