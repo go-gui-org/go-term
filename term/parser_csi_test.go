@@ -212,7 +212,9 @@ func TestParser_CSI_EraseInDisplayLine(t *testing.T) {
 func TestParser_CSI_UnknownDropped(t *testing.T) {
 	g, p := newParserGrid(1, 5)
 	g.Put('z')
-	feed(t, g, p, []byte("\x1b[Z"))
+	// CSI V has no assigned meaning; CSI Z (CBT) used to stand in here, but
+	// it is implemented now and no longer exercises the drop path.
+	feed(t, g, p, []byte("\x1b[V"))
 	if g.At(0, 0).Ch != 'z' || g.CursorC != 1 {
 		t.Errorf("unknown CSI mutated state: %v cursor=%d",
 			g.At(0, 0).Ch, g.CursorC)

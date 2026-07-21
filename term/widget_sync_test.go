@@ -193,3 +193,69 @@ func TestSyncWatchdog_ClosedTermNoop(t *testing.T) {
 		t.Errorf("drawVersion = %d after closed fire, want 0", v)
 	}
 }
+
+// A chunk that closes one frame and immediately opens the next (the common
+// "…ESU BSU" boundary a pty read can land on) must still paint the finished
+// frame: the newly opened block has written nothing, so the grid holds
+// exactly the completed frame. Before this, the frame waited for the next
+// read or the 500 ms watchdog.
+func TestApplyChunk_FrameFlushesWhenNextBlockOpenedButEmpty(t *testing.T) {
+	tm := newSyncTestTerm()
+
+	if !tm.applyChunk([]byte("\x1b[?2026hX\x1b[?2026l\x1b[?2026h"), true) {
+		t.Error("completed frame not flushed when the next block is still empty")
+	}
+	if v := tm.drawVersion.Load(); v != 1 {
+		t.Errorf("drawVersion = %d, want 1", v)
+	}
+	tm.grid.Mu.Lock()
+	active, ready := tm.grid.SyncActive, tm.grid.SyncFrameReady
+	tm.grid.Mu.Unlock()
+	if !active {
+		t.Error("trailing BSU should leave a block open")
+	}
+	if ready {
+		t.Error("SyncFrameReady should be cleared once the frame is painted")
+	}
+}
+
+// The counterpart: once the next block writes a cell, the grid holds a
+// half-drawn mix of two frames. Painting it would tear, so suppression
+// stands and the watchdog is the only release.
+func TestApplyChunk_PartialNextFrameStaysSuppressed(t *testing.T) {
+	tm := newSyncTestTerm()
+
+	if tm.applyChunk([]byte("\x1b[?2026hX\x1b[?2026l\x1b[?2026hY"), true) {
+		t.Error("painted a torn frame: next block has already written")
+	}
+	if v := tm.drawVersion.Load(); v != 0 {
+		t.Errorf("drawVersion = %d, want 0 while a partial frame is pending", v)
+	}
+	tm.grid.Mu.Lock()
+	ready := tm.grid.SyncFrameReady
+	tm.grid.Mu.Unlock()
+	if !ready {
+		t.Error("the completed frame should stay pending for the watchdog")
+	}
+}
+
+// A block reopened after a frame, with writes arriving in a later chunk,
+// must not be flushed early by that later chunk either.
+func TestApplyChunk_QuiescenceIsPerChunk(t *testing.T) {
+	tm := newSyncTestTerm()
+
+	// Frame 1 completes, frame 2 opens empty: painted.
+	if !tm.applyChunk([]byte("\x1b[?2026hA\x1b[?2026l\x1b[?2026h"), true) {
+		t.Fatal("setup: first frame should flush")
+	}
+	// Frame 2 starts writing in the next chunk: no repaint until its ESU.
+	if tm.applyChunk([]byte("B"), true) {
+		t.Error("mid-frame write repainted inside an open block")
+	}
+	if !tm.applyChunk([]byte("\x1b[?2026l"), true) {
+		t.Error("ESU should flush frame 2")
+	}
+	if v := tm.drawVersion.Load(); v != 2 {
+		t.Errorf("drawVersion = %d, want 2 (one paint per frame)", v)
+	}
+}

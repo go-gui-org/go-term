@@ -6,6 +6,30 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- ECH (`CSI Ps X`, erase characters) — previously parsed and dropped. TUIs
+  that paint split-pane layouts use it to clear a bounded span without
+  `EL` wiping the panes sharing the row.
+- CHT (`CSI Ps I`) and CBT (`CSI Ps Z`) tab navigation.
+- `COLORTERM=truecolor` in the child environment (Unix and Windows). The
+  widget renders 24-bit color, but `TERM=xterm-256color` alone only promises
+  the palette, so TUI toolkits were quantizing truecolor output.
+
+### Fixed
+
+- IL (`CSI Ps L`) and DL (`CSI Ps M`) no longer move the cursor to column 0.
+  xterm, wezterm and tmux all preserve the column; homing it made every
+  following write on the row land at the wrong offset. Together with the
+  missing ECH and CBT above, this left stale text across the screen in
+  cell-diffing TUIs (charmbracelet/crush).
+- A synchronized-update frame that completed mid-chunk is now painted
+  immediately when the application has already opened the next block but has
+  not written into it — the common `ESU BSU` boundary a pty read lands on.
+  Previously that frame waited for the next read or the 500 ms watchdog.
+  A block that has started writing still suppresses the repaint, so no
+  half-drawn frame is shown.
+
 ## [0.6.0] - 2026-07-19
 
 ### Added

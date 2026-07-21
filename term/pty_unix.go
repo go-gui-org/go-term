@@ -51,6 +51,12 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 		env = replaceEnv(env, "LANG", defaultUTF8Locale())
 	}
 	env = append(env, "TERM=xterm-256color")
+	// The widget renders 24-bit color, but TERM=xterm-256color only promises
+	// the 256-color palette — TUI toolkits (lipgloss/bubbletea, among others)
+	// probe COLORTERM to decide whether to emit SGR 38;2;r;g;b or quantize to
+	// the palette. Without it the child downgrades truecolor output for no
+	// reason.
+	env = append(env, "COLORTERM=truecolor")
 	// cfg.Env goes last so callers can override anything set above.
 	env = append(env, cfg.Env...)
 	cmd.Env = env

@@ -363,6 +363,50 @@ func (g *grid) Tab() {
 	g.CursorC = g.Cols - 1
 }
 
+// TabForward advances n tab stops. Implements CSI Ps I (CHT). n < 1 is
+// treated as 1; the cursor clamps to the last column when stops run out.
+func (g *grid) TabForward(n int) {
+	if n < 1 {
+		n = 1
+	}
+	for range n {
+		g.Tab()
+	}
+}
+
+// TabBackward moves back n tab stops. Implements CSI Ps Z (CBT), the
+// counterpart to Tab: scans TabStops leftward from CursorC-1 and stops at
+// column 0 when no earlier stop exists. TUI renderers use CBT to walk back to
+// a column boundary while painting — ignoring it strands the cursor to the
+// right of where the application believes it is, so subsequent writes land in
+// the wrong columns and leave the previous text unerased.
+func (g *grid) TabBackward(n int) {
+	if n < 1 {
+		n = 1
+	}
+	if g.CursorC > g.Cols {
+		g.CursorC = g.Cols
+	}
+	for range n {
+		if g.CursorC <= 0 {
+			g.CursorC = 0
+			return
+		}
+		moved := false
+		for c := g.CursorC - 1; c > 0; c-- {
+			if g.TabStops[c] {
+				g.CursorC = c
+				moved = true
+				break
+			}
+		}
+		if !moved {
+			g.CursorC = 0
+			return
+		}
+	}
+}
+
 // SetTabStop sets a tab stop at the current cursor column. Implements ESC H (HTS).
 func (g *grid) SetTabStop() {
 	if g.CursorC >= 0 && g.CursorC < MaxGridDim {
@@ -405,6 +449,40 @@ func (g *grid) EraseInLine(mode int) {
 	}
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	for c := cFrom; c < cTo; c++ {
+		g.Cells[row*g.Cols+c] = blank
+	}
+	g.markDirty(row)
+}
+
+// EraseChars implements CSI Ps X (ECH): blank n cells starting at the
+// cursor, clamped to the right margin. Unlike DCH the rest of the row does
+// not shift, and unlike EL the span is bounded — which is why cell-diffing
+// TUI renderers use it to repaint one pane of a split layout without
+// disturbing the panes beside it. The cursor does not move. Cleared cells
+// take the current bg/attrs, matching EraseInLine, so a painted background
+// survives the erase (BCE).
+func (g *grid) EraseChars(n int) {
+	row := g.CursorR
+	if row < 0 || row >= g.Rows {
+		return
+	}
+	if n < 1 {
+		n = 1
+	}
+	from := g.CursorC
+	if from < 0 {
+		from = 0
+	}
+	if from >= g.Cols {
+		return
+	}
+	to := min(from+n, g.Cols)
+	// A double-width char may straddle either edge of the span; clear its
+	// partner cell too so no orphaned continuation half is left behind.
+	g.eraseWideAt(row, from)
+	g.eraseWideAt(row, to-1)
+	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
+	for c := from; c < to; c++ {
 		g.Cells[row*g.Cols+c] = blank
 	}
 	g.markDirty(row)
@@ -459,6 +537,12 @@ func (g *grid) EraseInDisplay(mode int) {
 // cursor row, pushing existing rows toward Bottom; rows pushed past
 // Bottom are discarded. No-op when the cursor is outside the active
 // scroll region (DEC behavior).
+//
+// The cursor column is left untouched. ECMA-48 specifies a move to the line
+// home position, but xterm, wezterm and tmux all preserve the column, and
+// cell-diffing TUI renderers (Bubble Tea/ultraviolet, notably crush) assume
+// that: homing the column here makes every following write on the row land
+// at the wrong offset, leaving the row's tail permanently unpainted.
 func (g *grid) InsertLines(n int) {
 	if n <= 0 || !g.regionValid() {
 		return
@@ -487,13 +571,13 @@ func (g *grid) InsertLines(n int) {
 		}
 		g.RowWrapped[r] = false
 	}
-	g.CursorC = 0
 	g.markAllDirty()
 }
 
 // DeleteLines implements CSI Ps M (DL): delete n lines starting at the
 // cursor row, shifting rows below up; blank rows fill the bottom of
-// the region. No-op when cursor is outside the region.
+// the region. No-op when cursor is outside the region. The cursor column
+// is preserved — see InsertLines for why.
 func (g *grid) DeleteLines(n int) {
 	if n <= 0 || !g.regionValid() {
 		return
@@ -520,7 +604,6 @@ func (g *grid) DeleteLines(n int) {
 		}
 		g.RowWrapped[r] = false
 	}
-	g.CursorC = 0
 	g.markAllDirty()
 }
 
