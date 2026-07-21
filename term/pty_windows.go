@@ -101,7 +101,9 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	// inheriting the parent's real console.
 	si.Flags |= windows.STARTF_USESTDHANDLES
 
-	env := append(os.Environ(), "TERM=xterm-256color")
+	// COLORTERM advertises the widget's 24-bit rendering; TERM alone only
+	// promises the 256-color palette, so TUI toolkits quantize without it.
+	env := append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
 	env = append(env, cfg.Env...)
 	envBlock, err := createEnvBlock(env)
 	if err != nil {

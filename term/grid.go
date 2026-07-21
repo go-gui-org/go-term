@@ -139,14 +139,29 @@ func clampDim(n int) int {
 func (g *grid) BeginSync() {
 	if !g.SyncActive {
 		g.SyncBegan = time.Now()
+		g.syncOpenSeq = g.mutSeq
 	}
 	g.SyncActive = true
 }
 
 // EndSync ends a synchronized-update block; the caller's next redraw
 // check observes SyncActive == false and flushes accumulated dirty rows.
+// SyncFrameReady records that a complete frame is now sitting in the grid
+// unpainted, which lets the widget flush it even if the application
+// immediately opened the next block (see SyncFrameQuiescent).
 func (g *grid) EndSync() {
 	g.SyncActive = false
+	g.SyncFrameReady = true
+}
+
+// SyncFrameQuiescent reports whether the grid currently holds a finished,
+// unpainted frame with nothing written on top of it — true when a block
+// closed and any block opened since has not touched a cell yet. Painting is
+// safe exactly then: once the next frame starts writing, the grid holds a
+// half-drawn mix and only EndSync (or the watchdog) may release it.
+// Caller holds Mu.
+func (g *grid) SyncFrameQuiescent() bool {
+	return g.SyncFrameReady && g.mutSeq == g.syncOpenSeq
 }
 
 // cell.FG and cell.BG are packed uint32 values. The high byte is the
@@ -426,6 +441,17 @@ type grid struct {
 	// a block whose end never arrives cannot suppress repaints forever.
 	SyncBegan time.Time
 
+	// SyncFrameReady is set by EndSync and cleared once the widget paints:
+	// a completed frame is sitting in the grid. mutSeq counts cell-level
+	// mutations; syncOpenSeq snapshots it when a block opens, so comparing
+	// the two says whether the newly opened block has written anything yet.
+	// Together they let a finished frame be flushed immediately even when
+	// the application has already opened the next block — see
+	// SyncFrameQuiescent.
+	SyncFrameReady bool
+	mutSeq         uint64
+	syncOpenSeq    uint64
+
 	// Cursor shape + blink. Set via DECSCUSR (CSI Ps SP q). Default is
 	// a steady block. Embedders can override blink via
 	// Cfg.CursorBlink without overriding shape.
@@ -505,7 +531,17 @@ func (g *grid) MouseReporting() bool {
 func (g *grid) Bell() { g.BellCount++ }
 
 func (g *grid) markDirty(r int) {
-	if r >= 0 && r < len(g.Dirty) && !g.Dirty[r] {
+	if r < 0 || r >= len(g.Dirty) {
+		return
+	}
+	// mutSeq counts every mutation, not just the first per row, so
+	// SyncFrameQuiescent can tell "nothing written since this block opened"
+	// from "this row was already dirty before it opened". Counted
+	// unconditionally: gating it on SyncActive measured no better, and the
+	// increment itself is within noise on BenchmarkParserFeed_PlainText
+	// (82.6 MB/s without it, 84.3 with, medians of 6).
+	g.mutSeq++
+	if !g.Dirty[r] {
 		g.Dirty[r] = true
 		g.dirtyCount++
 	}
@@ -611,6 +647,7 @@ func (g *grid) AddGraphic(src string, widthPx, heightPx int) (int, int) {
 }
 
 func (g *grid) markAllDirty() {
+	g.mutSeq++
 	for i := range g.Dirty {
 		g.Dirty[i] = true
 	}

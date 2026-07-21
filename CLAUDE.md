@@ -153,7 +153,8 @@ Supports a modern xterm/kitty-compatible subset:
   shape/blink), DA1 (advertises Sixel via extension 4: `CSI ?1;2;4c`),
   DA2, XTVERSION (`CSI > q` → `DCS >| go-term(ver) ST`), XTWINOPS pixel
   geometry (`CSI 14 t`/`CSI 16 t` → text-area / cell size in pixels;
-  manipulation ops ignored), tab stop clear (TBC).
+  manipulation ops ignored), tab stop clear (TBC), tab navigation
+  (CHT `CSI Ps I` / CBT `CSI Ps Z`), erase characters (ECH `CSI Ps X`).
 - Modes: alt screen (1049/1047/47), mouse (1000/1002/1003/1006/1016),
   bracketed paste (2004), focus reporting (1004), synchronized updates
   (2026 — DECSET begins a block, DECRST ends + flushes; a 500 ms watchdog

@@ -101,6 +101,12 @@ func (p *parser) dispatchCSI(final byte) {
 		p.g.EraseInDisplay(p.param(0, 0))
 	case 'K':
 		p.g.EraseInLine(p.param(0, 0))
+	case 'X':
+		p.g.EraseChars(p.param(0, 1))
+	case 'I':
+		p.g.TabForward(p.param(0, 1))
+	case 'Z':
+		p.g.TabBackward(p.param(0, 1))
 	case 'r':
 
 		top := p.param(0, 1) - 1

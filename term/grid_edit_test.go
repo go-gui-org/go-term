@@ -293,8 +293,12 @@ func TestGrid_InsertLines(t *testing.T) {
 			t.Errorf("row %d = %q, want %q", i, got, w)
 		}
 	}
-	if g.CursorC != 0 {
-		t.Errorf("InsertLines must home cursor column: %d", g.CursorC)
+	// IL leaves the column alone (xterm/wezterm/tmux behavior), even though
+	// ECMA-48 specifies a move to the line home position. Cell-diffing TUI
+	// renderers assume the column survives; homing it strands the tail of the
+	// row unpainted.
+	if g.CursorC != 1 {
+		t.Errorf("InsertLines must preserve cursor column: got %d, want 1", g.CursorC)
 	}
 }
 
@@ -858,5 +862,246 @@ func BenchmarkGrid_DeleteLines(b *testing.B) {
 	}
 	for b.Loop() {
 		g.DeleteLines(1)
+	}
+}
+
+// TestGrid_DeleteLines_PreservesColumn pins the cursor-column behavior that
+// cell-diffing TUI renderers depend on: DL shifts rows but must not move the
+// cursor horizontally. Verified against wezterm and tmux, both of which leave
+// the column at its pre-DL value.
+func TestGrid_DeleteLines_PreservesColumn(t *testing.T) {
+	g := newGrid(5, 80)
+	g.CursorR, g.CursorC = 2, 68
+	g.DeleteLines(3)
+	if g.CursorC != 68 {
+		t.Errorf("DeleteLines moved cursor column: got %d, want 68", g.CursorC)
+	}
+	if g.CursorR != 2 {
+		t.Errorf("DeleteLines moved cursor row: got %d, want 2", g.CursorR)
+	}
+}
+
+// TestGrid_InsertLines_PreservesColumn is the IL counterpart to
+// TestGrid_DeleteLines_PreservesColumn.
+func TestGrid_InsertLines_PreservesColumn(t *testing.T) {
+	g := newGrid(5, 80)
+	g.CursorR, g.CursorC = 2, 68
+	g.InsertLines(3)
+	if g.CursorC != 68 {
+		t.Errorf("InsertLines moved cursor column: got %d, want 68", g.CursorC)
+	}
+	if g.CursorR != 2 {
+		t.Errorf("InsertLines moved cursor row: got %d, want 2", g.CursorR)
+	}
+}
+
+// TestGrid_EraseChars covers ECH (CSI Ps X): a bounded, non-shifting erase
+// starting at the cursor. Verified against wezterm and tmux.
+func TestGrid_EraseChars(t *testing.T) {
+	mk := func() *grid {
+		g := newGrid(1, 8)
+		for i := range g.Cols {
+			g.At(0, i).Ch = rune('a' + i)
+		}
+		return g
+	}
+
+	// Erase 3 from the middle: span blanked, cursor and tail untouched.
+	g := mk()
+	g.CursorC = 2
+	g.EraseChars(3)
+	if got := rowText(g, 0); got != "ab   fgh" {
+		t.Errorf("ECH 3 at col 2 = %q, want %q", got, "ab   fgh")
+	}
+	if g.CursorC != 2 {
+		t.Errorf("ECH moved cursor: got %d, want 2", g.CursorC)
+	}
+
+	// Count past the right margin clamps instead of wrapping or panicking.
+	g = mk()
+	g.CursorC = 6
+	g.EraseChars(99)
+	if got := rowText(g, 0); got != "abcdef  " {
+		t.Errorf("ECH clamp at margin = %q, want %q", got, "abcdef  ")
+	}
+
+	// Omitted parameter defaults to 1 (parser passes 1).
+	g = mk()
+	g.CursorC = 0
+	g.EraseChars(1)
+	if got := rowText(g, 0); got != " bcdefgh" {
+		t.Errorf("ECH 1 = %q, want %q", got, " bcdefgh")
+	}
+
+	// n < 1 is treated as 1, and a cursor past the margin is a no-op.
+	g = mk()
+	g.CursorC = 0
+	g.EraseChars(0)
+	if got := rowText(g, 0); got != " bcdefgh" {
+		t.Errorf("ECH 0 should erase one cell = %q", got)
+	}
+	g = mk()
+	g.CursorC = g.Cols
+	g.EraseChars(3)
+	if got := rowText(g, 0); got != "abcdefgh" {
+		t.Errorf("ECH past margin should no-op = %q", got)
+	}
+}
+
+// TestGrid_EraseChars_UsesCurAttrs pins BCE: cleared cells adopt the current
+// SGR background so a painted backdrop survives the erase.
+func TestGrid_EraseChars_UsesCurAttrs(t *testing.T) {
+	g := newGrid(1, 4)
+	g.CurBG = 7
+	g.CurFG = 3
+	g.EraseChars(2)
+	if c := g.At(0, 0); c.BG != 7 || c.FG != 3 {
+		t.Errorf("ECH blank attrs not propagated: %+v", *c)
+	}
+}
+
+// TestGrid_EraseChars_WideCharEdges verifies that EraseChars cleans up
+// full-width characters straddling the left and right edges of the span: a
+// wide continuation at `from` triggers clearing the head to its left, and a
+// wide head at `to-1` triggers clearing the continuation to its right.
+func TestGrid_EraseChars_WideCharEdges(t *testing.T) {
+	// Wide head at col 2 (中), continuation at col 3. Erase from col 3
+	// left edge lands on the continuation cell: eraseWideAt must clear col 2.
+	g := newGrid(1, 6)
+	g.At(0, 2).Ch = '中'
+	g.At(0, 2).Width = 2
+	g.At(0, 3).Ch = 0
+	g.At(0, 3).Width = 0
+	g.CursorC = 3
+	g.EraseChars(2)
+	// Col 2 (the wide head) should have been cleared by eraseWideAt.
+	if c := g.At(0, 2); c.Width == 2 {
+		t.Errorf("wide head at col 2 not cleared after ECH: width=%d ch=%x", c.Width, c.Ch)
+	}
+
+	// Wide head at col 1, continuation at col 2. Erase from col 0 spans to
+	// col 1. eraseWideAt(row, 1) sees a wide head and clears its continuation.
+	g = newGrid(1, 6)
+	g.At(0, 0).Ch = 'X'
+	g.At(0, 0).Width = 1
+	g.At(0, 1).Ch = '中'
+	g.At(0, 1).Width = 2
+	g.At(0, 2).Ch = 0
+	g.At(0, 2).Width = 0
+	g.CursorC = 0
+	g.EraseChars(2)
+	// Col 2 (continuation) should have been cleared by eraseWideAt — it
+	// is no longer Width==0.
+	if c := g.At(0, 2); c.Width == 0 {
+		t.Errorf("continuation at col 2 not cleared after ECH: %+v", c)
+	}
+	// Col 1 itself is blanked by the write loop (space).
+	if c := g.At(0, 1); c.Ch != ' ' || c.Width != 1 {
+		t.Errorf("col 1 should be blanked by span: ch=%q width=%d", c.Ch, c.Width)
+	}
+}
+
+// TestGrid_TabBackward covers CBT (CSI Ps Z). Default stops are every 8
+// columns, so back-tabbing from column 9 lands on 8, then 0.
+func TestGrid_TabBackward(t *testing.T) {
+	g := newGrid(1, 40)
+
+	g.CursorC = 9
+	g.TabBackward(1)
+	if g.CursorC != 8 {
+		t.Errorf("CBT 1 from col 9 = %d, want 8", g.CursorC)
+	}
+	g.TabBackward(1)
+	if g.CursorC != 0 {
+		t.Errorf("CBT 1 from col 8 = %d, want 0", g.CursorC)
+	}
+
+	// Multiple stops in one call, and clamping at the left margin.
+	// Stops sit at 8/16/24/32, so two back-tabs from 25 land on 24 then 16.
+	g.CursorC = 25
+	g.TabBackward(2)
+	if g.CursorC != 16 {
+		t.Errorf("CBT 2 from col 25 = %d, want 16", g.CursorC)
+	}
+	g.CursorC = 3
+	g.TabBackward(5)
+	if g.CursorC != 0 {
+		t.Errorf("CBT past left margin = %d, want 0", g.CursorC)
+	}
+	g.CursorC = 0
+	g.TabBackward(1)
+	if g.CursorC != 0 {
+		t.Errorf("CBT at col 0 should stay: %d", g.CursorC)
+	}
+
+	// n < 1 behaves as 1 (parser passes the default, but guard anyway).
+	g.CursorC = 9
+	g.TabBackward(0)
+	if g.CursorC != 8 {
+		t.Errorf("CBT 0 should act as 1: %d", g.CursorC)
+	}
+
+	// Cleared stops are skipped: with the stop at 8 gone, CBT from 9 → 0.
+	g = newGrid(1, 40)
+	g.TabStops[8] = false
+	g.CursorC = 9
+	g.TabBackward(1)
+	if g.CursorC != 0 {
+		t.Errorf("CBT over cleared stop = %d, want 0", g.CursorC)
+	}
+
+	// cursorC past the right edge is clamped before scanning.
+	g = newGrid(1, 40)
+	g.CursorC = 100
+	g.TabBackward(1)
+	if g.CursorC != 32 {
+		t.Errorf("CBT from past-right c=100 = %d, want 32 (back from 40)", g.CursorC)
+	}
+
+	// Negative cursorC returns immediately at 0.
+	g = newGrid(1, 40)
+	g.CursorC = -5
+	g.TabBackward(1)
+	if g.CursorC != 0 {
+		t.Errorf("CBT from negative cursor = %d, want 0", g.CursorC)
+	}
+}
+
+// TestGrid_TabForward covers CHT (CSI Ps I), the CBT counterpart.
+func TestGrid_TabForward(t *testing.T) {
+	g := newGrid(1, 40)
+
+	g.CursorC = 0
+	g.TabForward(2)
+	if g.CursorC != 16 {
+		t.Errorf("CHT 2 from col 0 = %d, want 16", g.CursorC)
+	}
+	g.CursorC = 0
+	g.TabForward(99)
+	if g.CursorC != 39 {
+		t.Errorf("CHT past right margin = %d, want 39", g.CursorC)
+	}
+
+	// n < 1 is treated as 1 (parser passes the default, but guard anyway).
+	g.CursorC = 0
+	g.TabForward(0)
+	if g.CursorC != 8 {
+		t.Errorf("CHT 0 should act as 1: got %d, want 8", g.CursorC)
+	}
+	g.CursorC = 0
+	g.TabForward(-1)
+	if g.CursorC != 8 {
+		t.Errorf("CHT -1 should act as 1: got %d, want 8", g.CursorC)
+	}
+}
+
+// TestParser_CBT_MovesToTabStop is the end-to-end form of the crush repro:
+// space, CSI Z, 't' must leave 't' in column 0.
+func TestParser_CBT_MovesToTabStop(t *testing.T) {
+	g := newGrid(1, 20)
+	p := newParser(g)
+	p.Feed([]byte(" \x1b[Zt"))
+	if got := g.At(0, 0).Ch; got != 't' {
+		t.Errorf("CBT: col 0 = %q, want 't'", got)
 	}
 }

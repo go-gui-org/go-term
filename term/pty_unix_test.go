@@ -98,3 +98,37 @@ func TestStartPTY_CfgEnvOverridesLocale(t *testing.T) {
 		t.Errorf("LANG = %q, want ja_JP.UTF-8", got)
 	}
 }
+
+// The widget renders 24-bit color, so the child must be told: TERM alone
+// only promises the 256-color palette and TUI toolkits quantize without
+// COLORTERM. cfg.Env still wins, per TestStartPTY_CfgEnvOverridesLocale.
+func TestStartPTY_AdvertisesTruecolor(t *testing.T) {
+	p, err := startPTY(24, 80, Cfg{Command: "/bin/sh", Args: []string{"-c", "exit 0"}})
+	if err != nil {
+		t.Skipf("startPTY: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	if got := envValue(p.cmd.Env, "COLORTERM"); got != "truecolor" {
+		t.Errorf("COLORTERM = %q, want %q", got, "truecolor")
+	}
+	if got := envValue(p.cmd.Env, "TERM"); got != "xterm-256color" {
+		t.Errorf("TERM = %q, want %q", got, "xterm-256color")
+	}
+}
+
+// A caller that deliberately downgrades color must still win: cfg.Env is
+// appended last and envValue takes the final occurrence.
+func TestStartPTY_CfgEnvOverridesColorterm(t *testing.T) {
+	p, err := startPTY(24, 80, Cfg{
+		Command: "/bin/sh",
+		Args:    []string{"-c", "exit 0"},
+		Env:     []string{"COLORTERM="},
+	})
+	if err != nil {
+		t.Skipf("startPTY: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	if got := envValue(p.cmd.Env, "COLORTERM"); got != "" {
+		t.Errorf("COLORTERM = %q, want empty (caller override)", got)
+	}
+}

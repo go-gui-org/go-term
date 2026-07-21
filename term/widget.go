@@ -1398,9 +1398,19 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 		t.parser.feedChunk(data)
 	}
 	bellCount := t.grid.BellCount
-	redraw := !t.grid.SyncOutput || !t.grid.SyncActive
+	// A block still open at the end of this chunk normally suppresses the
+	// repaint, since the grid may hold a half-written frame. But applications
+	// commonly close one frame and open the next back to back (BSU … ESU BSU),
+	// and a read can land in that gap: the grid then holds a *finished* frame
+	// under a block that has written nothing. SyncFrameQuiescent detects
+	// exactly that case, so the frame goes up now instead of waiting on the
+	// next read or the 500 ms watchdog.
+	redraw := !t.grid.SyncOutput || !t.grid.SyncActive || t.grid.SyncFrameQuiescent()
 	dirty := t.grid.HasDirtyRows() || bellCount != t.bell.readCount
 	needUpdate := false
+	if redraw {
+		t.grid.SyncFrameReady = false
+	}
 	if redraw && dirty {
 		t.bell.readCount = bellCount
 		t.bumpVersion()
@@ -1469,6 +1479,9 @@ func (t *Term) onSyncTimeout() {
 		time.Since(t.grid.SyncBegan) >= syncUpdateTimeout
 	if expired {
 		t.grid.EndSync()
+		// The forced flush below is the paint for whatever the grid holds, so
+		// don't leave a frame marked pending for the next chunk to re-flush.
+		t.grid.SyncFrameReady = false
 	}
 	dirty := expired && t.grid.HasDirtyRows()
 	t.grid.Mu.Unlock()
