@@ -48,8 +48,11 @@
 //
 // Use [Cfg.Themes] to provide a list of named themes for runtime
 // switching. The first entry is the initial theme. Built-in themes
-// include [DefaultTheme], [GruvboxTheme], [NordTheme], and
-// [SolarizedDarkTheme].
+// include [DefaultTheme], [GruvboxTheme], [NordTheme],
+// [SolarizedDarkTheme], [DraculaTheme], [CatppuccinMochaTheme],
+// [TokyoNightTheme], [MonokaiTheme], [OneDarkTheme],
+// [RosePineTheme], [KanagawaTheme], [AyuDarkTheme],
+// [EverforestTheme], and [GitHubDarkTheme].
 //
 // # Cwd
 //
@@ -68,7 +71,10 @@
 // have a narrow, well-defined contract to code against.
 //
 // Stable: [NamedTheme], [Theme], and the built-in theme variables
-// ([DefaultTheme], [GruvboxTheme], [NordTheme], [SolarizedDarkTheme]) —
+// ([DefaultTheme], [GruvboxTheme], [NordTheme], [SolarizedDarkTheme],
+// [DraculaTheme], [CatppuccinMochaTheme], [TokyoNightTheme],
+// [MonokaiTheme], [OneDarkTheme], [RosePineTheme], [KanagawaTheme],
+// [AyuDarkTheme], [EverforestTheme], [GitHubDarkTheme]) —
 // their names won't change and their color values won't shift in ways
 // that break contrast; the [MaxGridDim] and [MaxScrollbackCap] constants;
 // the [New] constructor; every exported [Term] method ([Term.View],

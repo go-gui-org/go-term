@@ -124,11 +124,40 @@ func (ws *Workspace) registerCommands() {
 		},
 		// Theme.
 		{
-			ID:       "workspace.cycleTheme",
-			Label:    "Cycle Theme",
+			ID:       "workspace.chooseTheme",
+			Label:    "Choose Theme...",
 			Shortcut: gui.Shortcut{Key: gui.KeyT, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.CycleTheme() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleThemePicker() },
+		},
+		// Theme picker keyboard navigation — only active when picker is visible.
+		{
+			ID:         "workspace.themePickerUp",
+			Shortcut:   gui.Shortcut{Key: gui.KeyUp},
+			Global:     true,
+			CanExecute: func(_ *gui.Window) bool { return ws.themePickerVisible },
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themePickerMoveUp() },
+		},
+		{
+			ID:         "workspace.themePickerDown",
+			Shortcut:   gui.Shortcut{Key: gui.KeyDown},
+			Global:     true,
+			CanExecute: func(_ *gui.Window) bool { return ws.themePickerVisible },
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themePickerMoveDown() },
+		},
+		{
+			ID:         "workspace.themePickerConfirm",
+			Shortcut:   gui.Shortcut{Key: gui.KeyEnter},
+			Global:     true,
+			CanExecute: func(_ *gui.Window) bool { return ws.themePickerVisible },
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themePickerConfirm() },
+		},
+		{
+			ID:         "workspace.themePickerEscape",
+			Shortcut:   gui.Shortcut{Key: gui.KeyEscape},
+			Global:     true,
+			CanExecute: func(_ *gui.Window) bool { return ws.themePickerVisible },
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.ToggleThemePicker() },
 		},
 		// Help overlay.
 		{

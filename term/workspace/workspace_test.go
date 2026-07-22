@@ -225,3 +225,27 @@ func TestLiveTermCount_NoTabsAndEmptyTermsReturnsZero(t *testing.T) {
 		t.Errorf("empty terms maps: got %d, want 0", n)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Theme picker — no-op guard paths
+//
+// Active paths (Toggle open, arrow-key navigation, apply, confirm) require a
+// live *gui.Window + *term.Term and are covered visually via examples/loon.
+// These exercise the early-return guards: zero themes, out-of-bounds apply.
+// ---------------------------------------------------------------------------
+
+func TestToggleThemePicker_ZeroThemesNoop(t *testing.T) {
+	ws := &Workspace{cfg: Cfg{}}
+	// Must not panic and themePickerVisible must remain false.
+	ws.ToggleThemePicker()
+	if ws.themePickerVisible {
+		t.Error("themePickerVisible unexpectedly true with zero themes")
+	}
+}
+
+func TestApplyTheme_OutOfBoundsReturns(t *testing.T) {
+	ws := &Workspace{cfg: Cfg{Themes: []term.NamedTheme{{Name: "a"}}}}
+	// Negative index: early return before ws.w.UpdateWindow (window is nil).
+	ws.applyTheme(-1)
+	ws.applyTheme(5)
+}
