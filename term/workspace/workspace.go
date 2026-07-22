@@ -39,6 +39,11 @@ type Workspace struct {
 	commands    []gui.Command // metadata source for the help overlay
 	helpVisible bool
 
+	// themePickerVisible toggles the theme-selection overlay. When true,
+	// themePickerIdx tracks the highlighted row (arrow keys move it).
+	themePickerVisible bool
+	themePickerIdx     int
+
 	prevOnEvent func(*gui.Event, *gui.Window)
 }
 
@@ -280,6 +285,10 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 		// and panel overlay the panes without disturbing their layout.
 		content = append(content, ws.helpBackdrop(ww, wh), ws.helpPanel())
 	}
+	if ws.themePickerVisible {
+		content = append(content, ws.themePickerBackdrop(ww, wh),
+			ws.themePickerPanel())
+	}
 	outer.Content = content
 	return gui.Column(outer)
 }
@@ -391,6 +400,177 @@ func (ws *Workspace) helpRow(label, keys string, theme gui.Theme) gui.View {
 	}
 	return gui.Row(row)
 }
+
+// — theme picker overlay ————————————————————————————————————
+
+// activeThemeIdx returns the index of the currently-active terminal theme
+// within cfg.Themes, or -1 when no pane is focused or the theme is not
+// found within the configured list.
+func (ws *Workspace) activeThemeIdx() int {
+	if p := ws.ActivePane(); p != nil {
+		curTheme := p.Theme()
+		for i, nt := range ws.cfg.Themes {
+			if nt.Theme == curTheme {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// ToggleThemePicker shows or hides the theme-selection overlay. When
+// showing, the selected index is initialized to the currently-active theme.
+// Bound to Cmd+Shift+T. No-op when no themes are configured.
+func (ws *Workspace) ToggleThemePicker() {
+	if len(ws.cfg.Themes) == 0 {
+		return
+	}
+	if ws.themePickerVisible {
+		ws.themePickerVisible = false
+		ws.refresh()
+		return
+	}
+	ws.themePickerIdx = ws.activeThemeIdx()
+	if ws.themePickerIdx < 0 {
+		ws.themePickerIdx = 0
+	}
+	ws.themePickerVisible = true
+	ws.refresh()
+}
+
+// themePickerBackdrop dims the panes and dismisses the picker on click.
+func (ws *Workspace) themePickerBackdrop(ww, wh int) gui.View {
+	b := tight(gui.FixedFixed)
+	b.Width = float32(ww)
+	b.Height = float32(wh)
+	b.Float = true
+	b.FloatAnchor = gui.FloatTopLeft
+	b.FloatTieOff = gui.FloatTopLeft
+	b.FloatZIndex = 999
+	b.Color = gui.RGBA(0, 0, 0, 120)
+	b.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+		const edgePx = float32(30)
+		if e.MouseX < edgePx || e.MouseX > float32(ww)-edgePx ||
+			e.MouseY < edgePx || e.MouseY > float32(wh)-edgePx {
+			return
+		}
+		ws.themePickerVisible = false
+		ws.refresh()
+		e.IsHandled = true
+	}
+	return gui.Column(b)
+}
+
+// themePickerPanel renders a centered float listing every configured theme.
+// The currently-active theme is marked with a check; the arrow-key-highlighted
+// row gets a distinct background. Clicking a row applies that theme.
+func (ws *Workspace) themePickerPanel() gui.View {
+	theme := gui.CurrentTheme()
+	if len(ws.cfg.Themes) == 0 {
+		return gui.Column(tight(gui.FixedFit))
+	}
+	// Find index of currently-active theme for the check mark.
+	activeIdx := ws.activeThemeIdx()
+	// Clamp highlight index.
+	if ws.themePickerIdx < 0 {
+		ws.themePickerIdx = 0
+	}
+	if ws.themePickerIdx >= len(ws.cfg.Themes) {
+		ws.themePickerIdx = len(ws.cfg.Themes) - 1
+	}
+
+	rows := make([]gui.View, 0, len(ws.cfg.Themes)+1)
+	rows = append(rows, ws.helpHeader("Themes", theme))
+	for i, nt := range ws.cfg.Themes {
+		idx := i // capture
+		bg := gui.Color{}
+		if idx == ws.themePickerIdx {
+			bg = theme.ColorActive
+		}
+		mark := "  "
+		if idx == activeIdx {
+			mark = "✓ "
+		}
+		row := tight(gui.FillFit)
+		row.Padding = gui.SomeP(2, 6, 2, 6)
+		row.Color = bg
+		row.Radius = gui.SomeF(3)
+		row.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+			ws.applyTheme(idx)
+			ws.themePickerVisible = false
+			ws.refresh()
+			e.IsHandled = true
+		}
+		style := theme.M5
+		row.Content = []gui.View{
+			gui.Text(gui.TextCfg{Text: mark + nt.Name, TextStyle: style}),
+		}
+		rows = append(rows, gui.Row(row))
+	}
+
+	panel := tight(gui.FixedFit)
+	panel.Width = 320
+	panel.Float = true
+	panel.FloatAnchor = gui.FloatMiddleCenter
+	panel.FloatTieOff = gui.FloatMiddleCenter
+	panel.FloatZIndex = 1000
+	panel.Color = theme.ColorPanel
+	panel.ColorBorder = theme.ColorBorder
+	panel.SizeBorder = gui.SomeF(1)
+	panel.Radius = gui.SomeF(6)
+	panel.Padding = gui.SomeP(14, 18, 14, 18)
+	panel.Spacing = gui.SomeF(2)
+	// Swallow clicks so they don't fall through to the backdrop.
+	panel.OnClick = func(_ *gui.Layout, e *gui.Event, _ *gui.Window) { e.IsHandled = true }
+	panel.Content = rows
+	return gui.Column(panel)
+}
+
+// applyTheme sets the given theme index on all panes across all tabs.
+func (ws *Workspace) applyTheme(idx int) {
+	if idx < 0 || idx >= len(ws.cfg.Themes) {
+		return
+	}
+	nt := ws.cfg.Themes[idx]
+	for _, tab := range ws.tabs {
+		for _, tm := range tab.terms {
+			tm.SetTheme(nt.Theme)
+		}
+	}
+	ws.w.UpdateWindow()
+}
+
+// themePickerMoveUp moves the highlight up by one entry and applies
+// the theme immediately for live preview.
+func (ws *Workspace) themePickerMoveUp() {
+	ws.themePickerIdx--
+	if ws.themePickerIdx < 0 {
+		ws.themePickerIdx = len(ws.cfg.Themes) - 1
+	}
+	ws.applyTheme(ws.themePickerIdx)
+	ws.refresh()
+}
+
+// themePickerMoveDown moves the highlight down by one entry and applies
+// the theme immediately for live preview.
+func (ws *Workspace) themePickerMoveDown() {
+	ws.themePickerIdx++
+	if ws.themePickerIdx >= len(ws.cfg.Themes) {
+		ws.themePickerIdx = 0
+	}
+	ws.applyTheme(ws.themePickerIdx)
+	ws.refresh()
+}
+
+// themePickerConfirm dismisses the picker without changing the theme
+// (the currently-highlighted theme was already applied by arrow-key
+// navigation or a click).
+func (ws *Workspace) themePickerConfirm() {
+	ws.themePickerVisible = false
+	ws.refresh()
+}
+
+// —————————————————————————————————————————————————————————————
 
 // focusPaneInTab switches focus to the given leaf.
 func (ws *Workspace) focusPaneInTab(tab *Tab, leafID string) {
@@ -639,15 +819,9 @@ func (ws *Workspace) CycleTheme() {
 	if len(ws.cfg.Themes) == 0 {
 		return
 	}
-	cur := 0
-	if p := ws.ActivePane(); p != nil {
-		curTheme := p.Theme()
-		for i, nt := range ws.cfg.Themes {
-			if nt.Theme == curTheme {
-				cur = i
-				break
-			}
-		}
+	cur := ws.activeThemeIdx()
+	if cur < 0 {
+		cur = 0
 	}
 	next := (cur + 1) % len(ws.cfg.Themes)
 	for _, tab := range ws.tabs {
