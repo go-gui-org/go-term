@@ -244,6 +244,8 @@ type drawState struct {
 	renderYOff    float32
 	live          bool
 	doResize      bool
+	// blinkOff is true during the hidden half of the SGR 5/6 blink cycle.
+	blinkOff bool
 	// IME composition state, populated by drawIME and consumed by drawCursor.
 	imeComposing bool
 }
@@ -308,13 +310,15 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	rows := clampDim(int(dc.Height / t.cellH))
 	t.draw.runBuf.Grow(cols * 4) // one row of text, worst-case UTF-8; no-op when cap sufficient
 
+	now := time.Now()
 	ds := drawState{
-		dc:    dc,
-		style: style,
-		g:     t.grid,
-		rows:  rows,
-		cols:  cols,
-		now:   time.Now(),
+		dc:       dc,
+		style:    style,
+		g:        t.grid,
+		rows:     rows,
+		cols:     cols,
+		now:      now,
+		blinkOff: textBlinkOff(now),
 	}
 
 	t.grid.Mu.Lock()
@@ -634,6 +638,28 @@ func (t *Term) drawBgResolved(dc *gui.DrawContext, r int, yOff float32, ds *draw
 	t.fillRun(dc, r, runStart, cols, runColor, yOff)
 }
 
+// textBlinkOff reports whether SGR 5/6 text is in the hidden half of its blink
+// cycle. The phase comes from the wall clock rather than a per-Term epoch so
+// every pane in a window blinks in step, and so the phase does not restart on
+// unrelated events (a keystroke resets the *cursor* epoch, not this one).
+func textBlinkOff(now time.Time) bool {
+	return (now.UnixNano()/int64(cursorBlinkPeriod))%2 == 1
+}
+
+// maskGlyph blanks a cell's glyph when SGR 8 (conceal) is set, or when SGR 5/6
+// (blink) is set and the cycle is currently in its hidden half. Background,
+// selection inversion and underline decoration are untouched — only the glyph
+// disappears, matching xterm. Conceal must be honored: ncurses maps A_INVIS to
+// SGR 8 and password prompts rely on it, so ignoring the attribute would show
+// the typed secret.
+func maskGlyph(c cell, blinkOff bool) cell {
+	if c.Attrs&attrConceal != 0 || (blinkOff && c.Attrs&attrBlink != 0) {
+		c.Ch = ' '
+		c.clusterID = 0
+	}
+	return c
+}
+
 // drawFgPass paints foreground text, coalescing adjacent cells with identical
 // visual style into single dc.Text calls. Wide chars break the run and emit
 // individually. Continuation cells are skipped. Plain spaces extend same-style
@@ -647,6 +673,11 @@ func (t *Term) drawFgPass(ds *drawState) {
 	hR, hC := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
 	cmdHeld := t.mouse.cmdHeld.Load()
 
+	// sawBlink tracks whether any painted cell carries SGR 5/6, so the blink
+	// ticker knows whether periodic repaints are needed at all. Recomputed
+	// every frame: it clears itself once the blinking text scrolls away.
+	sawBlink := false
+
 	// Partial top row: per-cell emit, no run coalescing.
 	if ds.partialRow != nil {
 		partialY := -t.cellH + yOff
@@ -655,6 +686,8 @@ func (t *Term) drawFgPass(ds *drawState) {
 			if cell.Width == 0 && cell.Ch == 0 {
 				continue
 			}
+			sawBlink = sawBlink || cell.Attrs&attrBlink != 0
+			cell = maskGlyph(cell, ds.blinkOff)
 			if cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0 {
 				continue
 			}
@@ -673,6 +706,8 @@ func (t *Term) drawFgPass(ds *drawState) {
 			if cell.Width == 0 && cell.Ch == 0 {
 				continue // continuation cell; skip without breaking run
 			}
+			sawBlink = sawBlink || cell.Attrs&attrBlink != 0
+			cell = maskGlyph(cell, ds.blinkOff)
 			k := cellRunKey(cell, style, g, hR, hC, cmdHeld)
 			isPlainSpace := cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0
 			if cell.Width == 2 {
@@ -715,6 +750,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 		}
 		t.flushRun(dc, r, style, yOff, &fr)
 	}
+	t.blinkCells.Store(sawBlink)
 }
 
 // flushRun draws the accumulated text run as a single dc.Text call with
@@ -836,7 +872,9 @@ func (t *Term) drawCursor(ds *drawState) {
 
 	cursorCell := cell{Ch: ' '}
 	if cell := g.At(g.CursorR, g.CursorC); cell != nil {
-		cursorCell = *cell
+		// Masked like the fg pass: a block cursor redraws the glyph beneath
+		// it, which would otherwise expose a concealed character.
+		cursorCell = maskGlyph(*cell, ds.blinkOff)
 	}
 	if ds.imeComposing && ds.imeCursor >= 0 && ds.imeCursor < len(ds.imeRunes) {
 		cursorCell.Ch = ds.imeRunes[ds.imeCursor]

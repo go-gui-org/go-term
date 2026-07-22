@@ -82,10 +82,11 @@ const maxCSIParamValue = 1 << 20
 
 // parser is a VT/xterm-compatible state machine. It handles C0 controls;
 // ESC sequences (cursor save/restore, IND/RI/NEL, charset selection, tab
-// stops, keypad mode); CSI (SGR with 16/256/truecolor fg/bg, underline
-// color/extended underlines, cursor movement/positioning, erase in
-// line/display, scroll regions, IL/DL/ICH/DCH, DECSCUSR, DA1, DECSC/DECRC,
-// tab clear, Kitty Keyboard Protocol, mode set/reset/query); OSC (window
+// stops, keypad mode, RIS); CSI (SGR with 16/256/truecolor fg/bg, underline
+// color/extended underlines, blink/conceal, cursor movement/positioning,
+// erase in line/display, scroll regions, IL/DL/ICH/DCH, REP, DECSCUSR, DA1,
+// DECSC/DECRC, DECSTR, tab clear, title stack, cursor/status reports,
+// Kitty Keyboard Protocol, mode set/reset/query); OSC (window
 // title, CWD, hyperlinks, desktop notifications, dynamic colors, clipboard,
 // semantic shell marks, iTerm2 inline images); DCS (DECRQSS, XTGETTCAP,
 // sixel graphics, synchronized updates); and APC (Kitty Graphics Protocol).
@@ -106,6 +107,14 @@ type parser struct {
 	onReply     func([]byte)
 	onClipboard func([]byte)
 	onNotify    func(title, body string)
+
+	// curTitle mirrors the last title reported via OSC 0/1/2 and titleStack
+	// holds the ones pushed by XTWINOPS 22 (CSI 22 t), popped by 23. vim and
+	// tmux bracket their session with a push/pop pair and rely on the pop to
+	// put the shell's title back. Icon name and window title share one stack —
+	// the widget surfaces a single title.
+	curTitle   string
+	titleStack []string
 
 	// graphicsDir is the directory where decoded Sixel PNGs are written.
 	// Empty = os.TempDir(). Set via SetGraphicsDir; the widget creates a
@@ -173,6 +182,42 @@ func (p *parser) SetClipboardWriteAllowed(ok bool) { p.allowClipboardWrite = ok 
 // while grid.Mu is held — the handler must not block; fire a goroutine
 // for any slow work (e.g. exec).
 func (p *parser) SetNotifyHandler(fn func(title, body string)) { p.onNotify = fn }
+
+// maxTitleStack caps the XTWINOPS title stack, matching xterm's limit. Pushes
+// past the cap are dropped rather than evicting the oldest entry: an app that
+// pushes without popping is misbehaving, and dropping keeps the *first* title
+// (the shell's) recoverable.
+const maxTitleStack = 10
+
+// pushTitle saves the current title (XTWINOPS CSI 22 t).
+func (p *parser) pushTitle() {
+	if len(p.titleStack) >= maxTitleStack {
+		return
+	}
+	p.titleStack = append(p.titleStack, p.curTitle)
+}
+
+// popTitle restores the most recently pushed title (XTWINOPS CSI 23 t) and
+// republishes it through onTitle. No-op on an empty stack.
+func (p *parser) popTitle() {
+	if len(p.titleStack) == 0 {
+		return
+	}
+	title := p.titleStack[len(p.titleStack)-1]
+	p.titleStack = p.titleStack[:len(p.titleStack)-1]
+	p.curTitle = title
+	if p.onTitle != nil {
+		p.onTitle(title)
+	}
+}
+
+// hardReset performs RIS (ESC c): the grid returns to its power-on state and
+// the parser drops the escape-level state it owns. The current title is kept —
+// the widget owns the window title, and RIS gives no replacement to show.
+func (p *parser) hardReset() {
+	p.g.HardReset()
+	p.titleStack = p.titleStack[:0]
+}
 
 // newParser binds a parser to a grid. Callers must hold g.Mu while calling
 // Feed.
@@ -310,6 +355,12 @@ func (p *parser) feedChunk(b []byte) {
 				p.state = stGround
 			case 'H':
 				p.g.SetTabStop()
+				p.state = stGround
+			case 'c':
+				// RIS — full reset. terminfo rs1; `reset` and `tput init`
+				// lead with it to recover a terminal a crashed app left in
+				// raw/mouse-reporting mode.
+				p.hardReset()
 				p.state = stGround
 			case '=':
 				p.g.AppKeypad = true

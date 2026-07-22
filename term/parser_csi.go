@@ -20,6 +20,15 @@ func (p *parser) dispatchCSI(final byte) {
 					b = append(b, 'u')
 					p.onReply(b)
 				}
+			case 'n':
+				// DECXCPR (CSI ? 6 n) — extended cursor position report. The
+				// reply carries the private marker and, on a real VT, a page
+				// number; xterm omits the page and clients accept that.
+				if p.param(0, 0) == 6 && p.onReply != nil {
+					row, col := p.g.CursorR+1, p.g.CursorC+1
+					p.onReply([]byte("\x1b[?" + strconv.Itoa(row) + ";" +
+						strconv.Itoa(col) + "R"))
+				}
 			case 'p':
 
 				if p.intermediate == '$' && p.onReply != nil {
@@ -107,6 +116,18 @@ func (p *parser) dispatchCSI(final byte) {
 		p.g.TabForward(p.param(0, 1))
 	case 'Z':
 		p.g.TabBackward(p.param(0, 1))
+	case 'b':
+		// REP — repeat the preceding graphic character.
+		p.g.RepeatLast(p.param(0, 1))
+	case 'p':
+		// DECSTR (CSI ! p) — soft terminal reset. The '$' intermediate form
+		// (ANSI DECRQM) is handled below; no other CSI final 'p' is defined.
+		switch p.intermediate {
+		case '!':
+			p.g.SoftReset()
+		case '$':
+			p.replyANSIDECRQM()
+		}
 	case 'r':
 
 		top := p.param(0, 1) - 1
@@ -130,27 +151,40 @@ func (p *parser) dispatchCSI(final byte) {
 			p.onReply([]byte(da1Reply))
 		}
 	case 'n':
-
-		if p.param(0, 0) == 6 && p.onReply != nil {
+		// DSR. 5 = "are you OK" (answer: terminal ready), 6 = CPR.
+		if p.onReply == nil {
+			break
+		}
+		switch p.param(0, 0) {
+		case 5:
+			p.onReply([]byte("\x1b[0n"))
+		case 6:
 			row, col := p.g.CursorR+1, p.g.CursorC+1
 			p.onReply([]byte("\x1b[" + strconv.Itoa(row) + ";" + strconv.Itoa(col) + "R"))
 		}
 	case 't':
-		// XTWINOPS pixel-geometry reports. Only the read-only queries are
-		// honored — window manipulation ops (move/resize/raise…) are ignored,
-		// an embedded widget must not let the app drive the host window. Cell
-		// pixel sizes come from the widget's measurement (CellPxW/CellPxH, 0
-		// before the first frame); a 0 reply is valid and clients fall back.
-		if p.onReply != nil {
-			px := func(f float32) int { return int(f + 0.5) }
-			switch p.param(0, 0) {
-			case 14: // report text-area size in pixels: CSI 4 ; height ; width t
+		// XTWINOPS. Only the read-only geometry queries and the title stack
+		// are honored — window manipulation ops (move/resize/raise…) are
+		// ignored, an embedded widget must not let the app drive the host
+		// window. Cell pixel sizes come from the widget's measurement
+		// (CellPxW/CellPxH, 0 before the first frame); a 0 reply is valid and
+		// clients fall back.
+		px := func(f float32) int { return int(f + 0.5) }
+		switch p.param(0, 0) {
+		case 14: // report text-area size in pixels: CSI 4 ; height ; width t
+			if p.onReply != nil {
 				h, w := px(float32(p.g.Rows)*p.g.CellPxH), px(float32(p.g.Cols)*p.g.CellPxW)
 				p.onReply([]byte("\x1b[4;" + strconv.Itoa(h) + ";" + strconv.Itoa(w) + "t"))
-			case 16: // report cell size in pixels: CSI 6 ; height ; width t
+			}
+		case 16: // report cell size in pixels: CSI 6 ; height ; width t
+			if p.onReply != nil {
 				h, w := px(p.g.CellPxH), px(p.g.CellPxW)
 				p.onReply([]byte("\x1b[6;" + strconv.Itoa(h) + ";" + strconv.Itoa(w) + "t"))
 			}
+		case 22: // push the current title onto the stack
+			p.pushTitle()
+		case 23: // pop it back
+			p.popTitle()
 		}
 	case 'g':
 
@@ -248,6 +282,34 @@ func (p *parser) applyMode(set bool) {
 			p.g.InsertMode = set
 		}
 	}
+}
+
+// replyANSIDECRQM answers the non-private DECRQM form (CSI Ps $ p) with
+// DECRPM (CSI Ps ; Pv $ y). Only ANSI modes the emulator models get a real
+// state; anything else reports 0 (unrecognized), which is what a client needs
+// to hear before falling back.
+func (p *parser) replyANSIDECRQM() {
+	if p.onReply == nil {
+		return
+	}
+	n := p.param(0, 0)
+	if n < 0 {
+		n = 0
+	}
+	v := 0
+	switch n {
+	case 4: // IRM — insert/replace
+		v = boolState(p.g.InsertMode)
+	case 20: // LNM — LF never implies CR here, and cannot be turned on
+		v = 4 // PERMANENTLY_RESET
+	}
+	b := make([]byte, 0, 24)
+	b = append(b, "\x1b["...)
+	b = strconv.AppendUint(b, uint64(n), 10)
+	b = append(b, ';')
+	b = strconv.AppendUint(b, uint64(v), 10)
+	b = append(b, '$', 'y')
+	p.onReply(b)
 }
 
 // decModeState returns the current state of a DEC private mode:
@@ -396,8 +458,14 @@ func (p *parser) applySGR() {
 			}
 			g.CurAttrs |= attrUnderline
 			g.CurULStyle = ulStyle
+		case n == 5, n == 6:
+			// Slow (5) and rapid (6) blink share one attribute; no emulator
+			// distinguishes the rates.
+			g.CurAttrs |= attrBlink
 		case n == 7:
 			g.CurAttrs |= attrInverse
+		case n == 8:
+			g.CurAttrs |= attrConceal
 		case n == 9:
 			g.CurAttrs |= attrStrikethrough
 		case n == 21:
@@ -408,12 +476,16 @@ func (p *parser) applySGR() {
 			g.CurAttrs &^= attrBold | attrDim
 		case n == 23:
 			g.CurAttrs &^= attrItalic
+		case n == 25:
+			g.CurAttrs &^= attrBlink
 		case n == 24:
 			g.CurAttrs &^= attrUnderline
 			g.CurULStyle = 0
 			g.CurULColor = DefaultColor
 		case n == 27:
 			g.CurAttrs &^= attrInverse
+		case n == 28:
+			g.CurAttrs &^= attrConceal
 		case n == 29:
 			g.CurAttrs &^= attrStrikethrough
 		case n >= 30 && n <= 37:

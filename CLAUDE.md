@@ -91,6 +91,7 @@ term/grid.go             Cell buffer + cursor state + alt-screen. Pure data.
 term/grid_cursor.go      Cursor move, save/restore, DECSCUSR.
 term/grid_edit.go        putCell write path; Put + streaming grapheme assembly.
 term/grid_mark.go        OSC 133 semantic shell marks.
+term/grid_reset.go       DECSTR soft reset; RIS hard reset.
 term/grid_reflow.go      Logical line reflow on resize.
 term/grid_scroll.go      Scroll regions; pixel-accurate ViewSubPx math.
 term/grid_search.go      Literal and RE2 regex search.
@@ -146,15 +147,28 @@ Supports a modern xterm/kitty-compatible subset:
 
 - C0: `BEL`, `BS`, `HT`, `LF`, `CR`, `ESC`.
 - SGR (`CSI … m`): reset; bold/dim/italic/underline/inverse/strikethrough;
+  blink (5/6, one attribute) and conceal (8) with their 25/28 resets;
   extended underlines (4:1–4:5, SGR 21); underline color (58); fg/bg
-  16-color, 256-color, 24-bit truecolor.
+  16-color, 256-color, 24-bit truecolor. Blink and conceal are rendering-
+  only: the grid keeps the real text so selection copy and search are
+  unaffected (`maskGlyph` in `widget_draw.go` hides the glyph).
 - CSI: cursor movement and positioning, erase in line/display, scroll
   regions (DECSTBM), IND/RI/NEL, IL/DL/ICH/DCH/SU/SD, DECSCUSR (cursor
   shape/blink), DA1 (advertises Sixel via extension 4: `CSI ?1;2;4c`),
   DA2, XTVERSION (`CSI > q` → `DCS >| go-term(ver) ST`), XTWINOPS pixel
-  geometry (`CSI 14 t`/`CSI 16 t` → text-area / cell size in pixels;
-  manipulation ops ignored), tab stop clear (TBC), tab navigation
-  (CHT `CSI Ps I` / CBT `CSI Ps Z`), erase characters (ECH `CSI Ps X`).
+  geometry (`CSI 14 t`/`CSI 16 t` → text-area / cell size in pixels)
+  and title stack (`CSI 22 t` push / `CSI 23 t` pop; other manipulation
+  ops ignored), tab stop clear (TBC), tab navigation
+  (CHT `CSI Ps I` / CBT `CSI Ps Z`), erase characters (ECH `CSI Ps X`),
+  repeat (REP `CSI Ps b` — ncurses emits it wherever terminfo has `rep`).
+- Reports: DSR 5 (`CSI 5 n` → `CSI 0 n`), CPR (`CSI 6 n`), DECXCPR
+  (`CSI ? 6 n`), DECRQM in both the private (`CSI ? Ps $ p`) and ANSI
+  (`CSI Ps $ p`) forms.
+- Reset: RIS (`ESC c`, terminfo rs1) clears screen + scrollback, leaves
+  alt screen, and drops every host-set mode; DECSTR (`CSI ! p`, in rs2
+  and is2) resets modes/SGR without touching the screen. Both live in
+  `grid_reset.go`. DECSTR restores autowrap ON, diverging from VT510 —
+  see the comment there.
 - Modes: alt screen (1049/1047/47), mouse (1000/1002/1003/1006/1016),
   bracketed paste (2004), focus reporting (1004), synchronized updates
   (2026 — DECSET begins a block, DECRST ends + flushes; a 500 ms watchdog

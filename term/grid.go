@@ -42,7 +42,8 @@ func runeWidth(r rune) int {
 	return 1
 }
 
-// cell attribute bits.
+// cell attribute bits. Exactly eight fit in cell.Attrs (uint8) — all are
+// now spoken for, so a ninth attribute needs a wider field.
 const (
 	attrBold uint8 = 1 << iota
 	attrUnderline
@@ -50,6 +51,8 @@ const (
 	attrDim
 	attrItalic
 	attrStrikethrough
+	attrBlink   // SGR 5/6 — glyph hidden on alternating half-cycles
+	attrConceal // SGR 8 — glyph never drawn (ncurses A_INVIS, password fields)
 )
 
 // Charset designator bytes used in ESC ( F / ESC ) F sequences.
@@ -332,6 +335,14 @@ type grid struct {
 	// sessions and a tiny realistic emoji/grapheme set keep it small.
 	clusters   []string
 	clusterIDs map[string]uint16
+
+	// lastGraphic* remember the most recent character committed by putCell so
+	// REP (CSI Ps b) can repeat it. lastGraphicW == 0 means "nothing printed
+	// yet", which makes REP a no-op. The cluster ID stays valid because the
+	// intern pool only grows.
+	lastGraphic   rune
+	lastGraphicID uint16
+	lastGraphicW  uint8
 
 	// gphBuf holds the UTF-8 of the in-progress grapheme cluster during
 	// streaming input (PutRune/FlushGrapheme). Reused across cells; only the
