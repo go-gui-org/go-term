@@ -287,9 +287,37 @@ func (g *grid) putCell(ch rune, clusterID uint16, w int) {
 		}
 	}
 	g.markDirty(g.CursorR)
+	// Remember what was written so REP can repeat it. w (not the caller's
+	// width) is recorded because the no-autowrap path above may have narrowed
+	// a wide glyph to one cell.
+	g.lastGraphic, g.lastGraphicID, g.lastGraphicW = ch, clusterID, uint8(w)
 	g.CursorC += w
 	if !g.AutoWrap && g.CursorC >= g.Cols {
 		g.CursorC = g.Cols - 1
+	}
+}
+
+// RepeatLast implements REP (CSI Ps b): write the last graphic character
+// again n times, as if the application had re-sent it. ncurses emits this
+// for runs of identical characters whenever the terminfo entry advertises
+// `rep` (Linux xterm-256color does), so dropping it silently swallows text.
+//
+// No-op before anything has been printed. n is bounded to one screenful:
+// a repeat count beyond that can only overwrite its own output, and the cap
+// keeps a hostile "CSI 999999999 b" from burning the reader goroutine.
+func (g *grid) RepeatLast(n int) {
+	if n <= 0 || g.lastGraphicW == 0 {
+		return
+	}
+	if limit := g.Rows * g.Cols; n > limit {
+		n = limit
+	}
+	// putCell overwrites lastGraphic* with the same values on each pass, so
+	// reading them once up front is only an optimization, not a correctness
+	// requirement.
+	ch, id, w := g.lastGraphic, g.lastGraphicID, int(g.lastGraphicW)
+	for range n {
+		g.putCell(ch, id, w)
 	}
 }
 

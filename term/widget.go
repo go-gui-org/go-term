@@ -444,6 +444,12 @@ type Term struct {
 	// blinkDone signals the blink ticker goroutine to exit. Closed by Close.
 	blinkDone chan struct{}
 
+	// blinkCells records whether the last painted frame contained any SGR 5/6
+	// (blink) text. Written by drawFgPass on the main thread, read by
+	// blinkLoop, so periodic repaints happen only while blinking text is
+	// actually visible.
+	blinkCells atomic.Bool
+
 	// readDone is closed by readLoop when it exits. Close waits on it so
 	// no further cmd.QueueCommand calls can arrive after Close returns.
 	readDone chan struct{}
@@ -784,6 +790,9 @@ func (t *Term) blinkLoop() {
 					t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0 &&
 					t.cursorBlinks()
 			}()
+			// Blinking text needs the same periodic repaint, and unlike the
+			// cursor it blinks in any viewport position.
+			redraw = redraw || t.blinkCells.Load()
 			if redraw {
 				t.bumpVersion()
 				t.queueCommand(func(w *gui.Window) {

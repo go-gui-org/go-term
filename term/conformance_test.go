@@ -149,6 +149,80 @@ func TestConformance(t *testing.T) {
 			wantR: 1, // IL sets CursorC=0, cursor stays at same row
 			wantC: 0,
 		},
+
+		// --- REP (ncurses `rep` capability) --------------------------------
+
+		{
+			// REP repeats the preceding graphic character. ncurses emits it
+			// for runs, so the repeated cells must land exactly as if the
+			// character had been sent again — including the wrap.
+			name:  "rep_repeats_and_wraps",
+			rows:  2,
+			cols:  4,
+			input: "-\x1b[5b",
+
+			// 1 written + 5 repeats = 6 cells: row 0 fills, row 1 takes two.
+			wantLines: []string{"----", "--  "},
+			wantR:     1,
+			wantC:     2,
+		},
+		{
+			// REP repeats only the graphic character — an intervening cursor
+			// move does not change what is repeated, and SGR set after the
+			// character applies to the repeats (they are fresh writes).
+			name:  "rep_after_cursor_move",
+			rows:  2,
+			cols:  6,
+			input: "X\x1b[2;3H\x1b[2b",
+
+			wantLines: []string{"X     ", "  XX  "},
+			wantR:     1,
+			wantC:     4,
+		},
+
+		// --- Reset (terminfo rs1 / rs2, is2) -------------------------------
+
+		{
+			// RIS wipes the screen, homes the cursor and drops SGR state.
+			// `reset` leads with this to recover a wedged terminal.
+			name:  "ris_full_reset",
+			rows:  2,
+			cols:  4,
+			input: "\x1b[7mab\r\ncd\x1bc",
+
+			wantLines: []string{"    ", "    "},
+			wantR:     0,
+			wantC:     0,
+			assert: func(t *testing.T, g *grid) {
+				if g.CurAttrs != 0 {
+					t.Errorf("attrs = %d after RIS, want 0", g.CurAttrs)
+				}
+			},
+		},
+		{
+			// DECSTR resets modes and SGR but leaves the screen alone — an
+			// app running `tput init` mid-session must not lose its output.
+			name: "decstr_soft_reset_keeps_screen",
+			rows: 2,
+			cols: 4,
+			// The scroll region is set first: DECSTBM homes the cursor, so
+			// setting it after the text would hide whether DECSTR moved it.
+			input: "\x1b[1;2r\x1b[4hab\x1b[?25l\x1b[!p",
+
+			wantLines: []string{"ab  ", "    "},
+			wantR:     0,
+			wantC:     2,
+			assert: func(t *testing.T, g *grid) {
+				if g.InsertMode || !g.CursorVisible {
+					t.Errorf("modes survived DECSTR: insert=%v visible=%v",
+						g.InsertMode, g.CursorVisible)
+				}
+				if g.Top != 0 || g.Bottom != g.Rows-1 {
+					t.Errorf("scroll region = %d..%d, want full screen",
+						g.Top, g.Bottom)
+				}
+			},
+		},
 	}
 
 	for _, tc := range cases {

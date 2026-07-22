@@ -82,7 +82,9 @@ func (p *parser) dispatchOSC() {
 	pt := string(p.osc[sep+1:])
 	switch ps {
 	case 0, 1, 2:
-
+		// Tracked as well as forwarded so XTWINOPS 22/23 (title stack) has
+		// something to push.
+		p.curTitle = pt
 		if p.onTitle != nil {
 			p.onTitle(pt)
 		}
