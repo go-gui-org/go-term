@@ -457,29 +457,59 @@ func (g *grid) ClearTabStop(all bool) {
 // EraseInLine implements CSI K. mode: 0 = cursor to EOL, 1 = SOL to
 // cursor, 2 = entire line. Cleared cells use current bg/attrs so
 // painted backgrounds persist.
-func (g *grid) EraseInLine(mode int) {
+func (g *grid) EraseInLine(mode int) { g.eraseInLine(mode, false) }
+
+// SelectiveEraseInLine implements DECSEL (CSI ? Ps K): EraseInLine that
+// leaves DECSCA-protected cells standing. Same mode values.
+func (g *grid) SelectiveEraseInLine(mode int) { g.eraseInLine(mode, true) }
+
+func (g *grid) eraseInLine(mode int, selective bool) {
 	row := g.CursorR
 	if row < 0 || row >= g.Rows {
 		return
 	}
+	// A wide pair straddling the cursor is split so no orphaned half survives —
+	// unless this is a selective erase and the pair is protected, which must
+	// come through untouched.
+	edge := splitWide
+	if selective {
+		edge = splitWideErasable
+	}
 	cFrom, cTo := 0, g.Cols
 	switch mode {
 	case 0:
-		g.eraseWideAt(row, g.CursorC)
-		cFrom = g.CursorC
+		g.splitWideAt(row, g.CursorC, edge)
+		cFrom = clamp(g.CursorC, 0, g.Cols)
 	case 1:
-		g.eraseWideAt(row, g.CursorC)
-		cTo = g.CursorC + 1
+		g.splitWideAt(row, g.CursorC, edge)
+		// The cursor can sit at Cols with a wrap pending; without the clamp
+		// this span would run one cell past the row into the next one.
+		cTo = clamp(g.CursorC+1, 0, g.Cols)
 	case 2:
 
 	default:
 		return
 	}
-	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
-	for c := cFrom; c < cTo; c++ {
-		g.Cells[row*g.Cols+c] = blank
+	g.eraseSpan(row, cFrom, cTo, selective)
+}
+
+// eraseSpan blanks columns [from,to) of row r to the current SGR bg/attrs
+// (BCE). When selective is set — DECSEL/DECSED/DECSERA — cells carrying
+// attrProtected are stepped over. Callers have already clamped the span and
+// sanitized any wide pair straddling its edges. Caller holds Mu.
+func (g *grid) eraseSpan(r, from, to int, selective bool) {
+	if r < 0 || r >= g.Rows || from >= to {
+		return
 	}
-	g.markDirty(row)
+	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
+	row := g.Cells[r*g.Cols : (r+1)*g.Cols]
+	for c := from; c < to; c++ {
+		if selective && row[c].Attrs&attrProtected != 0 {
+			continue
+		}
+		row[c] = blank
+	}
+	g.markDirty(r)
 }
 
 // EraseChars implements CSI Ps X (ECH): blank n cells starting at the
@@ -521,28 +551,39 @@ func (g *grid) EraseChars(n int) {
 // saved lines") blanks the screen like mode 2 and additionally drops the
 // scrollback buffer, so `clear` (which emits CSI 3 J then CSI 2 J) wipes
 // history as it does in xterm/iTerm/kitty.
-func (g *grid) EraseInDisplay(mode int) {
-	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
+func (g *grid) EraseInDisplay(mode int) { g.eraseInDisplay(mode, false) }
+
+// SelectiveEraseInDisplay implements DECSED (CSI ? Ps J): EraseInDisplay
+// that leaves DECSCA-protected cells standing. Mode 3 still drops the
+// scrollback — history holds no protection state to honor.
+func (g *grid) SelectiveEraseInDisplay(mode int) { g.eraseInDisplay(mode, true) }
+
+func (g *grid) eraseInDisplay(mode int, selective bool) {
 	switch mode {
 	case 0:
-		g.EraseInLine(0)
+		g.eraseInLine(0, selective)
 		for r := g.CursorR + 1; r < g.Rows; r++ {
-			for c := range g.Cols {
-				g.Cells[r*g.Cols+c] = blank
-			}
+			g.eraseSpan(r, 0, g.Cols, selective)
 		}
 		g.markAllDirty()
 	case 1:
-		g.EraseInLine(1)
+		g.eraseInLine(1, selective)
 		for r := range g.CursorR {
-			for c := range g.Cols {
-				g.Cells[r*g.Cols+c] = blank
-			}
+			g.eraseSpan(r, 0, g.Cols, selective)
 		}
 		g.markAllDirty()
 	case 2, 3:
-		for i := range g.Cells {
-			g.Cells[i] = blank
+		if selective {
+			for r := range g.Rows {
+				g.eraseSpan(r, 0, g.Cols, true)
+			}
+		} else {
+			// Flat fill: clearing the screen is common enough to keep the
+			// per-row bookkeeping out of it.
+			blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
+			for i := range g.Cells {
+				g.Cells[i] = blank
+			}
 		}
 		// Mode 3 additionally erases saved lines (scrollback). Dropping
 		// scrollback shifts the content-row coordinate space, so marks,

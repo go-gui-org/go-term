@@ -144,6 +144,7 @@ When go-gui ships v1.0.0:
 | 39 | Splits, panes, tabs, persistence | Built-in multiplexing; workspace save/restore |
 | 40 | Tab reordering | Cmd+Alt+[/] move tab left/right |
 | 41 | OSC 4 palette modification | `printf '\x1b]4;1;#00ff00\a'` |
+| 42 | DECSCA + VT420 rectangular areas | DEC forms apps, vttest menu 8 |
 
 ## Commands
 

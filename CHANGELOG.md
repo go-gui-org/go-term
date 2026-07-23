@@ -8,6 +8,16 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- DECSCA character protection and the VT420 rectangular area operations
+  (#71): DECSCA (`CSI Ps " q`), the selective erases DECSEL (`CSI ? Ps K`),
+  DECSED (`CSI ? Ps J`) and DECSERA (`CSI … $ {`) that honor it, plus DECERA
+  (`$ z`), DECFRA (`$ x`), DECCARA (`$ r`), DECRARA (`$ t`), DECCRA (`$ v`)
+  and the DECSACE extent selector (`CSI Ps * x`). DECRQSS answers `"q` and
+  `*x`. Protection follows the DEC rule: only the selective erases skip a
+  protected cell — ED/EL/ECH, scrolling and ordinary writes do not. DA1 still
+  reports VT100 level, so applications that gate rectangle support on a
+  VT420 device attributes reply will not use these.
+
 - ECH (`CSI Ps X`, erase characters) — previously parsed and dropped. TUIs
   that paint split-pane layouts use it to clear a bounded span without
   `EL` wiping the panes sharing the row.

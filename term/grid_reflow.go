@@ -45,7 +45,7 @@ type physRow struct {
 // trailing padding from the last physical row of a logical line.
 func isDefaultBlank(c cell) bool {
 	return c.Ch == ' ' && c.FG == DefaultColor && c.BG == DefaultColor &&
-		c.Attrs == 0 && c.Width == 1 && c.LinkID == 0 && c.ULStyle == 0
+		c.Attrs&attrVisual == 0 && c.Width == 1 && c.LinkID == 0 && c.ULStyle == 0
 }
 
 // rowArena carves fixed-width row slices from lazy-allocated flat blocks

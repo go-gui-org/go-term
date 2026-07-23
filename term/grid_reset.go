@@ -20,7 +20,9 @@ package term
 func (g *grid) SoftReset() {
 	g.FlushGrapheme()
 
-	// SGR + character sets back to defaults.
+	// SGR + character sets back to defaults. Zeroing CurAttrs also drops
+	// DECSCA protection, which VT510's reset table requires ("character
+	// attribute → normal, erasable by DECSEL and DECSED").
 	g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, 0
 	g.CurULStyle, g.CurULColor = ulNone, DefaultColor
 	g.CurLinkID = 0
@@ -71,6 +73,10 @@ func (g *grid) HardReset() {
 	g.FocusReporting = false
 	g.KittyKeyFlags = 0
 	g.kittyFlagStack = g.kittyFlagStack[:0]
+
+	// DECSACE back to the power-on stream extent. DECSTR leaves it alone —
+	// VT510's soft-reset table does not list it.
+	g.RectExtent = 0
 
 	// Cursor appearance (DECSCUSR / OSC 12).
 	g.cursorShape = cursorBlock

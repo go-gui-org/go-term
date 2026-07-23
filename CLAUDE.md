@@ -93,6 +93,7 @@ term/grid_edit.go        putCell write path; Put + streaming grapheme assembly.
 term/grid_mark.go        OSC 133 semantic shell marks.
 term/grid_reset.go       DECSTR soft reset; RIS hard reset.
 term/grid_reflow.go      Logical line reflow on resize.
+term/grid_rect.go        DECSCA protection; VT420 rectangular area ops.
 term/grid_scroll.go      Scroll regions; pixel-accurate ViewSubPx math.
 term/grid_search.go      Literal and RE2 regex search.
 term/grid_selection.go   Content-relative text selection.
@@ -162,6 +163,16 @@ Supports a modern xterm/kitty-compatible subset:
   ops ignored), tab stop clear (TBC), tab navigation
   (CHT `CSI Ps I` / CBT `CSI Ps Z`), erase characters (ECH `CSI Ps X`),
   repeat (REP `CSI Ps b` — ncurses emits it wherever terminfo has `rep`).
+- Character protection + rectangular areas (VT420, `grid_rect.go`): DECSCA
+  (`CSI Ps " q`) marks characters protected; only the selective erases honor
+  it — DECSEL (`CSI ? Ps K`), DECSED (`CSI ? Ps J`), DECSERA (`CSI … $ {`).
+  DECERA (`$ z`), DECFRA (`$ x`), DECCARA (`$ r`), DECRARA (`$ t`) and DECCRA
+  (`$ v`) ignore protection, as does every ordinary erase/scroll/overwrite.
+  DECSACE (`CSI Ps * x`) picks the stream (default) or rectangle extent for
+  DECCARA/DECRARA. Protection lives in `cell.Attrs` bit 8 (`attrProtected`)
+  so DECSC/DECRC and the alt-screen swap carry it; SGR 0 must *not* clear it,
+  DECSTR and RIS must. DA1 still reports VT100 level — apps that gate these
+  on `CSI ?64…` will not emit them.
 - Reports: DSR 5 (`CSI 5 n` → `CSI 0 n`), CPR (`CSI 6 n`), DECXCPR
   (`CSI ? 6 n`), DECRQM in both the private (`CSI ? Ps $ p`) and ANSI
   (`CSI Ps $ p`) forms.
@@ -185,8 +196,9 @@ Supports a modern xterm/kitty-compatible subset:
   clipboard (52), semantic shell marks (133), iTerm2 inline images (1337).
   Color specs accept `rgb:H/H/H`…`rgb:HHHH/HHHH/HHHH` and `#RGB` through
   `#RRRRGGGGBBBB`; X11 color *names* are not supported.
-- DCS: DECRQSS, XTGETTCAP (incl. `Smulx`/`Setulc` to advertise styled +
-  colored underlines), sixel graphics, synchronized updates.
+- DCS: DECRQSS (`m`, `r`, ` q`, `"q` DECSCA, `*x` DECSACE), XTGETTCAP (incl.
+  `Smulx`/`Setulc` to advertise styled + colored underlines), sixel graphics,
+  synchronized updates.
 - APC: Kitty Graphics Protocol (transmit/display/place/delete; PNG, raw
   RGBA/RGB; chunked base64).
 

@@ -688,7 +688,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 			}
 			sawBlink = sawBlink || cell.Attrs&attrBlink != 0
 			cell = maskGlyph(cell, ds.blinkOff)
-			if cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0 {
+			if cell.Ch == ' ' && cell.Attrs&attrVisual == 0 && cell.LinkID == 0 {
 				continue
 			}
 			k := cellRunKey(cell, style, g, hR, hC, cmdHeld)
@@ -709,7 +709,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 			sawBlink = sawBlink || cell.Attrs&attrBlink != 0
 			cell = maskGlyph(cell, ds.blinkOff)
 			k := cellRunKey(cell, style, g, hR, hC, cmdHeld)
-			isPlainSpace := cell.Ch == ' ' && cell.Attrs == 0 && cell.LinkID == 0
+			isPlainSpace := cell.Ch == ' ' && cell.Attrs&attrVisual == 0 && cell.LinkID == 0
 			if cell.Width == 2 {
 				t.flushRun(dc, r, style, yOff, &fr)
 				t.emitCell(dc, float32(c)*t.cellW, float32(r)*t.cellH+yOff, cell, k, style)

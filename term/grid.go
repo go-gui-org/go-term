@@ -42,10 +42,11 @@ func runeWidth(r rune) int {
 	return 1
 }
 
-// cell attribute bits. Exactly eight fit in cell.Attrs (uint8) — all are
-// now spoken for, so a ninth attribute needs a wider field.
+// cell attribute bits. cell.Attrs is uint16; bits 0..7 are the SGR visual
+// attributes, bit 8 is DECSCA protection. Widening from uint8 was free —
+// the second byte lands in padding cell already carried.
 const (
-	attrBold uint8 = 1 << iota
+	attrBold uint16 = 1 << iota
 	attrUnderline
 	attrInverse
 	attrDim
@@ -53,6 +54,20 @@ const (
 	attrStrikethrough
 	attrBlink   // SGR 5/6 — glyph hidden on alternating half-cycles
 	attrConceal // SGR 8 — glyph never drawn (ncurses A_INVIS, password fields)
+
+	// attrProtected is DECSCA (CSI Ps " q), not an SGR attribute: SGR 0 must
+	// not clear it, and it has no visual effect. Only the selective erases —
+	// DECSEL (CSI ? K), DECSED (CSI ? J) and DECSERA (CSI … $ {) — honor it;
+	// EL/ED/ECH, scrolling and ordinary overwrites ignore it entirely. Cells
+	// blanked by any erase path while DECSCA is on come out protected, since
+	// the blank carries CurAttrs (xterm does the same — its ClearCells masks
+	// with ATTRIBUTES, which includes PROTECTED).
+	attrProtected
+
+	// attrVisual is every bit a renderer looks at — i.e. Attrs minus
+	// protection. Blank-cell fast paths compare against this so a protected
+	// space is still recognized as an untouched blank.
+	attrVisual = attrProtected - 1
 )
 
 // Charset designator bytes used in ESC ( F / ESC ) F sequences.
@@ -214,7 +229,7 @@ type cell struct {
 	FG        uint32 // packed Color (palette index, RGB, or DefaultColor)
 	BG        uint32
 	ULColor   uint32 // packed underline color; DefaultColor = use FG
-	Attrs     uint8
+	Attrs     uint16
 	Width     uint8
 	ULStyle   uint8  // ulNone..ulDashed
 	LinkID    uint16 // 0 = no link; non-zero indexes grid.links
@@ -230,7 +245,7 @@ func defaultCell() cell {
 // runs to the *current* attributes (so e.g. an Erase under inverse
 // fills with inverse background). Blank cells never carry underline
 // decoration (invisible on spaces; ULStyle=0 signals that).
-func blankCell(fg, bg uint32, attrs uint8) cell {
+func blankCell(fg, bg uint32, attrs uint16) cell {
 	return cell{Ch: ' ', FG: fg, BG: bg, ULColor: DefaultColor, Attrs: attrs, Width: 1}
 }
 
@@ -253,7 +268,7 @@ type altSavedScreen struct {
 	rowWrapped       []bool
 	cursorR, cursorC int
 	curFG, curBG     uint32
-	curAttrs         uint8
+	curAttrs         uint16
 	curULStyle       uint8
 	curULColor       uint32
 	charsetG0        byte
@@ -327,6 +342,10 @@ type grid struct {
 	// don't re-allocate them from nil every time.
 	searchRunes []rune
 	searchCols  []int
+
+	// rectBuf is DECCRA's scratch copy of the source rectangle, kept on the
+	// grid so an overlapping copy costs no allocation after the first call.
+	rectBuf []cell
 
 	// clusters interns multi-codepoint grapheme cluster strings. A cell's
 	// clusterID indexes here (0 = none, index 0 is unused). clusterIDs is the
@@ -445,8 +464,16 @@ type grid struct {
 	pal         palTable
 	palOverride *palTable
 
-	CurAttrs       uint8
-	CurULStyle     uint8 // current underline style (ulNone..ulDashed)
+	CurAttrs   uint16
+	CurULStyle uint8 // current underline style (ulNone..ulDashed)
+
+	// RectExtent is DECSACE (CSI Ps * x): 0/1 = stream (the default — the run
+	// of character positions from the first corner to the second, wrapping
+	// through whole rows in between), 2 = rectangle. Consulted only by
+	// DECCARA and DECRARA; the erase/fill/copy rectangle operations are
+	// always rectangular.
+	RectExtent uint8
+
 	CharsetG0      byte  // ESC ( F — designated set for GL when ActiveG=0
 	CharsetG1      byte  // ESC ) F — designated set for GL when ActiveG=1
 	ActiveG        uint8 // 0 = SI selects G0 into GL, 1 = SO selects G1

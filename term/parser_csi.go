@@ -29,6 +29,12 @@ func (p *parser) dispatchCSI(final byte) {
 					p.onReply([]byte("\x1b[?" + strconv.Itoa(row) + ";" +
 						strconv.Itoa(col) + "R"))
 				}
+			case 'J':
+				// DECSED — selective erase in display (protection honored).
+				p.g.SelectiveEraseInDisplay(p.param(0, 0))
+			case 'K':
+				// DECSEL — selective erase in line.
+				p.g.SelectiveEraseInLine(p.param(0, 0))
 			case 'p':
 
 				if p.intermediate == '$' && p.onReply != nil {
@@ -129,7 +135,11 @@ func (p *parser) dispatchCSI(final byte) {
 			p.replyANSIDECRQM()
 		}
 	case 'r':
-
+		// DECSTBM bare; DECCARA (change attributes in area) with '$'.
+		if p.intermediate == '$' {
+			p.g.ChangeAttrsRect(p.params)
+			break
+		}
 		top := p.param(0, 1) - 1
 		bot := p.param(1, p.g.Rows) - 1
 		p.g.SetScrollRegion(top, bot)
@@ -163,6 +173,11 @@ func (p *parser) dispatchCSI(final byte) {
 			p.onReply([]byte("\x1b[" + strconv.Itoa(row) + ";" + strconv.Itoa(col) + "R"))
 		}
 	case 't':
+		// DECRARA (reverse attributes in area) with '$'; XTWINOPS bare.
+		if p.intermediate == '$' {
+			p.g.ReverseAttrsRect(p.params)
+			break
+		}
 		// XTWINOPS. Only the read-only geometry queries and the title stack
 		// are honored — window manipulation ops (move/resize/raise…) are
 		// ignored, an embedded widget must not let the app drive the host
@@ -196,8 +211,43 @@ func (p *parser) dispatchCSI(final byte) {
 		}
 	case 'q':
 
-		if p.intermediate == ' ' {
+		switch p.intermediate {
+		case ' ':
 			p.g.ApplyDECSCUSR(p.param(0, 0))
+		case '"':
+			// DECSCA — select character protection attribute.
+			p.g.SetProtection(p.param(0, 0))
+		}
+	case 'x':
+		// DECFRA (fill area) with '$'; DECSACE (attribute change extent)
+		// with '*'. A bare 'x' is DECREQTPARM, which this terminal ignores.
+		switch p.intermediate {
+		case '$':
+			p.g.FillRect(paramAt(p.params, 0), paramAt(p.params, 1),
+				paramAt(p.params, 2), paramAt(p.params, 3), paramAt(p.params, 4))
+		case '*':
+			p.g.SetRectExtent(p.param(0, 0))
+		}
+	case 'z':
+		// DECERA — erase rectangular area.
+		if p.intermediate == '$' {
+			p.g.EraseRect(paramAt(p.params, 0), paramAt(p.params, 1),
+				paramAt(p.params, 2), paramAt(p.params, 3))
+		}
+	case '{':
+		// DECSERA — selective erase rectangular area (protection honored).
+		if p.intermediate == '$' {
+			p.g.SelectiveEraseRect(paramAt(p.params, 0), paramAt(p.params, 1),
+				paramAt(p.params, 2), paramAt(p.params, 3))
+		}
+	case 'v':
+		// DECCRA — copy rectangular area. Params 4 and 7 are the source and
+		// destination page numbers; with one page they resolve to it whatever
+		// they say, so they are parsed past rather than validated.
+		if p.intermediate == '$' {
+			p.g.CopyRect(paramAt(p.params, 0), paramAt(p.params, 1),
+				paramAt(p.params, 2), paramAt(p.params, 3),
+				paramAt(p.params, 5), paramAt(p.params, 6))
 		}
 	default:
 
@@ -419,9 +469,12 @@ func clampU8(v int) uint8 {
 
 func (p *parser) applySGR() {
 	g := p.g
+	// SGR reset clears the visual attributes but must leave DECSCA alone:
+	// "DECSCA does not affect visual character attributes set by SGR", and
+	// the converse holds too — only DECSCA, DECSTR and RIS change protection.
 	if len(p.params) == 0 {
 
-		g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, 0
+		g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, g.CurAttrs&attrProtected
 		g.CurULStyle = 0
 		g.CurULColor = DefaultColor
 		return
@@ -430,7 +483,7 @@ func (p *parser) applySGR() {
 		n := p.params[i]
 		switch {
 		case n == 0:
-			g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, 0
+			g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, g.CurAttrs&attrProtected
 			g.CurULStyle = 0
 			g.CurULColor = DefaultColor
 		case n == 1:
