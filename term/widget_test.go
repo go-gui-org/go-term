@@ -2567,6 +2567,43 @@ func TestTerm_View_RestoresFocus(t *testing.T) {
 	}
 }
 
+// The canvas must be clipped: smooth scrolling emits the partial top row at
+// a negative Y (see TestOnDraw_PartialRowDrawsAboveCanvas), and go-gui only
+// scissors a DrawCanvas when Clip is set. Without it that row paints over the
+// workspace tab bar or the pane above in a split.
+func TestTerm_View_CanvasIsClipped(t *testing.T) {
+	win := gui.NewWindow(gui.WindowCfg{Width: 640, Height: 480})
+	term, err := New(win, Cfg{})
+	if err != nil {
+		t.Fatalf("New term: %v", err)
+	}
+	defer func() { _ = term.Close() }()
+
+	shape := findShapeByID(win, term.View(win), term.canvasID)
+	if shape == nil {
+		t.Fatalf("canvas shape %q not found in view tree", term.canvasID)
+	}
+	if !shape.Clip {
+		t.Error("DrawCanvas Clip = false, want true")
+	}
+}
+
+// findShapeByID walks a view tree, generating each node's layout, and returns
+// the first shape carrying id. Views are generated (not laid out), so only
+// shape identity and config fields are meaningful — geometry is unset.
+func findShapeByID(w *gui.Window, v gui.View, id string) *gui.Shape {
+	layout := v.GenerateLayout(w)
+	if layout.Shape != nil && layout.Shape.ID == id {
+		return layout.Shape
+	}
+	for _, child := range v.Content() {
+		if s := findShapeByID(w, child, id); s != nil {
+			return s
+		}
+	}
+	return nil
+}
+
 func TestTerm_onAmendLayout(t *testing.T) {
 	win := gui.NewWindow(gui.WindowCfg{})
 	term, err := New(win, Cfg{})

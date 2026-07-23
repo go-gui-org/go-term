@@ -1219,9 +1219,16 @@ func (t *Term) View(w *gui.Window) gui.View {
 	bgColor := t.grid.Theme.DefaultBG
 	t.grid.Mu.Unlock()
 	canvas := gui.DrawCanvas(gui.DrawCanvasCfg{
-		ID:            t.canvasID,
-		Version:       t.drawVersion.Load(),
-		Sizing:        gui.FillFill,
+		ID:      t.canvasID,
+		Version: t.drawVersion.Load(),
+		Sizing:  gui.FillFill,
+		// Clip is mandatory, not cosmetic. Smooth scrolling draws the
+		// partial top row at y = -cellH + ViewSubPx — i.e. *above* the
+		// canvas — and shifts the bottom row past dc.Height by ViewSubPx.
+		// go-gui only scissors a DrawCanvas when Clip is set, so without
+		// this those rows paint over whatever is adjacent: the workspace
+		// tab bar above, or the neighboring pane in a split.
+		Clip:          true,
 		OnDraw:        t.onDraw,
 		OnMouseScroll: t.onMouseScroll,
 		OnClick:       t.onClick,
