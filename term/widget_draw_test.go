@@ -145,6 +145,46 @@ func TestOnDraw_BackgroundPartialTopRow(t *testing.T) {
 	// completes without panic — partialRow nil-path is exercised.
 }
 
+// The partial top row is deliberately emitted at a negative Y — it is the
+// sliver of the scrollback row that smooth scrolling has pushed off the top
+// of the viewport. Nothing in onDraw clamps it, so the canvas itself must be
+// clipped (see TestTerm_View_CanvasIsClipped); otherwise this text paints
+// over the workspace tab bar or the pane above it in a split.
+func TestOnDraw_PartialRowDrawsAboveCanvas(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	g := tm.grid
+	g.Mu.Lock()
+	g.ScrollbackCap = 100
+	// Push three distinct rows into scrollback.
+	for _, ch := range []rune{'A', 'B', 'C'} {
+		g.CursorR, g.CursorC = 0, 0
+		g.Put(ch)
+		g.ScrollUp(1)
+	}
+	// Viewport one row back, scrolled 5px into the row above it: "B" is the
+	// partial top row, "C" the first full viewport row.
+	g.ViewOffset = 1
+	g.ViewSubPx = 5
+	g.Mu.Unlock()
+
+	tm.onDraw(dc)
+
+	var partialY float32
+	found := false
+	for _, tx := range dc.Texts() {
+		if tx.Text == "B" {
+			partialY, found = tx.Y, true
+		}
+	}
+	if !found {
+		t.Fatal("partial top row not drawn")
+	}
+	// -cellH + ViewSubPx = -20 + 5.
+	if partialY != -15 {
+		t.Errorf("partial row Y = %v, want -15", partialY)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Foreground pass
 // ---------------------------------------------------------------------------
