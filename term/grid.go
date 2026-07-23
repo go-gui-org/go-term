@@ -35,11 +35,65 @@ func runeWidth(r rune) int {
 	w := uniseg.StringWidth(string(r))
 	switch {
 	case w <= 0:
+		// uniseg zero-widths emoji skin-tone modifiers (they are
+		// Grapheme_Extend), but wcwidth renders a standalone one as wide.
+		// Match wcwidth; genuine combining marks (uniseg 0, not an emoji
+		// modifier) stay 0.
+		if isEmojiModifier(r) {
+			return 2
+		}
 		return 0
 	case w >= 2:
 		return 2
 	}
+	// uniseg reports width 1, but its width data is frozen at Unicode 15.0.0.
+	// Consult the current East Asian Width table (eawWide) so codepoints
+	// reclassified Wide in a later release match the wcwidth model. This only
+	// ever upgrades 1 -> 2; the zero-width and existing-wide cases are settled
+	// above and left to uniseg.
+	if eawWide(r) {
+		return 2
+	}
 	return 1
+}
+
+//go:generate go run gen_eaw.go
+
+// eawWide reports whether r should occupy two cells under the current Unicode
+// East Asian Width data (Wide or Fullwidth) — the up-to-date override on
+// uniseg's Unicode-15.0.0 width decision. eawWideRanges is generated from
+// term/ucd/EastAsianWidth.txt by gen_eaw.go. Regional indicators
+// (U+1F1E6..1F1FF) are East_Asian_Width Neutral, but wcwidth — the model
+// ucs-detect measures against — renders a lone one as wide, so they are
+// special-cased here. A regional-indicator *pair* forms a single grapheme
+// cluster uniseg already widths at 2, so this only affects a solitary one.
+func eawWide(r rune) bool {
+	if r >= 0x1F1E6 && r <= 0x1F1FF {
+		return true
+	}
+	// Binary search over the sorted, non-overlapping ranges.
+	lo, hi := 0, len(eawWideRanges)
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		switch {
+		case r < eawWideRanges[mid].lo:
+			hi = mid
+		case r > eawWideRanges[mid].hi:
+			lo = mid + 1
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+// isEmojiModifier reports whether r is an emoji skin-tone modifier
+// (Emoji_Modifier, U+1F3FB..1F3FF). uniseg zero-widths these (Grapheme_Extend),
+// but wcwidth renders a standalone one as wide. Combined with an emoji base
+// they form one grapheme cluster whose width comes from the base, so this only
+// affects a solitary modifier — see runeWidth and leadingAkshara.
+func isEmojiModifier(r rune) bool {
+	return r >= 0x1F3FB && r <= 0x1F3FF
 }
 
 // cell attribute bits. cell.Attrs is uint16; bits 0..7 are the SGR visual

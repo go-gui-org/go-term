@@ -1105,3 +1105,164 @@ func TestParser_CBT_MovesToTabStop(t *testing.T) {
 		t.Errorf("CBT: col 0 = %q, want 't'", got)
 	}
 }
+
+func TestEawWide(t *testing.T) {
+	cases := []struct {
+		r    rune
+		want bool
+	}{
+		// Regional indicators: special-cased in eawWide before binary search.
+		{0x1F1E6, true}, // 🇦
+		{0x1F1FF, true}, // 🇿
+		// Codepoint in eawWideRanges: U+1FADF (SPLATTER) — uniseg says width 1
+		// but the current EAW table lists it as Wide.
+		{0x1FADF, true},
+		// Codepoint at lo of a range.
+		{0x1100, true}, // hangul choseong
+		// Codepoint at hi of a range.
+		{0x115F, true}, // hangul choseong filler
+		// Plain ASCII — not wide.
+		{'A', false},
+		{'0', false},
+		// Zero-width combining mark — not wide.
+		{0x0300, false},
+		// Between ranges.
+		{0x1160, false}, // between hangul choseong and CJK
+		// Before first range.
+		{0x0000, false},
+		// Well after last range (a private-use or very high codepoint).
+		{0x40000, false},
+	}
+	for _, c := range cases {
+		if got := eawWide(c.r); got != c.want {
+			t.Errorf("eawWide(U+%04X)=%v want %v", c.r, got, c.want)
+		}
+	}
+}
+
+func TestIsEmojiModifier(t *testing.T) {
+	cases := []struct {
+		r    rune
+		want bool
+	}{
+		{0x1F3FB, true},  // light skin tone
+		{0x1F3FF, true},  // dark skin tone
+		{0x1F3FA, false}, // just before range
+		{0x1F400, false}, // just after range
+		{'A', false},
+		{0, false},
+	}
+	for _, c := range cases {
+		if got := isEmojiModifier(c.r); got != c.want {
+			t.Errorf("isEmojiModifier(U+%04X)=%v want %v", c.r, got, c.want)
+		}
+	}
+}
+
+func TestRuneWidth_EmojiModifier(t *testing.T) {
+	// Standalone emoji skin-tone modifiers: uniseg says width 0
+	// (Grapheme_Extend), but wcwidth renders them as wide. Our override
+	// must report 2.
+	cases := []rune{0x1F3FB, 0x1F3FC, 0x1F3FD, 0x1F3FE, 0x1F3FF}
+	for _, r := range cases {
+		if got := runeWidth(r); got != 2 {
+			t.Errorf("runeWidth(U+%04X)=%d, want 2", r, got)
+		}
+	}
+}
+
+func TestRuneWidth_EawWide(t *testing.T) {
+	// U+1FADF (SPLATTER): uniseg reports width 1 but the current EAW
+	// table classifies it Wide. runeWidth must override 1→2.
+	if got := runeWidth(0x1FADF); got != 2 {
+		t.Errorf("runeWidth(U+1FADF)=%d, want 2", got)
+	}
+	// U+1FAEB is just after the {0x1FADF,0x1FAEA} range; uniseg reports 1.
+	// eawWide must not override it.
+	if got := runeWidth(0x1FAEB); got != 1 {
+		t.Errorf("runeWidth(U+1FAEB)=%d, want 1", got)
+	}
+}
+
+func TestRuneWidth_ZeroWidthCombining(t *testing.T) {
+	// Non-emoji combining marks stay zero-width (not isEmojiModifier).
+	if got := runeWidth(0x0300); got != 0 {
+		t.Errorf("runeWidth(U+0300)=%d, want 0", got)
+	}
+}
+
+func TestWcwidthWidth(t *testing.T) {
+	cases := []struct {
+		name string
+		b    []byte
+		w    int
+		want int
+	}{
+		{
+			name: "EAW-wide: single rune uniseg calls narrow",
+			b:    []byte(string(rune(0x1FADF))),
+			w:    1,
+			want: 2,
+		},
+		{
+			name: "emoji modifier: single rune uniseg calls zero",
+			b:    []byte(string(rune(0x1F3FB))),
+			w:    0,
+			want: 2,
+		},
+		{
+			name: "VS16 cluster: base+VS16 uniseg left narrow",
+			b:    []byte("❤\xef\xb8\x8f"), // heart + VS16
+			w:    1,
+			want: 2,
+		},
+		{
+			name: "pass-through: narrow ASCII",
+			b:    []byte("A"),
+			w:    1,
+			want: 1,
+		},
+		{
+			name: "pass-through: already-wide cluster (w=2)",
+			b:    []byte(string(rune(0x1F600))), // 😀
+			w:    2,
+			want: 2,
+		},
+		{
+			name: "pass-through: zero-width combining mark",
+			b:    []byte("e\xcc\x81"), // e + combining acute
+			w:    1,
+			want: 1,
+		},
+		{
+			name: "empty byte slice",
+			b:    []byte{},
+			w:    1,
+			want: 1,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := wcwidthWidth(c.b, c.w); got != c.want {
+				t.Errorf("wcwidthWidth(%q, %d)=%d, want %d",
+					c.b, c.w, got, c.want)
+			}
+		})
+	}
+}
+
+func TestHasVS16(t *testing.T) {
+	if !hasVS16([]byte("❤\xef\xb8\x8f")) { // heart + U+FE0F
+		t.Error("hasVS16(heart+VS16)=false, want true")
+	}
+	if hasVS16([]byte("heart")) {
+		t.Error("hasVS16(heart)=true, want false")
+	}
+	if hasVS16([]byte{}) {
+		t.Error("hasVS16(empty)=true, want false")
+	}
+	// VS15 (U+FE0E) must NOT match: our 3-byte needle targets 0xEF 0xB8 0x8F only.
+	if hasVS16([]byte("\xef\xb8\x8e")) { // VS15
+		t.Error("hasVS16(VS15)=true, want false")
+	}
+}

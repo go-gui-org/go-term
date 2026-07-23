@@ -1,6 +1,7 @@
 package term
 
 import (
+	"bytes"
 	"unicode"
 	"unicode/utf8"
 
@@ -104,8 +105,44 @@ func leadingAkshara(b []byte) (n, width int, complete bool) {
 	}
 	if brahmic, w := brahmicWidth(b[:n]); brahmic {
 		width = w
+	} else {
+		width = wcwidthWidth(b[:n], width)
 	}
 	return n, width, complete
+}
+
+// wcwidthWidth reconciles uniseg's width w for the syllable b (its complete
+// bytes) with the wcwidth model ucs-detect measures against, correcting the few
+// cases uniseg's Unicode-15.0.0 data gets wrong. It only ever widens 0/1 -> 2;
+// it never narrows, so uniseg's already-wide clusters (flag pairs, ZWJ emoji,
+// wide base + combining) and its VS15 text-presentation narrowing are preserved.
+func wcwidthWidth(b []byte, w int) int {
+	r, sz := utf8.DecodeRune(b)
+	single := sz == len(b) // syllable is exactly one code point
+	switch {
+	case single && w == 1 && eawWide(r):
+		// A lone wide codepoint uniseg calls narrow: symbols reclassified Wide
+		// since Unicode 15.0, and wcwidth's wide regional indicators.
+		return 2
+	case single && w == 0 && isEmojiModifier(r):
+		// A standalone emoji skin-tone modifier: uniseg zero-widths it
+		// (Grapheme_Extend), but wcwidth renders a lone one as wide. Combined
+		// with an emoji base it is one cluster whose width comes from the base.
+		return 2
+	case w == 1 && hasVS16(b):
+		// A base + VS16 that uniseg left narrow — the ASCII emoji bases # * 0-9.
+		// VS16 requests emoji (wide) presentation, so the cluster is width 2.
+		// VS15 (U+FE0E, text presentation) has a different final byte and is not
+		// matched here, so its narrowing stands.
+		return 2
+	}
+	return w
+}
+
+// hasVS16 reports whether b contains U+FE0F, the emoji variation selector that
+// forces emoji (wide) presentation of the preceding base.
+func hasVS16(b []byte) bool {
+	return bytes.Contains(b, []byte{0xEF, 0xB8, 0x8F})
 }
 
 // clusterFusesRight reports whether a grapheme cluster should fuse with the
