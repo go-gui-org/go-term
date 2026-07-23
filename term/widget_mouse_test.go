@@ -934,29 +934,69 @@ func TestUpdateHover_NewCellUpdatesCoords(t *testing.T) {
 	_ = prevVer
 }
 
-// ---------------------------------------------------------------------------
-// linkCell
-// ---------------------------------------------------------------------------
-
-func TestLinkCell_NonZeroLinkID(t *testing.T) {
-	g := newGrid(4, 8)
-	g.Cells[0].LinkID = 42
-	if !linkCell(0, 0, g) {
-		t.Error("linkCell should return true for cell with non-zero LinkID")
+func TestUpdateHover_CmdHeldDetectsImplicitURL(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	putRow(tm.grid, "see https://go.dev now")
+	// Simulate Cmd being held.
+	tm.mouse.cmdHeld.Store(true)
+	tm.mouse.hoverR.Store(-1)
+	tm.mouse.hoverC.Store(-1)
+	prevVer := tm.drawVersion.Load()
+	// Hover over the URL text (col 4).
+	tm.updateHover(0, 4, &gui.Window{})
+	if tm.mouse.hoverURL == "" {
+		t.Error("Cmd+hover over URL: expected detected URL, got empty")
+	}
+	if len(tm.mouse.hoverSpans) == 0 {
+		t.Error("Cmd+hover over URL: expected hoverSpans, got none")
+	}
+	if tm.drawVersion.Load() <= prevVer {
+		t.Error("Cmd+hover over URL: version should bump for highlight")
 	}
 }
 
-func TestLinkCell_ZeroLinkID(t *testing.T) {
-	g := newGrid(4, 8)
-	if linkCell(0, 0, g) {
-		t.Error("linkCell should return false for cell with zero LinkID")
+func TestUpdateHover_CmdHeldPlainTextNoURL(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	putRow(tm.grid, "just plain text, no urls here")
+	tm.mouse.cmdHeld.Store(true)
+	tm.mouse.hoverR.Store(-1)
+	tm.mouse.hoverC.Store(-1)
+	prevVer := tm.drawVersion.Load()
+	tm.updateHover(0, 3, &gui.Window{})
+	if tm.mouse.hoverURL != "" {
+		t.Errorf("Cmd+hover over plain text: expected no URL, got %q", tm.mouse.hoverURL)
 	}
+	if len(tm.mouse.hoverSpans) != 0 {
+		t.Error("Cmd+hover over plain text: expected empty spans")
+	}
+	// Moving from (-1,-1) to (0,3) always bumps (new cell).
+	_ = prevVer
 }
 
-func TestLinkCell_OutOfBounds(t *testing.T) {
-	g := newGrid(4, 8)
-	// ViewCellAt returns defaultCell() for OOB, which has LinkID=0.
-	if linkCell(-1, -1, g) {
-		t.Error("linkCell should return false for out-of-bounds coords")
+func TestUpdateHover_CmdReleasedClearsURLHighlight(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	putRow(tm.grid, "see https://go.dev now")
+	// First, hover with Cmd to detect a URL.
+	tm.mouse.cmdHeld.Store(true)
+	tm.mouse.hoverR.Store(0)
+	tm.mouse.hoverC.Store(4)
+	tm.updateHover(0, 4, &gui.Window{})
+	if tm.mouse.hoverURL == "" {
+		t.Fatal("setup failed: URL not detected with Cmd held")
+	}
+	prevURL := tm.mouse.hoverURL
+
+	// Release Cmd: hovering the same cell should clear the URL.
+	tm.mouse.cmdHeld.Store(false)
+	prevVer := tm.drawVersion.Load()
+	tm.updateHover(0, 4, &gui.Window{})
+	if tm.mouse.hoverURL != "" {
+		t.Errorf("Cmd released: expected hoverURL to clear, got %q", tm.mouse.hoverURL)
+	}
+	if len(tm.mouse.hoverSpans) != 0 {
+		t.Error("Cmd released: expected hoverSpans to clear")
+	}
+	if prevURL != "" && tm.drawVersion.Load() <= prevVer {
+		t.Error("Cmd released: version should bump to clear the highlight")
 	}
 }

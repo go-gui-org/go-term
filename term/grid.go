@@ -343,6 +343,16 @@ type grid struct {
 	searchRunes []rune
 	searchCols  []int
 
+	// URL-detection scratch (detectURLAt), persisted for the same reason.
+	// urlRunes is the joined clean text of a logical line; urlRows / urlCols
+	// map each rune back to its content row and grid column; urlBytes maps
+	// each rune to its byte offset in string(urlRunes) so regexp byte spans
+	// convert back to rune indices.
+	urlRunes []rune
+	urlRows  []int
+	urlCols  []int
+	urlBytes []int
+
 	// rectBuf is DECCRA's scratch copy of the source rectangle, kept on the
 	// grid so an overlapping copy costs no allocation after the first call.
 	rectBuf []cell

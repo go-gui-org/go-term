@@ -383,6 +383,13 @@ type mouseState struct {
 	hoverC  atomic.Int32
 	cmdHeld atomic.Bool // true when Super (Cmd) is held
 
+	// Implicit URL detected under the pointer while Cmd is held (issue 72).
+	// Main-thread only: written by updateHover, read by prepareHoverURL and
+	// onMouseUp. hoverURL is "" when no auto-detected URL is under the cursor;
+	// hoverSpans are its per-content-row grid-column ranges for highlighting.
+	hoverURL   string
+	hoverSpans []urlSpan
+
 	// Wheel-report accumulator (see wheelReportTicks): pixels of scroll
 	// distance not yet emitted as an SGR wheel tick, and the direction
 	// (+1 up / -1 down / 0 initial) it was accumulated in.
@@ -397,6 +404,7 @@ type drawBufs struct {
 	runeCache   map[rune]string // caches string(r) for non-ASCII runes
 	vMatchBuf   [][]vMatch      // pre-allocated search-highlight rows
 	selBuf      []rowBounds     // pre-allocated selection-bound rows
+	urlBuf      []rowBounds     // pre-allocated hover-URL highlight rows
 	bidiVisRows [][]cell        // visual-reordered rows for current frame
 	bidiV2LRows [][]int         // visual→logical column maps
 	bidiScratch []cell          // reused per-row cell buffer for BiDi pre-pass

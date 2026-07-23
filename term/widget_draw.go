@@ -182,7 +182,9 @@ type runKey struct {
 // cellRunKey computes the runKey for cell, applying attribute and
 // hyperlink-hover color transforms. Must be called under grid.Mu.
 // Link underline is always applied; hover recolor is gated on cmdHeld.
-func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int, cmdHeld bool) runKey {
+// urlHover is true when this cell is inside the Cmd-hovered implicit-URL span
+// (issue 72); it gets the same underline + blue recolor as an OSC 8 link.
+func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int, cmdHeld, urlHover bool) runKey {
 	rawFG := g.fgOf(cell)
 	color := rawFG
 	if cell.Attrs&attrDim != 0 {
@@ -213,6 +215,15 @@ func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int, cmdH
 				color = gui.RGB(col.R/2, col.G/2, 255)
 			}
 		}
+	} else if urlHover {
+		// Implicit URL under the Cmd-hovered pointer: reveal it exactly like an
+		// OSC 8 link — underline plus the same blue recolor. The span membership
+		// is computed by the caller from ds.rowURL, so no per-cell lookup here.
+		if ulStyle == ulNone {
+			ulStyle = ulSingle
+		}
+		col := color
+		color = gui.RGB(col.R/2, col.G/2, 255)
 	}
 	return runKey{
 		color:         color,
@@ -232,6 +243,7 @@ type drawState struct {
 	cells         []cell
 	vMatchesByRow [][]vMatch
 	rowSel        []rowBounds
+	rowURL        []rowBounds // hover-detected implicit-URL span per viewport row
 	bidiVisRows   [][]cell
 	bidiV2LRows   [][]int
 	partialRow    []cell
@@ -354,6 +366,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.prepareFastPath(&ds)
 	t.prepareSearch(&ds)
 	t.prepareSelection(&ds)
+	t.prepareHoverURL(&ds)
 	t.prepareBiDi(&ds)
 	t.preparePartialRow(&ds)
 	t.drawBgPass(&ds)
@@ -524,6 +537,35 @@ func (t *Term) prepareSelection(ds *drawState) {
 	}
 }
 
+// prepareHoverURL translates the Cmd-hovered implicit-URL span (issue 72),
+// stored by updateHover in content coordinates, into a per-viewport-row column
+// range consumed by drawFgPass. No-op unless Cmd is held and a URL is under the
+// pointer, so the render path pays nothing in the common case.
+func (t *Term) prepareHoverURL(ds *drawState) {
+	if !t.mouse.cmdHeld.Load() || len(t.mouse.hoverSpans) == 0 {
+		return
+	}
+	rows := ds.rows
+	if cap(t.draw.urlBuf) < rows {
+		t.draw.urlBuf = make([]rowBounds, rows)
+	} else {
+		t.draw.urlBuf = t.draw.urlBuf[:rows]
+		clear(t.draw.urlBuf)
+	}
+	active := false
+	for _, sp := range t.mouse.hoverSpans {
+		vr, ok := ds.g.ContentRowToViewport(sp.Row)
+		if !ok {
+			continue
+		}
+		t.draw.urlBuf[vr] = rowBounds{sp.C0, sp.C1, true}
+		active = true
+	}
+	if active {
+		ds.rowURL = t.draw.urlBuf
+	}
+}
+
 // prepareBiDi detects viewport rows containing RTL characters and computes
 // their visual-reordered cell slices + logical→visual column maps. For live
 // LTR-only terminals rowHasRTL returns false immediately — zero allocations.
@@ -691,7 +733,9 @@ func (t *Term) drawFgPass(ds *drawState) {
 			if cell.Ch == ' ' && cell.Attrs&attrVisual == 0 && cell.LinkID == 0 {
 				continue
 			}
-			k := cellRunKey(cell, style, g, hR, hC, cmdHeld)
+			// The partial top row sits above viewport row 0; hover coords never
+			// land there (posToCell clamps to 0..Rows-1), so no URL highlight.
+			k := cellRunKey(cell, style, g, hR, hC, cmdHeld, false)
 			t.emitCell(dc, float32(c)*t.cellW, partialY, cell, k, style)
 		}
 	}
@@ -708,7 +752,13 @@ func (t *Term) drawFgPass(ds *drawState) {
 			}
 			sawBlink = sawBlink || cell.Attrs&attrBlink != 0
 			cell = maskGlyph(cell, ds.blinkOff)
-			k := cellRunKey(cell, style, g, hR, hC, cmdHeld)
+			urlHover := false
+			if ds.rowURL != nil {
+				if rb := ds.rowURL[r]; rb.active && c >= rb.c0 && c <= rb.c1 {
+					urlHover = true
+				}
+			}
+			k := cellRunKey(cell, style, g, hR, hC, cmdHeld, urlHover)
 			isPlainSpace := cell.Ch == ' ' && cell.Attrs&attrVisual == 0 && cell.LinkID == 0
 			if cell.Width == 2 {
 				t.flushRun(dc, r, style, yOff, &fr)
