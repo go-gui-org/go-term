@@ -607,7 +607,7 @@ func ThemeMenuItems(themes []NamedTheme) []gui.MenuItemCfg {
 // themes are configured the grid keeps its zero-value Theme.
 func applyTheme(g *grid, cfg Cfg) {
 	if len(cfg.Themes) > 0 {
-		g.Theme = cfg.Themes[0].Theme
+		g.setTheme(cfg.Themes[0].Theme)
 	}
 }
 
@@ -1149,7 +1149,7 @@ func (t *Term) Theme() Theme {
 func (t *Term) SetTheme(th Theme) {
 	t.grid.Mu.Lock()
 	defer t.grid.Mu.Unlock()
-	t.grid.Theme = th
+	t.grid.setTheme(th)
 	t.bumpVersion()
 }
 

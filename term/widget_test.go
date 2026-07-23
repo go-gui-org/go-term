@@ -664,6 +664,24 @@ func TestCellRunKey_PlainCell(t *testing.T) {
 	}
 }
 
+// End-to-end: an OSC 4 sequence off the pty must reach the color the
+// foreground pass draws with.
+func TestCellRunKey_OSC4Override(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
+	c := cell{Ch: 'A', FG: 1, Width: 1}
+
+	feed(t, g, p, []byte("\x1b]4;1;#00ff00\x07"))
+	if got, want := cellRunKey(c, base, g, -1, -1, false).color, gui.RGB(0, 0xFF, 0); got != want {
+		t.Errorf("after OSC 4: color = %+v, want %+v", got, want)
+	}
+
+	feed(t, g, p, []byte("\x1b]104;1\x07"))
+	if got, want := cellRunKey(c, base, g, -1, -1, false).color, DefaultTheme.ANSI[1]; got != want {
+		t.Errorf("after OSC 104: color = %+v, want %+v", got, want)
+	}
+}
+
 func TestCellRunKey_BoldItalic(t *testing.T) {
 	g := newGrid(4, 8)
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
@@ -1809,7 +1827,7 @@ func TestThemeMenuItems_TwoThemes(t *testing.T) {
 
 func TestApplyTheme_EmptyThemes(t *testing.T) {
 	g := newGrid(24, 80)
-	g.Theme = SolarizedDarkTheme
+	g.setTheme(SolarizedDarkTheme)
 	applyTheme(g, Cfg{})
 	if g.Theme.DefaultFG == DefaultTheme.DefaultFG {
 		t.Error("theme should not have changed when Themes is empty")
@@ -2810,7 +2828,7 @@ func TestTerm_Theme_ReturnsActiveTheme(t *testing.T) {
 		DefaultBG: gui.RGB(0, 0, 255),
 	}
 	term := &Term{grid: newGrid(2, 4)}
-	term.grid.Theme = custom
+	term.grid.setTheme(custom)
 	if got := term.Theme(); got.DefaultFG != custom.DefaultFG {
 		t.Errorf("Theme().DefaultFG = %+v, want %+v", got.DefaultFG, custom.DefaultFG)
 	}

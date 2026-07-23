@@ -54,6 +54,10 @@ func FuzzOSCDispatch(f *testing.F) {
 	seeds := []string{
 		"0;hello",
 		"2;My Window Title",
+		"4;1;#ff0000;200;rgb:00/00/ff",
+		"4;21;?",
+		"104",
+		"104;1;2",
 		"7;file:///Users/test",
 		"8;;https://example.com",
 		"52;c;dGVzdA==",

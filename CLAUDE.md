@@ -82,7 +82,7 @@ term/widget_draw_graphics.go Graphics render pass (sixel/kitty/iTerm2).
         ▼
 term/parser.go           VT state machine entry point. Bytes → grid mutations.
 term/parser_csi.go       CSI dispatch (SGR, cursor, erase, modes, DECSCUSR, KKP…)
-term/parser_osc.go       OSC dispatch (0/1/2/7/8/9/10/11/12/52/133/777/1337)
+term/parser_osc.go       OSC dispatch (0/1/2/4/7/8/9/10/11/12/52/104/133/777/1337)
 term/parser_dcs.go       DCS dispatch (DECRQSS, XTGETTCAP, sixel, sync)
 term/parser_apc.go       APC dispatch (Kitty Graphics Protocol)
         │
@@ -104,7 +104,8 @@ term/pty.go              ptyIO interface + shared helpers (clampWinsize…).
 term/pty_unix.go         creack/pty wrapper (!windows). Spawns $SHELL, resize ioctl.
 term/pty_windows.go      ConPTY wrapper (windows). Spawns ComSpec, ResizePseudoConsole.
 term/palette.go          256-color ANSI table (16 + 6×6×6 cube + 24 grayscale) +
-                         RGB resolution helpers.
+                         RGB resolution helpers; per-grid effective palette
+                         (grid.pal) merging theme + OSC 4 overrides.
 ```
 
 ### Concurrency model
@@ -178,9 +179,12 @@ Supports a modern xterm/kitty-compatible subset:
 - Kitty Keyboard Protocol: `CSI > u` / `< u` / `= u` / `? u` (push/pop/
   set/query); key-release events; left/right modifier distinction.
 - DEC Special Graphics: `SI`/`SO`, `ESC (0` / `ESC (B`.
-- OSC: window title (0/1/2), CWD (7), hyperlinks (8), desktop
-  notifications (9/777), dynamic colors (10/11/12), clipboard (52),
-  semantic shell marks (133), iTerm2 inline images (1337).
+- OSC: window title (0/1/2), palette set/query (4) and reset (104 —
+  one index, or all with a bare `OSC 104`), CWD (7), hyperlinks (8),
+  desktop notifications (9/777), dynamic colors (10/11/12),
+  clipboard (52), semantic shell marks (133), iTerm2 inline images (1337).
+  Color specs accept `rgb:H/H/H`…`rgb:HHHH/HHHH/HHHH` and `#RGB` through
+  `#RRRRGGGGBBBB`; X11 color *names* are not supported.
 - DCS: DECRQSS, XTGETTCAP (incl. `Smulx`/`Setulc` to advertise styled +
   colored underlines), sixel graphics, synchronized updates.
 - APC: Kitty Graphics Protocol (transmit/display/place/delete; PNG, raw
@@ -256,6 +260,11 @@ If keystrokes don't reach the PTY, focus is the first place to look.
   must not allocate per cell — keep `string(rune)` conversions and
   slice growth out of the inner loop if perf work begins.
 - `Grid.Mu` is the single lock — don't add per-feature mutexes.
+- `grid.pal` (the effective 256-color table) is derived state. Never assign
+  `grid.Theme` directly — call `grid.setTheme`, which rebuilds it. The merge
+  happens there so the per-cell `resolveColor` stays a single indexed load
+  (it must keep inlining into `fgOf`/`bgOf`; a wrapper that pushes it past
+  the inline budget costs ~45% on the foreground pass).
 - `Term.queueCommand` (which wraps `cmd.QueueCommand` with a closed-Term
   guard) is the only thread-safe path from reader goroutine to gui state.
   Title updates, clipboard writes, and notifications triggered by the

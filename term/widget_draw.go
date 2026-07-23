@@ -183,7 +183,7 @@ type runKey struct {
 // hyperlink-hover color transforms. Must be called under grid.Mu.
 // Link underline is always applied; hover recolor is gated on cmdHeld.
 func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int, cmdHeld bool) runKey {
-	rawFG := g.Theme.fg(cell)
+	rawFG := g.fgOf(cell)
 	color := rawFG
 	if cell.Attrs&attrDim != 0 {
 		color = gui.RGB(rawFG.R/2, rawFG.G/2, rawFG.B/2)
@@ -202,7 +202,7 @@ func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int, cmdH
 		tf = glyph.TypefaceItalic
 	}
 	ulStyle := cell.ULStyle
-	ulColor := g.Theme.resolve(cell.ULColor, rawFG)
+	ulColor := g.resolveColor(cell.ULColor, rawFG)
 	if cell.LinkID != 0 {
 		if ulStyle == ulNone {
 			ulStyle = ulSingle
@@ -594,7 +594,7 @@ func (t *Term) drawBgPass(ds *drawState) {
 	yOff := ds.renderYOff
 	cols := ds.cols
 	if ds.partialRow != nil {
-		t.drawBgPrecomputed(dc, -1, ds.partialRow, yOff, cols, ds.g.Theme)
+		t.drawBgPrecomputed(dc, -1, ds.partialRow, yOff, cols, ds.g)
 	}
 	for r := range ds.renderRows {
 		t.drawBgResolved(dc, r, yOff, ds)
@@ -603,14 +603,14 @@ func (t *Term) drawBgPass(ds *drawState) {
 
 // drawBgPrecomputed coalesces background-color runs from a pre-resolved cell
 // slice (partial row or BiDi-reordered row).
-func (t *Term) drawBgPrecomputed(dc *gui.DrawContext, r int, row []cell, yOff float32, cols int, th Theme) {
+func (t *Term) drawBgPrecomputed(dc *gui.DrawContext, r int, row []cell, yOff float32, cols int, g *grid) {
 	if len(row) == 0 {
 		return
 	}
 	runStart := 0
-	runColor := th.bg(row[0])
+	runColor := g.bgOf(row[0])
 	for c := 1; c < cols; c++ {
-		cur := th.bg(row[c])
+		cur := g.bgOf(row[c])
 		if cur != runColor {
 			t.fillRun(dc, r, runStart, c, runColor, yOff)
 			runStart = c
@@ -623,12 +623,12 @@ func (t *Term) drawBgPrecomputed(dc *gui.DrawContext, r int, row []cell, yOff fl
 // drawBgResolved coalesces background-color runs for a single row.
 // Uses resolveVisual so BiDi-reordered rows and regular rows share one path.
 func (t *Term) drawBgResolved(dc *gui.DrawContext, r int, yOff float32, ds *drawState) {
-	th := ds.g.Theme
+	g := ds.g
 	cols := ds.cols
 	runStart := 0
-	runColor := th.bg(ds.resolveVisual(r, 0))
+	runColor := g.bgOf(ds.resolveVisual(r, 0))
 	for c := 1; c < cols; c++ {
-		cur := th.bg(ds.resolveVisual(r, c))
+		cur := g.bgOf(ds.resolveVisual(r, c))
 		if cur != runColor {
 			t.fillRun(dc, r, runStart, c, runColor, yOff)
 			runStart = c
@@ -1037,22 +1037,22 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 			h = 2
 		}
 		dc.FilledRect(x, y+t.cellH-h, t.cellW, h,
-			t.grid.Theme.fg(cell).WithOpacity(opacity))
+			t.grid.fgOf(cell).WithOpacity(opacity))
 	case cursorBar:
 		w := t.cellW / 6
 		if w < 2 {
 			w = 2
 		}
 		dc.FilledRect(x, y, w, t.cellH,
-			t.grid.Theme.fg(cell).WithOpacity(opacity))
+			t.grid.fgOf(cell).WithOpacity(opacity))
 	default: // cursorBlock
-		fillColor := t.grid.Theme.fg(cell)
+		fillColor := t.grid.fgOf(cell)
 		if t.grid.CursorColor != DefaultColor {
 			fillColor = rgbToGUIColor(t.grid.CursorColor)
 		}
 		dc.FilledRect(x, y, t.cellW, t.cellH, fillColor.WithOpacity(opacity))
 		cs := style
-		cs.Color = t.grid.Theme.bg(cell)
+		cs.Color = t.grid.bgOf(cell)
 		cs.EmojiBoxWidth = float32(cell.Width) * t.cellW
 		dc.Text(x, y, t.cellText(cell), cs)
 	}

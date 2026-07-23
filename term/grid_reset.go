@@ -57,7 +57,9 @@ func (g *grid) SoftReset() {
 //
 // Not reset: the embedder's Theme (including OSC 10/11 overrides, which the
 // grid cannot distinguish from an embedder-supplied theme) and the window
-// title. Both belong to the widget, not the cell buffer.
+// title. Both belong to the widget, not the cell buffer. OSC 4 palette
+// overrides *are* reset — they live in their own layer, so dropping them
+// cannot take an embedder-supplied color with them.
 func (g *grid) HardReset() {
 	g.ExitAlt() // no-op when the main screen is already active
 	g.SoftReset()
@@ -74,6 +76,10 @@ func (g *grid) HardReset() {
 	g.cursorShape = cursorBlock
 	g.CursorBlink = false
 	g.CursorColor = DefaultColor
+
+	// OSC 4 palette overrides. Unlike OSC 10/11 these are unambiguously
+	// child-set, so a power-on reset drops them (xterm/kitty do the same).
+	g.ResetPalette()
 	g.lastGraphic, g.lastGraphicID, g.lastGraphicW = 0, 0, 0
 	g.gphBuf = g.gphBuf[:0]
 

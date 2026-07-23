@@ -3,6 +3,8 @@ package term
 import (
 	"strings"
 	"testing"
+
+	"github.com/go-gui-org/go-gui/gui"
 )
 
 func TestParser_OSCTitle_BELTerminator(t *testing.T) {
@@ -320,9 +322,14 @@ func TestParseXColor(t *testing.T) {
 		{"rgb:ffff/0000/8080", 0xFF, 0x00, 0x80, true},
 		{"rgb:f/0/8", 0xFF, 0x00, 0x88, true},
 		{"#ff0080", 0xFF, 0x00, 0x80, true},
+		{"#f08", 0xFF, 0x00, 0x88, true},
+		{"#fff000888", 0xFF, 0x00, 0x88, true},
+		{"#ffff00008080", 0xFF, 0x00, 0x80, true},
 		{"rgb:gg/00/00", 0, 0, 0, false},
 		{"rgb:ff/00", 0, 0, 0, false},
 		{"#ff008", 0, 0, 0, false},
+		{"#", 0, 0, 0, false},
+		{"#gg0000", 0, 0, 0, false},
 		{"red", 0, 0, 0, false},
 	}
 	for _, tc := range cases {
@@ -405,6 +412,144 @@ func TestParser_OSCDynColor_InvalidIgnored(t *testing.T) {
 	g.Mu.Unlock()
 	if fg != origFG {
 		t.Fatalf("invalid color changed DefaultFG: got rgb(%d,%d,%d)", fg.R, fg.G, fg.B)
+	}
+}
+
+// palColor reads the effective palette color for idx under the lock.
+func palColor(g *grid, idx uint8) gui.Color {
+	g.Mu.Lock()
+	defer g.Mu.Unlock()
+	r, gr, b := g.paletteColorRGB(idx)
+	return gui.RGB(r, gr, b)
+}
+
+func TestParser_OSC4_SetIndex(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	feed(t, g, p, []byte("\x1b]4;1;#00ff00\x07"))
+	if got, want := palColor(g, 1), gui.RGB(0, 0xFF, 0); got != want {
+		t.Fatalf("palette[1] = %+v, want %+v", got, want)
+	}
+	// An untouched index still resolves through the theme.
+	if got, want := palColor(g, 2), DefaultTheme.ANSI[2]; got != want {
+		t.Fatalf("palette[2] = %+v, want theme color %+v", got, want)
+	}
+}
+
+func TestParser_OSC4_MultiplePairs(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	feed(t, g, p, []byte("\x1b]4;1;#ff0000;200;rgb:00/00/ff\x07"))
+	if got, want := palColor(g, 1), gui.RGB(0xFF, 0, 0); got != want {
+		t.Fatalf("palette[1] = %+v, want %+v", got, want)
+	}
+	if got, want := palColor(g, 200), gui.RGB(0, 0, 0xFF); got != want {
+		t.Fatalf("palette[200] = %+v, want %+v", got, want)
+	}
+}
+
+func TestParser_OSC4_MalformedStopsRest(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	// First pair applies; the bad color aborts everything after it.
+	feed(t, g, p, []byte("\x1b]4;1;#00ff00;2;notacolor;3;#0000ff\x07"))
+	if got, want := palColor(g, 1), gui.RGB(0, 0xFF, 0); got != want {
+		t.Fatalf("palette[1] = %+v, want %+v", got, want)
+	}
+	if got, want := palColor(g, 3), DefaultTheme.ANSI[3]; got != want {
+		t.Fatalf("palette[3] = %+v, want untouched theme color %+v", got, want)
+	}
+}
+
+func TestParser_OSC4_OutOfRangeIgnored(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	feed(t, g, p, []byte("\x1b]4;256;#00ff00\x07"))
+	feed(t, g, p, []byte("\x1b]4;-1;#00ff00\x07"))
+	feed(t, g, p, []byte("\x1b]4;x;#00ff00\x07"))
+	g.Mu.Lock()
+	defer g.Mu.Unlock()
+	if g.palOverride != nil {
+		t.Fatal("out-of-range index allocated an override table")
+	}
+}
+
+func TestParser_OSC4_Query(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	var got []byte
+	p.SetReplyHandler(func(b []byte) { got = append(got, b...) })
+	// Index 21 of the static cube is pure blue → 0000/0000/ffff.
+	feed(t, g, p, []byte("\x1b]4;21;?\x07"))
+	if want := "\x1b]4;21;rgb:0000/0000/ffff\x1b\\"; string(got) != want {
+		t.Fatalf("OSC 4 query reply = %q, want %q", got, want)
+	}
+	// After a set, the query reports the override.
+	got = got[:0]
+	feed(t, g, p, []byte("\x1b]4;21;#112233\x07\x1b]4;21;?\x07"))
+	if want := "\x1b]4;21;rgb:1111/2222/3333\x1b\\"; string(got) != want {
+		t.Fatalf("OSC 4 query after set = %q, want %q", got, want)
+	}
+}
+
+func TestParser_OSC104_ResetOne(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	feed(t, g, p, []byte("\x1b]4;1;#00ff00;2;#00ff00\x07"))
+	feed(t, g, p, []byte("\x1b]104;1\x07"))
+	if got, want := palColor(g, 1), DefaultTheme.ANSI[1]; got != want {
+		t.Fatalf("palette[1] after reset = %+v, want %+v", got, want)
+	}
+	if got, want := palColor(g, 2), gui.RGB(0, 0xFF, 0); got != want {
+		t.Fatalf("palette[2] = %+v, want override %+v", got, want)
+	}
+}
+
+func TestParser_OSC104_ResetAll(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	feed(t, g, p, []byte("\x1b]4;1;#00ff00;200;#00ff00\x07"))
+	// Bare OSC 104 — no payload, no semicolon.
+	feed(t, g, p, []byte("\x1b]104\x07"))
+	g.Mu.Lock()
+	if g.palOverride != nil {
+		t.Error("bare OSC 104 left the override table allocated")
+	}
+	g.Mu.Unlock()
+	if got, want := palColor(g, 1), DefaultTheme.ANSI[1]; got != want {
+		t.Fatalf("palette[1] after reset-all = %+v, want %+v", got, want)
+	}
+	// The ";" form with an empty payload resets everything too.
+	feed(t, g, p, []byte("\x1b]4;1;#00ff00\x07"))
+	feed(t, g, p, []byte("\x1b]104;\x07"))
+	if got, want := palColor(g, 1), DefaultTheme.ANSI[1]; got != want {
+		t.Fatalf("palette[1] after \"104;\" = %+v, want %+v", got, want)
+	}
+}
+
+func TestParser_OSC4_QueryNoHandlerNoPanic(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	// With nil reply handler, query should be silently dropped.
+	p.SetReplyHandler(nil)
+	feed(t, g, p, []byte("\x1b]4;21;?\x07"))
+}
+
+func TestParser_OSC104_OutOfRangeStops(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	feed(t, g, p, []byte("\x1b]4;1;#00ff00;2;#00ff00\x07"))
+	// Valid index 1 is reset; out-of-range 256 stops processing.
+	feed(t, g, p, []byte("\x1b]104;1;256;3\x07"))
+	if got, want := palColor(g, 1), DefaultTheme.ANSI[1]; got != want {
+		t.Fatalf("palette[1] after reset = %+v, want %+v", got, want)
+	}
+	if got, want := palColor(g, 2), gui.RGB(0, 0xFF, 0); got != want {
+		t.Fatalf("palette[2] = %+v, want override %+v (should not be reset)", got, want)
+	}
+}
+
+func TestParser_OSC104_NonNumericStops(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	feed(t, g, p, []byte("\x1b]4;1;#00ff00;2;#00ff00\x07"))
+	// Non-numeric index stops processing at the bad token.
+	feed(t, g, p, []byte("\x1b]104;1;x;3\x07"))
+	if got, want := palColor(g, 1), DefaultTheme.ANSI[1]; got != want {
+		t.Fatalf("palette[1] after reset = %+v, want %+v", got, want)
+	}
+	if got, want := palColor(g, 2), gui.RGB(0, 0xFF, 0); got != want {
+		t.Fatalf("palette[2] = %+v, want override %+v (should not be reset)", got, want)
 	}
 }
 

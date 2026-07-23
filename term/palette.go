@@ -4,7 +4,10 @@ import "github.com/go-gui-org/go-gui/gui"
 
 // Theme holds the 16 ANSI base colors plus default fg/bg for a terminal
 // color scheme. Indices 0–7 are standard ANSI; 8–15 are bright variants.
-// The 240 extended colors (16–255) are computed and not themeable.
+// The 240 extended colors (16–255) are computed and not themeable — a
+// child app can still recolor any of the 256 entries at runtime via
+// OSC 4, which lands in the grid's override layer (see palOverrides),
+// not here.
 type Theme struct {
 	ANSI      [16]gui.Color
 	DefaultFG gui.Color
@@ -410,6 +413,118 @@ func (th *Theme) resolve(c uint32, def gui.Color) gui.Color {
 		return th.ANSI[idx]
 	}
 	return palette[idx]
+}
+
+// palTable is a full 256-entry color table. Two live on the grid: the
+// effective table read by the render path (grid.pal) and the sparse OSC 4
+// override layer that feeds it (grid.palOverride). In the override layer an
+// entry counts as set only when its Color reports IsSet, so clearing one
+// (OSC 104) is a plain zeroing.
+type palTable [256]gui.Color
+
+// rebuildPalette recomputes the effective table from the theme, the static
+// xterm table, and any OSC 4 overrides. Cheap (256 copies) and rare — it
+// runs on grid creation, theme change, and palette reset, never per frame.
+// Keeping the merge here is what lets resolveColor be a single indexed load
+// in the per-cell hot path.
+func (g *grid) rebuildPalette() {
+	g.pal = palTable(palette)
+	copy(g.pal[:16], g.Theme.ANSI[:])
+	if g.palOverride == nil {
+		return
+	}
+	for i, c := range g.palOverride {
+		if c.IsSet() {
+			g.pal[i] = c
+		}
+	}
+}
+
+// setTheme swaps the theme and refreshes the effective palette. Every
+// assignment to g.Theme that changes ANSI colors must go through here —
+// g.pal is derived state. (SetDynColor only touches DefaultFG/DefaultBG,
+// which are not part of the indexed table, so it needs no rebuild.)
+func (g *grid) setTheme(th Theme) {
+	g.Theme = th
+	g.rebuildPalette()
+}
+
+// resolveColor decodes a packed color value: DefaultColor yields def, an
+// rgbColor-tagged value unpacks directly, and everything else indexes the
+// effective palette (so OSC 4 overrides need no extra branch here).
+func (g *grid) resolveColor(c uint32, def gui.Color) gui.Color {
+	if c == DefaultColor {
+		return def
+	}
+	if c&0xFF000000 == colorRGB {
+		return rgbToGUIColor(c)
+	}
+	return g.pal[c&0xFF]
+}
+
+// fgOf resolves a cell's foreground to a Color, honoring inverse.
+func (g *grid) fgOf(c cell) gui.Color {
+	if c.Attrs&attrInverse != 0 {
+		return g.resolveColor(c.BG, g.Theme.DefaultBG)
+	}
+	return g.resolveColor(c.FG, g.Theme.DefaultFG)
+}
+
+// bgOf resolves a cell's background to a Color, honoring inverse.
+func (g *grid) bgOf(c cell) gui.Color {
+	if c.Attrs&attrInverse != 0 {
+		return g.resolveColor(c.FG, g.Theme.DefaultFG)
+	}
+	return g.resolveColor(c.BG, g.Theme.DefaultBG)
+}
+
+// SetPaletteColor overrides palette entry idx with an OSC 4 color. c must
+// be an rgbColor-tagged packed value. The override layer is allocated on
+// first use, so sessions that never see OSC 4 pay nothing. Marks all rows
+// dirty so the next render picks up the change. Called from the parser
+// while Mu is held.
+func (g *grid) SetPaletteColor(idx uint8, c uint32) {
+	if g.palOverride == nil {
+		g.palOverride = new(palTable)
+	}
+	col := rgbToGUIColor(c)
+	g.palOverride[idx] = col
+	g.pal[idx] = col
+	g.markAllDirty()
+}
+
+// ResetPaletteColor drops the OSC 4 override for one index (OSC 104 ; idx),
+// restoring the theme / static table color. Called under Mu.
+func (g *grid) ResetPaletteColor(idx uint8) {
+	if g.palOverride == nil {
+		return
+	}
+	g.palOverride[idx] = gui.Color{}
+	if idx < 16 {
+		g.pal[idx] = g.Theme.ANSI[idx]
+	} else {
+		g.pal[idx] = palette[idx]
+	}
+	g.markAllDirty()
+}
+
+// ResetPalette drops every OSC 4 override (bare OSC 104, and RIS). Frees
+// the override layer outright. Called under Mu.
+func (g *grid) ResetPalette() {
+	if g.palOverride == nil {
+		return
+	}
+	g.palOverride = nil
+	g.rebuildPalette()
+	g.markAllDirty()
+}
+
+// paletteColorRGB returns the effective color components for palette index
+// idx: OSC 4 override, else the theme's ANSI color (0–15), else the static
+// xterm table. Backs OSC 4 queries. Called under Mu.
+func (g *grid) paletteColorRGB(idx uint8) (r, gr, b uint8) {
+	c := g.pal[idx]
+	return c.R, c.G, c.B
 }
 
 // fg resolves a cell's foreground to a Color, honoring inverse.

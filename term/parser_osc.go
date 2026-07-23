@@ -66,6 +66,11 @@ func (p *parser) dispatchOSC() {
 		}
 	}
 	if sep <= 0 {
+		// Bare "OSC 104 ST" resets the whole palette — the one command
+		// with no argument. Everything else requires a ";Pt" payload.
+		if string(p.osc) == "104" {
+			p.g.ResetPalette()
+		}
 		return
 	}
 	ps := 0
@@ -106,6 +111,10 @@ func (p *parser) dispatchOSC() {
 			}
 			p.g.Cwd = cwd
 		}
+	case 4:
+		p.handleOSC4(pt)
+	case 104:
+		p.handleOSC104(pt)
 	case 10, 11, 12:
 
 		if pt == "?" {
@@ -187,6 +196,71 @@ func (p *parser) dispatchOSC() {
 	}
 }
 
+// handleOSC4 implements OSC 4 — palette set and query. The payload is a
+// sequence of "index ; spec" pairs, e.g. "1;#ff0000;2;rgb:00/ff/00". A spec
+// of "?" queries the current color instead of setting it. Processing stops
+// at the first malformed pair (xterm behavior); pairs applied before it
+// stand. Called with g.Mu held.
+func (p *parser) handleOSC4(pt string) {
+	for rest := pt; rest != ""; {
+		idxStr, tail, ok := strings.Cut(rest, ";")
+		if !ok {
+			return // trailing index with no spec
+		}
+		spec, next, hasNext := strings.Cut(tail, ";")
+		idx, err := strconv.Atoi(idxStr)
+		if err != nil || idx < 0 || idx > 255 {
+			return
+		}
+		if spec == "?" {
+			p.replyPaletteColor(uint8(idx))
+		} else if c, ok := parseXColor(spec); ok {
+			p.g.SetPaletteColor(uint8(idx), c)
+		} else {
+			return
+		}
+		if !hasNext {
+			return
+		}
+		rest = next
+	}
+}
+
+// replyPaletteColor answers an OSC 4 query with the index's effective
+// color, in the same "rgb:RRRR/GGGG/BBBB" form the OSC 10/11 replies use.
+func (p *parser) replyPaletteColor(idx uint8) {
+	if p.onReply == nil {
+		return
+	}
+	r, g, b := p.g.paletteColorRGB(idx)
+	p.onReply([]byte("\x1b]4;" + strconv.Itoa(int(idx)) + ";rgb:" +
+		oscHexWord(r) + "/" + oscHexWord(g) + "/" + oscHexWord(b) + "\x1b\\"))
+}
+
+// handleOSC104 implements OSC 104 — palette reset. An empty payload resets
+// every entry; otherwise each ';'-separated index is reset individually.
+// Stops at the first non-numeric or out-of-range index. Called with g.Mu
+// held. (The no-argument form "OSC 104 ST" is handled in dispatchOSC,
+// which otherwise requires a ';' before the payload.)
+func (p *parser) handleOSC104(pt string) {
+	if pt == "" {
+		p.g.ResetPalette()
+		return
+	}
+	for rest := pt; rest != ""; {
+		idxStr, next, hasNext := strings.Cut(rest, ";")
+		idx, err := strconv.Atoi(idxStr)
+		if err != nil || idx < 0 || idx > 255 {
+			return
+		}
+		p.g.ResetPaletteColor(uint8(idx))
+		if !hasNext {
+			return
+		}
+		rest = next
+	}
+}
+
 // handleOSC1337 implements the iTerm2 inline image protocol.
 // Payload format: File=[key=value;...]:base64data
 // Only renders when inline=1 is present; all other cases drop silently.
@@ -226,7 +300,9 @@ func (p *parser) handleOSC1337(pt string) {
 }
 
 // parseXColor parses an X11 color string into a packed rgbColor.
-// Accepts "rgb:H/H/H" through "rgb:HHHH/HHHH/HHHH" and "#RRGGBB".
+// Accepts "rgb:H/H/H" through "rgb:HHHH/HHHH/HHHH" and the "#" forms
+// #RGB, #RRGGBB, #RRRGGGBBB, #RRRRGGGGBBBB. Color *names* are not
+// supported — programs that recolor the palette emit hex.
 func parseXColor(s string) (uint32, bool) {
 	if strings.HasPrefix(s, "rgb:") {
 		parts := strings.SplitN(s[4:], "/", 3)
@@ -235,35 +311,55 @@ func parseXColor(s string) (uint32, bool) {
 		}
 		var ch [3]uint8
 		for i, p := range parts {
-			if len(p) == 0 || len(p) > 4 {
+			v, ok := parseHexChannel(p)
+			if !ok {
 				return 0, false
 			}
-			n, err := strconv.ParseUint(p, 16, 64)
-			if err != nil {
-				return 0, false
-			}
-
-			switch len(p) {
-			case 1:
-				ch[i] = uint8(n * 0x11)
-			case 2:
-				ch[i] = uint8(n)
-			case 3:
-				ch[i] = uint8(n >> 4)
-			case 4:
-				ch[i] = uint8(n >> 8)
-			}
+			ch[i] = v
 		}
 		return rgbColor(ch[0], ch[1], ch[2]), true
 	}
-	if len(s) == 7 && s[0] == '#' {
-		n, err := strconv.ParseUint(s[1:], 16, 32)
-		if err != nil {
+	if len(s) > 1 && s[0] == '#' {
+		// Equal-width channels: #RGB, #RRGGBB, #RRRGGGBBB, #RRRRGGGGBBBB.
+		digits := s[1:]
+		w := len(digits) / 3
+		if w == 0 || w > 4 || len(digits)%3 != 0 {
 			return 0, false
 		}
-		return rgbColor(uint8(n>>16), uint8(n>>8), uint8(n)), true
+		var ch [3]uint8
+		for i := range ch {
+			v, ok := parseHexChannel(digits[i*w : (i+1)*w])
+			if !ok {
+				return 0, false
+			}
+			ch[i] = v
+		}
+		return rgbColor(ch[0], ch[1], ch[2]), true
 	}
 	return 0, false
+}
+
+// parseHexChannel converts a 1–4 digit hex channel to 8 bits, scaling the
+// way X11 does: narrower values are widened, wider ones truncated to their
+// most significant byte.
+func parseHexChannel(p string) (uint8, bool) {
+	if len(p) == 0 || len(p) > 4 {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(p, 16, 64)
+	if err != nil {
+		return 0, false
+	}
+	switch len(p) {
+	case 1:
+		return uint8(n * 0x11), true
+	case 2:
+		return uint8(n), true
+	case 3:
+		return uint8(n >> 4), true
+	default:
+		return uint8(n >> 8), true
+	}
 }
 
 // sanitizeOSCString strips ASCII control characters (0x00–0x1F, 0x7F) from
