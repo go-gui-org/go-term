@@ -1,6 +1,10 @@
 package term
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/go-gui-org/go-gui/gui"
+)
 
 func TestGrid_RepeatLast(t *testing.T) {
 	g := newGrid(2, 8)
@@ -173,6 +177,28 @@ func TestGrid_HardReset(t *testing.T) {
 				t.Fatalf("cell %d,%d = %q, want blank", r, c, ch)
 			}
 		}
+	}
+}
+
+// RIS drops OSC 4 palette overrides (child-set); DECSTR keeps them.
+func TestGrid_Reset_PaletteOverrides(t *testing.T) {
+	g := newGrid(2, 4)
+	g.SetPaletteColor(1, rgbColor(1, 2, 3))
+
+	g.SoftReset()
+	if g.palOverride == nil {
+		t.Fatal("DECSTR dropped palette overrides")
+	}
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 1}), gui.RGB(1, 2, 3); got != want {
+		t.Errorf("after DECSTR: got %+v want %+v", got, want)
+	}
+
+	g.HardReset()
+	if g.palOverride != nil {
+		t.Error("RIS kept palette overrides")
+	}
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 1}), DefaultTheme.ANSI[1]; got != want {
+		t.Errorf("after RIS: got %+v want %+v", got, want)
 	}
 }
 

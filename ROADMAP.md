@@ -143,6 +143,7 @@ When go-gui ships v1.0.0:
 | 38 | BiDi / RTL text | `echo "שלום"` |
 | 39 | Splits, panes, tabs, persistence | Built-in multiplexing; workspace save/restore |
 | 40 | Tab reordering | Cmd+Alt+[/] move tab left/right |
+| 41 | OSC 4 palette modification | `printf '\x1b]4;1;#00ff00\a'` |
 
 ## Commands
 

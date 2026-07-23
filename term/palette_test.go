@@ -127,6 +127,109 @@ func TestPalette_ThemeOverridesANSI(t *testing.T) {
 	}
 }
 
+func TestPalette_OverrideBeatsThemeAndCube(t *testing.T) {
+	g := newGrid(2, 4)
+	// Index 1 normally comes from Theme.ANSI, 196 from the static cube.
+	g.SetPaletteColor(1, rgbColor(1, 2, 3))
+	g.SetPaletteColor(196, rgbColor(4, 5, 6))
+
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 1}), gui.RGB(1, 2, 3); got != want {
+		t.Errorf("ANSI index override: got %+v want %+v", got, want)
+	}
+	if got, want := g.bgOf(cell{Ch: ' ', BG: paletteColor(196)}), gui.RGB(4, 5, 6); got != want {
+		t.Errorf("cube index override: got %+v want %+v", got, want)
+	}
+	// Neighboring indices are untouched.
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 2}), DefaultTheme.ANSI[2]; got != want {
+		t.Errorf("index 2: got %+v want %+v", got, want)
+	}
+	if got, want := g.fgOf(cell{Ch: ' ', FG: paletteColor(197)}), palette[197]; got != want {
+		t.Errorf("index 197: got %+v want %+v", got, want)
+	}
+}
+
+func TestPalette_OverrideIgnoresTruecolorAndDefault(t *testing.T) {
+	g := newGrid(2, 4)
+	// Overriding index 1 must not touch cells whose color is a packed RGB
+	// triple or DefaultColor, even when their low byte happens to be 1.
+	g.SetPaletteColor(1, rgbColor(9, 9, 9))
+	c := cell{Ch: ' ', FG: rgbColor(0, 0, 1), BG: DefaultColor}
+	if got, want := g.fgOf(c), gui.RGB(0, 0, 1); got != want {
+		t.Errorf("truecolor fg: got %+v want %+v", got, want)
+	}
+	if got, want := g.bgOf(c), g.Theme.DefaultBG; got != want {
+		t.Errorf("default bg: got %+v want %+v", got, want)
+	}
+}
+
+func TestPalette_OverrideHonorsInverse(t *testing.T) {
+	g := newGrid(2, 4)
+	g.SetPaletteColor(1, rgbColor(1, 2, 3))
+	g.SetPaletteColor(2, rgbColor(4, 5, 6))
+	c := cell{Ch: ' ', FG: 1, BG: 2, Attrs: attrInverse}
+	if got, want := g.fgOf(c), gui.RGB(4, 5, 6); got != want {
+		t.Errorf("inverse fg: got %+v want %+v", got, want)
+	}
+	if got, want := g.bgOf(c), gui.RGB(1, 2, 3); got != want {
+		t.Errorf("inverse bg: got %+v want %+v", got, want)
+	}
+}
+
+func TestPalette_NoOverrideMatchesTheme(t *testing.T) {
+	g := newGrid(2, 4)
+	if g.palOverride != nil {
+		t.Fatal("fresh grid allocated an override table")
+	}
+	for _, c := range []cell{
+		{Ch: ' ', FG: 1, BG: 2},
+		{Ch: ' ', FG: paletteColor(196), BG: paletteColor(232)},
+		{Ch: ' ', FG: DefaultColor, BG: DefaultColor, Attrs: attrInverse},
+	} {
+		if got, want := g.fgOf(c), g.Theme.fg(c); got != want {
+			t.Errorf("fgOf(%+v) = %+v, want %+v", c, got, want)
+		}
+		if got, want := g.bgOf(c), g.Theme.bg(c); got != want {
+			t.Errorf("bgOf(%+v) = %+v, want %+v", c, got, want)
+		}
+	}
+}
+
+func TestPalette_ResetColorAndAll(t *testing.T) {
+	g := newGrid(2, 4)
+	g.SetPaletteColor(1, rgbColor(1, 2, 3))
+	g.SetPaletteColor(2, rgbColor(4, 5, 6))
+
+	g.ResetPaletteColor(1)
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 1}), DefaultTheme.ANSI[1]; got != want {
+		t.Errorf("after ResetPaletteColor: got %+v want %+v", got, want)
+	}
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 2}), gui.RGB(4, 5, 6); got != want {
+		t.Errorf("unrelated index dropped: got %+v want %+v", got, want)
+	}
+
+	g.ResetPalette()
+	if g.palOverride != nil {
+		t.Error("ResetPalette left the override table allocated")
+	}
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 2}), DefaultTheme.ANSI[2]; got != want {
+		t.Errorf("after ResetPalette: got %+v want %+v", got, want)
+	}
+}
+
+func TestPalette_OverrideSurvivesThemeSwitch(t *testing.T) {
+	g := newGrid(2, 4)
+	g.SetPaletteColor(1, rgbColor(1, 2, 3))
+	// An embedder theme switch (Term.SetTheme assigns g.Theme) leaves
+	// child-set OSC 4 entries in place — they live in their own layer.
+	g.setTheme(GruvboxTheme)
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 1}), gui.RGB(1, 2, 3); got != want {
+		t.Errorf("override after theme switch: got %+v want %+v", got, want)
+	}
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 2}), GruvboxTheme.ANSI[2]; got != want {
+		t.Errorf("non-overridden index: got %+v want %+v", got, want)
+	}
+}
+
 func TestRGBToGUIColor_Roundtrip(t *testing.T) {
 	// Verify each byte position survives the uint32→RGB trip intact.
 	cases := []uint32{

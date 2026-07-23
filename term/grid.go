@@ -431,6 +431,20 @@ type grid struct {
 	// when rendering cells. Set via Term.SetTheme; defaults to DefaultTheme.
 	Theme Theme
 
+	// pal is the effective 256-color table the render path reads: the
+	// static xterm table with Theme.ANSI merged over 0–15 and any OSC 4
+	// overrides merged on top. Derived state — never assign g.Theme
+	// directly, go through setTheme so this stays in sync.
+	//
+	// palOverride is the sparse OSC 4 layer feeding it, nil until the child
+	// app sets an entry (so sessions that never use OSC 4 pay nothing). It
+	// is kept separate from Theme so an embedder SetTheme cannot clobber
+	// child state, so Theme stays a small comparable value, and so RIS can
+	// drop child colors without touching embedder ones. Both types live in
+	// palette.go so grid.go needs no go-gui import.
+	pal         palTable
+	palOverride *palTable
+
 	CurAttrs       uint8
 	CurULStyle     uint8 // current underline style (ulNone..ulDashed)
 	CharsetG0      byte  // ESC ( F — designated set for GL when ActiveG=0
@@ -757,6 +771,7 @@ func newGrid(rows, cols int) *grid {
 	for c := 8; c < MaxGridDim; c += 8 {
 		g.TabStops[c] = true
 	}
+	g.rebuildPalette()
 	return g
 }
 

@@ -577,7 +577,7 @@ func TestGrid_DirtyTracking_EnterExitAltMarksAll(t *testing.T) {
 
 func TestDynColorRGB_AllPaths(t *testing.T) {
 	g := newGrid(4, 8)
-	g.Theme = DefaultTheme
+	g.setTheme(DefaultTheme)
 
 	// ps=10: foreground
 	r, gr, b := g.dynColorRGB(10)
