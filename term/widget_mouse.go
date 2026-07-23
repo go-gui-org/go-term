@@ -385,40 +385,54 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 // held over a link.
 func (t *Term) updateHover(r, c int, w *gui.Window) {
 	oldR, oldC := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
+	cmd := t.mouse.cmdHeld.Load()
+	moved := oldR != r || oldC != c
 
-	// Set pointing-hand cursor over a linked cell only when Cmd is held.
-	// go-gui resets the cursor to Arrow at the top of every mouse-move
-	// event, so we re-apply even when coords haven't changed.
-	if t.mouse.cmdHeld.Load() && linkCell(r, c, t.grid) {
+	// Resolve what is under the pointer. Explicit OSC 8 links win; only when the
+	// cell carries no LinkID and Cmd is held do we run implicit URL detection
+	// (bounded to one logical line, off the render path — see detectURLAt).
+	var prevLink, curLink uint16
+	var url string
+	var spans []urlSpan
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		if oldR >= 0 && oldC >= 0 {
+			prevLink = t.grid.ViewCellAt(oldR, oldC).LinkID
+		}
+		curLink = t.grid.ViewCellAt(r, c).LinkID
+		if cmd && curLink == 0 {
+			cp := contentPos{Row: t.grid.viewportToContent(r), Col: c}
+			url, spans, _ = t.grid.detectURLAt(cp)
+		}
+	}()
+
+	// Pointing-hand cursor over any actionable link — explicit or detected.
+	// go-gui resets the cursor to Arrow at the top of every mouse-move event,
+	// so re-apply on every call, even when the coords haven't changed.
+	if cmd && (curLink != 0 || url != "") {
 		w.SetMouseCursorPointingHand()
 	}
 
-	if oldR == r && oldC == c {
+	prevURL := t.mouse.hoverURL
+	t.mouse.hoverURL = url
+	t.mouse.hoverSpans = spans
+
+	if !moved {
+		// Same cell: only the detected URL could have changed (a Cmd press
+		// without motion doesn't reach here). Redraw if the highlight differs.
+		if url != prevURL {
+			t.bumpVersion()
+			w.UpdateWindow()
+		}
 		return
 	}
 	t.mouse.hoverR.Store(int32(r))
 	t.mouse.hoverC.Store(int32(c))
-	prevLink, curLink := func() (uint16, uint16) {
-		t.grid.Mu.Lock()
-		defer t.grid.Mu.Unlock()
-		var prev, cur uint16
-		if oldR >= 0 && oldC >= 0 {
-			prev = t.grid.ViewCellAt(oldR, oldC).LinkID
-		}
-		cur = t.grid.ViewCellAt(r, c).LinkID
-		return prev, cur
-	}()
-	if prevLink != 0 || curLink != 0 {
+	if prevLink != 0 || curLink != 0 || url != prevURL {
 		t.bumpVersion()
 		w.UpdateWindow()
 	}
-}
-
-// linkCell reports whether the cell at (r,c) has a non-zero link ID.
-func linkCell(r, c int, g *grid) bool {
-	g.Mu.Lock()
-	defer g.Mu.Unlock()
-	return g.ViewCellAt(r, c).LinkID != 0
 }
 
 // onMouseUp handles button-release. A drag started under reporting
@@ -456,14 +470,21 @@ func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		return
 	}
 	t.mouse.dragging = false
-	// Single click (no drag) with Cmd/Ctrl on a hyperlink → open URL.
+	// Single click (no drag) with Cmd/Ctrl on a hyperlink → open URL. An
+	// explicit OSC 8 link wins; otherwise fall back to implicit URL detection
+	// at the click cell, matching the Cmd-hover highlight.
 	if !t.grid.SelActive {
 		if e.Modifiers&gui.ModSuper != 0 || e.Modifiers&gui.ModCtrl != 0 {
 			url := func() string {
 				t.grid.Mu.Lock()
 				defer t.grid.Mu.Unlock()
 				cell := t.grid.ViewCellAt(r, c)
-				return t.grid.LinkURL(cell.LinkID)
+				if u := t.grid.LinkURL(cell.LinkID); u != "" {
+					return u
+				}
+				cp := contentPos{Row: t.grid.viewportToContent(r), Col: c}
+				u, _, _ := t.grid.detectURLAt(cp)
+				return u
 			}()
 			if url != "" {
 				openURL(url)

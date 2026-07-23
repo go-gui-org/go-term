@@ -655,7 +655,7 @@ func TestCellRunKey_PlainCell(t *testing.T) {
 	g := newGrid(4, 8)
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
 	cell := cell{Ch: 'A', FG: 7, BG: 0, Width: 1}
-	k := cellRunKey(cell, base, g, -1, -1, false)
+	k := cellRunKey(cell, base, g, -1, -1, false, false)
 	if k.ulStyle != ulNone || k.strikethrough {
 		t.Error("plain cell should have no decoration")
 	}
@@ -672,12 +672,12 @@ func TestCellRunKey_OSC4Override(t *testing.T) {
 	c := cell{Ch: 'A', FG: 1, Width: 1}
 
 	feed(t, g, p, []byte("\x1b]4;1;#00ff00\x07"))
-	if got, want := cellRunKey(c, base, g, -1, -1, false).color, gui.RGB(0, 0xFF, 0); got != want {
+	if got, want := cellRunKey(c, base, g, -1, -1, false, false).color, gui.RGB(0, 0xFF, 0); got != want {
 		t.Errorf("after OSC 4: color = %+v, want %+v", got, want)
 	}
 
 	feed(t, g, p, []byte("\x1b]104;1\x07"))
-	if got, want := cellRunKey(c, base, g, -1, -1, false).color, DefaultTheme.ANSI[1]; got != want {
+	if got, want := cellRunKey(c, base, g, -1, -1, false, false).color, DefaultTheme.ANSI[1]; got != want {
 		t.Errorf("after OSC 104: color = %+v, want %+v", got, want)
 	}
 }
@@ -686,7 +686,7 @@ func TestCellRunKey_BoldItalic(t *testing.T) {
 	g := newGrid(4, 8)
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
 	cell := cell{Ch: 'B', Width: 1, Attrs: attrBold | attrItalic}
-	k := cellRunKey(cell, base, g, -1, -1, false)
+	k := cellRunKey(cell, base, g, -1, -1, false, false)
 	if k.typeface != glyph.TypefaceBoldItalic {
 		t.Errorf("bold+italic: got %v, want BoldItalic", k.typeface)
 	}
@@ -706,7 +706,7 @@ func TestCellRunKey_GeometryGlyphsIgnoreBoldTypeface(t *testing.T) {
 			g := newGrid(4, 8)
 			base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
 			cell := cell{Ch: tc.ch, Width: 1, Attrs: attrBold}
-			k := cellRunKey(cell, base, g, -1, -1, false)
+			k := cellRunKey(cell, base, g, -1, -1, false, false)
 			if k.typeface != glyph.TypefaceRegular {
 				t.Fatalf("geometry glyph %q should not switch to bold typeface, got %v", tc.ch, k.typeface)
 			}
@@ -718,7 +718,7 @@ func TestCellRunKey_NonGeometryGlyphStillBolds(t *testing.T) {
 	g := newGrid(4, 8)
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
 	cell := cell{Ch: 'A', Width: 1, Attrs: attrBold}
-	k := cellRunKey(cell, base, g, -1, -1, false)
+	k := cellRunKey(cell, base, g, -1, -1, false, false)
 	if k.typeface != glyph.TypefaceBold {
 		t.Fatalf("text glyph should still bold, got %v", k.typeface)
 	}
@@ -728,7 +728,7 @@ func TestCellRunKey_GeometryGlyph_BoldItalicUsesItalic(t *testing.T) {
 	g := newGrid(4, 8)
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
 	cell := cell{Ch: '│', Width: 1, Attrs: attrBold | attrItalic}
-	k := cellRunKey(cell, base, g, -1, -1, false)
+	k := cellRunKey(cell, base, g, -1, -1, false, false)
 	// Bold is suppressed; italic is not — TypefaceItalic expected.
 	if k.typeface != glyph.TypefaceItalic {
 		t.Fatalf("geometry glyph bold+italic: got %v, want TypefaceItalic", k.typeface)
@@ -770,7 +770,7 @@ func TestCellRunKey_Underline(t *testing.T) {
 	g := newGrid(4, 8)
 	base := gui.TextStyle{}
 	cell := cell{Ch: 'C', Width: 1, Attrs: attrUnderline, ULStyle: ulSingle, ULColor: DefaultColor}
-	k := cellRunKey(cell, base, g, -1, -1, false)
+	k := cellRunKey(cell, base, g, -1, -1, false, false)
 	if k.ulStyle != ulSingle {
 		t.Errorf("underline attr: expected ulSingle in key, got %d", k.ulStyle)
 	}
@@ -780,7 +780,7 @@ func TestCellRunKey_Strikethrough(t *testing.T) {
 	g := newGrid(4, 8)
 	base := gui.TextStyle{}
 	cell := cell{Ch: 'D', Width: 1, Attrs: attrStrikethrough}
-	k := cellRunKey(cell, base, g, -1, -1, false)
+	k := cellRunKey(cell, base, g, -1, -1, false, false)
 	if !k.strikethrough {
 		t.Error("strikethrough attr: expected strikethrough in key")
 	}
@@ -790,7 +790,7 @@ func TestCellRunKey_LinkForcesUnderline(t *testing.T) {
 	g := newGrid(4, 8)
 	base := gui.TextStyle{}
 	cell := cell{Ch: 'E', Width: 1, LinkID: 42}
-	k := cellRunKey(cell, base, g, -1, -1, false)
+	k := cellRunKey(cell, base, g, -1, -1, false, false)
 	if k.ulStyle == ulNone {
 		t.Error("linked cell: expected underline forced on by linkID")
 	}
@@ -804,8 +804,8 @@ func TestCellRunKey_LinkHoverRecolorCmdOnly(t *testing.T) {
 	// Place a cell with the same link ID at (0, 1) so hover matches.
 	g.Cells[1].LinkID = 42
 
-	kNoCmd := cellRunKey(cell, base, g, 0, 1, false)
-	kCmd := cellRunKey(cell, base, g, 0, 1, true)
+	kNoCmd := cellRunKey(cell, base, g, 0, 1, false, false)
+	kCmd := cellRunKey(cell, base, g, 0, 1, true, false)
 
 	if kCmd.color == kNoCmd.color {
 		t.Error("Cmd held over same-link cell: expected color to differ (hover recolor)")
@@ -822,7 +822,7 @@ func TestCellRunKey_DifferentLinksSameStyleCoalesce(t *testing.T) {
 	base := gui.TextStyle{}
 	a := cell{Ch: 'x', Width: 1, LinkID: 1}
 	b := cell{Ch: 'y', Width: 1, LinkID: 2}
-	if cellRunKey(a, base, g, -1, -1, false) != cellRunKey(b, base, g, -1, -1, false) {
+	if cellRunKey(a, base, g, -1, -1, false, false) != cellRunKey(b, base, g, -1, -1, false, false) {
 		t.Error("same-style cells in different links must produce equal keys")
 	}
 }
@@ -832,11 +832,48 @@ func TestCellRunKey_DimHalvesColor(t *testing.T) {
 	base := gui.TextStyle{}
 	cell := cell{Ch: 'F', Width: 1, Attrs: attrDim}
 	cell.FG = rgbColor(200, 100, 50)
-	k := cellRunKey(cell, base, g, -1, -1, false)
+	k := cellRunKey(cell, base, g, -1, -1, false, false)
 	// Dim halves each channel via integer division.
 	want := gui.RGB(100, 50, 25)
 	if k.color != want {
 		t.Errorf("dim color: got %v, want %v", k.color, want)
+	}
+}
+
+func TestCellRunKey_URLHoverAppliesUnderlineAndBlue(t *testing.T) {
+	g := newGrid(4, 8)
+	base := gui.TextStyle{}
+	cell := cell{Ch: 'A', Width: 1, FG: rgbColor(200, 200, 200)}
+
+	// urlHover=false — no underline, no recolor.
+	kOff := cellRunKey(cell, base, g, -1, -1, false, false)
+	if kOff.ulStyle != ulNone {
+		t.Error("urlHover false: expected no underline")
+	}
+
+	// urlHover=true — underline forced on + blue recolor.
+	kOn := cellRunKey(cell, base, g, -1, -1, false, true)
+	if kOn.ulStyle == ulNone {
+		t.Error("urlHover true: expected underline forced on")
+	}
+	if kOn.color == kOff.color {
+		t.Error("urlHover true: expected color to change (blue recolor)")
+	}
+}
+
+func TestCellRunKey_URLHoverVsExplicitLink(t *testing.T) {
+	// urlHover and an explicit LinkID should never appear together on
+	// the same cell (the caller gating enforces this), but if they do
+	// the explicit link path wins — it runs first in cellRunKey.
+	g := newGrid(4, 8)
+	base := gui.TextStyle{}
+	cell := cell{Ch: 'B', Width: 1, LinkID: 7, FG: rgbColor(200, 200, 200)}
+	g.Cells[0].LinkID = 7
+
+	// urlHover=true but LinkID is set → explicit-link path applies (Cmd-hover).
+	k := cellRunKey(cell, base, g, 0, 0, true, true)
+	if k.ulStyle == ulNone {
+		t.Error("explicit link with urlHover: expected underline from link path")
 	}
 }
 
@@ -870,7 +907,7 @@ func BenchmarkForegroundPass(b *testing.B) {
 				if cell.Width == 0 && cell.Ch == 0 {
 					continue
 				}
-				_ = cellRunKey(cell, base, g, -1, -1, false)
+				_ = cellRunKey(cell, base, g, -1, -1, false, false)
 			}
 		}
 	}
