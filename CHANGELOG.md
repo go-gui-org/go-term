@@ -102,7 +102,7 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - Mouse-wheel scroll sensitivity reduced from 15 to 5 rows (#32).
 - Scroll momentum decay shortened (#36).
 - Selection boundaries use half-open intervals (#30).
-- Renamed `examples/demo` to `examples/loon` (#16); consolidated the
+- Renamed `examples/demo` to `examples/falcon` (#16); consolidated the
   font-family constant (#26).
 - Compressed ROADMAP from 606 to 135 lines.
 
@@ -195,4 +195,4 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   erase-in-line, erase-in-display, and SGR for the ANSI 16-color
   palette plus bold / underline / inverse.
 - 16-color palette (VS Code Dark+ approximation) with default fg/bg.
-- `examples/loon` example window.
+- `examples/falcon` example window.
