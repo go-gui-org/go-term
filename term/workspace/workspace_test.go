@@ -82,7 +82,7 @@ func TestNew_NilWindowReturnsError(t *testing.T) {
 // These exercise the early-return guards that do not touch the window, so a
 // Workspace can be hand-built with a nil window. Index changes that would
 // reach refresh()/activateTab's switch path need a live *gui.Window and are
-// covered visually via examples/loon.
+// covered visually via examples/falcon.
 // ---------------------------------------------------------------------------
 
 func TestGoToTab_OutOfRangeNoop(t *testing.T) {
@@ -125,7 +125,7 @@ func TestPrevTab_SingleTabNoop(t *testing.T) {
 // MoveTabLeft / MoveTabRight — no-op guard paths
 //
 // The active paths (swapping then calling refresh()) need a live *gui.Window
-// and are covered visually via examples/loon. These exercise the early-return
+// and are covered visually via examples/falcon. These exercise the early-return
 // guards: single/empty tabs, edge positions, and negative activeTab.
 // ---------------------------------------------------------------------------
 
@@ -209,7 +209,7 @@ func TestMoveTabRight_NegativeActiveTabNoop(t *testing.T) {
 // LiveTermCount — zero/empty paths
 //
 // The counting branch (tm.Alive() → n++) needs real *term.Term values with a
-// live PTY and is covered visually via examples/loon. These exercise the
+// live PTY and is covered visually via examples/falcon. These exercise the
 // panic-safety guards: nil tabs slice and empty/nil terms maps return 0.
 // ---------------------------------------------------------------------------
 
@@ -230,7 +230,7 @@ func TestLiveTermCount_NoTabsAndEmptyTermsReturnsZero(t *testing.T) {
 // Theme picker — no-op guard paths
 //
 // Active paths (Toggle open, arrow-key navigation, apply, confirm) require a
-// live *gui.Window + *term.Term and are covered visually via examples/loon.
+// live *gui.Window + *term.Term and are covered visually via examples/falcon.
 // These exercise the early-return guards: zero themes, out-of-bounds apply.
 // ---------------------------------------------------------------------------
 

@@ -18,7 +18,7 @@ macOS, Linux, and Windows (ConPTY).
 
 ```bash
 # Run the demo window
-cd examples/loon && go run .
+cd examples/falcon && go run .
 
 # Run the full test suite
 go test ./...
@@ -46,7 +46,7 @@ there means the child app is at fault — or feed the bytes to
 
 There are automated tests for the grid, parser, PTY, widget helpers,
 and replay-style emulator behavior. The widget itself is still partly
-GUI-bound, so keep validating visually by running `examples/loon` and trying
+GUI-bound, so keep validating visually by running `examples/falcon` and trying
 `ls`, `cat`, ANSI color output, window resize, selection/copy, and
 full-screen apps such as `vim` or `less`.
 
@@ -68,7 +68,7 @@ across multiple files by concern — the layering invariant is what matters,
 not the file count.
 
 ```
-examples/loon/main.go         gui.NewWindow + term.New + backend.Run
+examples/falcon/main.go         gui.NewWindow + term.New + backend.Run
         │
         ▼
 term/widget.go           Term struct, New, View, Close; reader goroutine.
