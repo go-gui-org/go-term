@@ -223,3 +223,31 @@ func TestGrapheme_PlainASCIIUnaffected(t *testing.T) {
 		t.Errorf("cluster pool grew to %d for plain ASCII", len(g.clusters))
 	}
 }
+
+// TestGrapheme_EawWide verifies a codepoint reclassified Wide since
+// Unicode 15.0.0 (U+1FADF SPLATTER) renders at width 2 through the full
+// grapheme pipeline (PutRune → leadingAkshara → wcwidthWidth → eawWide).
+func TestGrapheme_EawWide(t *testing.T) {
+	g, p := newParserGrid(1, 10)
+	feedStr(t, g, p, "\U0001FADF") // SPLATTER — wcwidth says 2, uniseg 15 says 1
+	if g.CursorC != 2 {
+		t.Fatalf("cursor col = %d, want 2", g.CursorC)
+	}
+	if w := gcell(g, 0, 0).Width; w != 2 {
+		t.Errorf("width = %d, want 2", w)
+	}
+}
+
+// TestGrapheme_StandaloneEmojiModifier verifies a standalone emoji skin-tone
+// modifier (U+1F3FB) renders at width 2 through the grapheme pipeline.
+// uniseg zero-widths it (Grapheme_Extend), but wcwidth renders it wide.
+func TestGrapheme_StandaloneEmojiModifier(t *testing.T) {
+	g, p := newParserGrid(1, 10)
+	feedStr(t, g, p, "\U0001F3FB") // EMOJI MODIFIER FITZPATRICK TYPE-1-2
+	if g.CursorC != 2 {
+		t.Fatalf("cursor col = %d, want 2", g.CursorC)
+	}
+	if w := gcell(g, 0, 0).Width; w != 2 {
+		t.Errorf("width = %d, want 2", w)
+	}
+}
