@@ -45,6 +45,16 @@ func (p *parser) replyDECRQSS(body []byte) {
 		out = appendReply(out, []byte("1$r"+strconv.Itoa(top)+";"+strconv.Itoa(bot)+"r"))
 	case " q":
 		out = appendReply(out, []byte("1$r"+strconv.Itoa(p.g.DECSCUSRParam())+" q"))
+	case "\"q":
+		// DECSCA — 1 when characters are being written protected, else 0.
+		ps := 0
+		if p.g.CurAttrs&attrProtected != 0 {
+			ps = 1
+		}
+		out = appendReply(out, []byte("1$r"+strconv.Itoa(ps)+"\"q"))
+	case "*x":
+		// DECSACE — attribute change extent (0 = stream, 2 = rectangle).
+		out = appendReply(out, []byte("1$r"+strconv.Itoa(int(p.g.RectExtent))+"*x"))
 	default:
 		out = appendReply(out, []byte("0$r"))
 	}

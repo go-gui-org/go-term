@@ -223,6 +223,73 @@ func TestConformance(t *testing.T) {
 				}
 			},
 		},
+
+		// --- DECSCA + rectangular areas (vttest menu 8) --------------------
+
+		{
+			// A protected frame survives DECSED/DECSEL; the unprotected text
+			// inside it does not. This is the shape DEC forms-mode apps use:
+			// paint the labels protected, clear the fields selectively.
+			name: "decsca_protected_frame_survives_selective_erase",
+			rows: 3,
+			cols: 8,
+			// Row 1: protected "NAME:" then unprotected "bob".
+			// Row 2: unprotected filler. Then DECSED 2 from home.
+			input: "\x1b[1\"qNAME:\x1b[0\"qbob\r\n" +
+				"filler\x1b[H\x1b[?2J",
+
+			wantLines: []string{"NAME:   ", "        ", "        "},
+			wantR:     0,
+			wantC:     0,
+		},
+		{
+			// Plain ED after the same setup takes the protected cells too.
+			name: "ed_ignores_protection",
+			rows: 2,
+			cols: 8,
+			input: "\x1b[1\"qNAME:\x1b[0\"qbob\r\n" +
+				"\x1b[H\x1b[2J",
+
+			wantLines: []string{"        ", "        "},
+		},
+		{
+			// DECFRA paints a box of '#', DECERA punches a hole in it, and
+			// DECCRA duplicates the remaining top row lower down.
+			name:  "rect_fill_erase_copy",
+			rows:  4,
+			cols:  6,
+			input: "\x1b[35;1;1;2;6$x\x1b[1;3;1;4$z\x1b[1;1;1;6;1;4;1;1$v",
+
+			wantLines: []string{
+				"##  ##",
+				"######",
+				"      ",
+				"##  ##",
+			},
+		},
+		{
+			// DECSERA clears only the unprotected half of a filled row, and
+			// DECCARA (rectangle extent) reverses video over a sub-span
+			// without touching the characters.
+			name:  "decsera_and_deccara",
+			rows:  1,
+			cols:  6,
+			input: "\x1b[1\"qAB\x1b[0\"qCD\x1b[2*x\x1b[1;1;1;4${\x1b[1;1;1;2;7$r",
+
+			wantLines: []string{"AB    "},
+			wantC:     4, // the rect ops leave the cursor where ABCD ended
+			assert: func(t *testing.T, g *grid) {
+				if g.At(0, 0).Attrs&attrInverse == 0 || g.At(0, 1).Attrs&attrInverse == 0 {
+					t.Error("DECCARA did not set inverse over the protected span")
+				}
+				if g.At(0, 2).Attrs&attrInverse != 0 {
+					t.Error("DECCARA reached past the rectangle")
+				}
+				if g.At(0, 0).Ch != 'A' {
+					t.Errorf("DECCARA changed the character: %q", g.At(0, 0).Ch)
+				}
+			},
+		},
 	}
 
 	for _, tc := range cases {

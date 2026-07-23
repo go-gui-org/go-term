@@ -43,6 +43,7 @@ go test ./term -run TestConformance
 | Bracketed paste, focus reporting, mouse modes, sync output | `parser_test.go`, `widget_test.go`, `emulator_replay_test.go` |
 | Grapheme clusters, wide chars, emoji, VS15/16, ZWJ, flags (Mode 2027) | `grapheme_test.go`, `grid_test.go` |
 | Bidirectional text (UAX#9) | `bidi_test.go` |
+| DECSCA protection, selective erase, rectangular area ops | `grid_rect_test.go`, `parser_csi_test.go`, `conformance_test.go` |
 | Graphics: Sixel, Kitty (APC), iTerm2 (OSC 1337) | `graphics_test.go`, `parser_apc_test.go`, `parser_iterm2_test.go` |
 | Kitty Keyboard Protocol, function/keypad keys | `widget_keyboard_test.go`, `parser_csi_test.go` |
 | Semantic shell marks (OSC 133), search | `grid_mark_test.go`, `grid_search_test.go` |

@@ -22,7 +22,7 @@ func TestTextBlinkOff_AlternatesEachHalfCycle(t *testing.T) {
 func TestMaskGlyph(t *testing.T) {
 	tests := []struct {
 		name     string
-		attrs    uint8
+		attrs    uint16
 		blinkOff bool
 		hidden   bool
 	}{

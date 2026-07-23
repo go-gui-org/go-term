@@ -526,7 +526,8 @@ func appendReply(out []byte, body []byte) []byte {
 }
 
 func (p *parser) currentSGRString() string {
-	if p.g.CurFG == DefaultColor && p.g.CurBG == DefaultColor && p.g.CurAttrs == 0 {
+	if p.g.CurFG == DefaultColor && p.g.CurBG == DefaultColor &&
+		p.g.CurAttrs&attrVisual == 0 {
 		return "0m"
 	}
 	params := make([]byte, 0, 32)

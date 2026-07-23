@@ -27,12 +27,13 @@ func (g *grid) ApplyDECSCUSR(ps int) {
 }
 
 // savedCursor holds the snapshot taken by SaveCursor (DECSC / CSI s).
-// Stores position and SGR state per VT100 spec. Zero value means no
-// snapshot has been taken yet (valid == false).
+// Stores position and SGR state per VT100 spec. attrs carries the DECSCA
+// protection bit along with the SGR attributes, which VT510 requires DECSC
+// to save. Zero value means no snapshot has been taken yet (valid == false).
 type savedCursor struct {
 	r, c       int
 	fg, bg     uint32
-	attrs      uint8
+	attrs      uint16
 	ulStyle    uint8
 	ulColor    uint32
 	charsetG0  byte

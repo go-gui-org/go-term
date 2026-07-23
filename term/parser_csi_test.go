@@ -773,7 +773,7 @@ func TestParser_SGR_NewAttrs_Set(t *testing.T) {
 	tests := []struct {
 		name string
 		seq  string
-		want uint8
+		want uint16
 	}{
 		{"dim", "\x1b[2m", attrDim},
 		{"italic", "\x1b[3m", attrItalic},
@@ -797,7 +797,7 @@ func TestParser_SGR_NewAttrs_Clear(t *testing.T) {
 		name     string
 		setSeq   string
 		clearSeq string
-		bits     uint8
+		bits     uint16
 	}{
 		{"dim via 22", "\x1b[2m", "\x1b[22m", attrDim},
 		{"bold+dim via 22", "\x1b[1m\x1b[2m", "\x1b[22m", attrBold | attrDim},
@@ -1130,4 +1130,181 @@ func TestParser_DECRQM_NoHandler(t *testing.T) {
 	// No SetReplyHandler call — p.onReply is nil.
 	feed(t, g, p, []byte("\x1b[?2004$p"))
 	// No panic = pass.
+}
+
+// ── DECSCA + VT420 rectangular area operations (issue #71) ────────────────
+
+func TestParser_DECSCA_SetsAndClearsProtection(t *testing.T) {
+	g, p := newParserGrid(1, 4)
+	feed(t, g, p, []byte("\x1b[1\"q"))
+	if g.CurAttrs&attrProtected == 0 {
+		t.Fatal("CSI 1 \" q did not set protection")
+	}
+	// Characters written now carry the bit.
+	feed(t, g, p, []byte("ab"))
+	if g.At(0, 0).Attrs&attrProtected == 0 || g.At(0, 1).Attrs&attrProtected == 0 {
+		t.Error("protection not applied to written cells")
+	}
+	// SGR reset must not clear DECSCA — it is not a visual attribute.
+	feed(t, g, p, []byte("\x1b[0m"))
+	if g.CurAttrs&attrProtected == 0 {
+		t.Error("SGR 0 cleared DECSCA")
+	}
+	feed(t, g, p, []byte("\x1b[m"))
+	if g.CurAttrs&attrProtected == 0 {
+		t.Error("bare SGR cleared DECSCA")
+	}
+	feed(t, g, p, []byte("\x1b[0\"q"))
+	if g.CurAttrs&attrProtected != 0 {
+		t.Error("CSI 0 \" q did not clear protection")
+	}
+}
+
+func TestParser_DECSCA_SavedByDECSCAndClearedByDECSTR(t *testing.T) {
+	g, p := newParserGrid(1, 4)
+	feed(t, g, p, []byte("\x1b[1\"q\x1b7\x1b[0\"q"))
+	if g.CurAttrs&attrProtected != 0 {
+		t.Fatal("protection still set after DECSCA 0")
+	}
+	feed(t, g, p, []byte("\x1b8")) // DECRC restores the saved DECSCA state
+	if g.CurAttrs&attrProtected == 0 {
+		t.Error("DECRC did not restore DECSCA")
+	}
+	feed(t, g, p, []byte("\x1b[!p")) // DECSTR
+	if g.CurAttrs&attrProtected != 0 {
+		t.Error("DECSTR left DECSCA set")
+	}
+}
+
+func TestParser_DECSEL_DECSED_HonorProtection(t *testing.T) {
+	g, p := newParserGrid(2, 4)
+	// Row 0: "ab" unprotected, "CD" protected.
+	feed(t, g, p, []byte("ab\x1b[1\"qCD\x1b[0\"q"))
+	feed(t, g, p, []byte("\x1b[1;1H\x1b[?2K")) // DECSEL 2 on row 0
+	if got := rowText(g, 0); got != "  CD" {
+		t.Errorf("DECSEL row = %q, want \"  CD\"", got)
+	}
+	feed(t, g, p, []byte("\x1b[?2J")) // DECSED 2
+	if got := rowText(g, 0); got != "  CD" {
+		t.Errorf("DECSED row = %q, want \"  CD\"", got)
+	}
+	feed(t, g, p, []byte("\x1b[2J")) // plain ED ignores protection
+	if got := rowText(g, 0); got != "    " {
+		t.Errorf("ED row = %q, want blank", got)
+	}
+}
+
+func TestParser_RectOps_Dispatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			// DECERA over rows 1-2, cols 2-3.
+			name:  "DECERA",
+			input: "\x1b[1;2;2;3$z",
+			want:  []string{"X  X", "X  X", "XXXX"},
+		},
+		{
+			// DECFRA fills rows 2-3, cols 1-2 with '*'.
+			name:  "DECFRA",
+			input: "\x1b[42;2;1;3;2$x",
+			want:  []string{"XPXX", "**XX", "**XX"},
+		},
+		{
+			// DECSERA leaves the protected cell at (0,1) standing; the rest
+			// of row 1 clears.
+			name:  "DECSERA",
+			input: "\x1b[1;1;1;4$\x7b",
+			want:  []string{" P  ", "XXXX", "XXXX"},
+		},
+		{
+			// DECCRA copies row 1 cols 1-2 down to row 3 col 3.
+			name:  "DECCRA",
+			input: "\x1b[1;1;1;2;1;3;3;1$v",
+			want:  []string{"XPXX", "XXXX", "XXXP"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g, p := newParserGrid(3, 4)
+			fillGrid(g, 'X')
+			// A protected 'P' at (0,1) so the selective forms are observable.
+			g.Cells[1] = cell{Ch: 'P', FG: DefaultColor, BG: DefaultColor,
+				ULColor: DefaultColor, Width: 1, Attrs: attrProtected}
+			feed(t, g, p, []byte(tt.input))
+			wantRows(t, g, tt.want)
+		})
+	}
+}
+
+func TestParser_DECCARA_DECRARA_Dispatch(t *testing.T) {
+	g, p := newParserGrid(2, 4)
+	fillGrid(g, 'X')
+	// Rectangle extent, then bold rows 1-2 cols 2-3.
+	feed(t, g, p, []byte("\x1b[2*x\x1b[1;2;2;3;1$r"))
+	if g.RectExtent != 2 {
+		t.Fatalf("DECSACE not applied: %d", g.RectExtent)
+	}
+	for r := range 2 {
+		for c := range 4 {
+			bold := g.At(r, c).Attrs&attrBold != 0
+			want := c == 1 || c == 2
+			if bold != want {
+				t.Errorf("DECCARA (%d,%d) bold=%v, want %v", r, c, bold, want)
+			}
+		}
+	}
+	// DECRARA toggles the same area back off.
+	feed(t, g, p, []byte("\x1b[1;2;2;3;1$t"))
+	for r := range 2 {
+		for c := range 4 {
+			if g.At(r, c).Attrs&attrBold != 0 {
+				t.Errorf("DECRARA left (%d,%d) bold", r, c)
+			}
+		}
+	}
+}
+
+func TestParser_RectIntermediates_DoNotShadowBareFinals(t *testing.T) {
+	// 'r', 't' and 'x' are shared with DECSTBM, XTWINOPS and DECREQTPARM;
+	// only the '$'/'*' intermediate forms may reach the rectangle ops.
+	g, p := newParserGrid(6, 8)
+	feed(t, g, p, []byte("\x1b[2;5r"))
+	if g.Top != 1 || g.Bottom != 4 {
+		t.Errorf("DECSTBM broken by DECCARA dispatch: %d..%d", g.Top, g.Bottom)
+	}
+	var replies []string
+	p.SetReplyHandler(func(b []byte) { replies = append(replies, string(b)) })
+	feed(t, g, p, []byte("\x1b[16t")) // XTWINOPS cell-size report
+	if len(replies) != 1 {
+		t.Errorf("XTWINOPS broken by DECRARA dispatch: %q", replies)
+	}
+	if g.RectExtent != 0 {
+		t.Errorf("bare final touched DECSACE: %d", g.RectExtent)
+	}
+}
+
+func TestParser_DECRQSS_DECSCA_DECSACE(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	var replies []string
+	p.SetReplyHandler(func(b []byte) { replies = append(replies, string(b)) })
+	feed(t, g, p, []byte("\x1bP$q\"q\x1b\\"))
+	feed(t, g, p, []byte("\x1b[1\"q\x1b[2*x"))
+	feed(t, g, p, []byte("\x1bP$q\"q\x1b\\"))
+	feed(t, g, p, []byte("\x1bP$q*x\x1b\\"))
+	want := []string{
+		"\x1bP1$r0\"q\x1b\\",
+		"\x1bP1$r1\"q\x1b\\",
+		"\x1bP1$r2*x\x1b\\",
+	}
+	if len(replies) != len(want) {
+		t.Fatalf("reply count = %d (%q), want %d", len(replies), replies, len(want))
+	}
+	for i := range want {
+		if replies[i] != want[i] {
+			t.Errorf("reply[%d] = %q, want %q", i, replies[i], want[i])
+		}
+	}
 }

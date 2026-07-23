@@ -446,7 +446,7 @@ func TestCurrentSGRString_AllPaths(t *testing.T) {
 		name string
 		fg   uint32
 		bg   uint32
-		attr uint8
+		attr uint16
 		want string
 	}{
 		{"default", DefaultColor, DefaultColor, 0, "0m"},
