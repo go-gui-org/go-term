@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"log"
 	"strconv"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -152,13 +153,6 @@ func (ws *Workspace) registerCommands() {
 			CanExecute: func(_ *gui.Window) bool { return ws.themePickerVisible },
 			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themePickerConfirm() },
 		},
-		{
-			ID:         "workspace.themePickerEscape",
-			Shortcut:   gui.Shortcut{Key: gui.KeyEscape},
-			Global:     true,
-			CanExecute: func(_ *gui.Window) bool { return ws.themePickerVisible },
-			Execute:    func(_ *gui.Event, w *gui.Window) { ws.ToggleThemePicker() },
-		},
 		// Help overlay.
 		{
 			ID:       "workspace.toggleHelp",
@@ -168,14 +162,20 @@ func (ws *Workspace) registerCommands() {
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleHelp() },
 		},
 		{
-			// Escape dismisses the overlay. CanExecute gates on
-			// helpVisible so Escape still reaches the child process
-			// (vim, less, …) whenever the overlay is closed.
-			ID:         "workspace.closeHelp",
-			Shortcut:   gui.Shortcut{Key: gui.KeyEscape},
-			Global:     true,
-			CanExecute: func(_ *gui.Window) bool { return ws.helpVisible },
-			Execute:    func(_ *gui.Event, w *gui.Window) { ws.ToggleHelp() },
+			// Escape dismisses whichever overlay is up. A *single* Escape
+			// command owns both overlays: go-gui's registry rejects
+			// duplicate shortcuts, and one rejection aborts the whole
+			// RegisterCommands batch, so two Escape entries would silently
+			// drop every command registered after them. CanExecute gates on
+			// visibility so Escape still reaches the child process (vim,
+			// less, …) whenever no overlay is open.
+			ID:       "workspace.dismissOverlay",
+			Shortcut: gui.Shortcut{Key: gui.KeyEscape},
+			Global:   true,
+			CanExecute: func(_ *gui.Window) bool {
+				return ws.themePickerVisible || ws.helpVisible
+			},
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.dismissOverlay() },
 		},
 	}
 	// Tab 1–9 shortcuts.
@@ -204,7 +204,28 @@ func (ws *Workspace) registerCommands() {
 	// bindings rather than a hand-maintained copy. The tab 1–9 commands
 	// carry no Label and are skipped by the overlay.
 	ws.commands = cmds
-	_ = ws.w.RegisterCommands(cmds...)
+	// Register one at a time rather than via RegisterCommands: that helper
+	// aborts the whole batch on the first duplicate ID/shortcut, which
+	// silently drops every command declared after it — exactly how a
+	// duplicate Escape binding once disabled Cmd+1..9 tab selection.
+	// Per-command registration confines the damage to the offending entry
+	// and logs it instead of failing invisibly.
+	for i := range cmds {
+		if err := ws.w.RegisterCommand(cmds[i]); err != nil {
+			log.Printf("workspace: register %s: %v", cmds[i].ID, err)
+		}
+	}
+}
+
+// dismissOverlay closes the topmost visible overlay. The theme picker is
+// drawn above the help panel, so it wins when both are open.
+func (ws *Workspace) dismissOverlay() {
+	switch {
+	case ws.themePickerVisible:
+		ws.ToggleThemePicker()
+	case ws.helpVisible:
+		ws.ToggleHelp()
+	}
 }
 
 // SplitPane splits the focused pane. If horizontal is true, splits top/bottom;
