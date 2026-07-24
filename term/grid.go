@@ -592,6 +592,14 @@ type grid struct {
 	// repaint output.
 	AltActive bool
 	SelActive bool
+
+	// hasSelAnchor is true once a left-click has placed SelAnchor and remains
+	// true after a plain click collapses the selection (SelActive == false),
+	// so a following Shift+click can extend from that anchor. ClearSelection
+	// resets it, so any selection-invalidating event (scroll, reset, alt-screen
+	// swap, reflow) forces the next Shift+click to start a fresh anchor rather
+	// than extend from a now-meaningless content position.
+	hasSelAnchor bool
 }
 
 // PushKittyKeyFlags saves the current KittyKeyFlags on the stack and ORs in

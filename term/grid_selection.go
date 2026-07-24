@@ -67,4 +67,5 @@ func (g *grid) ClearSelection() {
 	g.SelActive = false
 	g.SelAnchor = contentPos{}
 	g.SelHead = contentPos{}
+	g.hasSelAnchor = false
 }

@@ -417,6 +417,107 @@ func TestOnMouseUp_LocalReleaseClearsSelection(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// shift-click extend
+// ---------------------------------------------------------------------------
+
+// A plain click must leave the anchor behind (inactive) so a following
+// Shift+click can extend from it. A full ClearSelection here would wipe the
+// anchor and break click-then-Shift+click.
+func TestOnMouseUp_PlainClickPreservesAnchor(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	// MouseX=15 → cell boundary 2; MouseY=25 → row 1.
+	down := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
+	tm.onClick(nil, down, &gui.Window{})
+	up := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
+	tm.onMouseUp(nil, up, &gui.Window{})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelActive {
+		t.Error("plain click should leave the selection inactive")
+	}
+	if !tm.grid.hasSelAnchor {
+		t.Error("anchor must survive a plain-click release for later shift-extend")
+	}
+	if tm.grid.SelAnchor != (contentPos{Row: 1, Col: 2}) {
+		t.Errorf("SelAnchor = %v, want {Row:1 Col:2} preserved", tm.grid.SelAnchor)
+	}
+}
+
+// Click, release, then Shift+click a different cell: the anchor stays put and
+// only the head moves, activating the selection — xterm/iTerm2 behavior.
+func TestOnClick_ShiftExtendFromAnchor(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.onClick(nil, &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, &gui.Window{})
+	tm.onMouseUp(nil, &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, &gui.Window{})
+
+	// MouseX=55 → boundary 6; MouseY=65 → row 3.
+	shift := &gui.Event{
+		MouseX: 55, MouseY: 65, MouseButton: gui.MouseLeft, Modifiers: gui.ModShift,
+	}
+	tm.onClick(nil, shift, &gui.Window{})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelAnchor != (contentPos{Row: 1, Col: 2}) {
+		t.Errorf("SelAnchor = %v, want {Row:1 Col:2} (anchor preserved)", tm.grid.SelAnchor)
+	}
+	if tm.grid.SelHead != (contentPos{Row: 3, Col: 6}) {
+		t.Errorf("SelHead = %v, want {Row:3 Col:6}", tm.grid.SelHead)
+	}
+	if !tm.grid.SelActive {
+		t.Error("shift-extend to a different cell should activate the selection")
+	}
+}
+
+// Shift+click as the very first action has no prior anchor, so it anchors
+// normally instead of extending from the zero-value contentPos{}.
+func TestOnClick_ShiftClickNoPriorAnchorReanchors(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	e := &gui.Event{
+		MouseX: 55, MouseY: 65, MouseButton: gui.MouseLeft, Modifiers: gui.ModShift,
+	}
+	tm.onClick(nil, e, &gui.Window{})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelAnchor != (contentPos{Row: 3, Col: 6}) {
+		t.Errorf("SelAnchor = %v, want {Row:3 Col:6} (fresh anchor)", tm.grid.SelAnchor)
+	}
+	if tm.grid.SelActive {
+		t.Error("fresh shift-click (head == anchor) should be inactive")
+	}
+	if !tm.grid.hasSelAnchor {
+		t.Error("hasSelAnchor should be set after any click")
+	}
+}
+
+// A selection-invalidating event (here ClearSelection, as scroll/reset emit)
+// resets hasSelAnchor, so the next Shift+click starts a fresh anchor rather
+// than extending from a now-meaningless content position.
+func TestOnClick_ShiftExtendAfterClearReanchors(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.onClick(nil, &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, &gui.Window{})
+	tm.grid.Mu.Lock()
+	tm.grid.ClearSelection()
+	tm.grid.Mu.Unlock()
+
+	tm.onClick(nil, &gui.Event{
+		MouseX: 55, MouseY: 65, MouseButton: gui.MouseLeft, Modifiers: gui.ModShift,
+	}, &gui.Window{})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelAnchor != (contentPos{Row: 3, Col: 6}) {
+		t.Errorf("SelAnchor = %v, want {Row:3 Col:6}; ClearSelection must reset hasSelAnchor",
+			tm.grid.SelAnchor)
+	}
+	if tm.grid.SelActive {
+		t.Error("fresh anchor after clear should be inactive")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // canvas offset — mouse-lock callbacks use absolute coords
 // ---------------------------------------------------------------------------
 

@@ -263,13 +263,27 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		return
 	}
 	selCol := t.posToSelCol(e.MouseX)
+	// Shift+click extends the existing selection from its fixed anchor instead
+	// of starting a new one — matching xterm/iTerm2/kitty. Only extends when a
+	// prior anchor exists (hasSelAnchor); a Shift+click with no prior selection
+	// falls through to the normal re-anchor below.
+	shiftExtend := e.Modifiers.Has(gui.ModShift)
 	func() {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
 		contentR := t.grid.viewportToContent(r)
-		t.grid.SelAnchor = contentPos{Row: contentR, Col: selCol}
-		t.grid.SelHead = contentPos{Row: contentR, Col: selCol}
-		t.grid.SelActive = false
+		head := contentPos{Row: contentR, Col: selCol}
+		if shiftExtend && t.grid.hasSelAnchor {
+			// Keep SelAnchor; move only the head to the click point. A one-cell
+			// span (head == anchor) is not a real selection, so leave inactive.
+			t.grid.SelHead = head
+			t.grid.SelActive = head != t.grid.SelAnchor
+		} else {
+			t.grid.SelAnchor = head
+			t.grid.SelHead = head
+			t.grid.SelActive = false
+		}
+		t.grid.hasSelAnchor = true
 	}()
 	t.mouse.dragging = true
 	t.mouse.dragButton = e.MouseButton
@@ -494,10 +508,16 @@ func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		}
 	}
 	if !t.copySelection(w) {
+		// Nothing selected (plain click, or a drag too small to span a cell).
+		// Deactivate the selection but keep SelAnchor and hasSelAnchor so a
+		// following Shift+click extends from this click point — a full
+		// ClearSelection here would wipe the anchor and break click-then-
+		// Shift+click. onClick already set SelHead == SelAnchor at the click,
+		// so there is no stale head to reset.
 		func() {
 			t.grid.Mu.Lock()
 			defer t.grid.Mu.Unlock()
-			t.grid.ClearSelection()
+			t.grid.SelActive = false
 		}()
 	}
 	t.bumpVersion()
