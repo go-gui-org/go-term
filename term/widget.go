@@ -1551,14 +1551,69 @@ func (t *Term) AdjustFontSize(delta float32) {
 			return
 		}
 	}
-	t.fontSize += delta
-	const minSize, maxSize float32 = 4, 72
-	if t.fontSize < minSize {
-		t.fontSize = minSize
+	t.fontSize = clampFontSize(t.fontSize + delta)
+	t.invalidateFontMetrics()
+}
+
+// SetFontSize sets the runtime zoom to an absolute size in points, clamped to
+// [minFontSize, maxFontSize]. A value <= 0 clears the override (equivalent to
+// ResetFontSize). Unlike seeding cfg.TextStyle.Size, this leaves the configured
+// default intact, so a later ResetFontSize still returns to that default —
+// which is why restore/split apply their inherited size through here rather
+// than through Cfg. Main-thread only, same constraints as AdjustFontSize.
+func (t *Term) SetFontSize(size float32) {
+	if !realNumber(size) {
+		return
 	}
-	if t.fontSize > maxSize {
-		t.fontSize = maxSize
+	if size <= 0 {
+		t.ResetFontSize()
+		return
 	}
+	size = clampFontSize(size)
+	if t.fontSize == size {
+		return
+	}
+	t.fontSize = size
+	t.invalidateFontMetrics()
+}
+
+// ResetFontSize clears any runtime zoom, restoring the configured
+// TextStyle.Size (or the theme default when no TextStyle was set). Main-thread
+// only, same constraints as AdjustFontSize. A no-op when already unzoomed.
+// After reset t.fontSize is 0; AdjustFontSize re-seeds it from style() on the
+// next zoom, so subsequent zooming still works.
+func (t *Term) ResetFontSize() {
+	if t.fontSize == 0 {
+		return // already at the configured default
+	}
+	t.fontSize = 0
+	t.invalidateFontMetrics()
+}
+
+// FontSize returns the effective font size in points — the runtime zoom
+// override when set, otherwise the configured TextStyle.Size. Main-thread
+// only (reads style() without grid.Mu, like AdjustFontSize).
+func (t *Term) FontSize() float32 { return t.style().Size }
+
+// minFontSize/maxFontSize bound the runtime zoom. 4 pt stays legible at the
+// smallest useful size; 72 pt is a generous presentation ceiling.
+const minFontSize, maxFontSize float32 = 4, 72
+
+// clampFontSize constrains size to [minFontSize, maxFontSize].
+func clampFontSize(size float32) float32 {
+	if size < minFontSize {
+		return minFontSize
+	}
+	if size > maxFontSize {
+		return maxFontSize
+	}
+	return size
+}
+
+// invalidateFontMetrics forces onDraw to remeasure the cell (cellW == 0) on the
+// next frame, drops the cached glyph runs whose widths are now stale, bumps the
+// draw version, and requests a repaint. Main-thread only (see AdjustFontSize).
+func (t *Term) invalidateFontMetrics() {
 	t.cellW = 0
 	t.draw.runeCache = nil
 	t.bumpVersion()

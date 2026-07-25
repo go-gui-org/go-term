@@ -55,5 +55,6 @@ func Shortcuts() []ShortcutInfo {
 		{"Scroll to bottom", sc(gui.KeyEnd, gui.ModShift)},
 		{"Increase font size", sc(gui.KeyEqual, gui.ModSuper)},
 		{"Decrease font size", sc(gui.KeyMinus, gui.ModSuper)},
+		{"Reset font size", sc(gui.Key0, gui.ModSuper)},
 	}
 }

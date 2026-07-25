@@ -453,11 +453,11 @@ func (t *Term) handleClipboardKey(e *gui.Event, w *gui.Window) bool {
 	return false
 }
 
-// handleDisplayKey intercepts Primary+= (increase font size) and Primary+-
-// (decrease font size) before they reach the pty — Cmd+= / Cmd+- on macOS,
-// Ctrl+Shift+= / Ctrl+Shift+- on Windows. Has (not exact) so the Shift used to
-// type '+' on the '=' key is tolerated. Returns true when the event was
-// consumed.
+// handleDisplayKey intercepts Primary+= (increase font size), Primary+-
+// (decrease font size), and Primary+0 (reset to default) before they reach the
+// pty — Cmd+=/Cmd+-/Cmd+0 on macOS, Ctrl+Shift+=/-/0 on Windows. isPrimaryChord
+// (not exact) tolerates the Shift used to type '+' on the '=' key. Returns true
+// when the event was consumed.
 func (t *Term) handleDisplayKey(e *gui.Event, w *gui.Window) bool {
 	if isPrimaryChord(e.Modifiers) {
 		if e.KeyCode == gui.KeyEqual {
@@ -467,6 +467,11 @@ func (t *Term) handleDisplayKey(e *gui.Event, w *gui.Window) bool {
 		}
 		if e.KeyCode == gui.KeyMinus {
 			t.AdjustFontSize(-0.25)
+			e.IsHandled = true
+			return true
+		}
+		if e.KeyCode == gui.Key0 {
+			t.ResetFontSize()
 			e.IsHandled = true
 			return true
 		}

@@ -78,12 +78,16 @@ func (t *Tab) termCfg(
 }
 
 // addPane creates a new Term as a leaf in this tab. dir sets the child's
-// working directory (empty = inherit process CWD).
+// working directory (empty = inherit process CWD). A non-zero fontSize applies
+// a per-pane zoom via Term.SetFontSize — an override layered over the workspace
+// default, so Cmd+0 in the pane still resets to that default (not the inherited
+// size). Zero inherits the default with no override.
 func (t *Tab) addPane(
 	w *gui.Window,
 	cfg Cfg,
 	leafID string,
 	dir string,
+	fontSize float32,
 	onExit func(leafID string),
 	onFocus func(leafID string),
 	onTitle func(leafID, title string),
@@ -91,6 +95,9 @@ func (t *Tab) addPane(
 	tm, err := term.New(w, t.termCfg(w, cfg, leafID, dir, onExit, onFocus, onTitle))
 	if err != nil {
 		return err
+	}
+	if fontSize > 0 {
+		tm.SetFontSize(fontSize)
 	}
 	t.terms[leafID] = tm
 	t.titles[leafID] = leafID

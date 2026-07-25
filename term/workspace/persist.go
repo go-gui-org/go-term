@@ -43,15 +43,22 @@ type persistedNode struct {
 	// Leaf fields.
 	LeafID string `json:"leafID,omitempty"`
 	Cwd    string `json:"cwd,omitempty"`
+	// FontSize is the pane's runtime zoom in points. Omitted (0) when the pane
+	// is at the workspace default so unchanged panes keep the JSON clean; on
+	// restore a zero size means "inherit the default."
+	FontSize float32 `json:"fontSize,omitempty"`
 }
 
 // snapshot captures the current workspace state. Pure, no I/O.
 func (ws *Workspace) snapshot() persistedWorkspace {
+	// Panes at this size are unzoomed; snapshotNode omits FontSize for them so
+	// the JSON only records genuine zoom overrides.
+	defaultSize := ws.cfg.TextStyle.Size
 	tabs := make([]persistedTab, len(ws.tabs))
 	for i, tab := range ws.tabs {
 		tabs[i] = persistedTab{
 			ActiveLeaf: tab.focused,
-			Root:       snapshotNode(tab.root, tab.terms),
+			Root:       snapshotNode(tab.root, tab.terms, defaultSize),
 		}
 	}
 	return persistedWorkspace{
@@ -61,20 +68,23 @@ func (ws *Workspace) snapshot() persistedWorkspace {
 	}
 }
 
-func snapshotNode(n *splitNode, terms map[string]*term.Term) persistedNode {
+func snapshotNode(n *splitNode, terms map[string]*term.Term, defaultSize float32) persistedNode {
 	if n.isLeaf() {
-		cwd := ""
+		node := persistedNode{LeafID: n.LeafID}
 		if tm, ok := terms[n.LeafID]; ok {
-			cwd = cwdLocalPath(tm.Cwd())
+			node.Cwd = cwdLocalPath(tm.Cwd())
+			if fs := tm.FontSize(); fs != defaultSize {
+				node.FontSize = fs
+			}
 		}
-		return persistedNode{LeafID: n.LeafID, Cwd: cwd}
+		return node
 	}
 	dir := "vertical"
 	if n.Dir == SplitHorizontal {
 		dir = "horizontal"
 	}
-	first := snapshotNode(n.First, terms)
-	second := snapshotNode(n.Second, terms)
+	first := snapshotNode(n.First, terms, defaultSize)
+	second := snapshotNode(n.Second, terms, defaultSize)
 	return persistedNode{
 		Dir:    dir,
 		Ratio:  n.Ratio,
@@ -226,11 +236,11 @@ func newTabFromPersisted(
 	idMap := make(map[string]string) // persisted leafID → new leafID
 	nextID := 0
 	var spawnErr error
-	t.root = buildSplitTree(tabID, &pt.Root, func(leafID, cwd string) {
+	t.root = buildSplitTree(tabID, &pt.Root, func(leafID, cwd string, fontSize float32) {
 		if spawnErr != nil {
 			return
 		}
-		if err := t.addPane(w, cfg, leafID, cwd, onExit, onFocus, onTitle); err != nil {
+		if err := t.addPane(w, cfg, leafID, cwd, fontSize, onExit, onFocus, onTitle); err != nil {
 			spawnErr = err
 		}
 	}, idMap, &nextID)
@@ -258,12 +268,13 @@ func newTabFromPersisted(
 }
 
 // buildSplitTree recursively rebuilds a splitNode tree from persisted data.
-// For each leaf it calls spawn(newLeafID, cwd) and records the old→new ID
-// mapping in idMap. nextID is incremented for each leaf (depth-first order).
+// For each leaf it calls spawn(newLeafID, cwd, fontSize) and records the
+// old→new ID mapping in idMap. nextID is incremented for each leaf (depth-first
+// order). A zero fontSize means the pane was unzoomed → inherit the default.
 func buildSplitTree(
 	tabID string,
 	pn *persistedNode,
-	spawn func(leafID, cwd string),
+	spawn func(leafID, cwd string, fontSize float32),
 	idMap map[string]string,
 	nextID *int,
 ) *splitNode {
@@ -276,7 +287,7 @@ func buildSplitTree(
 			newID := tabID + "-pane-" + strconv.Itoa(*nextID)
 			*nextID++
 			idMap[pn.LeafID] = newID
-			spawn(newID, pn.Cwd)
+			spawn(newID, pn.Cwd, pn.FontSize)
 			return leaf(newID)
 		}
 		if pn.First == nil || pn.Second == nil {
