@@ -229,12 +229,14 @@ func TestSave_AtomicWrite(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildSplitTree_Leaf(t *testing.T) {
-	pn := &persistedNode{LeafID: "old-pane-0", Cwd: "/tmp"}
+	pn := &persistedNode{LeafID: "old-pane-0", Cwd: "/tmp", FontSize: 18}
 	idMap := make(map[string]string)
 	nextID := 0
 	var spawned []string
-	node := buildSplitTree("tab-0", pn, func(id, cwd string) {
+	var gotSize float32
+	node := buildSplitTree("tab-0", pn, func(id, cwd string, fontSize float32) {
 		spawned = append(spawned, id+":"+cwd)
+		gotSize = fontSize
 	}, idMap, &nextID)
 
 	if node == nil || !node.isLeaf() {
@@ -248,6 +250,9 @@ func TestBuildSplitTree_Leaf(t *testing.T) {
 	}
 	if len(spawned) != 1 || spawned[0] != "tab-0-pane-0:/tmp" {
 		t.Errorf("spawned = %v", spawned)
+	}
+	if gotSize != 18 {
+		t.Errorf("spawn fontSize = %v, want 18", gotSize)
 	}
 	if nextID != 1 {
 		t.Errorf("nextID = %d, want 1", nextID)
@@ -269,7 +274,7 @@ func TestBuildSplitTree_VerticalSplit(t *testing.T) {
 	idMap := make(map[string]string)
 	nextID := 0
 	var order []string
-	node := buildSplitTree("tab-0", pn, func(id, cwd string) {
+	node := buildSplitTree("tab-0", pn, func(id, cwd string, _ float32) {
 		order = append(order, id)
 	}, idMap, &nextID)
 
@@ -299,7 +304,7 @@ func TestBuildSplitTree_MalformedReturnsNil(t *testing.T) {
 	pn := &persistedNode{Dir: "vertical", Ratio: 0.5}
 	idMap := make(map[string]string)
 	nextID := 0
-	node := buildSplitTree("tab-0", pn, func(id, cwd string) {}, idMap, &nextID)
+	node := buildSplitTree("tab-0", pn, func(id, cwd string, _ float32) {}, idMap, &nextID)
 	if node != nil {
 		t.Errorf("expected nil for malformed node, got %+v", node)
 	}
@@ -327,9 +332,53 @@ func TestBuildSplitTree_DepthLimitReturnsNil(t *testing.T) {
 	}
 	idMap := make(map[string]string)
 	nextID := 0
-	node := buildSplitTree("tab-0", pn, func(id, cwd string) {}, idMap, &nextID)
+	node := buildSplitTree("tab-0", pn, func(id, cwd string, _ float32) {}, idMap, &nextID)
 	if node != nil {
 		t.Errorf("expected nil for tree exceeding maxSplitDepth (%d), got non-nil", maxSplitDepth)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Per-pane font size (issue 73)
+// ---------------------------------------------------------------------------
+
+// A non-zero FontSize survives a JSON round trip so restore can re-apply it.
+func TestPersistedNode_FontSizeRoundTrip(t *testing.T) {
+	in := persistedNode{LeafID: "p0", Cwd: "/tmp", FontSize: 18.5}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"fontSize":18.5`) {
+		t.Errorf("marshaled node missing fontSize: %s", data)
+	}
+	var out persistedNode
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.FontSize != 18.5 {
+		t.Errorf("FontSize round trip = %v, want 18.5", out.FontSize)
+	}
+}
+
+// An unzoomed pane (FontSize 0) must be omitted from the JSON so unchanged
+// panes keep the file clean; on restore a missing field parses back to 0
+// (inherit the workspace default) — the backward-compat path for older files.
+func TestPersistedNode_FontSizeOmittedWhenZero(t *testing.T) {
+	data, err := json.Marshal(persistedNode{LeafID: "p0", Cwd: "/tmp"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), "fontSize") {
+		t.Errorf("zero FontSize should be omitted, got: %s", data)
+	}
+	// A version-1 node written before this field existed has no fontSize key.
+	var out persistedNode
+	if err := json.Unmarshal([]byte(`{"leafID":"p0","cwd":"/tmp"}`), &out); err != nil {
+		t.Fatalf("unmarshal legacy node: %v", err)
+	}
+	if out.FontSize != 0 {
+		t.Errorf("legacy node FontSize = %v, want 0 (inherit default)", out.FontSize)
 	}
 }
 

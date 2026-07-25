@@ -3652,6 +3652,113 @@ func TestAdjustFontSize_ZeroFontSizeZeroStyleNoPanic(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ResetFontSize
+// ---------------------------------------------------------------------------
+
+func TestResetFontSize_ClearsOverrideAndRemeasures(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(16, cfg) // zoomed to 16
+	term.cellW = 8.5
+	prevVer := term.drawVersion.Load()
+
+	term.ResetFontSize()
+
+	if term.fontSize != 0 {
+		t.Errorf("ResetFontSize must clear the override: got %v, want 0", term.fontSize)
+	}
+	// style() falls back to the configured size once the override is cleared.
+	if got := term.FontSize(); got != 12 {
+		t.Errorf("effective size after reset: got %v, want 12", got)
+	}
+	if term.cellW != 0 {
+		t.Errorf("ResetFontSize must reset cellW: got %v, want 0", term.cellW)
+	}
+	if term.drawVersion.Load() == prevVer {
+		t.Error("ResetFontSize must bump drawVersion")
+	}
+}
+
+func TestSetFontSize_AbsoluteAndClamp(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+
+	term.SetFontSize(20)
+	if term.FontSize() != 20 {
+		t.Errorf("SetFontSize(20): got %v, want 20", term.FontSize())
+	}
+	term.SetFontSize(1000)
+	if term.FontSize() != 72 {
+		t.Errorf("SetFontSize clamps to max 72: got %v", term.FontSize())
+	}
+	term.SetFontSize(1)
+	if term.FontSize() != 4 {
+		t.Errorf("SetFontSize clamps to min 4: got %v", term.FontSize())
+	}
+}
+
+// The regression this guards: an inherited/persisted size is applied as an
+// override, NOT as the configured default, so Cmd+0 (ResetFontSize) still
+// returns to the workspace default rather than the inherited size.
+func TestSetFontSize_ResetReturnsToConfiguredDefault(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}} // workspace default = 12
+	term, _ := newTestTermWithScheduler(12, cfg)
+
+	term.SetFontSize(16) // pane inherits a zoom (split/restore)
+	if term.FontSize() != 16 {
+		t.Fatalf("after SetFontSize(16): got %v, want 16", term.FontSize())
+	}
+	term.ResetFontSize()
+	if term.FontSize() != 12 {
+		t.Errorf("reset must return to configured default 12, not inherited 16: got %v", term.FontSize())
+	}
+}
+
+func TestSetFontSize_NonPositiveResets(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(16, cfg)
+	term.SetFontSize(0)
+	if term.fontSize != 0 {
+		t.Errorf("SetFontSize(0) must clear the override: fontSize = %v, want 0", term.fontSize)
+	}
+	if term.FontSize() != 12 {
+		t.Errorf("effective size after SetFontSize(0): got %v, want 12", term.FontSize())
+	}
+}
+
+func TestResetFontSize_AlreadyDefaultIsNoop(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(0, cfg) // fontSize starts at 0 (default)
+	term.cellW = 8.5
+	prevVer := term.drawVersion.Load()
+
+	term.ResetFontSize()
+
+	// No override to clear: nothing should be invalidated.
+	if term.cellW != 8.5 {
+		t.Errorf("no-op reset must not touch cellW: got %v, want 8.5", term.cellW)
+	}
+	if term.drawVersion.Load() != prevVer {
+		t.Error("no-op reset must not bump drawVersion")
+	}
+}
+
+func TestSetFontSize_SameAsCurrentNoop(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(12, cfg)
+	term.cellW = 8.5
+	prevVer := term.drawVersion.Load()
+
+	term.SetFontSize(12) // same as current fontSize
+
+	if term.cellW != 8.5 {
+		t.Errorf("same-size SetFontSize must not reset cellW: got %v, want 8.5", term.cellW)
+	}
+	if term.drawVersion.Load() != prevVer {
+		t.Error("same-size SetFontSize must not bump drawVersion")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // handleDisplayKey
 // ---------------------------------------------------------------------------
 
@@ -3736,5 +3843,36 @@ func TestHandleDisplayKey_MinusWithoutCmd_PassesThrough(t *testing.T) {
 	}
 	if term.fontSize != prev {
 		t.Errorf("- without Cmd must not change fontSize: %v -> %v", prev, term.fontSize)
+	}
+}
+
+func TestHandleDisplayKey_Cmd0ResetsFontSize(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(16, cfg) // zoomed to 16
+	e := &gui.Event{KeyCode: gui.Key0, Modifiers: modPrimary}
+	if !term.handleDisplayKey(e, &gui.Window{}) {
+		t.Error("primary+0 should be handled")
+	}
+	if !e.IsHandled {
+		t.Error("primary+0 should set e.IsHandled")
+	}
+	if term.fontSize != 0 {
+		t.Errorf("primary+0 should clear the zoom override: got %v, want 0", term.fontSize)
+	}
+	if got := term.FontSize(); got != 12 {
+		t.Errorf("effective size after primary+0: got %v, want 12", got)
+	}
+}
+
+func TestHandleDisplayKey_Zero0WithoutCmd_PassesThrough(t *testing.T) {
+	cfg := Cfg{TextStyle: gui.TextStyle{Size: 12}}
+	term, _ := newTestTermWithScheduler(16, cfg)
+	prev := term.fontSize
+	e := &gui.Event{KeyCode: gui.Key0}
+	if term.handleDisplayKey(e, &gui.Window{}) {
+		t.Error("0 without Cmd should NOT be handled")
+	}
+	if term.fontSize != prev {
+		t.Errorf("0 without Cmd must not change fontSize: %v -> %v", prev, term.fontSize)
 	}
 }

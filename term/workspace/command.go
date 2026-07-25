@@ -237,13 +237,18 @@ func (ws *Workspace) SplitPane(horizontal bool) {
 		dir = SplitHorizontal
 	}
 	// Unfocus the old pane so it stops asserting focus during layout.
-	// The new pane defaults to focused=true.
+	// The new pane defaults to focused=true. Capture its effective font size so
+	// the split inherits the source pane's zoom (matching Ghostty). An unzoomed
+	// source reports the workspace default, so the new pane matches it either
+	// way; addPane treats zero as "inherit default" for the no-source case.
+	var inheritSize float32
 	if old, ok := tab.terms[tab.focused]; ok {
+		inheritSize = old.FontSize()
 		old.SetFocused(false)
 		old.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 	}
 	newLeafID := tab.allocLeafID()
-	if err := tab.addPane(ws.w, ws.cfg, newLeafID, "", ws.onPaneExit, ws.onPaneFocus, ws.onPaneTitle); err != nil {
+	if err := tab.addPane(ws.w, ws.cfg, newLeafID, "", inheritSize, ws.onPaneExit, ws.onPaneFocus, ws.onPaneTitle); err != nil {
 		return
 	}
 	newRoot := splitLeaf(tab.root, tab.focused, newLeafID, dir)
