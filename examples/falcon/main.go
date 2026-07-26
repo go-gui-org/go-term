@@ -9,7 +9,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -32,19 +31,16 @@ const confirmOnQuit = true
 const defaultFontFamily = "JetBrainsMono NFM"
 
 func main() {
-	var workspacePath string
-	var saveWorkspacePath string
-	var recordPath string
+	cfg := parseStartCfg()
+
 	var replayPath string
 	var replaySpeed float64
 	var replayIdle time.Duration
 	var replayLoop bool
-	flag.StringVar(&workspacePath, "workspace", "", "workspace JSON to load on startup")
-	flag.StringVar(&saveWorkspacePath, "save-workspace", "", "workspace JSON to write on quit (defaults to --workspace path when set)")
-	flag.StringVar(&recordPath, "record", "", "record the first pane's session to this .gtr file")
 	flag.StringVar(&replayPath, "replay", "", "play back a .gtr recording instead of starting a shell")
 	flag.Float64Var(&replaySpeed, "replay-speed", 1, "playback speed multiplier for --replay")
-	flag.DurationVar(&replayIdle, "replay-idle-limit", 0, "cap on any single gap between recorded frames (0 = none)")
+	flag.DurationVar(&replayIdle, "replay-idle-limit", 0,
+		"cap on any single gap between recorded frames (0 = none)")
 	flag.BoolVar(&replayLoop, "replay-loop", false, "restart playback at end of recording")
 	flag.Parse()
 
@@ -62,115 +58,20 @@ func main() {
 		return
 	}
 
-	// Auto-load default workspace when --workspace is not given but the
-	// default file already exists.
-	if workspacePath == "" {
-		if def, err := workspace.DefaultWorkspacePath(); err == nil {
-			if _, err := os.Stat(def); err == nil {
-				workspacePath = def
-			}
-		}
-	}
+	workspacePath := cfg.resolvedWorkspacePath()
+	savePath := cfg.effectiveSavePath()
 
 	gui.SetTheme(gui.ThemeDark.WithBorders(true))
 
+	wc := workspace.Cfg{
+		TextStyle:              gui.TextStyle{Family: defaultFontFamily, Size: 12},
+		ExitWhenLastShellExits: true,
+		DownloadDir:            defaultDownloadDir(),
+		Themes:                 themeList(),
+	}
+
 	var s *workspace.Workspace
-
-	// Effective save path: --save-workspace if set, else --workspace if set.
-	savePath := saveWorkspacePath
-	if savePath == "" {
-		savePath = workspacePath
-	}
-
-	saveAndClose := func(w *gui.Window) {
-		if savePath != "" && s != nil {
-			if err := s.Save(savePath); err != nil {
-				log.Printf("workspace save: %v", err)
-			}
-		}
-		w.Close()
-	}
-
-	w := gui.NewWindow(gui.WindowCfg{
-		Title:  "go-term",
-		Width:  900,
-		Height: 600,
-		OnCloseRequest: func(w *gui.Window) {
-			// A confirm dialog is already up (e.g. a repeated Cmd+Q or
-			// a close-button click while confirming): don't stack a
-			// second one. DialogIsVisible also drives the quit-request
-			// dedup in go-gui, but the window-close path has no such
-			// guard, so check here too.
-			if w.DialogIsVisible() {
-				return
-			}
-			n := 0
-			if s != nil {
-				n = s.LiveTermCount()
-			}
-			if confirmOnQuit && n > 0 {
-				// Use go-gui's in-app dialog, not NativeConfirmDialog:
-				// go-gui renders and keyboard-routes it itself (Enter,
-				// Esc, Tab all work). The native NSAlert runModal path
-				// loses keyboard focus under the metal backend's manual
-				// event pump, and doesn't participate in the quit-request
-				// dedup, so it could stack duplicate dialogs.
-				w.Dialog(gui.DialogCfg{
-					DialogType: gui.DialogConfirm,
-					Title:      "Quit go-term?",
-					Body: fmt.Sprintf(
-						"%d active terminal(s) will be terminated. Quit anyway?", n),
-					OnOkYes: func(w *gui.Window) { saveAndClose(w) },
-				})
-				return
-			}
-			saveAndClose(w)
-		},
-		OnInit: func(w *gui.Window) {
-			cfg := workspace.Cfg{
-				TextStyle:              gui.TextStyle{Family: defaultFontFamily, Size: 12},
-				ExitWhenLastShellExits: true,
-				DownloadDir:            defaultDownloadDir(),
-				Themes: []term.NamedTheme{
-					{Name: "Default", Theme: term.DefaultTheme},
-					{Name: "Dracula", Theme: term.DraculaTheme},
-					{Name: "Catppuccin Mocha", Theme: term.CatppuccinMochaTheme},
-					{Name: "Tokyo Night", Theme: term.TokyoNightTheme},
-					{Name: "Monokai", Theme: term.MonokaiTheme},
-					{Name: "One Dark", Theme: term.OneDarkTheme},
-					{Name: "Rosé Pine", Theme: term.RosePineTheme},
-					{Name: "Kanagawa", Theme: term.KanagawaTheme},
-					{Name: "Ayu Dark", Theme: term.AyuDarkTheme},
-					{Name: "Everforest", Theme: term.EverforestTheme},
-					{Name: "GitHub Dark", Theme: term.GitHubDarkTheme},
-					{Name: "Gruvbox", Theme: term.GruvboxTheme},
-					{Name: "Nord", Theme: term.NordTheme},
-					{Name: "Solarized Dark", Theme: term.SolarizedDarkTheme},
-				},
-			}
-			var err error
-			if workspacePath != "" {
-				s, err = workspace.Restore(w, cfg, workspacePath)
-			} else {
-				s, err = workspace.New(w, cfg)
-			}
-			if err != nil {
-				log.Fatalf("workspace init: %v", err)
-			}
-			// --record applies to the pane the user starts in. Other panes
-			// are recorded on demand with Cmd+Shift+R.
-			if recordPath != "" {
-				if tm := s.ActivePane(); tm != nil {
-					if err := tm.StartRecording(recordPath); err != nil {
-						log.Printf("record: %v", err)
-					} else {
-						log.Printf("recording to %s", recordPath)
-					}
-				}
-			}
-			w.UpdateView(s.View)
-		},
-	})
+	w := gui.NewWindow(newLiveWindowCfg(wc, workspacePath, savePath, cfg.recordPath, &s))
 	defer func() {
 		if s != nil {
 			_ = s.Close()
