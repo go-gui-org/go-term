@@ -2,47 +2,90 @@ package main
 
 import (
 	"flag"
-	"fmt"
-	"log"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-term/term"
 	"github.com/go-gui-org/go-term/term/workspace"
 )
 
+// Window geometry shared by the live and replay windows, so the two paths
+// can't drift apart.
+const (
+	windowWidth  = 900
+	windowHeight = 600
+)
+
+// defaultFontFamily is the JetBrains Mono Nerd Font (Mono variant) family
+// name as reported by go-glyph's pure-Go go-text font discovery. go-text
+// reads the abbreviated "NF"/"NFM" family from the font's name table
+// (not the spelled-out "Nerd Font"), so the request must use that form.
+const defaultFontFamily = "JetBrainsMono NFM"
+
 // startCfg holds the CLI arguments for the normal (non-replay) startup path.
-// Register flags via parseStartCfg before flag.Parse; fields are populated
-// after Parse runs in main.
 type startCfg struct {
 	workspacePath     string
 	saveWorkspacePath string
 	recordPath        string
 }
 
-// parseStartCfg registers the --workspace, --save-workspace, and --record
-// flags on the default flag set and returns a struct whose fields will
-// hold the parsed values after flag.Parse executes.
-func parseStartCfg() startCfg {
-	var cfg startCfg
-	flag.StringVar(&cfg.workspacePath, "workspace", "",
-		"workspace JSON to load on startup")
-	flag.StringVar(&cfg.saveWorkspacePath, "save-workspace", "",
-		"workspace JSON to write on quit (defaults to --workspace path when set)")
-	flag.StringVar(&cfg.recordPath, "record", "",
-		"record the first pane's session to this .gtr file")
-	return cfg
+// replayCfg holds the CLI arguments for the --replay viewer path.
+type replayCfg struct {
+	path  string
+	speed float64
+	idle  time.Duration
+	loop  bool
 }
 
-// resolvedWorkspacePath returns the workspace path with the default
-// fallback applied when --workspace was not given. Must be called after
-// flag.Parse.
-func (c startCfg) resolvedWorkspacePath() string {
+// parseFlags registers every falcon flag on fs, parses args, and returns
+// the populated configs.
+//
+// All flags are registered and parsed in this one function on purpose.
+// Registering in one place and parsing in another leaves a window where
+// the config structs are still zero-valued, and nothing but a comment
+// stops a caller from reading them too early — a bug that has already
+// bitten this file once. Here, a returned config is always parsed.
+//
+// fs is a parameter rather than flag.CommandLine so tests can parse a
+// synthetic argv against a throwaway FlagSet.
+func parseFlags(fs *flag.FlagSet, args []string) (*startCfg, *replayCfg, error) {
+	start := &startCfg{}
+	fs.StringVar(&start.workspacePath, "workspace", "",
+		"workspace JSON to load on startup")
+	fs.StringVar(&start.saveWorkspacePath, "save-workspace", "",
+		"workspace JSON to write on quit (defaults to --workspace path when set)")
+	fs.StringVar(&start.recordPath, "record", "",
+		"record the first pane's session to this .gtr file")
+
+	replay := &replayCfg{}
+	fs.StringVar(&replay.path, "replay", "",
+		"play back a .gtr recording instead of starting a shell")
+	fs.Float64Var(&replay.speed, "replay-speed", 1,
+		"playback speed multiplier for --replay")
+	fs.DurationVar(&replay.idle, "replay-idle-limit", 0,
+		"cap on any single gap between recorded frames (0 = none)")
+	fs.BoolVar(&replay.loop, "replay-loop", false,
+		"restart playback at end of recording")
+
+	if err := fs.Parse(args); err != nil {
+		return nil, nil, err
+	}
+	return start, replay, nil
+}
+
+// resolvedWorkspacePath returns the workspace to restore on startup:
+// --workspace if given, else the default path when that file already
+// exists. Empty means "start fresh".
+func (c *startCfg) resolvedWorkspacePath() string {
 	if c.workspacePath != "" {
 		return c.workspacePath
 	}
-	def, err := workspace.DefaultWorkspacePath()
-	if err != nil {
+	// Restoring requires an existing file, so the default only applies
+	// once it's on disk.
+	def := defaultWorkspacePath()
+	if def == "" {
 		return ""
 	}
 	if _, err := os.Stat(def); err != nil {
@@ -52,13 +95,56 @@ func (c startCfg) resolvedWorkspacePath() string {
 }
 
 // effectiveSavePath returns the path to write the workspace on quit:
-// --save-workspace if set, otherwise --workspace when set.
-// Must be called after flag.Parse.
-func (c startCfg) effectiveSavePath() string {
+// --save-workspace if set, else --workspace if set, else the default
+// workspace path.
+//
+// Unlike resolvedWorkspacePath, the default fallback here does *not*
+// require the file to already exist: saving creates it (Workspace.Save
+// does MkdirAll on the parent). That's what makes a fresh install persist
+// its layout on first quit, so the next launch has something to restore.
+func (c *startCfg) effectiveSavePath() string {
 	if c.saveWorkspacePath != "" {
 		return c.saveWorkspacePath
 	}
-	return c.workspacePath
+	if c.workspacePath != "" {
+		return c.workspacePath
+	}
+	return defaultWorkspacePath()
+}
+
+// defaultWorkspacePath returns the default workspace JSON path, or "" when
+// the config directory can't be determined. The file need not exist.
+func defaultWorkspacePath() string {
+	def, err := workspace.DefaultWorkspacePath()
+	if err != nil {
+		return ""
+	}
+	return def
+}
+
+// defaultTextStyle is the terminal font used by both the live and replay
+// windows.
+func defaultTextStyle() gui.TextStyle {
+	return gui.TextStyle{Family: defaultFontFamily, Size: 12}
+}
+
+// applyTheme sets the go-gui widget theme. Shared by the live and replay
+// paths for the same reason as the window geometry above: two call sites
+// setting the chrome independently is two chances to drift.
+func applyTheme() {
+	gui.SetTheme(gui.ThemeDark.WithBorders(true))
+}
+
+// defaultDownloadDir picks where OSC 1337 File= transfers land. Downloads are
+// opt-in per embedder, so this is falcon's policy, not go-term's: the user's
+// home Downloads folder, matching what iTerm2 does. Returns "" when the home
+// directory can't be determined, which leaves file transfers disabled.
+func defaultDownloadDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "Downloads")
 }
 
 // themeList returns the built-in color themes available in falcon.
@@ -78,88 +164,5 @@ func themeList() []term.NamedTheme {
 		{Name: "Gruvbox", Theme: term.GruvboxTheme},
 		{Name: "Nord", Theme: term.NordTheme},
 		{Name: "Solarized Dark", Theme: term.SolarizedDarkTheme},
-	}
-}
-
-// newLiveWindowCfg builds the WindowCfg for the normal (non-replay) path.
-// sp points to the caller's *Workspace variable; OnInit assigns the
-// created workspace through it, and OnCloseRequest / saveAndClose read
-// the current value through it. This mirrors the closure-over-local
-// pattern from the original single-function main, now explicit.
-func newLiveWindowCfg(
-	wc workspace.Cfg,
-	workspacePath, savePath, recordPath string,
-	sp **workspace.Workspace,
-) gui.WindowCfg {
-	saveAndClose := func(w *gui.Window) {
-		s := *sp
-		if savePath != "" && s != nil {
-			if err := s.Save(savePath); err != nil {
-				log.Printf("workspace save: %v", err)
-			}
-		}
-		w.Close()
-	}
-	return gui.WindowCfg{
-		Title:  "go-term",
-		Width:  900,
-		Height: 600,
-		OnCloseRequest: func(w *gui.Window) {
-			// A confirm dialog is already up (e.g. a repeated Cmd+Q or
-			// a close-button click while confirming): don't stack a
-			// second one. DialogIsVisible also drives the quit-request
-			// dedup in go-gui, but the window-close path has no such
-			// guard, so check here too.
-			if w.DialogIsVisible() {
-				return
-			}
-			s := *sp
-			n := 0
-			if s != nil {
-				n = s.LiveTermCount()
-			}
-			if confirmOnQuit && n > 0 {
-				// Use go-gui's in-app dialog, not NativeConfirmDialog:
-				// go-gui renders and keyboard-routes it itself (Enter,
-				// Esc, Tab all work). The native NSAlert runModal path
-				// loses keyboard focus under the metal backend's manual
-				// event pump, and doesn't participate in the quit-request
-				// dedup, so it could stack duplicate dialogs.
-				w.Dialog(gui.DialogCfg{
-					DialogType: gui.DialogConfirm,
-					Title:      "Quit go-term?",
-					Body: fmt.Sprintf(
-						"%d active terminal(s) will be terminated. Quit anyway?", n),
-					OnOkYes: func(w *gui.Window) { saveAndClose(w) },
-				})
-				return
-			}
-			saveAndClose(w)
-		},
-		OnInit: func(w *gui.Window) {
-			var s *workspace.Workspace
-			var err error
-			if workspacePath != "" {
-				s, err = workspace.Restore(w, wc, workspacePath)
-			} else {
-				s, err = workspace.New(w, wc)
-			}
-			if err != nil {
-				log.Fatalf("workspace init: %v", err)
-			}
-			*sp = s
-			// --record applies to the pane the user starts in. Other panes
-			// are recorded on demand with Cmd+Shift+R.
-			if recordPath != "" {
-				if tm := s.ActivePane(); tm != nil {
-					if err := tm.StartRecording(recordPath); err != nil {
-						log.Printf("record: %v", err)
-					} else {
-						log.Printf("recording to %s", recordPath)
-					}
-				}
-			}
-			w.UpdateView(s.View)
-		},
 	}
 }
