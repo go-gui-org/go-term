@@ -61,6 +61,7 @@ func (t *Tab) termCfg(
 		Themes:          cfg.Themes,
 		Dir:             dir,
 		RecordInput:     cfg.RecordInput,
+		DownloadDir:     cfg.DownloadDir,
 		OnTitle: func(title string) {
 			w.QueueCommand(func(w *gui.Window) {
 				t.titles[panelID] = title

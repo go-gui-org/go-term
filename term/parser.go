@@ -26,10 +26,13 @@ const (
 // silently swallowed up to its terminator.
 const maxOSCBytes = 4096
 
-// maxOSC1337Bytes is the enlarged cap for OSC 1337 (iTerm2 inline
-// images). Images are base64-encoded so a 50 KB PNG becomes ~67 KB
-// on the wire; 4 MiB matches the DCS/Sixel limit.
-const maxOSC1337Bytes = 4 << 20
+// maxOSC1337Bytes is the enlarged cap for OSC 1337 (iTerm2 inline images
+// and File= transfers). Payloads are base64-encoded so a 50 KB PNG becomes
+// ~67 KB on the wire; 32 MiB leaves room for real file downloads (~24 MiB
+// of file data) while keeping a runaway stream bounded. Exceeding it sets
+// p.oscTrunc, which drops the sequence outright rather than handing a
+// truncated payload to the decoder.
+const maxOSC1337Bytes = 32 << 20
 
 // maxDCSBytes caps DCS payloads. Sixel images can be sizable (a small
 // 320×240 sample is ~50 KB of sixel data); 1 MiB tolerates real-world
@@ -101,12 +104,14 @@ type parser struct {
 	// bytes back toward the application (e.g. DA1 response).
 	// onClipboard, if non-nil, is invoked for OSC 52 clipboard-write
 	// requests. onNotify, if non-nil, is invoked for OSC 9 and OSC 777
-	// desktop-notification requests. All run while grid.Mu is held —
-	// handlers must not re-enter the grid.
+	// desktop-notification requests. onDownload, if non-nil, is invoked for
+	// OSC 1337 File= transfers that are not inline images. All run while
+	// grid.Mu is held — handlers must not re-enter the grid.
 	onTitle     func(string)
 	onReply     func([]byte)
 	onClipboard func([]byte)
 	onNotify    func(title, body string)
+	onDownload  func(name string, data []byte)
 
 	// curTitle mirrors the last title reported via OSC 0/1/2 and titleStack
 	// holds the ones pushed by XTWINOPS 22 (CSI 22 t), popped by 23. vim and
@@ -145,6 +150,7 @@ type parser struct {
 	intermediate        byte // last intermediate byte (0x20..0x2F) seen, 0 if none
 	escInter            byte // ESC intermediate introducer like '(' in ESC(B
 	oscIsImage          bool // true once "1337;" prefix detected
+	oscTrunc            bool // true once a byte was dropped for exceeding the OSC cap
 	allowClipboardWrite bool
 }
 
@@ -154,8 +160,17 @@ type parser struct {
 func (p *parser) SetGraphicsDir(dir string) { p.graphicsDir = dir }
 
 func (p *parser) oscReset() {
-	p.osc = p.osc[:0]
+	// An OSC 1337 payload can grow the backing array to maxOSC1337Bytes.
+	// Truncating alone would pin that array for the parser's lifetime, so
+	// drop anything grown past the ordinary OSC cap and let the next OSC
+	// start from a small allocation again.
+	if cap(p.osc) > maxOSCBytes {
+		p.osc = nil
+	} else {
+		p.osc = p.osc[:0]
+	}
 	p.oscIsImage = false
+	p.oscTrunc = false
 }
 
 // SetTitleHandler registers a callback for OSC 0/1/2. Pass nil to
@@ -182,6 +197,15 @@ func (p *parser) SetClipboardWriteAllowed(ok bool) { p.allowClipboardWrite = ok 
 // while grid.Mu is held — the handler must not block; fire a goroutine
 // for any slow work (e.g. exec).
 func (p *parser) SetNotifyHandler(fn func(title, body string)) { p.onNotify = fn }
+
+// SetDownloadHandler registers a callback for OSC 1337 File= transfers that
+// are not inline images (iTerm2's imgcat -d, it2dl). name is sanitized down
+// to a bare filename — never a path — and data is the decoded payload, freshly
+// allocated and not retained by the parser. Pass nil to disable, which is the
+// default: file transfers drop silently unless the host opts in. Called while
+// grid.Mu is held — the handler must not block; hand disk writes to a
+// goroutine.
+func (p *parser) SetDownloadHandler(fn func(name string, data []byte)) { p.onDownload = fn }
 
 // maxTitleStack caps the XTWINOPS title stack, matching xterm's limit. Pushes
 // past the cap are dropped rather than evicting the oldest entry: an app that
@@ -471,6 +495,11 @@ func (p *parser) feedChunk(b []byte) {
 				}
 				if len(p.osc) < lim {
 					p.osc = append(p.osc, c)
+				} else {
+					// Record the truncation so handlers that care (OSC
+					// 1337) can drop the sequence instead of decoding a
+					// payload with its tail cut off.
+					p.oscTrunc = true
 				}
 			}
 			i++

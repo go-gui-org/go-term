@@ -165,6 +165,7 @@ When go-gui ships v1.0.0:
 | 41 | OSC 4 palette modification | `printf '\x1b]4;1;#00ff00\a'` |
 | 42 | DECSCA + VT420 rectangular areas | DEC forms apps, vttest menu 8 |
 | 45 | Session recording and replay | `falcon --record` / `--replay`, `gotermrec` |
+| 46 | OSC 1337 file download + sizing keys | `imgcat -d file`, `imgcat -W 40` |
 
 ## Commands
 

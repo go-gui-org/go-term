@@ -2,6 +2,7 @@ package term
 
 import (
 	"encoding/base64"
+	"math"
 	"path"
 	"strconv"
 	"strings"
@@ -261,22 +262,165 @@ func (p *parser) handleOSC104(pt string) {
 	}
 }
 
-// handleOSC1337 implements the iTerm2 inline image protocol.
+// dimKind tags how an iTerm2 width=/height= value should be interpreted.
+type dimKind uint8
+
+const (
+	dimAuto    dimKind = iota // unset or "auto": use the image's natural size
+	dimCells                  // bare "N": N character cells
+	dimPixels                 // "Npx": N pixels
+	dimPercent                // "N%": percent of the text area
+)
+
+// dimSpec is one parsed width=/height= value.
+type dimSpec struct {
+	val  int
+	kind dimKind
+}
+
+// iterm2FileArgs holds the parsed key=value list of an OSC 1337 File=
+// payload. Unset keys keep the defaults set by parseOSC1337Args — note
+// preserveAR defaults to true, matching the iTerm2 spec.
+type iterm2FileArgs struct {
+	name       string // decoded and sanitized to a bare filename
+	size       int64  // declared byte count; -1 when absent
+	width      dimSpec
+	height     dimSpec
+	preserveAR bool
+	inline     bool
+}
+
+// maxDownloadName caps the sanitized filename. 255 bytes is the per-component
+// limit on every filesystem go-term runs on.
+const maxDownloadName = 255
+
+// defaultDownloadName is used when name= is absent, undecodable, or sanitizes
+// away to nothing. A transfer with a hostile name still lands, just under a
+// boring one.
+const defaultDownloadName = "download"
+
+// parseOSC1337Args parses the semicolon-separated key=value list that
+// precedes the base64 payload of an OSC 1337 File= sequence. Unknown keys are
+// ignored and a malformed value falls back to that key's default rather than
+// rejecting the whole sequence — iTerm2 is lenient here and real emitters
+// lean on it.
+func parseOSC1337Args(args string) iterm2FileArgs {
+	a := iterm2FileArgs{size: -1, preserveAR: true}
+	for rest := args; rest != ""; {
+		var field string
+		field, rest, _ = strings.Cut(rest, ";")
+		key, val, ok := strings.Cut(field, "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "name":
+			a.name = sanitizeDownloadName(val)
+		case "size":
+			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n >= 0 {
+				a.size = n
+			}
+		case "width":
+			a.width = parseDimSpec(val)
+		case "height":
+			a.height = parseDimSpec(val)
+		case "preserveAspectRatio":
+			a.preserveAR = val != "0"
+		case "inline":
+			a.inline = val == "1"
+		}
+	}
+	return a
+}
+
+// parseDimSpec parses one iTerm2 dimension: "auto", "N" (cells), "Npx"
+// (pixels) or "N%" (percent of the text area). Anything else — including a
+// zero or negative count — reads as auto.
+func parseDimSpec(s string) dimSpec {
+	kind := dimCells
+	switch {
+	case s == "" || s == "auto":
+		return dimSpec{}
+	case strings.HasSuffix(s, "px"):
+		kind, s = dimPixels, s[:len(s)-2]
+	case strings.HasSuffix(s, "%"):
+		kind, s = dimPercent, s[:len(s)-1]
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return dimSpec{}
+	}
+	return dimSpec{val: n, kind: kind}
+}
+
+// sanitizeDownloadName turns the base64-encoded name= value into a bare
+// filename safe to join onto a download directory. Everything up to the last
+// path separator is dropped (both flavors — the sender picks the separator,
+// not us), control bytes are stripped, and the traversal names are refused.
+// Returns defaultDownloadName rather than "" so a transfer is never lost to a
+// hostile name.
+func sanitizeDownloadName(b64 string) string {
+	raw, err := decodeBase64String(b64)
+	if err != nil {
+		return defaultDownloadName
+	}
+	name := sanitizeOSCString(string(raw))
+	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
+		name = name[i+1:]
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		return defaultDownloadName
+	}
+	if len(name) > maxDownloadName {
+		name = name[:maxDownloadName]
+	}
+	return name
+}
+
+// handleOSC1337 implements the iTerm2 File= protocol, which carries both
+// inline images (inline=1) and plain file transfers (inline=0).
 // Payload format: File=[key=value;...]:base64data
-// Only renders when inline=1 is present; all other cases drop silently.
+//
+// Transfers are handed to onDownload, which is nil unless the host opted in —
+// writing files on the say-so of arbitrary terminal output is the host's call,
+// not the parser's.
 func (p *parser) handleOSC1337(pt string) {
 	const prefix = "File="
 	if !strings.HasPrefix(pt, prefix) {
 		return
 	}
+	// A payload that hit the OSC cap lost its tail; decoding it would yield
+	// either a base64 error or, worse, a silently truncated file.
+	if p.oscTrunc {
+		return
+	}
 	rest := pt[len(prefix):]
-	before, after, ok := strings.Cut(rest, ":")
+	before, b64, ok := strings.Cut(rest, ":")
 	if !ok {
 		return
 	}
-	args, b64 := before, after
+	args := parseOSC1337Args(before)
 
-	if !strings.Contains(";"+args+";", ";inline=1;") {
+	// Declared size over the wire cap can't be honest — drop before spending
+	// a decode on it. The real length is re-checked implicitly by the cap on
+	// p.osc itself.
+	if args.size > maxOSC1337Bytes {
+		return
+	}
+	if !args.inline {
+		if p.onDownload == nil {
+			return
+		}
+		raw, err := decodeBase64String(b64)
+		if err != nil {
+			return
+		}
+		name := args.name
+		if name == "" {
+			name = defaultDownloadName
+		}
+		p.onDownload(name, raw)
 		return
 	}
 
@@ -289,14 +433,73 @@ func (p *parser) handleOSC1337(pt string) {
 		return
 	}
 	b := img.Bounds()
-	path := encodePNGFile(img, p.graphicsDir)
-	if path == "" {
+	src := encodePNGFile(img, p.graphicsDir)
+	if src == "" {
 		return
 	}
-	_, rows := p.g.AddGraphic(path, b.Dx(), b.Dy())
+	cols, rows := p.resolveGraphicCells(&args, b.Dx(), b.Dy())
+	_, rows = p.g.addGraphicCells(src, b.Dx(), b.Dy(), cols, rows)
 	for range rows {
 		p.g.Newline()
 	}
+}
+
+// resolveGraphicCells converts the width=/height= specs into an explicit cell
+// footprint for an image of imgW×imgH pixels. Returns 0,0 when the natural
+// size should be used — either both axes are auto or the cell metrics aren't
+// measured yet — which addGraphicCells reads as "derive it yourself".
+func (p *parser) resolveGraphicCells(a *iterm2FileArgs, imgW, imgH int) (int, int) {
+	cw, ch := p.g.CellPxW, p.g.CellPxH
+	if cw <= 0 || ch <= 0 || imgW <= 0 || imgH <= 0 {
+		return 0, 0
+	}
+	if a.width.kind == dimAuto && a.height.kind == dimAuto {
+		return 0, 0
+	}
+
+	// Work in fractional cells throughout and round up only at the end, so a
+	// chain of conversions doesn't accumulate rounding error.
+	toCells := func(d dimSpec, cellPx float32, axisCells int) float64 {
+		switch d.kind {
+		case dimCells:
+			return float64(d.val)
+		case dimPixels:
+			return float64(d.val) / float64(cellPx)
+		case dimPercent:
+			return float64(d.val) / 100 * float64(axisCells)
+		}
+		return -1 // auto
+	}
+	w := toCells(a.width, cw, p.g.Cols)
+	h := toCells(a.height, ch, p.g.Rows)
+
+	// Natural size in cells, the reference for aspect-preserving fits.
+	natW := float64(imgW) / float64(cw)
+	natH := float64(imgH) / float64(ch)
+
+	switch {
+	case !a.preserveAR:
+		// Free scaling: each unspecified axis keeps its natural extent.
+		if w < 0 {
+			w = natW
+		}
+		if h < 0 {
+			h = natH
+		}
+	case w < 0:
+		// Only height given (both-auto returned above), so h is valid here.
+		w = h * natW / natH
+	case h < 0:
+		h = w * natH / natW
+	default:
+		// Both axes given: fit inside the box without overflowing either.
+		scale := min(w/natW, h/natH)
+		w, h = natW*scale, natH*scale
+	}
+
+	cols := int(math.Ceil(w))
+	rows := int(math.Ceil(h))
+	return max(cols, 1), max(rows, 1)
 }
 
 // parseXColor parses an X11 color string into a packed rgbColor.

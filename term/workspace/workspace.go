@@ -29,6 +29,11 @@ type Cfg struct {
 	// workspace. Off by default — see term.Cfg.RecordInput.
 	RecordInput bool
 
+	// DownloadDir is where OSC 1337 File= transfers from panes in this
+	// workspace are saved. Empty (default) disables file transfers — see
+	// term.Cfg.DownloadDir.
+	DownloadDir string
+
 	// ExitWhenLastShellExits closes the window when the last shell
 	// process exits, rather than replacing it with a fresh tab.
 	ExitWhenLastShellExits bool

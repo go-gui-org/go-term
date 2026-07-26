@@ -8,6 +8,24 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- OSC 1337 `File=` downloads and real argument parsing (#75). The iTerm2
+  sequence now carries file transfers (`inline=0`, as sent by `imgcat -d` and
+  `it2dl`) in addition to inline images. Transfers are opt-in: embedders set
+  `Cfg.OnDownload` to handle the bytes themselves, or `Cfg.DownloadDir` to use
+  the built-in writer, which saves with `0600` permissions, suffixes name
+  collisions (`report (1).pdf`) instead of overwriting, and reports the saved
+  path through the existing notification path. Both unset — the default —
+  leaves downloads disabled, so untrusted terminal output cannot create files.
+  `falcon` opts in with `~/Downloads`; `workspace.Cfg.DownloadDir` passes the
+  choice through.
+
+  The `File=` key list is now parsed rather than substring-matched, so
+  `width` and `height` (`N` cells, `Npx`, `N%`, `auto`) and
+  `preserveAspectRatio` finally affect inline image size — `imgcat -W 40`
+  renders at 40 columns instead of the image's natural size. `name` is
+  base64-decoded and sanitized to a bare filename; path separators, traversal
+  names, and control bytes cannot escape the download directory.
+
 - Session recording and replay (#74). `falcon --record <file.gtr>` records the
   starting pane, `Cmd+Shift+R` toggles recording on the focused pane (marked by
   a `● REC m:ss` pill), and embedders get `Cfg.RecordPath`,
@@ -49,6 +67,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - `COLORTERM=truecolor` in the child environment (Unix and Windows). The
   widget renders 24-bit color, but `TERM=xterm-256color` alone only promises
   the palette, so TUI toolkits were quantizing truecolor output.
+
+### Changed
+
+- The OSC 1337 payload cap rose from 4 MiB to 32 MiB of base64 (~24 MiB of
+  file data) to leave room for real downloads (#75). A payload that exceeds it
+  is now dropped outright instead of silently truncated, and the enlarged
+  accumulator is released after each sequence rather than pinned for the
+  parser's lifetime.
 
 ### Fixed
 

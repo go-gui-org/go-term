@@ -142,6 +142,23 @@ type Cfg struct {
 	// (false) default is correct for single-Term windows.
 	NoWindowHandler bool
 
+	// OnDownload receives OSC 1337 File= transfers that are not inline
+	// images (iTerm2's imgcat -d, it2dl). name is a sanitized bare filename,
+	// never a path; data is the decoded payload. Runs on a background
+	// goroutine, so it may block on disk or network. When nil and DownloadDir
+	// is set, the built-in writer saves to that directory instead.
+	//
+	// Leaving both unset disables file transfers entirely, which is the
+	// default: untrusted terminal output must not create files on its own
+	// authority.
+	OnDownload func(name string, data []byte)
+
+	// DownloadDir is where OSC 1337 File= transfers are saved when
+	// OnDownload is nil. Created on first use. Empty (default) disables the
+	// built-in writer. Files land with 0600 permissions and a " (N)" suffix
+	// on name collisions; a transfer never overwrites an existing file.
+	DownloadDir string
+
 	// Dir sets the working directory for the child process. When non-empty
 	// and the path exists on disk, the shell starts there. Empty inherits
 	// the process CWD.
@@ -564,6 +581,18 @@ type Term struct {
 	// Only one notification runs at a time; extras are dropped.
 	notifyBusy atomic.Bool
 
+	// dlQueue hands OSC 1337 File= transfers from the reader goroutine (which
+	// holds grid.Mu and must never block on disk) to downloadWorker. Nil when
+	// downloads are not configured. Never closed — the reader goroutine may
+	// outlive Close on the stuck-read path, and a send on a closed channel
+	// panics; the worker exits on dlDone instead.
+	//
+	// dlPending tracks queued payload bytes so a burst of large transfers
+	// can't pin the whole queue's worth of memory.
+	dlQueue   chan downloadJob
+	dlDone    chan struct{}
+	dlPending atomic.Int64
+
 	// autoScrollDir drives the selection auto-scroll goroutine during a
 	// drag that extends outside the widget (-1 = toward live,
 	// +1 = into scrollback, 0 = no scroll). Written on the main
@@ -704,6 +733,7 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 		})
 	}
 	t.registerNotifyHandler()
+	t.registerDownloadHandler()
 	if !cfg.NoWindowHandler {
 		t.prevOnEvent = w.OnEvent
 		w.OnEvent = func(e *gui.Event, w *gui.Window) {
@@ -906,16 +936,22 @@ func (t *Term) registerNotifyHandler() {
 		if !t.notifyBusy.CompareAndSwap(false, true) {
 			return
 		}
-		fn := t.cfg.OnNotify
 		go func() {
 			defer t.notifyBusy.Store(false)
-			if fn != nil {
-				fn(title, body)
-			} else {
-				t.notif.Notify(title, body)
-			}
+			t.notify(title, body)
 		}()
 	})
+}
+
+// notify delivers a desktop notification through the host's OnNotify hook, or
+// the built-in notifier when unset. Blocks (the built-in path may exec), so
+// callers must already be off the reader goroutine.
+func (t *Term) notify(title, body string) {
+	if fn := t.cfg.OnNotify; fn != nil {
+		fn(title, body)
+		return
+	}
+	t.notif.Notify(title, body)
 }
 
 // onParserTitle is the OSC 0/1/2 handler. Runs on the reader goroutine
@@ -1364,6 +1400,13 @@ func (t *Term) Close() error {
 	t.replyMu.Unlock()
 	if t.replyCond != nil {
 		t.replyCond.Signal()
+	}
+	// Stop the download worker. dlQueue is deliberately left open — the
+	// reader goroutine may still be alive on the stuck-read path above and a
+	// send on a closed channel panics. Anything still queued is dropped; a
+	// transfer already being written finishes before the worker returns.
+	if t.dlDone != nil {
+		close(t.dlDone)
 	}
 	// Wait for auxiliary goroutines to exit cleanly so they cannot
 	// reference t.cmd or other state after we return.
