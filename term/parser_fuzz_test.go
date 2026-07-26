@@ -63,6 +63,10 @@ func FuzzOSCDispatch(f *testing.F) {
 		"52;c;dGVzdA==",
 		"133;A",
 		"1337;File=name=AAABAAAA;size=100",
+		"1337;File=name=AAABAAAA;size=5;inline=0:aGVsbG8=",
+		"1337;File=name=Li4vLi4vZXRjL3Bhc3N3ZA==;inline=0:aGVsbG8=",
+		"1337;File=width=10;height=50%;preserveAspectRatio=0;inline=1:AAAA",
+		"1337;File=width=auto;height=px;size=-1;inline=1:",
 	}
 	for _, s := range seeds {
 		f.Add([]byte(s))

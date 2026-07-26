@@ -45,6 +45,7 @@ go test ./term -run TestConformance
 | Bidirectional text (UAX#9) | `bidi_test.go` |
 | DECSCA protection, selective erase, rectangular area ops | `grid_rect_test.go`, `parser_csi_test.go`, `conformance_test.go` |
 | Graphics: Sixel, Kitty (APC), iTerm2 (OSC 1337) | `graphics_test.go`, `parser_apc_test.go`, `parser_iterm2_test.go` |
+| OSC 1337 `File=` transfers (download), name sanitization | `parser_iterm2_test.go`, `widget_download_test.go` |
 | Kitty Keyboard Protocol, function/keypad keys | `widget_keyboard_test.go`, `parser_csi_test.go` |
 | Semantic shell marks (OSC 133), search | `grid_mark_test.go`, `grid_search_test.go` |
 | PTY startup and resize plumbing | `pty_test.go` |

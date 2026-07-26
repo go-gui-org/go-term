@@ -9,6 +9,8 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -207,14 +209,28 @@ func TestOSC1337_STTerminator(t *testing.T) {
 	}
 }
 
-func TestOSC1337_ExtraParams_Ignored(t *testing.T) {
-	// Extra params (name, size, width, height) should not break dispatch.
+func TestOSC1337_ExtraParams_NaturalSize(t *testing.T) {
+	// A full key list with both dimensions on auto renders at natural size.
 	raw := make1x1PNG(color.NRGBA{128, 128, 128, 255})
 	b64name := base64.StdEncoding.EncodeToString([]byte("test.png"))
 	args := "name=" + b64name + ";size=100;width=auto;height=auto;inline=1"
 	g := feedOSC1337Grid(t, 10, 80, args, raw)
 	if len(g.Graphics) != 1 {
 		t.Fatalf("Graphics len = %d; want 1 with extra params", len(g.Graphics))
+	}
+	if gr := g.Graphics[0]; gr.Cols != 1 || gr.Rows != 1 {
+		t.Errorf("footprint = %dx%d cells; want 1x1 (auto)", gr.Cols, gr.Rows)
+	}
+}
+
+func TestOSC1337_UnknownAndMalformedParams(t *testing.T) {
+	// Unknown keys, a bare field with no '=', and an empty value must not
+	// derail the sequence — real emitters produce all three.
+	raw := make1x1PNG(color.NRGBA{10, 20, 30, 255})
+	args := "unknownKey=zzz;justAFlag;name=;inline=1;trailing="
+	g := feedOSC1337Grid(t, 10, 80, args, raw)
+	if len(g.Graphics) != 1 {
+		t.Fatalf("Graphics len = %d; want 1", len(g.Graphics))
 	}
 }
 
@@ -305,5 +321,283 @@ func TestOSC1337_StateResetAfterDispatch_NormalOSCCapped(t *testing.T) {
 
 	if len(got) != maxOSCBytes-2 {
 		t.Errorf("title len = %d; want %d (oscIsImage state leaked from 1337)", len(got), maxOSCBytes-2)
+	}
+}
+
+// --- File= argument parsing ---
+
+func TestParseOSC1337Args_Defaults(t *testing.T) {
+	a := parseOSC1337Args("")
+	if a.inline {
+		t.Error("inline should default false")
+	}
+	if !a.preserveAR {
+		t.Error("preserveAspectRatio should default true")
+	}
+	if a.size != -1 {
+		t.Errorf("size = %d; want -1 (absent)", a.size)
+	}
+	if a.width.kind != dimAuto || a.height.kind != dimAuto {
+		t.Errorf("dims = %v/%v; want auto", a.width, a.height)
+	}
+	if a.name != "" {
+		t.Errorf("name = %q; want empty", a.name)
+	}
+}
+
+func TestParseOSC1337Args_AllKeys(t *testing.T) {
+	name := base64.StdEncoding.EncodeToString([]byte("report.pdf"))
+	a := parseOSC1337Args("name=" + name +
+		";size=1234;width=40;height=200px;preserveAspectRatio=0;inline=1")
+	if a.name != "report.pdf" {
+		t.Errorf("name = %q; want report.pdf", a.name)
+	}
+	if a.size != 1234 {
+		t.Errorf("size = %d; want 1234", a.size)
+	}
+	if a.width != (dimSpec{val: 40, kind: dimCells}) {
+		t.Errorf("width = %+v; want 40 cells", a.width)
+	}
+	if a.height != (dimSpec{val: 200, kind: dimPixels}) {
+		t.Errorf("height = %+v; want 200px", a.height)
+	}
+	if a.preserveAR {
+		t.Error("preserveAspectRatio=0 should clear preserveAR")
+	}
+	if !a.inline {
+		t.Error("inline=1 should set inline")
+	}
+}
+
+func TestParseDimSpec(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want dimSpec
+	}{
+		{"", dimSpec{}},
+		{"auto", dimSpec{}},
+		{"10", dimSpec{val: 10, kind: dimCells}},
+		{"10px", dimSpec{val: 10, kind: dimPixels}},
+		{"50%", dimSpec{val: 50, kind: dimPercent}},
+		{"0", dimSpec{}},   // zero is meaningless — treat as auto
+		{"-5", dimSpec{}},  // negative likewise
+		{"abc", dimSpec{}}, // garbage
+		{"px", dimSpec{}},  // suffix with no number
+		{"%", dimSpec{}},   // ditto
+		{"1e3", dimSpec{}}, // not an integer
+	} {
+		if got := parseDimSpec(tc.in); got != tc.want {
+			t.Errorf("parseDimSpec(%q) = %+v; want %+v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSanitizeDownloadName(t *testing.T) {
+	b64 := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+	for _, tc := range []struct{ in, want string }{
+		{b64("report.pdf"), "report.pdf"},
+		{b64("../../etc/passwd"), "passwd"},
+		{b64("/abs/path/file.txt"), "file.txt"},
+		{b64(`C:\Windows\evil.exe`), "evil.exe"},
+		{b64("with\nnewline.txt"), "withnewline.txt"},
+		{b64("with\x00nul.txt"), "withnul.txt"},
+		{b64(".."), defaultDownloadName},
+		{b64("."), defaultDownloadName},
+		{b64(""), defaultDownloadName},
+		{b64("   "), defaultDownloadName},
+		{b64("dir/"), defaultDownloadName},
+		{"not!valid!base64", defaultDownloadName},
+	} {
+		if got := sanitizeDownloadName(tc.in); got != tc.want {
+			t.Errorf("sanitizeDownloadName(%q) = %q; want %q", tc.in, got, tc.want)
+		}
+	}
+	// Over-long names are truncated to a filesystem-safe length.
+	long := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("a", 300)))
+	if got := sanitizeDownloadName(long); len(got) != maxDownloadName {
+		t.Errorf("long name len = %d; want %d", len(got), maxDownloadName)
+	}
+}
+
+// --- download dispatch ---
+
+// feedDownload feeds a non-inline File= transfer and returns what the
+// download handler saw.
+func feedDownload(t *testing.T, args string, payload []byte) (string, []byte, int) {
+	t.Helper()
+	g, p := newParserGrid(10, 80)
+	g.CellPxW, g.CellPxH = 8, 16
+	p.SetGraphicsDir(t.TempDir())
+	var gotName string
+	var gotData []byte
+	calls := 0
+	p.SetDownloadHandler(func(name string, data []byte) {
+		gotName, gotData, calls = name, data, calls+1
+	})
+	feedOSC1337(t, g, p, args, payload)
+	return gotName, gotData, calls
+}
+
+func TestOSC1337_Download_InlineZero(t *testing.T) {
+	name := base64.StdEncoding.EncodeToString([]byte("notes.txt"))
+	payload := []byte("hello world")
+	gotName, gotData, calls := feedDownload(t, "name="+name+";size=11;inline=0", payload)
+	if calls != 1 {
+		t.Fatalf("handler calls = %d; want 1", calls)
+	}
+	if gotName != "notes.txt" {
+		t.Errorf("name = %q; want notes.txt", gotName)
+	}
+	if string(gotData) != string(payload) {
+		t.Errorf("data = %q; want %q", gotData, payload)
+	}
+}
+
+func TestOSC1337_Download_MissingInlineKey(t *testing.T) {
+	// No inline key at all is a transfer, not a render.
+	_, _, calls := feedDownload(t, "size=5", []byte("hello"))
+	if calls != 1 {
+		t.Fatalf("handler calls = %d; want 1", calls)
+	}
+}
+
+func TestOSC1337_Download_NoNameUsesDefault(t *testing.T) {
+	gotName, _, calls := feedDownload(t, "inline=0", []byte("x"))
+	if calls != 1 {
+		t.Fatalf("handler calls = %d; want 1", calls)
+	}
+	if gotName != defaultDownloadName {
+		t.Errorf("name = %q; want %q", gotName, defaultDownloadName)
+	}
+}
+
+func TestOSC1337_Download_NotCalledForInlineImage(t *testing.T) {
+	_, _, calls := feedDownload(t, "inline=1", make1x1PNG(color.NRGBA{1, 2, 3, 255}))
+	if calls != 0 {
+		t.Fatalf("handler calls = %d; want 0 for inline=1", calls)
+	}
+}
+
+func TestOSC1337_Download_NoHandlerDrops(t *testing.T) {
+	// The default (no SetDownloadHandler) must not render or panic.
+	g := feedOSC1337Grid(t, 10, 80, "inline=0", []byte("hello"))
+	if len(g.Graphics) != 0 {
+		t.Fatalf("Graphics len = %d; want 0", len(g.Graphics))
+	}
+}
+
+func TestOSC1337_Download_DeclaredSizeOverCapDrops(t *testing.T) {
+	args := "inline=0;size=" + strconv.Itoa(maxOSC1337Bytes+1)
+	_, _, calls := feedDownload(t, args, []byte("hello"))
+	if calls != 0 {
+		t.Fatalf("handler calls = %d; want 0 for over-cap declared size", calls)
+	}
+}
+
+func TestOSC1337_TruncatedPayloadDrops(t *testing.T) {
+	// A payload past the 1337 cap loses its tail. Dropping it is the point:
+	// half a file must never reach the download handler.
+	g, p := newParserGrid(10, 80)
+	g.CellPxW, g.CellPxH = 8, 16
+	p.SetGraphicsDir(t.TempDir())
+	calls := 0
+	p.SetDownloadHandler(func(string, []byte) { calls++ })
+
+	var b strings.Builder
+	b.WriteString("\x1b]1337;File=inline=0:")
+	// Base64 alphabet only, so a truncated tail still decodes cleanly and
+	// the drop can only be attributed to the truncation flag.
+	b.WriteString(strings.Repeat("A", maxOSC1337Bytes+16))
+	b.WriteString("\x07")
+	feed(t, g, p, []byte(b.String()))
+
+	if calls != 0 {
+		t.Fatalf("handler calls = %d; want 0 for truncated payload", calls)
+	}
+	if p.oscTrunc {
+		t.Error("oscTrunc should be cleared by oscReset after dispatch")
+	}
+	// The oversized accumulator must not stay pinned for the parser's life.
+	if cap(p.osc) > maxOSCBytes {
+		t.Errorf("cap(p.osc) = %d; want <= %d after reset", cap(p.osc), maxOSCBytes)
+	}
+}
+
+// --- inline sizing ---
+
+// sizedGraphic feeds an inline image of imgW×imgH pixels with the given
+// sizing args and returns its cell footprint.
+func sizedGraphic(t *testing.T, imgW, imgH int, args string) (int, int) {
+	t.Helper()
+	var buf bytes.Buffer
+	img := image.NewNRGBA(image.Rect(0, 0, imgW, imgH))
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	// 8x16 cells, 80x24 grid: 1 cell = 8x16 px.
+	g, p := newParserGrid(24, 80)
+	g.CellPxW, g.CellPxH = 8, 16
+	p.SetGraphicsDir(t.TempDir())
+	feedOSC1337(t, g, p, args+";inline=1", buf.Bytes())
+	if len(g.Graphics) != 1 {
+		t.Fatalf("Graphics len = %d; want 1", len(g.Graphics))
+	}
+	return g.Graphics[0].Cols, g.Graphics[0].Rows
+}
+
+func TestOSC1337_Sizing(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		imgW, imgH         int
+		args               string
+		wantCols, wantRows int
+	}{
+		// 80x32 px = 10x2 cells naturally.
+		{"auto", 80, 32, "", 10, 2},
+		// Width in cells; aspect preserved (10:2 → 20:4).
+		{"width cells", 80, 32, "width=20", 20, 4},
+		// Width in pixels: 160px = 20 cells, same as above.
+		{"width px", 80, 32, "width=160px", 20, 4},
+		// 50% of an 80-column grid = 40 cells wide, 8 rows tall.
+		{"width percent", 80, 32, "width=50%", 40, 8},
+		// Height alone drives width when aspect is preserved.
+		{"height cells", 80, 32, "height=4", 20, 4},
+		// Both axes, aspect preserved: fit inside the box (width binds).
+		{"both fit", 80, 32, "width=20;height=40", 20, 4},
+		// Aspect off: each axis is taken literally.
+		{"both stretch", 80, 32, "width=20;height=40;preserveAspectRatio=0", 20, 40},
+		// Aspect off with one axis given: the other keeps natural size.
+		{"one stretch", 80, 32, "width=20;preserveAspectRatio=0", 20, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cols, rows := sizedGraphic(t, tc.imgW, tc.imgH, tc.args)
+			if cols != tc.wantCols || rows != tc.wantRows {
+				t.Errorf("footprint = %dx%d; want %dx%d",
+					cols, rows, tc.wantCols, tc.wantRows)
+			}
+		})
+	}
+}
+
+func TestOSC1337_Sizing_ClampedToGridWidth(t *testing.T) {
+	// A request wider than the grid is truncated at the right margin, not
+	// allowed to describe cells that don't exist.
+	cols, _ := sizedGraphic(t, 80, 32, "width=200")
+	if cols != 80 {
+		t.Errorf("cols = %d; want 80 (grid width)", cols)
+	}
+}
+
+func TestOSC1337_Sizing_NoCellMetricsFallsBack(t *testing.T) {
+	// Before the first frame measures the font, cell pixels are zero and
+	// explicit sizing can't be resolved — the natural 1x1 fallback applies.
+	g, p := newParserGrid(10, 80)
+	p.SetGraphicsDir(t.TempDir())
+	feedOSC1337(t, g, p, "width=20;inline=1", make1x1PNG(color.NRGBA{9, 9, 9, 255}))
+	if len(g.Graphics) != 1 {
+		t.Fatalf("Graphics len = %d; want 1", len(g.Graphics))
+	}
+	if gr := g.Graphics[0]; gr.Cols != 1 || gr.Rows != 1 {
+		t.Errorf("footprint = %dx%d; want 1x1", gr.Cols, gr.Rows)
 	}
 }

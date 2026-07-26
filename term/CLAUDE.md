@@ -77,7 +77,12 @@ Supports a modern xterm/kitty-compatible subset:
 - OSC: window title (0/1/2), palette set/query (4) and reset (104 —
   one index, or all with a bare `OSC 104`), CWD (7), hyperlinks (8),
   desktop notifications (9/777), dynamic colors (10/11/12),
-  clipboard (52), semantic shell marks (133), iTerm2 inline images (1337).
+  clipboard (52), semantic shell marks (133), iTerm2 `File=` (1337 — both
+  `inline=1` images and `inline=0` file transfers). The 1337 key list is
+  parsed for real: `name` (base64, sanitized to a bare filename), `size`,
+  `width`/`height` (`N` cells, `Npx`, `N%`, `auto`) and
+  `preserveAspectRatio`. Transfers reach the host only when it opted in via
+  `Cfg.OnDownload`/`Cfg.DownloadDir`; the parser never touches disk itself.
   Color specs accept `rgb:H/H/H`…`rgb:HHHH/HHHH/HHHH` and `#RGB` through
   `#RRRRGGGGBBBB`; X11 color *names* are not supported.
 - DCS: DECRQSS (`m`, `r`, ` q`, `"q` DECSCA, `*x` DECSACE), XTGETTCAP (incl.

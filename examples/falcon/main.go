@@ -130,6 +130,7 @@ func main() {
 			cfg := workspace.Cfg{
 				TextStyle:              gui.TextStyle{Family: defaultFontFamily, Size: 12},
 				ExitWhenLastShellExits: true,
+				DownloadDir:            defaultDownloadDir(),
 				Themes: []term.NamedTheme{
 					{Name: "Default", Theme: term.DefaultTheme},
 					{Name: "Dracula", Theme: term.DraculaTheme},
@@ -209,4 +210,16 @@ func runReplay(path string, rc term.ReplayCfg) {
 	}()
 	log.Printf("replaying %s — space pauses, +/- speed, . steps, 0 restarts", path)
 	backend.RunApp(gui.NewApp(), w)
+}
+
+// defaultDownloadDir picks where OSC 1337 File= transfers land. Downloads are
+// opt-in per embedder, so this is falcon's policy, not go-term's: the user's
+// home Downloads folder, matching what iTerm2 does. Returns "" when the home
+// directory can't be determined, which leaves file transfers disabled.
+func defaultDownloadDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "Downloads")
 }

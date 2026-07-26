@@ -713,22 +713,33 @@ func (g *grid) shiftGraphics(delta, total int) {
 // zero (no frame drawn yet) a single-cell footprint is used. Caller
 // holds Mu.
 func (g *grid) AddGraphic(src string, widthPx, heightPx int) (int, int) {
+	return g.addGraphicCells(src, widthPx, heightPx, 0, 0)
+}
+
+// addGraphicCells is AddGraphic with an explicit cell footprint. Non-positive
+// cols/rows mean "derive from the pixel size", which is what every caller but
+// the OSC 1337 width=/height= path wants. The clamps apply either way: an
+// explicit size is still capped to MaxGridDim rows and truncated at the right
+// margin. Caller holds Mu.
+func (g *grid) addGraphicCells(src string, widthPx, heightPx, cols, rows int) (int, int) {
 	if src == "" || widthPx <= 0 || heightPx <= 0 {
 		return 0, 0
 	}
-	cols, rows := 1, 1
-	if g.CellPxW > 0 && g.CellPxH > 0 {
-		cols = int(math.Ceil(float64(widthPx) / float64(g.CellPxW)))
-		rows = int(math.Ceil(float64(heightPx) / float64(g.CellPxH)))
-		if cols < 1 {
-			cols = 1
+	if cols <= 0 || rows <= 0 {
+		cols, rows = 1, 1
+		if g.CellPxW > 0 && g.CellPxH > 0 {
+			cols = int(math.Ceil(float64(widthPx) / float64(g.CellPxW)))
+			rows = int(math.Ceil(float64(heightPx) / float64(g.CellPxH)))
+			if cols < 1 {
+				cols = 1
+			}
+			if rows < 1 {
+				rows = 1
+			}
 		}
-		if rows < 1 {
-			rows = 1
-		}
-		if rows > MaxGridDim {
-			rows = MaxGridDim
-		}
+	}
+	if rows > MaxGridDim {
+		rows = MaxGridDim
 	}
 	originR := g.Scrollback.Len() + g.CursorR
 	originC := g.CursorC
