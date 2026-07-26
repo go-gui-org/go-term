@@ -123,6 +123,14 @@ func (ws *Workspace) registerCommands() {
 			Global:   true,
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.PrevTab() },
 		},
+		// Session recording of the focused pane.
+		{
+			ID:       "workspace.toggleRecording",
+			Label:    "Start / Stop Recording",
+			Shortcut: gui.Shortcut{Key: gui.KeyR, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleRecording() },
+		},
 		// Theme.
 		{
 			ID:       "workspace.chooseTheme",

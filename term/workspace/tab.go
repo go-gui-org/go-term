@@ -60,6 +60,7 @@ func (t *Tab) termCfg(
 		TextStyle:       cfg.TextStyle,
 		Themes:          cfg.Themes,
 		Dir:             dir,
+		RecordInput:     cfg.RecordInput,
 		OnTitle: func(title string) {
 			w.QueueCommand(func(w *gui.Window) {
 				t.titles[panelID] = title

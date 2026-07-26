@@ -71,6 +71,7 @@ func (t *Term) pasteFromClipboard(w *gui.Window) {
 	if bracketed {
 		payload = pasteStart + clean + pasteEnd
 	}
+	t.rec.Load().Input([]byte(payload))
 	if _, err := t.pw.Write([]byte(payload)); err != nil {
 		log.Printf("term: pty paste: %v", err)
 	}

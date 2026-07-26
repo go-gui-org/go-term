@@ -21,6 +21,14 @@ type Cfg struct {
 	// A missing file is silently ignored (defaults apply).
 	ConfigPath string
 
+	// RecordDir is where Cmd+Shift+R writes session recordings. When empty,
+	// a "recordings" subdirectory of the go-term config directory is used.
+	RecordDir string
+
+	// RecordInput adds keystrokes to session recordings started from this
+	// workspace. Off by default — see term.Cfg.RecordInput.
+	RecordInput bool
+
 	// ExitWhenLastShellExits closes the window when the last shell
 	// process exits, rather than replacing it with a fresh tab.
 	ExitWhenLastShellExits bool

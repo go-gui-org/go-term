@@ -10,6 +10,7 @@ import (
 	"time"
 
 	gui "github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/internal/recfmt"
 )
 
 // recordPty is a ptyIO stub that records Resize calls and blocks Read
@@ -159,7 +160,7 @@ func TestReadLoop_CaptureTeeRecordsRawBytes(t *testing.T) {
 		cmd:      &gui.Window{},
 		pty:      p,
 		pw:       p,
-		capture:  f,
+		capture:  recfmt.NewRawRecorder(f),
 		readDone: make(chan struct{}),
 	}
 	go tm.readLoop()
@@ -193,8 +194,8 @@ func TestOpenCapture(t *testing.T) {
 		t.Fatal("openCapture: got nil")
 	}
 	defer func() { _ = f.Close() }()
-	if f.Name() != prefix+"-7.bin" {
-		t.Errorf("capture path = %q, want %q", f.Name(), prefix+"-7.bin")
+	if f.Path() != prefix+"-7.bin" {
+		t.Errorf("capture path = %q, want %q", f.Path(), prefix+"-7.bin")
 	}
 	if _, err := os.Stat(prefix + "-7.bin"); err != nil {
 		t.Errorf("capture file: %v", err)
@@ -251,7 +252,7 @@ func TestReadLoop_CaptureWriteFails(t *testing.T) {
 		cmd:      &gui.Window{},
 		pty:      p,
 		pw:       p,
-		capture:  f,
+		capture:  recfmt.NewRawRecorder(f),
 		readDone: make(chan struct{}),
 	}
 	go tm.readLoop()
@@ -260,10 +261,10 @@ func TestReadLoop_CaptureWriteFails(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("readLoop did not exit")
 	}
-	// readLoop must have nilled capture after the write error so
-	// subsequent iterations skip the tee.
-	if tm.capture != nil {
-		t.Error("capture was not nilled after write failure")
+	// The tee must have disabled itself after the write error so
+	// subsequent iterations skip it.
+	if tm.capture.Active() {
+		t.Error("capture still active after write failure")
 	}
 	// The pty data must still have been fed to the parser — the grid
 	// should contain the input bytes.
