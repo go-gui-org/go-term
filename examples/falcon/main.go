@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-gui/gui/backend"
@@ -32,9 +34,33 @@ const defaultFontFamily = "JetBrainsMono NFM"
 func main() {
 	var workspacePath string
 	var saveWorkspacePath string
+	var recordPath string
+	var replayPath string
+	var replaySpeed float64
+	var replayIdle time.Duration
+	var replayLoop bool
 	flag.StringVar(&workspacePath, "workspace", "", "workspace JSON to load on startup")
 	flag.StringVar(&saveWorkspacePath, "save-workspace", "", "workspace JSON to write on quit (defaults to --workspace path when set)")
+	flag.StringVar(&recordPath, "record", "", "record the first pane's session to this .gtr file")
+	flag.StringVar(&replayPath, "replay", "", "play back a .gtr recording instead of starting a shell")
+	flag.Float64Var(&replaySpeed, "replay-speed", 1, "playback speed multiplier for --replay")
+	flag.DurationVar(&replayIdle, "replay-idle-limit", 0, "cap on any single gap between recorded frames (0 = none)")
+	flag.BoolVar(&replayLoop, "replay-loop", false, "restart playback at end of recording")
 	flag.Parse()
+
+	// Replay is a viewer, not a multiplexer: one pane, no tabs, no
+	// workspace persistence. Handled entirely separately from the normal
+	// startup path below.
+	if replayPath != "" {
+		runReplay(replayPath, term.ReplayCfg{
+			Path:      replayPath,
+			Speed:     replaySpeed,
+			IdleLimit: replayIdle,
+			Loop:      replayLoop,
+			Controls:  true,
+		})
+		return
+	}
 
 	// Auto-load default workspace when --workspace is not given but the
 	// default file already exists.
@@ -130,6 +156,17 @@ func main() {
 			if err != nil {
 				log.Fatalf("workspace init: %v", err)
 			}
+			// --record applies to the pane the user starts in. Other panes
+			// are recorded on demand with Cmd+Shift+R.
+			if recordPath != "" {
+				if tm := s.ActivePane(); tm != nil {
+					if err := tm.StartRecording(recordPath); err != nil {
+						log.Printf("record: %v", err)
+					} else {
+						log.Printf("recording to %s", recordPath)
+					}
+				}
+			}
 			w.UpdateView(s.View)
 		},
 	})
@@ -140,5 +177,36 @@ func main() {
 	}()
 	// Use the multi-window app loop: only it honors an OnCloseRequest
 	// veto (single-window backend.Run quits unconditionally on Cmd+Q).
+	backend.RunApp(gui.NewApp(), w)
+}
+
+// runReplay opens a single-pane window playing back a recording. There is no
+// shell, so no quit confirmation and no workspace to save; playback controls
+// (space, +/-, '.', '0') are keystrokes routed to the replay source.
+func runReplay(path string, rc term.ReplayCfg) {
+	gui.SetTheme(gui.ThemeDark.WithBorders(true))
+	var tm *term.Term
+	w := gui.NewWindow(gui.WindowCfg{
+		Title:  "go-term replay — " + filepath.Base(path),
+		Width:  900,
+		Height: 600,
+		OnInit: func(w *gui.Window) {
+			var err error
+			tm, err = term.NewReplay(w, term.Cfg{
+				TextStyle: gui.TextStyle{Family: defaultFontFamily, Size: 12},
+				Themes:    []term.NamedTheme{{Name: "Default", Theme: term.DefaultTheme}},
+			}, rc)
+			if err != nil {
+				log.Fatalf("replay: %v", err)
+			}
+			w.UpdateView(tm.View)
+		},
+	})
+	defer func() {
+		if tm != nil {
+			_ = tm.Close()
+		}
+	}()
+	log.Printf("replaying %s — space pauses, +/- speed, . steps, 0 restarts", path)
 	backend.RunApp(gui.NewApp(), w)
 }

@@ -2,6 +2,7 @@ package term
 
 import (
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -980,6 +981,11 @@ func (t *Term) drawOverlays(ds *drawState) {
 		t.drawSearchBar(ds.dc, ds.style)
 	}
 
+	// Recording indicator: nothing else tells the user the session is being
+	// written to disk, and an unnoticed recording is a privacy problem, not
+	// just a surprise.
+	t.drawRecordIndicator(ds)
+
 	// Visual bell: a faint white wash that eases out over the flash
 	// duration rather than switching on and off, so an incidental BEL
 	// registers peripherally instead of strobing the whole pane.
@@ -1196,6 +1202,48 @@ func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yO
 	y := float32(row)*t.cellH + yOff
 	w := float32(c1-c0) * t.cellW
 	dc.FilledRect(x, y, w, t.cellH, color)
+}
+
+// recordIndicatorPad is the padding inside the REC pill, and its inset from
+// the pane's top-right corner.
+const recordIndicatorPad = 6
+
+// drawRecordIndicator paints a "● REC m:ss" pill in the pane's top-right
+// corner while a session recording is running. Sits left of the scrollbar
+// lane so the two never overlap. Called under Mu (inside onDraw).
+func (t *Term) drawRecordIndicator(ds *drawState) {
+	if !t.Recording() {
+		return
+	}
+	// Built with strconv rather than fmt: this file stays out of the
+	// reflection-based formatting path, and the label is rebuilt every
+	// frame while recording.
+	d := t.recordingElapsed()
+	sec := int(d.Seconds()) % 60
+	label := "● REC " + strconv.Itoa(int(d.Minutes())) + ":"
+	if sec < 10 {
+		label += "0"
+	}
+	label += strconv.Itoa(sec)
+
+	cs := ds.style
+	cs.Color = gui.RGB(255, 235, 235)
+	cs.Typeface = glyph.TypefaceRegular
+	textW := ds.dc.TextWidth(label, cs)
+	if textW <= 0 || !realNumber(textW) {
+		return // metrics not ready yet, or NaN; a later frame will paint it
+	}
+	w := textW + 2*recordIndicatorPad
+	h := t.cellH + recordIndicatorPad
+	x := ds.dc.Width - w - recordIndicatorPad - t.effectiveScrollbarWidth()
+	if x < 0 {
+		x = 0
+	}
+	y := float32(recordIndicatorPad)
+	// Semi-transparent so it dims rather than hides the cells underneath —
+	// the terminal content matters more than the badge.
+	ds.dc.FilledRoundedRect(x, y, w, h, h/2, gui.RGBA(150, 30, 30, 210))
+	ds.dc.Text(x+recordIndicatorPad, y+recordIndicatorPad/2, label, cs)
 }
 
 // drawSearchBar paints a status bar over the bottom cellH pixels of the

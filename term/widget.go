@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/internal/recfmt"
 )
 
 // cmdScheduler schedules callbacks on the GUI main thread. *gui.Window
@@ -145,6 +146,19 @@ type Cfg struct {
 	// and the path exists on disk, the shell starts there. Empty inherits
 	// the process CWD.
 	Dir string
+
+	// RecordPath, when non-empty, starts a session recording at that path
+	// as soon as the terminal opens (see Term.StartRecording). The file is
+	// overwritten. A failure to open it is logged, not fatal — a terminal
+	// that refuses to start because a debug artefact could not be written
+	// would be a poor trade.
+	RecordPath string
+
+	// RecordInput adds keystrokes and pastes to session recordings as 'i'
+	// frames. Off by default: input capture records whatever the user
+	// types, including into a password prompt, so it must be asked for.
+	// Replay ignores 'i' frames; they are context for a human reader.
+	RecordInput bool
 }
 
 // NamedTheme pairs a display name with a Theme for use in menus.
@@ -568,10 +582,18 @@ type Term struct {
 	ptyResizeCols    atomic.Int32
 	ptyResizeKick    chan struct{} // buffered(1); nil in bare test Terms
 
-	// capture is the opt-in raw pty-output tee (GOTERM_CAPTURE env var).
+	// capture is the opt-in raw pty-output tee (GOTERM_CAPTURE env var):
+	// a recorder in raw mode, i.e. bare bytes with no header or framing.
 	// Set once in New, written only by the reader goroutine, closed in
 	// Close after readLoop exits. Nil when capture is disabled.
-	capture *os.File
+	capture *recfmt.Recorder
+
+	// rec is the user-facing session recording (.gtr — header, timing,
+	// resize frames). Swapped at runtime by StartRecording/StopRecording on
+	// the main thread while the reader goroutine reads it, hence atomic.
+	// Independent of capture: the debug tee and a session recording may run
+	// at the same time.
+	rec atomic.Pointer[recfmt.Recorder]
 
 	// redrawPending coalesces UpdateWindow requests from the reader
 	// goroutine: applyChunk only queues a redraw command when one is not
@@ -627,6 +649,14 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	if err != nil {
 		return nil, err
 	}
+	return newWithPTY(w, cfg, pty)
+}
+
+// newWithPTY builds a Term around an already-created byte source. New wraps
+// a real shell pty; NewReplay wraps a recording. Everything above the ptyIO
+// boundary — parser, grid, rendering, input, scrollback — is identical for
+// both, which is the whole reason replay needs no separate viewer.
+func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 	g := newGrid(initRows, initCols)
 	applyTheme(g, cfg)
 	applyScrollbackConfig(g, cfg)
@@ -686,6 +716,14 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 	t.focused.Store(true)
 	w.SetFocus(t.focusID)
 	t.replyCond = sync.NewCond(&t.replyMu)
+	// Record-from-startup. Started before readLoop so the recording cannot
+	// miss the shell's first bytes. A failure is logged, not fatal — see
+	// Cfg.RecordPath.
+	if cfg.RecordPath != "" {
+		if err := t.StartRecording(cfg.RecordPath); err != nil {
+			log.Printf("term: record %s: %v", cfg.RecordPath, err)
+		}
+	}
 	go t.readLoop()
 	t.loopWg.Add(5)
 	go t.blinkLoop()
@@ -704,7 +742,10 @@ func New(w *gui.Window, cfg Cfg) (*Term, error) {
 // Terminal.app) to compare visuals, or feed it to CaptureFixture /
 // script2fixture for the EmulatorReplay harness. Returns nil (capture
 // disabled) when the variable is unset or the file cannot be created.
-func openCapture(seq uint64) *os.File {
+//
+// For a timed, self-describing recording — one that can be replayed inside
+// go-term — use Cfg.RecordPath or Term.StartRecording instead.
+func openCapture(seq uint64) *recfmt.Recorder {
 	prefix := os.Getenv("GOTERM_CAPTURE")
 	if prefix == "" {
 		return nil
@@ -716,7 +757,7 @@ func openCapture(seq uint64) *os.File {
 		return nil
 	}
 	log.Printf("term: capturing pty output to %s", path)
-	return f
+	return recfmt.NewRawRecorder(f)
 }
 
 // resizeLoop is the dedicated goroutine that applies pty resizes latched by
@@ -765,6 +806,9 @@ func (t *Term) resizeLoop() {
 		if err := t.pty.Resize(rows, cols); err != nil && !t.closed.Load() {
 			log.Printf("term: pty resize: %v", err)
 		}
+		// Record the new geometry so a replay can report the size the
+		// session actually ran at (recfmt.KindResize).
+		t.rec.Load().Resize(rows, cols)
 		lastRows, lastCols = rows, cols
 	}
 }
@@ -799,8 +843,10 @@ func (t *Term) blinkLoop() {
 					t.cursorBlinks()
 			}()
 			// Blinking text needs the same periodic repaint, and unlike the
-			// cursor it blinks in any viewport position.
-			redraw = redraw || t.blinkCells.Load()
+			// cursor it blinks in any viewport position. The recording
+			// indicator rides the same tick to advance its elapsed timer,
+			// which is why the timer shows whole seconds and no finer.
+			redraw = redraw || t.blinkCells.Load() || t.Recording()
 			if redraw {
 				t.bumpVersion()
 				t.queueCommand(func(w *gui.Window) {
@@ -1111,6 +1157,7 @@ func (t *Term) Cols() int {
 // restoring CWD, running startup commands, or scripting input.
 // Safe to call from any goroutine.
 func (t *Term) Write(p []byte) (int, error) {
+	t.rec.Load().Input(p)
 	return t.pw.Write(p)
 }
 
@@ -1299,12 +1346,16 @@ func (t *Term) Close() error {
 	case <-t.readDone:
 	case <-readTimer.C:
 	}
-	// readLoop has exited (or is deemed stuck); the capture tee has no
-	// writer left, so the file can be closed. Skipped on the stuck path
-	// only if readLoop later revives — acceptable for a debug-only tee.
-	if t.capture != nil {
-		_ = t.capture.Close()
-		t.capture = nil
+	// readLoop has exited (or is deemed stuck); the capture tee and the
+	// session recording have no writer left, so both files can be closed.
+	// Skipped on the stuck path only if readLoop later revives — its writes
+	// then land on a closed recorder, which is a no-op.
+	_ = t.capture.Close()
+	t.capture = nil
+	if r := t.rec.Swap(nil); r != nil {
+		if err := r.Close(); err != nil {
+			log.Printf("term: recording close: %v", err)
+		}
 	}
 	// Stop the reply writer. The pty is already closed, so any pty.Write in
 	// flight returns an error and writeLoop loops back to observe replyDone.
@@ -1372,18 +1423,15 @@ func (t *Term) readLoop() {
 	for {
 		n, err := t.pty.Read(buf)
 		if n > 0 {
-			// Opt-in debugging tee (GOTERM_CAPTURE): record the exact
-			// bytes delivered by the pty master before parsing, so a
-			// rendering bug can be replayed against a reference
-			// terminal or the EmulatorReplay harness. On write failure
-			// disable capture rather than losing pty throughput.
-			if t.capture != nil {
-				if _, werr := t.capture.Write(buf[:n]); werr != nil {
-					log.Printf("term: capture write: %v", werr)
-					_ = t.capture.Close()
-					t.capture = nil
-				}
-			}
+			// Record the exact bytes delivered by the pty master before
+			// parsing, so a rendering bug can be replayed against a
+			// reference terminal, the EmulatorReplay harness, or go-term
+			// itself. Two independent sinks: the GOTERM_CAPTURE debug tee
+			// (raw bytes) and the user-facing .gtr session recording
+			// (timed frames). Both self-disable on write failure rather
+			// than costing pty throughput.
+			t.capture.Output(buf[:n])
+			t.rec.Load().Output(buf[:n])
 			// Feed buf directly: parser.feedChunk consumes the slice
 			// synchronously (carry-over and reply bytes are copied
 			// internally), so reusing buf next iteration is safe.
@@ -1740,6 +1788,7 @@ func (t *Term) effectiveScrollbarWidth() float32 {
 func (t *Term) bumpVersion() { t.drawVersion.Add(1) }
 
 func (t *Term) writeBytes(out []byte) {
+	t.rec.Load().Input(out)
 	if _, err := t.pw.Write(out); err != nil {
 		log.Printf("term: pty write: %v", err)
 	}

@@ -37,14 +37,33 @@ term/scrollback.go       Ring buffer.
 term/pty.go              ptyIO interface; creack/pty (Unix) + ConPTY (Windows).
 term/palette.go          256-color table.
 
+term/replay.go           replayPTY (a recording as a ptyIO); NewReplay.
+
 term/workspace/          Panes/tabs/persistence — sits above term, public API only.
+internal/recfmt/         .gtr session-recording container (Recorder + Reader).
+term/gotermrec/          CLI over a recording: info/cat/play/fixture/export.
 ```
 
 Public API: `Cfg`, `Term`, `Theme`, `NamedTheme`, `New`, `View`, `Close`, `Cwd`,
 `SetTheme`, `Rows`, `Cols`, `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`,
-`ShortcutInfo`/`Shortcuts` (help overlay), `ThemeMenuItems`.
+`ShortcutInfo`/`Shortcuts` (help overlay), `ThemeMenuItems`,
+`StartRecording`/`StopRecording`/`Recording`, `NewReplay`/`ReplayCfg`.
 
 ## Upcoming
+
+### Phase 45 — Session recording and replay (issue #74)
+
+Record the pty stream with timing to a `.gtr` file; replay it back through a
+real `Term`. Duplicate issue #76 covers the same work.
+
+- [x] `internal/recfmt`: lossless container (JSON header + varint frames),
+      Recorder (zero-alloc per frame) and Reader (bounded, fuzzed)
+- [x] `term`: `Cfg.RecordPath`/`RecordInput`, `StartRecording`/`StopRecording`/
+      `Recording`; `GOTERM_CAPTURE` folded onto the same Recorder in raw mode
+- [x] `term`: `replayPTY` as a `ptyIO`, `NewReplay` + `ReplayCfg`, playback
+      controls routed through the pty write path
+- [x] `term/gotermrec`: info / cat / play / fixture / export -cast
+- [x] falcon `--record` / `--replay`, workspace `Cmd+Shift+R`, `● REC` pill
 
 ### Phase 40 — Tab reordering
 
@@ -145,6 +164,7 @@ When go-gui ships v1.0.0:
 | 40 | Tab reordering | Cmd+Alt+[/] move tab left/right |
 | 41 | OSC 4 palette modification | `printf '\x1b]4;1;#00ff00\a'` |
 | 42 | DECSCA + VT420 rectangular areas | DEC forms apps, vttest menu 8 |
+| 45 | Session recording and replay | `falcon --record` / `--replay`, `gotermrec` |
 
 ## Commands
 

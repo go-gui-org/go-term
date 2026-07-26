@@ -8,6 +8,30 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Session recording and replay (#74). `falcon --record <file.gtr>` records the
+  starting pane, `Cmd+Shift+R` toggles recording on the focused pane (marked by
+  a `● REC m:ss` pill), and embedders get `Cfg.RecordPath`,
+  `Term.StartRecording`, `StopRecording`, and `Recording`. Recordings capture
+  pty output with timing plus grid resizes; keystrokes only when
+  `Cfg.RecordInput` is set.
+
+  `falcon --replay <file.gtr>` plays one back through a real `Term` — the
+  parser, renderer, scrollback, selection, and search are the production ones,
+  so a recording reproduces a rendering bug rather than describing it. Space
+  pauses, `+`/`-` change speed, `.` steps a frame, `0` restarts.
+
+  The `.gtr` container (`internal/recfmt`) is a JSON header line followed by
+  `kind + delta-µs + length + raw bytes` frames. Payloads are never
+  transcoded, so malformed UTF-8 — the byte sequences most worth reporting —
+  survives the round trip; asciicast v2, whose events are JSON strings,
+  cannot carry it and is therefore an export target rather than the storage
+  format. Recording costs no allocations per frame and one write syscall.
+
+  New `gotermrec` tool: `info`, `cat` (raw bytes — the `GOTERM_CAPTURE`
+  workflow), `play` (timed playback in any terminal, no GUI), `fixture` (a
+  replay fixture via `CaptureFixture`), and `export -cast` (asciicast v2, with
+  a per-frame warning wherever bytes had to be replaced).
+
 - DECSCA character protection and the VT420 rectangular area operations
   (#71): DECSCA (`CSI Ps " q`), the selective erases DECSEL (`CSI ? Ps K`),
   DECSED (`CSI ? Ps J`) and DECSERA (`CSI … $ {`) that honor it, plus DECERA
