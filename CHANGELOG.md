@@ -103,6 +103,14 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Windows: the tail of a session's output is no longer truncated when the
+  shell exits. ConPTY's output pipe is fed by conhost from its own process,
+  asynchronously, so bytes the child had already produced could still be in
+  flight when its process object signalled — and the child-exit path closed
+  the read end at exactly that moment, discarding them. The last command's
+  output vanished roughly half the time. The console and input pipe still go
+  down on child exit, but the output read end now stays open so the reader
+  drains to a natural EOF, with a bounded grace period as a backstop.
 - IL (`CSI Ps L`) and DL (`CSI Ps M`) no longer move the cursor to column 0.
   xterm, wezterm and tmux all preserve the column; homing it made every
   following write on the row land at the wrong offset. Together with the
