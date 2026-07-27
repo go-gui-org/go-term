@@ -176,6 +176,17 @@ type Cfg struct {
 	// types, including into a password prompt, so it must be asked for.
 	// Replay ignores 'i' frames; they are context for a human reader.
 	RecordInput bool
+
+	// KeyBindings overrides the default chords for Term-level actions (copy,
+	// paste, find, scrollback, font zoom). A nil or empty map leaves every
+	// built-in binding in place; entries override only the actions they name.
+	// A gui.Shortcut with Key == 0 unbinds its action so the key reaches the
+	// child process instead.
+	//
+	// This seeds the initial table only. Term.SetKeyBindings changes bindings
+	// on a live terminal — a settings UI or config reload must use that, since
+	// Cfg is never re-read after New.
+	KeyBindings KeyMap
 }
 
 // NamedTheme pairs a display name with a Theme for use in menus.
@@ -624,6 +635,12 @@ type Term struct {
 	// at the same time.
 	rec atomic.Pointer[recfmt.Recorder]
 
+	// bindings is the effective Term-level shortcut table: defaults merged
+	// with Cfg.KeyBindings at construction, replaced wholesale by
+	// SetKeyBindings. Read by binds() on the main thread only, so it needs no
+	// lock — onKeyDown and SetKeyBindings both run there.
+	bindings map[Action]binding
+
 	// redrawPending coalesces UpdateWindow requests from the reader
 	// goroutine: applyChunk only queues a redraw command when one is not
 	// already in flight, so a burst of PTY reads between frames does not
@@ -692,6 +709,7 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 	seqID := termSeq.Add(1)
 	t := &Term{
 		cfg:         cfg,
+		bindings:    mergeBindings(cfg.KeyBindings),
 		grid:        g,
 		parser:      newParser(g),
 		pty:         pty,

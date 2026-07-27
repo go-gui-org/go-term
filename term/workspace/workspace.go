@@ -344,8 +344,10 @@ func (ws *Workspace) helpBackdrop(ww, wh int) gui.View {
 }
 
 // helpPanel is the centered float listing every keyboard shortcut. The
-// workspace section is generated from the live command registry; the
-// terminal section from term.Shortcuts(). Neither is hand-maintained.
+// workspace section is generated from the live command registry; the terminal
+// section from the active pane's effective bindings, so rebound shortcuts show
+// their real chords rather than the built-in defaults. Neither is
+// hand-maintained.
 func (ws *Workspace) helpPanel() gui.View {
 	theme := gui.CurrentTheme()
 	rows := []gui.View{ws.helpHeader("Workspace", theme)}
@@ -356,7 +358,13 @@ func (ws *Workspace) helpPanel() gui.View {
 		rows = append(rows, ws.helpRow(cmd.Label, cmd.Shortcut.String(), theme))
 	}
 	rows = append(rows, ws.helpHeader("Terminal", theme))
-	for _, s := range term.Shortcuts() {
+	// Fall back to the package defaults when no pane is live (e.g. the last
+	// shell exited but the overlay is still up).
+	termShortcuts := term.Shortcuts()
+	if active := ws.ActivePane(); active != nil {
+		termShortcuts = active.Shortcuts()
+	}
+	for _, s := range termShortcuts {
 		rows = append(rows, ws.helpRow(s.Label, s.Keys, theme))
 	}
 

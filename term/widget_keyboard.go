@@ -338,7 +338,7 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	}
 	shift := e.Modifiers.Has(gui.ModShift)
 	ctrl := e.Modifiers.Has(gui.ModCtrl)
-	if t.scrollbackIntercept(e, w, shift, ctrl) {
+	if t.scrollbackIntercept(e, w, shift) {
 		return
 	}
 	if t.handleDisplayKey(e, w) {
@@ -356,20 +356,32 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 // handleSearchKey handles the search bar lifecycle: Cmd+F opens it,
 // Cmd+Up/Down jumps between prompt marks, and while active, editing and
 // navigation keys are intercepted. Returns true when the event was consumed.
-// isPrimaryChord reports whether e's modifiers are the primary shortcut
-// modifier (see modPrimary), optionally with Shift, and nothing else. Shift is
-// tolerated so '+' on the '=' key still counts; Ctrl/Alt beyond the primary are
-// rejected so layered bindings (pane resize, etc.) pass through.
-func isPrimaryChord(m gui.Modifier) bool {
-	return m.Has(modPrimary) && m&^(modPrimary|gui.ModShift) == 0
+// bindingTable returns the effective shortcut table, seeding it with the
+// defaults on first use. A Term built as a bare struct literal (as several
+// tests do) has no table, and a zero-value Term should behave like a
+// default-configured one rather than one with every shortcut disabled.
+// Main-thread only, like every other binding access.
+func (t *Term) bindingTable() map[Action]binding {
+	if t.bindings == nil {
+		t.bindings = mergeBindings(nil)
+	}
+	return t.bindings
+}
+
+// binds reports whether e matches any chord bound to action a. Matching is
+// exact on the keyboard modifier bits, except that actions flagged
+// shiftOptional ignore a stray Shift (see binding). An unbound action never
+// matches, so its key falls through to the child process.
+//
+// This decides only *whether the chord matched*; each handler keeps its own
+// conditional-passthrough logic (selection state, alt screen, and so on).
+func (t *Term) binds(a Action, e *gui.Event) bool {
+	return t.bindingTable()[a].matches(e.KeyCode, e.Modifiers)
 }
 
 func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
-	ctrl := e.Modifiers.Has(gui.ModCtrl)
-	shift := e.Modifiers.Has(gui.ModShift)
-
 	// Primary+F opens the search bar (Cmd+F on macOS, Ctrl+Shift+F on Windows).
-	if e.KeyCode == gui.KeyF && isPrimaryChord(e.Modifiers) {
+	if t.binds(ActionFind, e) {
 		t.search.active = true
 		t.search.query = ""
 		t.search.matches = nil
@@ -381,18 +393,28 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 	}
 
 	// Primary+Up/Down: jump between OSC 133 prompt marks (shell integration).
-	if isPrimaryChord(e.Modifiers) && (e.KeyCode == gui.KeyUp || e.KeyCode == gui.KeyDown) {
-		t.jumpToMark(e.KeyCode == gui.KeyUp, w)
+	if t.binds(ActionPrevPrompt, e) || t.binds(ActionNextPrompt, e) {
+		t.jumpToMark(t.binds(ActionPrevPrompt, e), w)
 		e.IsHandled = true
 		return true
 	}
 
 	// While in search mode, intercept navigation and editing keys.
 	if t.search.active {
-		switch e.KeyCode {
-		case gui.KeyEnter, gui.KeyKPEnter:
-			t.searchJump(!shift, w)
-		case gui.KeyBackspace:
+		switch {
+		// Prev before next: the two share the Enter key and are told apart
+		// by Shift, so the shifted binding has to be tested first.
+		case t.binds(ActionPrevMatch, e):
+			t.searchJump(false, w)
+		case t.binds(ActionNextMatch, e):
+			t.searchJump(true, w)
+		case t.binds(ActionToggleRegex, e):
+			t.search.regex = !t.search.regex
+			t.recompileSearchRE()
+			t.bumpVersion()
+			w.UpdateWindow()
+		// Backspace and Escape are text editing, not rebindable shortcuts.
+		case e.KeyCode == gui.KeyBackspace:
 			if len(t.search.query) > 0 {
 				rr := []rune(t.search.query)
 				t.search.query = string(rr[:len(rr)-1])
@@ -400,19 +422,12 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 				t.bumpVersion()
 				w.UpdateWindow()
 			}
-		case gui.KeyEscape:
+		case e.KeyCode == gui.KeyEscape:
 			t.search.active = false
 			t.search.query = ""
 			t.search.matches = nil
 			t.bumpVersion()
 			w.UpdateWindow()
-		case gui.KeyR:
-			if ctrl {
-				t.search.regex = !t.search.regex
-				t.recompileSearchRE()
-				t.bumpVersion()
-				w.UpdateWindow()
-			}
 		}
 		e.IsHandled = true
 		return true
@@ -423,18 +438,14 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 // handleClipboardKey handles Cmd+C / Ctrl+Shift+C (copy) and Cmd+V /
 // Ctrl+Shift+V (paste). Returns true when the event was consumed.
 func (t *Term) handleClipboardKey(e *gui.Event, w *gui.Window) bool {
-	cmd := e.Modifiers.Has(gui.ModSuper)
-	ctrl := e.Modifiers.Has(gui.ModCtrl)
-	shift := e.Modifiers.Has(gui.ModShift)
-
 	// Copy: Cmd+C (macOS) or Ctrl+Shift+C. Only suppress when there
 	// is a non-empty selection so plain Ctrl+C still SIGINTs the child.
-	if e.KeyCode == gui.KeyC && (cmd || (ctrl && shift)) {
+	if t.binds(ActionCopy, e) {
 		if t.copySelection(w) {
 			e.IsHandled = true
 			return true
 		}
-		if cmd {
+		if !encodesControlByte(e.Modifiers) {
 			// Cmd+C without selection is a no-op; never reaches pty.
 			e.IsHandled = true
 			return true
@@ -445,12 +456,22 @@ func (t *Term) handleClipboardKey(e *gui.Event, w *gui.Window) bool {
 
 	// Paste: Cmd+V (macOS) or Ctrl+Shift+V. Always suppresses so the
 	// 'v' character isn't sent in addition to the paste payload.
-	if e.KeyCode == gui.KeyV && (cmd || (ctrl && shift)) {
+	if t.binds(ActionPaste, e) {
 		t.pasteFromClipboard(w)
 		e.IsHandled = true
 		return true
 	}
 	return false
+}
+
+// encodesControlByte reports whether a chord with these modifiers would
+// otherwise encode a Ctrl+letter control byte for the child. Copy uses it to
+// decide whether an unproductive press (no selection) should be swallowed or
+// passed through: Ctrl+Shift+C must still reach the child as SIGINT, while
+// Cmd+C has no terminal encoding and is simply a no-op. Super wins when both
+// are held, matching the macOS reading of the chord.
+func encodesControlByte(m gui.Modifier) bool {
+	return m.Has(gui.ModCtrl) && !m.Has(gui.ModSuper)
 }
 
 // handleDisplayKey intercepts Primary+= (increase font size), Primary+-
@@ -459,58 +480,53 @@ func (t *Term) handleClipboardKey(e *gui.Event, w *gui.Window) bool {
 // (not exact) tolerates the Shift used to type '+' on the '=' key. Returns true
 // when the event was consumed.
 func (t *Term) handleDisplayKey(e *gui.Event, w *gui.Window) bool {
-	if isPrimaryChord(e.Modifiers) {
-		if e.KeyCode == gui.KeyEqual {
-			t.AdjustFontSize(0.25)
-			e.IsHandled = true
-			return true
-		}
-		if e.KeyCode == gui.KeyMinus {
-			t.AdjustFontSize(-0.25)
-			e.IsHandled = true
-			return true
-		}
-		if e.KeyCode == gui.Key0 {
-			t.ResetFontSize()
-			e.IsHandled = true
-			return true
-		}
+	switch {
+	case t.binds(ActionFontInc, e):
+		t.AdjustFontSize(0.25)
+	case t.binds(ActionFontDec, e):
+		t.AdjustFontSize(-0.25)
+	case t.binds(ActionFontReset, e):
+		t.ResetFontSize()
+	default:
+		return false
 	}
-	return false
+	e.IsHandled = true
+	return true
 }
 
-// scrollbackIntercept handles PageUp/Down/Home/End keys when they should
-// navigate the scrollback rather than being encoded for the pty. Returns
-// true when the key was consumed. shift and ctrl are pre-computed by the
-// caller (onKeyDown) so they aren't re-read from e.Modifiers.
-// When the alt screen is active, only Shift+PageUp/PageDown scroll;
-// plain PageUp/PageDown pass through.
-func (t *Term) scrollbackIntercept(e *gui.Event, w *gui.Window, shift, ctrl bool) bool {
-	switch e.KeyCode {
-	case gui.KeyPageUp:
+// scrollbackIntercept handles the scrollback navigation keys when they should
+// move the viewport rather than being encoded for the pty. Returns true when
+// the key was consumed. shift is pre-computed by the caller (onKeyDown) so it
+// isn't re-read from e.Modifiers.
+//
+// When the alt screen is active, only Shift+PageUp/PageDown scroll; plain
+// PageUp/PageDown pass through so full-screen apps get their own paging. That
+// check is on the literal Shift state rather than the binding, because it is
+// the "hold Shift to talk to the terminal, not the app" idiom — rebinding
+// these two actions to a non-Shift chord therefore won't reach them on the
+// alt screen. Scroll-to-top/bottom have no such gate.
+func (t *Term) scrollbackIntercept(e *gui.Event, w *gui.Window, shift bool) bool {
+	switch {
+	case t.binds(ActionScrollPageUp, e):
 		if shift || !t.isAltActive() {
 			t.scrollByPage(+1, w)
 			e.IsHandled = true
 			return true
 		}
-	case gui.KeyPageDown:
+	case t.binds(ActionScrollPageDown, e):
 		if shift || !t.isAltActive() {
 			t.scrollByPage(-1, w)
 			e.IsHandled = true
 			return true
 		}
-	case gui.KeyHome:
-		if shift && !ctrl {
-			t.scrollToTop(w)
-			e.IsHandled = true
-			return true
-		}
-	case gui.KeyEnd:
-		if shift && !ctrl {
-			t.scrollToBottom(w)
-			e.IsHandled = true
-			return true
-		}
+	case t.binds(ActionScrollTop, e):
+		t.scrollToTop(w)
+		e.IsHandled = true
+		return true
+	case t.binds(ActionScrollBottom, e):
+		t.scrollToBottom(w)
+		e.IsHandled = true
+		return true
 	}
 	return false
 }
