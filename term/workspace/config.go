@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -126,7 +127,11 @@ func (c *workspaceConfig) setFont(key, val string) error {
 		if err != nil {
 			return fmt.Errorf("font size %q: not a number", val)
 		}
-		if n <= 0 || n > maxFontSizeCfg {
+		// NaN must be rejected explicitly: every comparison against it is
+		// false, so the range test below would let it through, and nothing
+		// downstream catches it either — Term.style()'s clamp is gated on
+		// "Size > 0", which NaN also fails.
+		if math.IsNaN(n) || n <= 0 || n > maxFontSizeCfg {
 			return fmt.Errorf("font size %v: out of range", n)
 		}
 		c.fontSize, c.hasFontSize = float32(n), true
@@ -156,7 +161,12 @@ func (c *workspaceConfig) setGeneral(key, val string) error {
 		if err != nil {
 			return fmt.Errorf("scrollbar %q: not a number", val)
 		}
-		if n > maxScrollbarPx {
+		// Non-finite is rejected for the same reason as the font size: NaN
+		// passes every range test, and -Inf slips past the upper bound
+		// because negatives are legal here. Both are caught downstream by
+		// effectiveScrollbarWidth, but they would still defeat the equality
+		// early-out in SetScrollbarWidth on every reload.
+		if math.IsNaN(n) || math.IsInf(n, 0) || n > maxScrollbarPx {
 			return fmt.Errorf("scrollbar %v: out of range", n)
 		}
 		c.scrollbar, c.hasScrollbar = float32(n), true
@@ -421,6 +431,24 @@ func applyKeybindingOverrides(cmds []gui.Command, kb map[string]string) term.Key
 	return termBindings(cmds, kb)
 }
 
+// sortedBindingKeys returns the keys of kb that are (or are not) term.* names,
+// in a stable order.
+//
+// The order matters wherever a collision is rejected: whichever entry is seen
+// first wins, so ranging over the map directly would pick the winner — and
+// emit the log line — differently on each run. Both binding passes reject
+// collisions, so both sort.
+func sortedBindingKeys(kb map[string]string, wantTerm bool) []string {
+	keys := make([]string, 0, len(kb))
+	for key := range kb {
+		if strings.HasPrefix(key, termPrefix) == wantTerm {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 // applyWorkspaceBindings rewrites the shortcuts of the workspace.* commands
 // named in kb. Bare (unprefixed) keys are workspace commands too.
 func applyWorkspaceBindings(cmds []gui.Command, kb map[string]string) {
@@ -428,12 +456,11 @@ func applyWorkspaceBindings(cmds []gui.Command, kb map[string]string) {
 	for i, cmd := range cmds {
 		byID[cmd.ID] = i
 	}
-	for key, chord := range kb {
-		if strings.HasPrefix(key, termPrefix) {
-			continue
-		}
-		fullID := strings.TrimPrefix(key, workspacePrefix)
-		fullID = workspacePrefix + fullID
+	for _, key := range sortedBindingKeys(kb, false) {
+		chord := kb[key]
+		// Bare keys are workspace commands, so normalize both spellings to
+		// the namespaced command ID.
+		fullID := workspacePrefix + strings.TrimPrefix(key, workspacePrefix)
 		idx, ok := byID[fullID]
 		if !ok {
 			log.Printf("workspace: unknown command %q in config", fullID)
@@ -469,16 +496,7 @@ func applyWorkspaceBindings(cmds []gui.Command, kb map[string]string) {
 // binding at its built-in default.
 func termBindings(cmds []gui.Command, kb map[string]string) term.KeyMap {
 	var km term.KeyMap
-	// Map iteration order is random, so a chord claimed by two term entries
-	// would otherwise pick a winner nondeterministically. Sorting makes the
-	// rejection (and its log line) reproducible.
-	keys := make([]string, 0, len(kb))
-	for key := range kb {
-		if strings.HasPrefix(key, termPrefix) {
-			keys = append(keys, key)
-		}
-	}
-	slices.Sort(keys)
+	keys := sortedBindingKeys(kb, true)
 
 	taken := make(map[gui.Shortcut]string, len(cmds))
 	for _, cmd := range cmds {
