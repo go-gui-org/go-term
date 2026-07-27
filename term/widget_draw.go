@@ -263,25 +263,28 @@ type drawState struct {
 	imeComposing bool
 }
 
-// resolveCell returns the cell at viewport (r, c), applying selection
-// and search-highlight inversions. Uses the fast path (direct Cells
+// resolveCell returns the cell at viewport (r, c), applying the selection
+// tint and search-highlight inversion. Uses the fast path (direct Cells
 // index) when ds.live; otherwise goes through ViewCellAt.
 func (ds *drawState) resolveCell(r, c int) cell {
 	if ds.live {
 		return ds.cells[r*ds.cols+c]
 	}
 	cell := ds.g.ViewCellAt(r, c)
-	if ds.rowSel != nil {
-		if rb := ds.rowSel[r]; rb.active && c >= rb.c0 && c <= rb.c1 {
-			cell.Attrs ^= attrInverse
-		}
-	}
+	// Search matches invert; selection tints. Search runs first so a cell that
+	// is both keeps the inverted match colors, with the selection tint blended
+	// on top of them rather than the two effects cancelling out.
 	if ds.vMatchesByRow != nil {
 		for _, m := range ds.vMatchesByRow[r] {
 			if c >= m.col && c < m.col+m.len {
 				cell.Attrs ^= attrInverse
 				break
 			}
+		}
+	}
+	if ds.rowSel != nil {
+		if rb := ds.rowSel[r]; rb.active && c >= rb.c0 && c <= rb.c1 {
+			cell = ds.g.highlightSelected(cell)
 		}
 	}
 	return cell
@@ -498,7 +501,7 @@ func (t *Term) prepareSearch(ds *drawState) {
 }
 
 // prepareSelection pre-computes the selection column span for each viewport
-// row so the per-cell resolveCell path can apply attrInverse without
+// row so the per-cell resolveCell path can apply the selection tint without
 // re-computing selOrder on every cell.
 func (t *Term) prepareSelection(ds *drawState) {
 	g := ds.g
