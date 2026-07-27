@@ -236,7 +236,10 @@ type ShortcutInfo struct {
 // " / " and dropping duplicates — on Windows remapMod collapses the macOS and
 // Ctrl+Shift forms of Copy onto the same combo, which should print once.
 func formatChords(chords []gui.Shortcut) string {
-	var parts []string
+	if len(chords) == 1 {
+		return chords[0].String() // the common case: no slice, no dedupe scan
+	}
+	parts := make([]string, 0, len(chords))
 	for _, c := range chords {
 		if s := c.String(); !slices.Contains(parts, s) {
 			parts = append(parts, s)
@@ -269,4 +272,7 @@ func Shortcuts() []ShortcutInfo { return shortcutsFrom(defaultBindings()) }
 
 // Shortcuts returns this terminal's effective Term-level shortcuts, including
 // any overrides from Cfg.KeyBindings or SetKeyBindings, in display order.
-func (t *Term) Shortcuts() []ShortcutInfo { return shortcutsFrom(t.bindings) }
+//
+// Goes through bindingTable so a Term built as a bare struct literal reports
+// the defaults, matching what its key handlers would actually do.
+func (t *Term) Shortcuts() []ShortcutInfo { return shortcutsFrom(t.bindingTable()) }

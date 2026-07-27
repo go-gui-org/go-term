@@ -393,8 +393,10 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 	}
 
 	// Primary+Up/Down: jump between OSC 133 prompt marks (shell integration).
-	if t.binds(ActionPrevPrompt, e) || t.binds(ActionNextPrompt, e) {
-		t.jumpToMark(t.binds(ActionPrevPrompt, e), w)
+	// prev is computed once — this is the keyboard hot path, and binds() walks
+	// a map plus a chord list on every call.
+	if prev := t.binds(ActionPrevPrompt, e); prev || t.binds(ActionNextPrompt, e) {
+		t.jumpToMark(prev, w)
 		e.IsHandled = true
 		return true
 	}

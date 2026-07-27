@@ -1,6 +1,7 @@
 package term
 
 import (
+	"math"
 	"testing"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -171,6 +172,86 @@ func TestSetScrollbarWidth(t *testing.T) {
 	tm.SetScrollbarWidth(0)
 	if got := tm.effectiveScrollbarWidth(); got != scrollbarWidth {
 		t.Errorf("width = %v, want the built-in default restored", got)
+	}
+}
+
+// countingScheduler records how many commands were queued, so a test can
+// assert that a setter asked for a repaint.
+type countingScheduler struct{ n *int }
+
+func (c countingScheduler) QueueCommand(fn func(*gui.Window)) {
+	*c.n++
+	fn(&gui.Window{})
+}
+
+// TestSetScrollbackRows_RequestsRepaint pins the repaint that shrinking needs:
+// trimming can clamp ViewOffset, which moves the visible viewport, so nothing
+// on screen matches the grid until a frame is drawn. Marking rows dirty is not
+// enough — something has to schedule the frame.
+func TestSetScrollbackRows_RequestsRepaint(t *testing.T) {
+	var queued int
+	tm := newSettingsTerm(Cfg{})
+	tm.cmd = countingScheduler{n: &queued}
+
+	tm.SetScrollbackRows(500)
+	if queued == 0 {
+		t.Error("a cap change queued no repaint")
+	}
+
+	queued = 0
+	tm.SetScrollbackRows(500) // same value: nothing changed
+	if queued != 0 {
+		t.Errorf("a no-op change queued %d repaints, want 0", queued)
+	}
+}
+
+// TestStyle_NonFiniteSize covers the config path that could deliver a NaN
+// size. style()'s clamp used a "Size > 0" gate, which NaN fails, so the value
+// reached text measurement unclamped. A non-finite size means "unset".
+func TestStyle_NonFiniteSize(t *testing.T) {
+	nan := float32(math.NaN())
+	tm := newSettingsTerm(Cfg{TextStyle: gui.TextStyle{Family: "Menlo", Size: nan}})
+	if got := tm.style().Size; got != 0 {
+		t.Errorf("style().Size = %v, want 0 (non-finite treated as unset)", got)
+	}
+}
+
+// TestSetTextStyle_NormalizesNonFiniteSize checks the setter stores a finite
+// size. Left as NaN, the "did it change?" equality below can never hold
+// (NaN != NaN), so every later reload would force a remeasure and silently
+// throw away the user's font zoom.
+func TestSetTextStyle_NormalizesNonFiniteSize(t *testing.T) {
+	tm := newSettingsTerm(Cfg{TextStyle: gui.TextStyle{Family: "Menlo", Size: 12}})
+	tm.SetTextStyle(gui.TextStyle{Family: "Menlo", Size: float32(math.Inf(1))})
+	if got := tm.cfg.TextStyle.Size; got != 0 {
+		t.Errorf("cfg.TextStyle.Size = %v, want 0", got)
+	}
+	// Stored finite, so re-applying the same style is correctly a no-op —
+	// with NaN in there the equality check could never hold.
+	tm.fontSize = 9 // pretend the user zoomed
+	tm.SetTextStyle(gui.TextStyle{Family: "Menlo", Size: float32(math.NaN())})
+	if tm.fontSize != 0 {
+		t.Error("a pending zoom must still be cleared when the style is re-applied")
+	}
+	tm.SetTextStyle(gui.TextStyle{Family: "Menlo", Size: float32(math.NaN())})
+	if tm.cfg.TextStyle.Size != 0 {
+		t.Errorf("cfg.TextStyle.Size = %v, want 0", tm.cfg.TextStyle.Size)
+	}
+}
+
+// TestTermShortcuts_ZeroValueUsesDefaults matches (*Term).Shortcuts to the
+// lazy seed in bindingTable: a Term with no binding table behaves as though it
+// has the defaults, so it must also *report* the defaults rather than nothing.
+func TestTermShortcuts_ZeroValueUsesDefaults(t *testing.T) {
+	tm := &Term{}
+	got, want := tm.Shortcuts(), Shortcuts()
+	if len(got) != len(want) {
+		t.Fatalf("zero-value Term reported %d shortcuts, want %d", len(got), len(want))
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("shortcut %d = %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }
 

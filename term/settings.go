@@ -24,6 +24,12 @@ import (
 // cfg.TextStyle.Size in style(), so a pane zoomed to 14 pt would otherwise
 // ignore a new configured size of 12 pt until the user pressed Cmd+0.
 func (t *Term) SetTextStyle(ts gui.TextStyle) {
+	// Normalize a non-finite size to "unset" before storing it. Otherwise the
+	// equality check below can never hold (NaN != NaN), so every call would
+	// force a remeasure and silently discard the user's zoom.
+	if !realNumber(ts.Size) {
+		ts.Size = 0
+	}
 	if t.cfg.TextStyle == ts && t.fontSize == 0 {
 		return
 	}
@@ -51,10 +57,23 @@ func (t *Term) SetScrollbackRows(n int) {
 	default:
 		capRows = 0 // negative: scrollback off
 	}
+	if !t.resizeScrollback(capRows) {
+		return
+	}
+	// Outside the lock: grid.Mu must never be held across a go-gui call.
+	// Trimming can clamp ViewOffset, which moves the visible viewport, so the
+	// frame has to be requested here rather than left to the next event.
+	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+}
+
+// resizeScrollback applies a new scrollback capacity under grid.Mu, reporting
+// whether anything actually changed. Split out of SetScrollbackRows so the
+// repaint request can happen after the lock is released.
+func (t *Term) resizeScrollback(capRows int) bool {
 	t.grid.Mu.Lock()
 	defer t.grid.Mu.Unlock()
 	if t.grid.ScrollbackCap == capRows {
-		return
+		return false
 	}
 	t.grid.ScrollbackCap = capRows
 	// EnsureGeom keeps the newest min(size, cap) rows on a capacity-only
@@ -68,6 +87,7 @@ func (t *Term) SetScrollbackRows(n int) {
 	}
 	t.grid.markAllDirty()
 	t.bumpVersion()
+	return true
 }
 
 // SetBellMode changes how BEL is signalled on a live terminal. Safe to call

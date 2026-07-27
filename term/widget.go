@@ -1651,7 +1651,12 @@ func (t *Term) style() gui.TextStyle {
 	if t.fontSize > 0 {
 		ts.Size = t.fontSize
 	}
-	if ts.Size > 0 {
+	// realNumber, not "> 0": NaN fails every comparison, so a "Size > 0" gate
+	// would skip the clamp and pass NaN straight through to text measurement.
+	// A non-finite configured size falls back to the theme default instead.
+	if !realNumber(ts.Size) {
+		ts.Size = 0
+	} else if ts.Size > 0 {
 		ts.Size = clampFontSize(ts.Size)
 	}
 	return ts

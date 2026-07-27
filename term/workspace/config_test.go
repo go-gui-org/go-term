@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -252,6 +253,74 @@ func TestApplyKeybindingOverrides_EmptyMap(t *testing.T) {
 func TestApplyKeybindingOverrides_NilCmds(t *testing.T) {
 	// Should not panic with nil cmds slice.
 	applyKeybindingOverrides(nil, map[string]string{"splitVertical": "Cmd+E"})
+}
+
+// TestApplyKeybindingOverrides_CollisionIsDeterministic pins the reason
+// applyWorkspaceBindings sorts its keys. Two entries claim the same chord, so
+// exactly one must win — and it must be the *same* one on every run. Ranging
+// over the map directly picked the winner (and logged the loser) at random.
+func TestApplyKeybindingOverrides_CollisionIsDeterministic(t *testing.T) {
+	kb := map[string]string{
+		"closePane":     "Cmd+E",
+		"splitVertical": "Cmd+E",
+	}
+	var first []gui.Shortcut
+	// Enough iterations that random map order would almost certainly differ.
+	for i := 0; i < 50; i++ {
+		cmds := sampleCmds()
+		applyKeybindingOverrides(cmds, kb)
+		got := make([]gui.Shortcut, len(cmds))
+		for j, c := range cmds {
+			got[j] = c.Shortcut
+		}
+		if first == nil {
+			first = got
+			continue
+		}
+		if !slices.Equal(got, first) {
+			t.Fatalf("run %d differs: %v vs %v", i, got, first)
+		}
+	}
+	// "closePane" sorts before "splitVertical", so it takes the chord and
+	// splitVertical keeps its default.
+	if first[1].Key != gui.KeyE {
+		t.Errorf("closePane key = %v, want KeyE (first in sort order wins)", first[1].Key)
+	}
+	if first[0] != (gui.Shortcut{Key: gui.KeyD, Modifiers: gui.ModSuper}) {
+		t.Errorf("splitVertical = %v, want its default (lost the collision)", first[0])
+	}
+}
+
+// TestSetFont_RejectsNonFinite guards the hole that let a NaN font size reach
+// the widget: NaN fails every range comparison, and Term.style()'s clamp was
+// gated on "Size > 0", which NaN also fails — so it passed through unclamped
+// into text measurement.
+func TestSetFont_RejectsNonFinite(t *testing.T) {
+	for _, val := range []string{"nan", "NaN", "+Inf", "inf"} {
+		var c workspaceConfig
+		if err := c.setFont("size", val); err == nil {
+			t.Errorf("setFont(size, %q) accepted, want error", val)
+		}
+		if c.hasFontSize {
+			t.Errorf("setFont(size, %q) set hasFontSize", val)
+		}
+	}
+}
+
+// TestSetGeneral_RejectsNonFiniteScrollbar is the scrollbar half of the same
+// hole. -Inf is legal input in the sense that any negative value hides the
+// scrollbar, but a non-finite one still defeats the equality early-out in
+// Term.SetScrollbarWidth, so it is rejected too.
+func TestSetGeneral_RejectsNonFiniteScrollbar(t *testing.T) {
+	for _, val := range []string{"nan", "NaN", "+Inf", "-Inf"} {
+		var c workspaceConfig
+		if err := c.setGeneral("scrollbar", val); err == nil {
+			t.Errorf("setGeneral(scrollbar, %q) accepted, want error", val)
+		}
+		if c.hasScrollbar {
+			t.Errorf("setGeneral(scrollbar, %q) set hasScrollbar", val)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
