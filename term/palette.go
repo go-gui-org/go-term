@@ -478,6 +478,77 @@ func (g *grid) bgOf(c cell) gui.Color {
 	return g.resolveColor(c.BG, g.Theme.DefaultBG)
 }
 
+// Selection highlight tint. Terminal.app-style: a selected cell keeps its own
+// foreground color and its background is blended a fixed fraction toward one
+// of the theme's default colors. Blending toward a theme color (rather than a
+// fixed gray) makes the tint lighten on dark themes and darken on light ones,
+// and keeps syntax colors readable instead of inverting them away.
+//
+// Expressed as an integer fraction so the blend stays allocation- and
+// float-free in the per-cell draw path.
+const (
+	selTintNum = 3
+	selTintDen = 10
+)
+
+// mixChannel blends one 8-bit channel from a toward b by selTintNum/selTintDen.
+func mixChannel(a, b uint8) uint8 {
+	return uint8((int(a)*(selTintDen-selTintNum) + int(b)*selTintNum) / selTintDen)
+}
+
+// chanDist is the sum of per-channel absolute differences between two colors —
+// a cheap, float-free stand-in for perceptual distance, adequate for the one
+// question selectionBG asks: which of two endpoints is farther away.
+func chanDist(a, b gui.Color) int {
+	return absDiff8(a.R, b.R) + absDiff8(a.G, b.G) + absDiff8(a.B, b.B)
+}
+
+// absDiff8 is |a-b| for two 8-bit channels, computed in int so the subtraction
+// cannot wrap.
+func absDiff8(a, b uint8) int {
+	if a > b {
+		return int(a) - int(b)
+	}
+	return int(b) - int(a)
+}
+
+// selectionBG returns the highlight background for a cell whose resolved
+// background is bg.
+//
+// The blend target is whichever theme default — foreground or background — is
+// farther from bg, which guarantees the tint is actually visible. Ordinary
+// text (bg == DefaultBG) blends toward DefaultFG, the Terminal.app behavior.
+// Reverse-video cells (bg == DefaultFG: a vim status line, a man-page heading,
+// or a search match, whose highlight is an inverse) would otherwise be blended
+// with themselves and come out unchanged, showing no selection at all; those
+// blend back toward DefaultBG instead.
+func (g *grid) selectionBG(bg gui.Color) gui.Color {
+	target := g.Theme.DefaultFG
+	if chanDist(bg, target) < chanDist(bg, g.Theme.DefaultBG) {
+		target = g.Theme.DefaultBG
+	}
+	return gui.RGB(
+		mixChannel(bg.R, target.R),
+		mixChannel(bg.G, target.G),
+		mixChannel(bg.B, target.B),
+	)
+}
+
+// highlightSelected rewrites a cell so it renders as selected. The cell's
+// resolved foreground (inverse already applied) is frozen into FG as a direct
+// RGB value and BG becomes the blended selection tint, so every downstream
+// consumer — bgOf, cellRunKey, emitCell — sees ordinary colors and needs no
+// selection-specific branch. attrInverse is cleared because it has already
+// been resolved here; leaving it set would swap the two colors back.
+func (g *grid) highlightSelected(c cell) cell {
+	fg := g.fgOf(c)
+	bg := g.selectionBG(g.bgOf(c))
+	c.Attrs &^= attrInverse
+	c.FG = rgbColor(fg.R, fg.G, fg.B)
+	c.BG = rgbColor(bg.R, bg.G, bg.B)
+	return c
+}
+
 // SetPaletteColor overrides palette entry idx with an OSC 4 color. c must
 // be an rgbColor-tagged packed value. The override layer is allocated on
 // first use, so sessions that never see OSC 4 pay nothing. Marks all rows

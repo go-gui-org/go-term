@@ -825,3 +825,114 @@ func TestPrepareSelection_EmptySpanNotHighlighted(t *testing.T) {
 		t.Errorf("row 0 span: got %+v, want full row", rb)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// selection highlight — tint, not inversion
+// ---------------------------------------------------------------------------
+
+// TestResolveCell_SelectionTintKeepsForeground verifies the Terminal.app-style
+// highlight: a selected cell keeps its own foreground color and only its
+// background moves, blended toward the theme foreground. The old behavior
+// (toggling attrInverse) swapped fg/bg and destroyed the text color.
+func TestResolveCell_SelectionTintKeepsForeground(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.Cells[0].Ch = 'A'
+	g.Cells[0].FG = rgbColor(255, 0, 0) // red text on default bg
+	g.SelActive = true
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 0, Col: 1}
+
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	tm.prepareSelection(ds)
+	sel := ds.resolveCell(0, 0)
+
+	if got, want := g.fgOf(sel), gui.RGB(255, 0, 0); got != want {
+		t.Errorf("selected fg: got %+v, want unchanged %+v", got, want)
+	}
+	plainBG := g.Theme.DefaultBG
+	selBG := g.bgOf(sel)
+	if selBG == plainBG {
+		t.Errorf("selected bg unchanged (%+v); expected tinted", selBG)
+	}
+	if want := g.selectionBG(plainBG); selBG != want {
+		t.Errorf("selected bg: got %+v, want %+v", selBG, want)
+	}
+	if sel.Attrs&attrInverse != 0 {
+		t.Error("selection must not leave attrInverse set")
+	}
+}
+
+// TestHighlightSelected_InverseCellResolvedFirst verifies a cell already
+// carrying SGR 7 has its inverse materialized before the tint is applied, so
+// the highlight does not read as un-inverted text.
+func TestHighlightSelected_InverseCellResolvedFirst(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	c := cell{Ch: 'A', FG: rgbColor(255, 0, 0), BG: rgbColor(0, 0, 255), Attrs: attrInverse, Width: 1}
+	sel := g.highlightSelected(c)
+
+	if got, want := g.fgOf(sel), gui.RGB(0, 0, 255); got != want {
+		t.Errorf("inverse fg: got %+v, want the cell's bg %+v", got, want)
+	}
+	if got, want := g.bgOf(sel), g.selectionBG(gui.RGB(255, 0, 0)); got != want {
+		t.Errorf("inverse bg: got %+v, want tint over the cell's fg %+v", got, want)
+	}
+}
+
+// TestSelectionBG_TintAlwaysVisible pins the blend-target choice. A cell whose
+// background already *is* the theme foreground (every reverse-video cell) must
+// not be blended with itself — that would leave the background untouched and
+// the selection invisible. Both theme endpoints must move.
+func TestSelectionBG_TintAlwaysVisible(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+
+	for _, tc := range []struct {
+		name string
+		bg   gui.Color
+	}{
+		{"default background", g.Theme.DefaultBG},
+		{"default foreground (reverse video)", g.Theme.DefaultFG},
+	} {
+		got := g.selectionBG(tc.bg)
+		if got == tc.bg {
+			t.Errorf("%s: selectionBG(%+v) unchanged; selection would be invisible",
+				tc.name, tc.bg)
+		}
+	}
+}
+
+// TestResolveCell_SearchMatchThenSelectionStillTints covers the overlap case:
+// a cell that is both a search match (rendered inverse) and selected. The two
+// effects must compose, not cancel — the match keeps its inverted colors and
+// the selection tint is still applied on top of them.
+func TestResolveCell_SearchMatchThenSelectionStillTints(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.Cells[0].Ch = 'A'
+	g.SelActive = true
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 0, Col: 1}
+
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	ds.vMatchesByRow = make([][]vMatch, g.Rows)
+	ds.vMatchesByRow[0] = []vMatch{{col: 0, len: 1}}
+	tm.prepareSelection(ds)
+	sel := ds.resolveCell(0, 0)
+
+	// Inverse of a default cell puts DefaultFG in the background; the tint then
+	// has to move it, otherwise selecting a search hit shows no highlight.
+	matchBG := g.Theme.DefaultFG
+	if got := g.bgOf(sel); got == matchBG {
+		t.Errorf("selected search match bg: got %+v, want tinted away from %+v",
+			got, matchBG)
+	}
+	if got, want := g.bgOf(sel), g.selectionBG(matchBG); got != want {
+		t.Errorf("selected search match bg: got %+v, want %+v", got, want)
+	}
+	// The match's inverted foreground survives the tint.
+	if got, want := g.fgOf(sel), g.Theme.DefaultBG; got != want {
+		t.Errorf("selected search match fg: got %+v, want %+v", got, want)
+	}
+}
