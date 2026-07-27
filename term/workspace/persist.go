@@ -180,12 +180,17 @@ func restoreWorkspace(w *gui.Window, cfg Cfg, pw persistedWorkspace) (*Workspace
 	ws := &Workspace{
 		w:           w,
 		cfg:         cfg,
+		baseCfg:     cfg,
 		prevOnEvent: w.OnEvent,
 	}
+	// Resolve the config file (and register the command table) before any pane
+	// is built, so restored panes get the configured font, theme, scrollback
+	// and keybindings at construction rather than being corrected afterwards.
+	ws.loadAndApplyConfig()
 
 	for _, pt := range pw.Tabs {
 		tabID := "tab-" + strconv.Itoa(ws.nextTabID)
-		tab, err := newTabFromPersisted(w, cfg, tabID, pt,
+		tab, err := newTabFromPersisted(w, ws.cfg, tabID, pt,
 			ws.onPaneExit, ws.onPaneFocus, ws.onPaneTitle)
 		if err != nil {
 			for _, t := range ws.tabs {
@@ -199,7 +204,6 @@ func restoreWorkspace(w *gui.Window, cfg Cfg, pw persistedWorkspace) (*Workspace
 	}
 
 	w.OnEvent = ws.onWindowEvent
-	ws.registerCommands()
 
 	activeTab := pw.ActiveTab
 	if activeTab < 0 || activeTab >= len(ws.tabs) {

@@ -2250,12 +2250,16 @@ func TestApplyChunk_BellFlashDisabled(t *testing.T) {
 // is the "platform cannot beep" case.
 func newBellTerm(mode BellMode) *Term {
 	g := newGrid(24, 80)
-	return &Term{
+	tm := &Term{
 		grid:   g,
 		parser: newParser(g),
 		cmd:    syncScheduler{},
 		cfg:    Cfg{BellMode: mode, BellFlashDuration: 50 * time.Millisecond},
 	}
+	// ringBell reads the atomic, not cfg — newWithPTY seeds it, and a
+	// hand-built Term has to do the same.
+	tm.bellMode.Store(int32(mode))
+	return tm
 }
 
 func TestRingBell_ModeSelectsFlash(t *testing.T) {

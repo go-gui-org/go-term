@@ -37,13 +37,23 @@ type Cfg struct {
 	// ExitWhenLastShellExits closes the window when the last shell
 	// process exits, rather than replacing it with a fresh tab.
 	ExitWhenLastShellExits bool
+
+	// opts carries the per-Term settings resolved from the config file. The
+	// workspace fills it in; embedders configure these through the config
+	// file, not here.
+	opts termOpts
 }
 
 // Workspace manages a multi-tab, multi-pane terminal workspace.
 // Create via New, render via View, tear down via Close.
 type Workspace struct {
-	w   *gui.Window
-	cfg Cfg
+	w *gui.Window
+	// cfg is the effective config: baseCfg with the config file layered on
+	// top. baseCfg is the embedder's pristine copy, kept so every reload
+	// recomputes from the same starting point — otherwise a setting removed
+	// from the file would stay applied until restart.
+	cfg     Cfg
+	baseCfg Cfg
 
 	tabs      []*Tab
 	activeTab int
@@ -68,10 +78,14 @@ func New(w *gui.Window, cfg Cfg) (*Workspace, error) {
 	ws := &Workspace{
 		w:           w,
 		cfg:         cfg,
+		baseCfg:     cfg,
 		prevOnEvent: w.OnEvent,
 	}
 	w.OnEvent = ws.onWindowEvent
-	ws.registerCommands()
+	// Reads the config file, resolves settings and keybindings, and registers
+	// the command table. Runs before the first tab so panes are built with the
+	// configured font, theme, and scrollback rather than being corrected after.
+	ws.loadAndApplyConfig()
 
 	_, err := ws.addTab()
 	if err != nil {

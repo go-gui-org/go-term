@@ -35,6 +35,30 @@ const (
 	ActionFontReset      Action = "term.font-reset"
 )
 
+// actionSet indexes actionOrder for ParseAction. Built once at init rather
+// than scanned per lookup — a config file naming every action would otherwise
+// be quadratic, and this keeps actionOrder the single list to maintain.
+var actionSet = func() map[Action]struct{} {
+	m := make(map[Action]struct{}, len(actionOrder))
+	for _, a := range actionOrder {
+		m[a] = struct{}{}
+	}
+	return m
+}()
+
+// ParseAction resolves an action name — the full "term."-prefixed form, e.g.
+// "term.copy" — to an Action, reporting whether it names a real one.
+//
+// Config-file parsers need this: KeyMap silently ignores unknown actions (so a
+// map built in code can't panic), which would turn a typo in a user's config
+// into a binding that mysteriously does nothing. Checking here lets the
+// embedder log it instead. Matching is exact; no fuzzy resolution.
+func ParseAction(name string) (Action, bool) {
+	a := Action(name)
+	_, ok := actionSet[a]
+	return a, ok
+}
+
 // KeyMap overrides the default chord for individual Actions. Actions absent
 // from the map keep their defaults. An entry whose gui.Shortcut has Key == 0
 // (gui.KeyInvalid) unbinds the action entirely, so that key reaches the child

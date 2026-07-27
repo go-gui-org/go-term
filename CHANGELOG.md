@@ -8,6 +8,27 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- User config file covering fonts, theme, terminal settings and Term-level
+  keybindings (#94). The existing INI at `~/.config/go-term/config` gains
+  `[font]` (`family`, `size`) and `[general]` (`theme`, `scrollback`, `bell`,
+  `scrollbar`) sections, and `[keybindings]` entries are now namespaced
+  `term.<action>` or `workspace.<command>` — a bare key still means
+  `workspace.`, so existing files keep working. `none` unbinds an action so the
+  key reaches the child process. Collisions are detected across both
+  namespaces, because go-gui's global commands outrank the widget's key
+  handling and would otherwise shadow a `term.*` binding silently.
+  `Cmd+Shift+,` (`Workspace.ReloadConfig`) re-reads the file and applies it to
+  every live pane; a setting removed from the file reverts to the embedder's
+  default. Parse errors are logged per line and never wedge the app.
+  See `docs/config.md`.
+- `term`: live setters for settings that `Cfg` previously fixed at
+  construction — `SetTextStyle`, `SetScrollbackRows`, `SetBellMode`,
+  `SetScrollbarWidth` — plus `ParseAction` for resolving an action name from a
+  config file. `SetTextStyle` clears the runtime font zoom (an absolute size
+  that would otherwise outrank the new configured one); `SetScrollbackRows`
+  trims stored history immediately when shrinking rather than waiting for
+  eviction.
+
 - OSC 1337 `File=` downloads and real argument parsing (#75). The iTerm2
   sequence now carries file transfers (`inline=0`, as sent by `imgcat -d` and
   `it2dl`) in addition to inline images. Transfers are opt-in: embedders set
@@ -69,6 +90,10 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   the palette, so TUI toolkits were quantizing truecolor output.
 
 ### Changed
+
+- `term`: the configured font size (`Cfg.TextStyle.Size`, `SetTextStyle`) is
+  now clamped to the same 4–72 pt bounds the zoom path already enforced, so no
+  caller has to re-derive the limits.
 
 - The OSC 1337 payload cap rose from 4 MiB to 32 MiB of base64 (~24 MiB of
   file data) to leave room for real downloads (#75). A payload that exceeds it

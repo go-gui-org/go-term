@@ -7,15 +7,36 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/term"
 )
 
 // workspaceConfig holds the parsed human config file.
+//
+// Every setting is optional, so each one that has a meaningful zero value
+// carries a companion "has" flag. Reload recomputes the effective config from
+// the embedder's pristine Cfg every time, so a key deleted from the file must
+// be distinguishable from a key set to zero — otherwise removing a line would
+// leave the last-loaded value stuck until restart.
 type workspaceConfig struct {
-	keybindings map[string]string // command suffix → chord string
+	keybindings map[string]string // binding key (namespaced or bare) → chord
+
+	fontFamily string // [font] family
+	theme      string // [general] theme, matched by name against Cfg.Themes
+
+	fontSize   float32       // [font] size, points
+	scrollbar  float32       // [general] scrollbar, px (negative hides)
+	scrollback int           // [general] scrollback rows (negative disables)
+	bell       term.BellMode // [general] bell
+
+	hasFontSize   bool
+	hasScrollback bool
+	hasScrollbar  bool
+	hasBell       bool
 }
 
 const (
@@ -23,6 +44,12 @@ const (
 	maxKeyLen      = 128 // max bytes for a config key
 	maxValLen      = 128 // max bytes for a config value
 )
+
+// maxFontSizeCfg bounds a [font] size entry before it reaches term. term
+// clamps the effective size itself (see Term.style); this only rejects
+// values so far out of range that they read as a typo rather than intent,
+// and keeps the parse error visible in the log.
+const maxFontSizeCfg = 1000
 
 // parseConfig parses an INI-style config file. Collects per-line errors
 // without aborting. The format: [section] headers; key = value pairs;
@@ -58,18 +85,111 @@ func parseConfig(r io.Reader) (workspaceConfig, []error) {
 			errs = append(errs, fmt.Errorf("line %d: key or value too long", lineNum))
 			continue
 		}
-		if section == "keybindings" {
+		// Unknown sections and unknown keys within a known section are
+		// ignored on purpose: a config written for a newer go-term must
+		// still work here, and vice versa.
+		switch section {
+		case "keybindings":
 			if len(cfg.keybindings) >= maxKeybindings {
 				errs = append(errs, fmt.Errorf("line %d: keybinding limit (%d) reached", lineNum, maxKeybindings))
 				continue
 			}
 			cfg.keybindings[key] = val
+		case "font":
+			if err := cfg.setFont(key, val); err != nil {
+				errs = append(errs, fmt.Errorf("line %d: %w", lineNum, err))
+			}
+		case "general":
+			if err := cfg.setGeneral(key, val); err != nil {
+				errs = append(errs, fmt.Errorf("line %d: %w", lineNum, err))
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
 		errs = append(errs, fmt.Errorf("scan: %w", err))
 	}
 	return cfg, errs
+}
+
+// setFont applies one key from the [font] section. A returned error means the
+// value was malformed; the caller logs it and the setting keeps its default.
+// An unrecognized key is not an error — see parseConfig.
+func (c *workspaceConfig) setFont(key, val string) error {
+	switch key {
+	case "family":
+		if val == "" {
+			return fmt.Errorf("font family: empty")
+		}
+		c.fontFamily = val
+	case "size":
+		n, err := strconv.ParseFloat(val, 32)
+		if err != nil {
+			return fmt.Errorf("font size %q: not a number", val)
+		}
+		if n <= 0 || n > maxFontSizeCfg {
+			return fmt.Errorf("font size %v: out of range", n)
+		}
+		c.fontSize, c.hasFontSize = float32(n), true
+	}
+	return nil
+}
+
+// setGeneral applies one key from the [general] section. Same error contract
+// as setFont.
+func (c *workspaceConfig) setGeneral(key, val string) error {
+	switch key {
+	case "theme":
+		if val == "" {
+			return fmt.Errorf("theme: empty")
+		}
+		c.theme = val
+	case "scrollback":
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("scrollback %q: not an integer", val)
+		}
+		// Sign convention and upper bound are term.Cfg.ScrollbackRows':
+		// negative disables, positive clamps. Only the parse is done here.
+		c.scrollback, c.hasScrollback = n, true
+	case "scrollbar":
+		n, err := strconv.ParseFloat(val, 32)
+		if err != nil {
+			return fmt.Errorf("scrollbar %q: not a number", val)
+		}
+		if n > maxScrollbarPx {
+			return fmt.Errorf("scrollbar %v: out of range", n)
+		}
+		c.scrollbar, c.hasScrollbar = float32(n), true
+	case "bell":
+		m, ok := parseBellMode(val)
+		if !ok {
+			return fmt.Errorf("bell %q: want auto|audible|visual|both|none", val)
+		}
+		c.bell, c.hasBell = m, true
+	}
+	return nil
+}
+
+// maxScrollbarPx bounds a [general] scrollbar entry. A thumb wider than this
+// would eat the pane; negative values are legal (they hide the scrollbar).
+const maxScrollbarPx = 100
+
+// parseBellMode maps a config bell value to a term.BellMode.
+func parseBellMode(s string) (term.BellMode, bool) {
+	switch strings.ToLower(s) {
+	case "auto":
+		return term.BellAuto, true
+	case "audible":
+		return term.BellAudible, true
+	case "visual":
+		return term.BellVisual, true
+	case "both":
+		return term.BellBoth, true
+	case "none", "off":
+		return term.BellNone, true
+	default:
+		return term.BellAuto, false
+	}
 }
 
 const maxShortcutLen = 64 // "Cmd+Ctrl+Alt+Shift+F25" is ~22 chars; 64 is generous
@@ -210,23 +330,117 @@ func loadConfig(cfg Cfg) workspaceConfig {
 	return parsed
 }
 
-// applyKeybindingOverrides applies config-file keybinding overrides to cmds
-// in place. Entries in kb map command suffix → chord string. Unknown command
-// names, unparseable chords, and shortcut collisions are logged; defaults
-// are kept for those entries.
-func applyKeybindingOverrides(cmds []gui.Command, kb map[string]string) {
-	if len(kb) == 0 {
-		return
+// termOpts are the per-Term settings the config file can override. They live
+// on Cfg (unexported) rather than in a separate parameter so that a single
+// "effective Cfg" object flows to every pane, the way Cfg.TextStyle already
+// does — no second channel for tabs and panes to keep in sync.
+type termOpts struct {
+	// theme is nil when the config names no theme (or names an unknown one),
+	// in which case panes keep term's own default: Cfg.Themes[0].
+	theme *term.Theme
+
+	keys       term.KeyMap
+	scrollback int
+	scrollbar  float32
+	bell       term.BellMode
+}
+
+// applySettings returns base with the config file's [font] and [general]
+// values layered on top, plus the resolved term.* keybindings.
+//
+// base must be the embedder's *pristine* Cfg, never a previously-resolved one:
+// a reload recomputes from scratch, so deleting a key from the file restores
+// the embedder's default rather than leaving the last-loaded value in place.
+func applySettings(base Cfg, fc workspaceConfig, keys term.KeyMap) Cfg {
+	out := base
+	if fc.fontFamily != "" {
+		out.TextStyle.Family = fc.fontFamily
 	}
+	if fc.hasFontSize {
+		out.TextStyle.Size = fc.fontSize
+	}
+	out.opts = termOpts{keys: keys}
+	if fc.hasScrollback {
+		out.opts.scrollback = fc.scrollback
+	}
+	if fc.hasScrollbar {
+		out.opts.scrollbar = fc.scrollbar
+	}
+	if fc.hasBell {
+		out.opts.bell = fc.bell
+	}
+	if fc.theme != "" {
+		if th, ok := findTheme(base.Themes, fc.theme); ok {
+			out.opts.theme = &th
+		} else {
+			log.Printf("workspace: unknown theme %q in config; keeping default", fc.theme)
+		}
+	}
+	return out
+}
+
+// findTheme looks up a theme by display name, case-insensitively so a config
+// file need not reproduce the exact capitalization of "Catppuccin Mocha".
+func findTheme(themes []term.NamedTheme, name string) (term.Theme, bool) {
+	for _, nt := range themes {
+		if strings.EqualFold(nt.Name, name) {
+			return nt.Theme, true
+		}
+	}
+	return term.Theme{}, false
+}
+
+// termPrefix / workspacePrefix namespace a [keybindings] entry. A key with
+// neither prefix is treated as workspace.*, which is what bare keys meant
+// before the term.* namespace existed; only the explicit forms are documented.
+const (
+	termPrefix      = "term."
+	workspacePrefix = "workspace."
+)
+
+// unbindValue is the chord value that removes a binding instead of moving it,
+// so a key the terminal intercepts can be handed back to the child process.
+const unbindValue = "none"
+
+// applyKeybindingOverrides applies config-file keybinding overrides to cmds in
+// place and returns the term.KeyMap for the term.* entries. Unknown names,
+// unparseable chords, and shortcut collisions are logged; the affected entry
+// keeps its default.
+//
+// Workspace entries are resolved first, then term entries are checked against
+// the *resulting* command shortcuts. That order matters: go-gui's global
+// command registry runs before the focused widget's onKeyDown, so a term.*
+// binding shadowed by a workspace command would never fire — silently, since
+// the workspace command would just run instead. Rejecting the collision keeps
+// the term default working and puts the conflict in the log.
+func applyKeybindingOverrides(cmds []gui.Command, kb map[string]string) term.KeyMap {
+	if len(kb) == 0 {
+		return nil
+	}
+	applyWorkspaceBindings(cmds, kb)
+	return termBindings(cmds, kb)
+}
+
+// applyWorkspaceBindings rewrites the shortcuts of the workspace.* commands
+// named in kb. Bare (unprefixed) keys are workspace commands too.
+func applyWorkspaceBindings(cmds []gui.Command, kb map[string]string) {
 	byID := make(map[string]int, len(cmds))
 	for i, cmd := range cmds {
 		byID[cmd.ID] = i
 	}
-	for suffix, chord := range kb {
-		fullID := "workspace." + suffix
+	for key, chord := range kb {
+		if strings.HasPrefix(key, termPrefix) {
+			continue
+		}
+		fullID := strings.TrimPrefix(key, workspacePrefix)
+		fullID = workspacePrefix + fullID
 		idx, ok := byID[fullID]
 		if !ok {
 			log.Printf("workspace: unknown command %q in config", fullID)
+			continue
+		}
+		if strings.EqualFold(chord, unbindValue) {
+			cmds[idx].Shortcut = gui.Shortcut{}
 			continue
 		}
 		sc, ok := parseShortcut(chord)
@@ -237,7 +451,7 @@ func applyKeybindingOverrides(cmds []gui.Command, kb map[string]string) {
 		// Detect collision with any other command's current shortcut.
 		collision := false
 		for i, cmd := range cmds {
-			if i != idx && cmd.Shortcut == sc {
+			if i != idx && cmd.Shortcut.IsSet() && cmd.Shortcut == sc {
 				log.Printf("workspace: shortcut %q for %q collides with %q; keeping default", chord, fullID, cmd.ID)
 				collision = true
 				break
@@ -247,4 +461,61 @@ func applyKeybindingOverrides(cmds []gui.Command, kb map[string]string) {
 			cmds[idx].Shortcut = sc
 		}
 	}
+}
+
+// termBindings builds the term.KeyMap for the term.* entries in kb, rejecting
+// any chord already claimed by a workspace command or by an earlier term
+// entry. Returns nil when no term.* entry survives, which leaves every Term
+// binding at its built-in default.
+func termBindings(cmds []gui.Command, kb map[string]string) term.KeyMap {
+	var km term.KeyMap
+	// Map iteration order is random, so a chord claimed by two term entries
+	// would otherwise pick a winner nondeterministically. Sorting makes the
+	// rejection (and its log line) reproducible.
+	keys := make([]string, 0, len(kb))
+	for key := range kb {
+		if strings.HasPrefix(key, termPrefix) {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+
+	taken := make(map[gui.Shortcut]string, len(cmds))
+	for _, cmd := range cmds {
+		if cmd.Shortcut.IsSet() {
+			taken[cmd.Shortcut] = cmd.ID
+		}
+	}
+	for _, key := range keys {
+		action, ok := term.ParseAction(key)
+		if !ok {
+			log.Printf("workspace: unknown terminal action %q in config", key)
+			continue
+		}
+		chord := kb[key]
+		if strings.EqualFold(chord, unbindValue) {
+			// The zero Shortcut is term's "unbind" sentinel: the key falls
+			// through to the child process.
+			if km == nil {
+				km = make(term.KeyMap)
+			}
+			km[action] = gui.Shortcut{}
+			continue
+		}
+		sc, ok := parseShortcut(chord)
+		if !ok {
+			log.Printf("workspace: cannot parse shortcut %q for %q", chord, key)
+			continue
+		}
+		if owner, dup := taken[sc]; dup {
+			log.Printf("workspace: shortcut %q for %q collides with %q; keeping default", chord, key, owner)
+			continue
+		}
+		taken[sc] = key
+		if km == nil {
+			km = make(term.KeyMap)
+		}
+		km[action] = sc
+	}
+	return km
 }

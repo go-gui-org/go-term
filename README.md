@@ -9,6 +9,29 @@ covers the protocol surface expected by modern CLI tools and TUI frameworks.
 
 Targets macOS, Linux, and Windows (ConPTY).
 
+## Configuration
+
+Fonts, theme, scrollback, bell, scrollbar and every keyboard shortcut can be
+set in an optional INI file at `~/.config/go-term/config`, reloadable at
+runtime with `Cmd+Shift+,`:
+
+```ini
+[font]
+family = JetBrainsMono NFM
+size   = 13
+
+[general]
+theme      = Tokyo Night
+scrollback = 20000
+
+[keybindings]
+workspace.splitVertical = Cmd+D
+term.find               = Cmd+G
+```
+
+See [docs/config.md](docs/config.md) for every section, key, default, and the
+full list of rebindable actions.
+
 ## Session recording
 
 Record a terminal session to a `.gtr` file and play it back through the

@@ -5,12 +5,13 @@ import (
 	"strconv"
 
 	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/term"
 )
 
-// registerCommands registers all workspace keyboard shortcuts on the window.
-// All commands use Global: true so they fire before the focused terminal
-// consumes the key.
-func (ws *Workspace) registerCommands() {
+// buildCommands returns the workspace command table with built-in shortcuts,
+// before any config-file overrides. All commands use Global: true so they fire
+// before the focused terminal consumes the key.
+func (ws *Workspace) buildCommands() []gui.Command {
 	cmds := []gui.Command{
 		// Split pane.
 		{
@@ -161,6 +162,15 @@ func (ws *Workspace) registerCommands() {
 			CanExecute: func(_ *gui.Window) bool { return ws.themePickerVisible },
 			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themePickerConfirm() },
 		},
+		// Config reload. Cmd+, is deliberately left free for a future
+		// settings UI, so the reload lives on the Shift variant.
+		{
+			ID:       "workspace.reloadConfig",
+			Label:    "Reload Config",
+			Shortcut: gui.Shortcut{Key: gui.KeyComma, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ReloadConfig() },
+		},
 		// Help overlay.
 		{
 			ID:       "workspace.toggleHelp",
@@ -203,11 +213,97 @@ func (ws *Workspace) registerCommands() {
 	for i := range cmds {
 		cmds[i].Shortcut.Modifiers = remapMod(cmds[i].Shortcut.Modifiers)
 	}
-	// Apply any [keybindings] overrides from the config file before
-	// registering, so the help overlay reflects live bindings.
-	kbCfg := loadConfig(ws.cfg)
-	applyKeybindingOverrides(cmds, kbCfg.keybindings)
+	return cmds
+}
 
+// loadAndApplyConfig re-reads the config file and rebuilds everything derived
+// from it: the workspace command table (registered on the window), the term.*
+// keybindings, and the effective Cfg used to build panes.
+//
+// It does not touch live panes — ReloadConfig does that, so New can call this
+// before any pane exists.
+func (ws *Workspace) loadAndApplyConfig() {
+	fc := loadConfig(ws.baseCfg)
+	cmds := ws.buildCommands()
+	// Overrides are applied before registering so the help overlay, which
+	// reads ws.commands, reflects the live bindings.
+	keys := applyKeybindingOverrides(cmds, fc.keybindings)
+	ws.cfg = applySettings(ws.baseCfg, fc, keys)
+	ws.installCommands(cmds)
+}
+
+// ReloadConfig re-reads the config file and applies it to the running
+// workspace: command shortcuts are re-registered and every live pane is
+// updated in place. Bound to Cmd+Shift+, by default.
+//
+// Parse errors are logged and the offending setting keeps its current value —
+// a malformed config must never wedge the app. Settings that did not change
+// are not pushed to panes, so a reload triggered for one key doesn't disturb
+// unrelated per-pane state (notably font zoom, which SetTextStyle resets).
+func (ws *Workspace) ReloadConfig() {
+	prev := ws.cfg
+	ws.loadAndApplyConfig()
+	ws.applyTermSettings(prev)
+	ws.refresh()
+}
+
+// applyTermSettings pushes the settings that changed between prev and the
+// current effective Cfg to every live pane in every tab.
+func (ws *Workspace) applyTermSettings(prev Cfg) {
+	cur := ws.cfg
+	styleChanged := prev.TextStyle != cur.TextStyle
+	// A theme removed from the config reverts to the embedder's first theme,
+	// which is what term applies to a brand-new pane.
+	newTheme, hasTheme := effectiveTheme(cur)
+	oldTheme, hadTheme := effectiveTheme(prev)
+	themeChanged := hasTheme && (!hadTheme || newTheme != oldTheme)
+
+	for _, tab := range ws.tabs {
+		for _, tm := range tab.terms {
+			if styleChanged {
+				tm.SetTextStyle(cur.TextStyle)
+			}
+			if themeChanged {
+				tm.SetTheme(newTheme)
+			}
+			if prev.opts.scrollback != cur.opts.scrollback {
+				tm.SetScrollbackRows(cur.opts.scrollback)
+			}
+			if prev.opts.bell != cur.opts.bell {
+				tm.SetBellMode(cur.opts.bell)
+			}
+			if prev.opts.scrollbar != cur.opts.scrollbar {
+				tm.SetScrollbarWidth(cur.opts.scrollbar)
+			}
+			// KeyMap is a map, so it can't be compared for equality cheaply;
+			// re-seeding is idempotent (mergeBindings rebuilds from the
+			// defaults each time) and costs one small map per pane.
+			tm.SetKeyBindings(cur.opts.keys)
+		}
+	}
+	ws.w.UpdateWindow()
+}
+
+// effectiveTheme returns the theme a new pane would start with: the one named
+// in the config file, else the embedder's first configured theme.
+func effectiveTheme(cfg Cfg) (term.Theme, bool) {
+	if cfg.opts.theme != nil {
+		return *cfg.opts.theme, true
+	}
+	if len(cfg.Themes) > 0 {
+		return cfg.Themes[0].Theme, true
+	}
+	return term.Theme{}, false
+}
+
+// installCommands registers cmds on the window, replacing any previously
+// registered table (a config reload re-registers everything).
+func (ws *Workspace) installCommands(cmds []gui.Command) {
+	// Unregister the previous table first: the registry rejects duplicate
+	// IDs, so a reload would otherwise keep the stale shortcuts.
+	for i := range ws.commands {
+		ws.w.UnregisterCommand(ws.commands[i].ID)
+	}
 	// Retain Label+Shortcut metadata so the help overlay renders the live
 	// bindings rather than a hand-maintained copy. The tab 1–9 commands
 	// carry no Label and are skipped by the overlay.

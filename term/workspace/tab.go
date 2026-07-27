@@ -38,6 +38,7 @@ func newTab(
 	if err != nil {
 		return nil, err
 	}
+	applyPaneTheme(tm, cfg)
 	t.terms[leafID] = tm
 	t.titles[leafID] = leafID
 	t.focused = leafID
@@ -62,6 +63,10 @@ func (t *Tab) termCfg(
 		Dir:             dir,
 		RecordInput:     cfg.RecordInput,
 		DownloadDir:     cfg.DownloadDir,
+		ScrollbackRows:  cfg.opts.scrollback,
+		ScrollbarWidth:  cfg.opts.scrollbar,
+		BellMode:        cfg.opts.bell,
+		KeyBindings:     cfg.opts.keys,
 		OnTitle: func(title string) {
 			w.QueueCommand(func(w *gui.Window) {
 				t.titles[panelID] = title
@@ -98,12 +103,23 @@ func (t *Tab) addPane(
 	if err != nil {
 		return err
 	}
+	applyPaneTheme(tm, cfg)
 	if fontSize > 0 {
 		tm.SetFontSize(fontSize)
 	}
 	t.terms[leafID] = tm
 	t.titles[leafID] = leafID
 	return nil
+}
+
+// applyPaneTheme applies the config file's [general] theme to a freshly built
+// pane. term seeds a new Term from Cfg.Themes[0]; the config names a different
+// entry of that same list, applied here rather than by reordering Themes —
+// which would also reorder the theme picker the user sees.
+func applyPaneTheme(tm *term.Term, cfg Cfg) {
+	if cfg.opts.theme != nil {
+		tm.SetTheme(*cfg.opts.theme)
+	}
 }
 
 // removePane closes a Term and removes it from the tab's state.

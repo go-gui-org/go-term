@@ -47,7 +47,9 @@ term/gotermrec/          CLI over a recording: info/cat/play/fixture/export.
 Public API: `Cfg`, `Term`, `Theme`, `NamedTheme`, `New`, `View`, `Close`, `Cwd`,
 `SetTheme`, `Rows`, `Cols`, `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`,
 `ShortcutInfo`/`Shortcuts` (help overlay), `ThemeMenuItems`,
-`Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings` (rebindable shortcuts),
+`Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings`/`ParseAction` (rebindable
+shortcuts), `SetTextStyle`/`SetScrollbackRows`/`SetBellMode`/`SetScrollbarWidth`
+(live settings),
 `StartRecording`/`StopRecording`/`Recording`, `NewReplay`/`ReplayCfg`.
 
 ## Upcoming
@@ -65,6 +67,23 @@ real `Term`. Duplicate issue #76 covers the same work.
       controls routed through the pty write path
 - [x] `term/gotermrec`: info / cat / play / fixture / export -cast
 - [x] falcon `--record` / `--replay`, workspace `Cmd+Shift+R`, `● REC` pill
+
+### Phase 46 — User config file (issue #94)
+
+Extend the existing `~/.config/go-term/config` INI — which already carried
+`[keybindings]` — to cover fonts, theme, and terminal settings, and make
+everything it sets reloadable at runtime. Follow-up to #79/#93, which made
+Term-level shortcuts rebindable but left serialization out of `term.Cfg`.
+
+- [x] Parser: `[font]` / `[general]` sections, typed values, forgiving posture
+      (unknown sections/keys ignored, malformed values logged, valid lines kept)
+- [x] Keybinding routing: `term.*` vs `workspace.*` namespaces, bare key still
+      means `workspace.*`, `none` unbinds, collision detection across both
+- [x] `term`: `SetTextStyle` (clears the zoom override), `SetScrollbackRows`
+      (trims existing rows), `SetBellMode`, `SetScrollbarWidth`, `ParseAction`
+- [x] Settings applied when building each pane; theme resolved by name
+- [x] `workspace.reloadConfig` (`Cmd+Shift+,`) + `Workspace.ReloadConfig`
+- [x] `docs/config.md`, linked from README
 
 ### Phase 40 — Tab reordering
 
