@@ -306,7 +306,7 @@ func TestScrollbackIntercept_PageUp_Scrolls(t *testing.T) {
 	term.grid.Scrollback.Push([]cell{}, false)
 	term.grid.ViewOffset = 1
 	e := &gui.Event{KeyCode: gui.KeyPageUp}
-	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift), e.Modifiers.Has(gui.ModCtrl))
+	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift))
 	if !intercepted {
 		t.Error("PageUp should be intercepted when scrollback is available")
 	}
@@ -321,7 +321,7 @@ func TestScrollbackIntercept_PageDown_Scrolls(t *testing.T) {
 	term.grid.Scrollback.Push([]cell{}, false)
 	term.grid.ViewOffset = 1
 	e := &gui.Event{KeyCode: gui.KeyPageDown}
-	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift), e.Modifiers.Has(gui.ModCtrl))
+	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift))
 	if !intercepted {
 		t.Error("PageDown should be intercepted when scrolled back")
 	}
@@ -331,7 +331,7 @@ func TestScrollbackIntercept_PageUp_AltScreen_PassesThrough(t *testing.T) {
 	term, _ := newKeyboardTerm(24, 80)
 	term.grid.AltActive = true
 	e := &gui.Event{KeyCode: gui.KeyPageUp}
-	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift), e.Modifiers.Has(gui.ModCtrl))
+	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift))
 	if intercepted {
 		t.Error("plain PageUp should pass through in alt screen")
 	}
@@ -341,7 +341,7 @@ func TestScrollbackIntercept_ShiftPageUp_AltScreen_Scrolls(t *testing.T) {
 	term, _ := newKeyboardTerm(24, 80)
 	term.grid.AltActive = true
 	e := &gui.Event{KeyCode: gui.KeyPageUp, Modifiers: gui.ModShift}
-	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift), e.Modifiers.Has(gui.ModCtrl))
+	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift))
 	if !intercepted {
 		t.Error("Shift+PageUp should scroll even in alt screen")
 	}
@@ -353,7 +353,7 @@ func TestScrollbackIntercept_ShiftHome_ScrollsToTop(t *testing.T) {
 	term.grid.Scrollback.Push([]cell{}, false)
 	term.grid.ViewOffset = 1
 	e := &gui.Event{KeyCode: gui.KeyHome, Modifiers: gui.ModShift}
-	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift), e.Modifiers.Has(gui.ModCtrl))
+	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift))
 	if !intercepted {
 		t.Error("Shift+Home should scroll to top")
 	}
@@ -362,7 +362,7 @@ func TestScrollbackIntercept_ShiftHome_ScrollsToTop(t *testing.T) {
 func TestScrollbackIntercept_Home_Normal_NotIntercepted(t *testing.T) {
 	term, _ := newKeyboardTerm(24, 80)
 	e := &gui.Event{KeyCode: gui.KeyHome}
-	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift), e.Modifiers.Has(gui.ModCtrl))
+	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift))
 	if intercepted {
 		t.Error("plain Home should not be intercepted")
 	}
@@ -371,7 +371,7 @@ func TestScrollbackIntercept_Home_Normal_NotIntercepted(t *testing.T) {
 func TestScrollbackIntercept_NotScrollKey(t *testing.T) {
 	term, _ := newKeyboardTerm(24, 80)
 	e := &gui.Event{KeyCode: gui.KeyA}
-	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift), e.Modifiers.Has(gui.ModCtrl))
+	intercepted := term.scrollbackIntercept(e, nil, e.Modifiers.Has(gui.ModShift))
 	if intercepted {
 		t.Error("letter A should not be intercepted")
 	}

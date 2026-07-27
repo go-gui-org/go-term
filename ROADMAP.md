@@ -47,6 +47,7 @@ term/gotermrec/          CLI over a recording: info/cat/play/fixture/export.
 Public API: `Cfg`, `Term`, `Theme`, `NamedTheme`, `New`, `View`, `Close`, `Cwd`,
 `SetTheme`, `Rows`, `Cols`, `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`,
 `ShortcutInfo`/`Shortcuts` (help overlay), `ThemeMenuItems`,
+`Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings` (rebindable shortcuts),
 `StartRecording`/`StopRecording`/`Recording`, `NewReplay`/`ReplayCfg`.
 
 ## Upcoming
@@ -82,6 +83,7 @@ Every exported symbol gets a deliberate reason and complete doc comment.
 
 **term:**
 - `Cfg`, `New`, `Term`, `Theme`, `NamedTheme`, predef themes, `ShortcutInfo`, `Shortcuts`, `ThemeMenuItems` — keep
+- `Action` + action constants, `KeyMap`, `Cfg.KeyBindings`, `Term.SetKeyBindings`, `Term.KeyBindings`, `Term.Shortcuts` — keep
 - `MaxGridDim`, `MaxScrollbackCap` — keep
 - `DefaultColor` — unexport (internal encoding detail)
 - `Fixture`, `CaptureFixture` — keep with doc disclaimer, or move to `term/termtest` with deprecation shim

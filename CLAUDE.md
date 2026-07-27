@@ -72,9 +72,16 @@ input) lives in `term/CLAUDE.md`, loaded when working under `term/`.
   `Theme`, `BellMode`, `New`, `View`, `Close`, `Cwd`, `SetTheme`, `Rows`,
   `Cols`, `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`,
   `StartRecording`/`StopRecording`/`Recording`, `NewReplay`/`ReplayCfg`, plus
-  `Shortcuts`/`ShortcutInfo` (display metadata for help overlays). Keep it
-  that way; add unexported helpers freely. The recording *format* stays in
-  `internal/recfmt` precisely so it never becomes public API.
+  `Shortcuts`/`ShortcutInfo` (display metadata for help overlays) and
+  `Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings` (rebindable Term-level
+  shortcuts). Keep it that way; add unexported helpers freely. The recording
+  *format* stays in `internal/recfmt` precisely so it never becomes public API.
+- Keyboard shortcuts resolve through the binding table in `shortcuts.go`
+  (`defaultBindings`/`mergeBindings`), which is the single source of truth for
+  both matching and the help overlay. The table decides only *whether a chord
+  matched*; conditional passthrough to the child (no-selection Ctrl+C, alt-screen
+  PageUp) stays in the handlers. `Cfg.KeyBindings` seeds it, `SetKeyBindings`
+  replaces it — both via `mergeBindings`, so they can't diverge.
 - Performance target: reduce heap allocations. The OnDraw hot path
   must not allocate per cell — keep `string(rune)` conversions and
   slice growth out of the inner loop if perf work begins.
