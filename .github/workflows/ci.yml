@@ -86,6 +86,57 @@ jobs:
         working-directory: go-term
         run: go test -race -count=1 ./...
 
+  windows-test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout go-term
+        uses: actions/checkout@v4
+        with:
+          path: go-term
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
+
+      # No system deps step: unlike the Linux/macOS jobs, nothing below the GUI
+      # backend needs SDL2/freetype/harfbuzz. The ConPTY layer (pty_windows.go)
+      # is pure-Go syscalls over golang.org/x/sys/windows, and go-glyph's
+      # shaping stack is pure Go, so CGO_ENABLED=0 covers term/ and internal/
+      # end to end. Disabling cgo also keeps these steps independent of the
+      # runner image's mingw toolchain.
+      - name: Vet
+        working-directory: go-term
+        env:
+          CGO_ENABLED: "0"
+        run: go vet ./term/... ./internal/...
+
+      - name: Build
+        working-directory: go-term
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./term/... ./internal/...
+
+      # Runs the real ConPTY code path — pty_windows.go spawns a child through
+      # a pseudoconsole on the runner. No -race: the Linux and macOS jobs cover
+      # the race detector, and enabling it here would reintroduce the gcc
+      # dependency that CGO_ENABLED=0 avoids.
+      - name: Test
+        working-directory: go-term
+        env:
+          CGO_ENABLED: "0"
+        run: go test -count=1 ./term/... ./internal/...
+
+      # The GUI backend needs cgo (go-gl) and is unproven on windows-latest, so
+      # it reports without gating merges. Once it has been green for a while,
+      # drop continue-on-error and fold it into the required steps.
+      - name: Build falcon (informational)
+        continue-on-error: true
+        working-directory: go-term
+        run: go build ./examples/falcon
+
   lint:
     runs-on: ubuntu-latest
     steps:
