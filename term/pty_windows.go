@@ -6,10 +6,18 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+// pipeDrainGrace bounds how long the console output pipe stays open after the
+// child exits, so a reader that never sees EOF cannot block forever. Only a
+// backstop: conhost normally closes its write end as soon as the console is
+// gone, and the reader hits EOF well inside this window. Shell-exit detection
+// does not wait on this — that is driven by the reader reaching EOF.
+const pipeDrainGrace = 5 * time.Second
 
 // ptyDev drives a child shell through a Windows pseudoconsole (ConPTY).
 // ConPTY does not expose a single bidirectional fd like a Unix master, so
@@ -25,7 +33,12 @@ type ptyDev struct {
 	thread windows.Handle // child primary thread handle
 	pid    int
 
-	closeOnce sync.Once
+	// Two gates, deliberately separate: the console and the input pipe go
+	// down as soon as the child exits, while the output read end must outlive
+	// it so buffered output can still be drained. See the wait goroutine in
+	// startPTY.
+	consoleOnce sync.Once
+	outOnce     sync.Once
 }
 
 // startPTY spawns the configured shell (default $env:ComSpec, fallback
@@ -169,9 +182,21 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	// down so the reader goroutine's Read returns and readDone closes (drives
 	// Alive() and ExitWhenLastShellExits). This goroutine owns the process and
 	// thread handles.
+	//
+	// The output read end is deliberately left open here. conhost renders the
+	// console into that pipe from its own process, asynchronously, so bytes
+	// the child already produced can still be in flight when the process
+	// object signals. Closing the read end at that moment discards them —
+	// which truncated the tail of a session's output roughly half the time
+	// (the shell's last command output vanishing right before exit). Closing
+	// the console instead makes conhost finish and close its write end, so the
+	// reader drains what is buffered and then sees a natural EOF.
 	go func() {
 		_, _ = windows.WaitForSingleObject(p.proc, windows.INFINITE)
-		p.release()
+		p.shutdownConsole()
+		// Backstop only, so a reader cannot park forever if conhost never
+		// closes its end. The normal path is EOF long before this fires.
+		time.AfterFunc(pipeDrainGrace, p.closeOutput)
 		_ = windows.CloseHandle(p.thread)
 		_ = windows.CloseHandle(p.proc)
 	}()
@@ -179,14 +204,24 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	return p, nil
 }
 
-// release closes the pseudoconsole and the process-owned pipe ends exactly
-// once. Closing the console terminates the attached child and unblocks a
-// reader parked in Read.
-func (p *ptyDev) release() {
-	p.closeOnce.Do(func() {
+// shutdownConsole closes the pseudoconsole and the input pipe exactly once.
+// Closing the console terminates an attached child and tells conhost to
+// finish, after which it closes its end of the output pipe and a reader
+// parked in Read sees EOF. The output read end is left alone — closeOutput
+// owns it — so output already buffered survives to be read.
+func (p *ptyDev) shutdownConsole() {
+	p.consoleOnce.Do(func() {
 		windows.ClosePseudoConsole(p.hpc)
-		_ = p.file.Close()
 		_ = p.in.Close()
+	})
+}
+
+// closeOutput closes the console output read end exactly once, unblocking any
+// reader still parked in Read. Callers that want the buffered output first
+// must let the reader drain to EOF before calling this.
+func (p *ptyDev) closeOutput() {
+	p.outOnce.Do(func() {
+		_ = p.file.Close()
 	})
 }
 
@@ -202,11 +237,14 @@ func (p *ptyDev) Resize(rows, cols int) error {
 	return windows.ResizePseudoConsole(p.hpc, coordSize(rows, cols))
 }
 
-// Close tears down the console, which terminates the child. Safe to call
-// repeatedly; the wait goroutine reaps the process and thread handles once
-// WaitForSingleObject returns.
+// Close tears down the console, which terminates the child, and closes the
+// output pipe. Unlike the child-exit path this does not wait to drain: the
+// caller is discarding the terminal, so pending output has nowhere to go.
+// Safe to call repeatedly; the wait goroutine reaps the process and thread
+// handles once WaitForSingleObject returns.
 func (p *ptyDev) Close() error {
-	p.release()
+	p.shutdownConsole()
+	p.closeOutput()
 	return nil
 }
 
