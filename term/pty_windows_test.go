@@ -23,30 +23,47 @@ func TestPTY_WindowsEcho(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	got := make(chan string, 1)
+	// result carries the read error alongside the output. Without the error
+	// a failure is ambiguous: "no marker" reads the same whether the console
+	// produced other text or the child's pipe broke before it echoed
+	// anything, and those have different causes.
+	type result struct {
+		out  string
+		err  error
+		read int
+	}
+
+	got := make(chan result, 1)
 	go func() {
 		var b strings.Builder
 		buf := make([]byte, 4096)
+		reads := 0
 		for {
 			n, err := p.Read(buf)
 			if n > 0 {
+				reads++
 				b.Write(buf[:n])
 				if strings.Contains(b.String(), marker) {
-					got <- b.String()
+					got <- result{out: b.String(), read: reads}
 					return
 				}
 			}
 			if err != nil {
-				got <- b.String()
+				got <- result{out: b.String(), err: err, read: reads}
 				return
 			}
 		}
 	}()
 
 	select {
-	case out := <-got:
-		if !strings.Contains(out, marker) {
-			t.Errorf("marker %q not found in console output", marker)
+	case r := <-got:
+		if !strings.Contains(r.out, marker) {
+			t.Errorf("marker %q not found in console output\n"+
+				"  read error: %v\n"+
+				"  successful reads: %d\n"+
+				"  bytes received: %d\n"+
+				"  output: %q",
+				marker, r.err, r.read, len(r.out), r.out)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for console output")
