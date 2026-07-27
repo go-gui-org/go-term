@@ -154,13 +154,18 @@ func TestReadLoop_CaptureTeeRecordsRawBytes(t *testing.T) {
 	input := []byte("hello \x1b[31mred\x1b[0m")
 	p := &scriptPty{chunks: [][]byte{input[:6], input[6:]}}
 	g := newGrid(4, 20)
+	rec := recfmt.NewRawRecorder(f)
+	// This Term is built as a literal, so nothing calls Term.Close and its
+	// capture file would stay open. Windows refuses to unlink an open file,
+	// which fails t.TempDir cleanup; Unix does not care. Close it here.
+	defer func() { _ = rec.Close() }()
 	tm := &Term{
 		grid:     g,
 		parser:   newParser(g),
 		cmd:      &gui.Window{},
 		pty:      p,
 		pw:       p,
-		capture:  recfmt.NewRawRecorder(f),
+		capture:  rec,
 		readDone: make(chan struct{}),
 	}
 	go tm.readLoop()
@@ -168,6 +173,11 @@ func TestReadLoop_CaptureTeeRecordsRawBytes(t *testing.T) {
 	case <-tm.readDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("readLoop did not exit")
+	}
+	// Close before reading: the capture must be complete and, on Windows,
+	// released before the deferred TempDir cleanup runs.
+	if err := rec.Close(); err != nil {
+		t.Fatal(err)
 	}
 	got, err := os.ReadFile(f.Name())
 	if err != nil {
