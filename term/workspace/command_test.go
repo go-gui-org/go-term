@@ -10,14 +10,12 @@ import (
 )
 
 // newTestWorkspace builds a Workspace wired to a bare window and an isolated
-// (nonexistent) config path, so registerCommands can be exercised without a
+// (nonexistent) config path, so the command table can be built without a
 // live GUI backend or the developer's real ~/.config file.
 func newTestWorkspace(t *testing.T) *Workspace {
 	t.Helper()
-	return &Workspace{
-		w:   &gui.Window{},
-		cfg: Cfg{ConfigPath: filepath.Join(t.TempDir(), "no-such-config")},
-	}
+	cfg := Cfg{ConfigPath: filepath.Join(t.TempDir(), "no-such-config")}
+	return &Workspace{w: &gui.Window{}, cfg: cfg, baseCfg: cfg}
 }
 
 // TestRegisterCommands_NoDuplicateShortcuts guards the failure mode that
@@ -26,7 +24,7 @@ func newTestWorkspace(t *testing.T) *Workspace {
 // collision drops every command declared after it.
 func TestRegisterCommands_NoDuplicateShortcuts(t *testing.T) {
 	ws := newTestWorkspace(t)
-	ws.registerCommands()
+	ws.loadAndApplyConfig()
 
 	seenShortcut := make(map[gui.Shortcut]string, len(ws.commands))
 	seenID := make(map[string]bool, len(ws.commands))
@@ -51,7 +49,7 @@ func TestRegisterCommands_NoDuplicateShortcuts(t *testing.T) {
 // what dispatches keystrokes.
 func TestRegisterCommands_AllReachRegistry(t *testing.T) {
 	ws := newTestWorkspace(t)
-	ws.registerCommands()
+	ws.loadAndApplyConfig()
 
 	for _, cmd := range ws.commands {
 		if _, ok := ws.w.CommandByID(cmd.ID); !ok {
@@ -65,7 +63,7 @@ func TestRegisterCommands_AllReachRegistry(t *testing.T) {
 // modifier.
 func TestRegisterCommands_TabDigitsBound(t *testing.T) {
 	ws := newTestWorkspace(t)
-	ws.registerCommands()
+	ws.loadAndApplyConfig()
 
 	wantMods := remapMod(gui.ModSuper)
 	for i := 0; i < 9; i++ {
@@ -93,7 +91,7 @@ func TestRegisterCommands_TabDigitsBound(t *testing.T) {
 // command and checks it activates the matching tab.
 func TestRegisterCommands_TabDigitsSelectTab(t *testing.T) {
 	ws := newTestWorkspace(t)
-	ws.registerCommands()
+	ws.loadAndApplyConfig()
 	// Three empty tabs: activateTab only touches Terms when present, and a
 	// nil-map Tab has none, so refresh/focus work stays out of the way.
 	ws.tabs = []*Tab{{}, {}, {}}

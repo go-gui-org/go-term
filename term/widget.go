@@ -641,6 +641,11 @@ type Term struct {
 	// lock — onKeyDown and SetKeyBindings both run there.
 	bindings map[Action]binding
 
+	// bellMode is the live BellMode, seeded from Cfg.BellMode and replaced by
+	// SetBellMode. Atomic rather than a plain cfg read because ringBell runs
+	// on the reader goroutine while the setter runs on the main thread.
+	bellMode atomic.Int32
+
 	// redrawPending coalesces UpdateWindow requests from the reader
 	// goroutine: applyChunk only queues a redraw command when one is not
 	// already in flight, so a burst of PTY reads between frames does not
@@ -724,6 +729,7 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 		capture:     openCapture(seqID),
 	}
 	t.ptyResizeKick = make(chan struct{}, 1)
+	t.bellMode.Store(int32(cfg.BellMode))
 	if s := t.style(); s.Size > 0 {
 		t.fontSize = s.Size
 	}
@@ -1632,6 +1638,11 @@ func (t *Term) onSyncTimeout() {
 
 // style returns the resolved text style for this terminal. When fontSize
 // is non-zero it overrides the configured Size.
+//
+// The result is clamped to [minFontSize, maxFontSize] — the same bounds the
+// zoom path enforces. Doing it here rather than only in AdjustFontSize means a
+// configured size (Cfg.TextStyle, SetTextStyle, a user config file) is bounded
+// too, so no caller has to re-derive the limits.
 func (t *Term) style() gui.TextStyle {
 	ts := t.cfg.TextStyle
 	if ts == (gui.TextStyle{}) {
@@ -1639,6 +1650,9 @@ func (t *Term) style() gui.TextStyle {
 	}
 	if t.fontSize > 0 {
 		ts.Size = t.fontSize
+	}
+	if ts.Size > 0 {
+		ts.Size = clampFontSize(ts.Size)
 	}
 	return ts
 }
@@ -1736,7 +1750,7 @@ func (t *Term) invalidateFontMetrics() {
 // there, and routing the flash through the same path keeps the bell
 // timers main-thread-only rather than shared with the reader goroutine.
 func (t *Term) ringBell() {
-	mode := t.cfg.BellMode
+	mode := BellMode(t.bellMode.Load())
 	if mode == BellNone {
 		return
 	}

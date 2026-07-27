@@ -73,9 +73,17 @@ input) lives in `term/CLAUDE.md`, loaded when working under `term/`.
   `Cols`, `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`,
   `StartRecording`/`StopRecording`/`Recording`, `NewReplay`/`ReplayCfg`, plus
   `Shortcuts`/`ShortcutInfo` (display metadata for help overlays) and
-  `Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings` (rebindable Term-level
-  shortcuts). Keep it that way; add unexported helpers freely. The recording
+  `Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings`/`ParseAction` (rebindable
+  Term-level shortcuts), and the live setters a config reload needs —
+  `SetTextStyle`, `SetScrollbackRows`, `SetBellMode`, `SetScrollbarWidth`.
+  Keep it that way; add unexported helpers freely. The recording
   *format* stays in `internal/recfmt` precisely so it never becomes public API.
+- User settings (fonts, theme, terminal settings, keybindings) are parsed and
+  applied by `term/workspace`, never by `term/` — `term.Cfg` has no
+  serialization. `term/workspace/config.go` owns the INI; the settings it
+  resolves ride on the workspace's effective `Cfg` (see `termOpts`), so panes,
+  tabs, and restore all build from one object. `docs/config.md` is the
+  user-facing reference and must be updated with any new key.
 - Keyboard shortcuts resolve through the binding table in `shortcuts.go`
   (`defaultBindings`/`mergeBindings`), which is the single source of truth for
   both matching and the help overlay. The table decides only *whether a chord
