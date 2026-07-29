@@ -189,6 +189,7 @@ actually want to press.
 | `term.font-inc` | `Cmd+=` |
 | `term.font-dec` | `Cmd+-` |
 | `term.font-reset` | `Cmd+0` |
+| `term.copy-mode` | `Cmd+Shift+Space` / `Ctrl+Shift+Space` |
 
 An override replaces the action's whole default chord list with the single
 chord you give, but inherits the action's Shift tolerance. Where Shift is a
@@ -214,6 +215,66 @@ Consequence: rebinding these two actions to a chord that doesn't include Shift
 means they won't reach scrollback while the alt screen is active. On the normal
 screen they work as bound. `term.scroll-top` / `term.scroll-bottom` have no
 such gate and rebind freely.
+
+### `term.copy-mode.*` — copy mode
+
+`term.copy-mode` (`Cmd+Shift+Space`, or `Ctrl+Shift+Space`) enters copy mode: a
+vim-keyed state for scrolling the buffer, selecting text, and copying it
+without a mouse. While it is active **no key reaches the shell** — every
+keystroke is consumed by the terminal until you leave the mode — and incoming
+output is frozen so the text you are selecting cannot scroll away underneath
+you. A status bar across the top shows the key hints and an `output paused`
+marker; it takes over the topmost visible row for as long as the mode is
+active, so the newest output — the usual reason to enter copy mode — stays
+visible, and the covered line is one `k` away.
+
+A click anywhere in the pane also leaves copy mode, handing selection back to
+the mouse.
+
+These actions are rebindable like any other, but they are deliberately left out
+of the `Cmd+/` help overlay — twenty extra rows in a flat list helps nobody.
+
+| Action | Default | Does |
+|---|---|---|
+| `term.copy-mode.exit` | `Escape` / `q` | Leave copy mode |
+| `term.copy-mode.left` | `h` / `Left` | Move one cell left |
+| `term.copy-mode.down` | `j` / `Down` | Move one row down |
+| `term.copy-mode.up` | `k` / `Up` | Move one row up |
+| `term.copy-mode.right` | `l` / `Right` | Move one cell right |
+| `term.copy-mode.word-fwd` | `w` | Start of the next word |
+| `term.copy-mode.word-back` | `b` | Start of the previous word |
+| `term.copy-mode.line-start` | `0` / `Home` | First column |
+| `term.copy-mode.line-end` | `$` / `End` | Last non-blank cell |
+| `term.copy-mode.top` | `g` | Oldest scrollback row |
+| `term.copy-mode.bottom` | `G` | Newest row |
+| `term.copy-mode.half-page-up` | `Ctrl+U` | Up half a screen |
+| `term.copy-mode.half-page-down` | `Ctrl+D` | Down half a screen |
+| `term.copy-mode.page-up` | `PageUp` / `Ctrl+B` | Up one screen |
+| `term.copy-mode.page-down` | `PageDown` / `Ctrl+F` | Down one screen |
+| `term.copy-mode.select-char` | `v` | Start/cancel a character-wise selection |
+| `term.copy-mode.select-line` | `V` | Start/cancel a line-wise selection |
+| `term.copy-mode.yank` | `y` / `Enter` | Copy the selection and exit |
+| `term.copy-mode.search-fwd` | `/` | Open the search bar, searching forward |
+| `term.copy-mode.search-back` | `?` | Open the search bar, searching backward |
+| `term.copy-mode.next-match` | `n` | Move to the next match |
+| `term.copy-mode.prev-match` | `N` | Move to the previous match |
+| `term.copy-mode.prev-mark` | `[` | Previous shell prompt (needs OSC 133) |
+| `term.copy-mode.next-mark` | `]` | Next shell prompt (needs OSC 133) |
+
+With no selection yet, `y` copies the single cell under the cursor. Pressing
+`v` or `V` a second time cancels the selection without leaving the mode.
+
+In the search bar, typing edits the query as usual; `Enter` closes it and moves
+the copy cursor onto the match, `Shift+Enter` does the same in the opposite
+direction, and `Escape` closes the bar but stays in copy mode.
+
+The `$` and `?` defaults are the US-layout `Shift+4` and `Shift+/`. On another
+layout, rebind them to whatever your keyboard actually produces.
+
+Rebinding a copy-mode action to a chord that holds `Ctrl`, `Alt`, or `Cmd`
+works, as does rebinding it to a bare printable key. Both reach copy mode; they
+simply arrive through different platform events (macOS delivers an unmodified
+printable key as text input, not as a key press).
 
 ## Full example
 

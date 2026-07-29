@@ -471,6 +471,18 @@ type grid struct {
 	ViewOffset    int
 	dirtyCount    int
 
+	// ViewFrozen pins the visible content against incoming output: while set,
+	// every row pushed into scrollback bumps ViewOffset by one, so the same
+	// content rows stay on screen instead of drifting upward as the buffer
+	// grows. Copy mode sets it — a moving target is unusable to select from.
+	//
+	// The pin is exact only until the scrollback ring starts evicting. Past
+	// that, content row indices themselves shift and the view slips by the
+	// number of evicted rows; callers clamp their own coordinates rather than
+	// this trying to rewrite history. Main-thread writes under Mu; read by the
+	// reader goroutine in scrollUpRegion, which already holds Mu.
+	ViewFrozen bool
+
 	Mu         sync.Mutex
 	CurFG      uint32 // packed Color
 	CurBG      uint32

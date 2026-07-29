@@ -236,6 +236,12 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if t.cfg.OnClickFocus != nil {
 		t.cfg.OnClickFocus()
 	}
+	// A click is the user reaching for the mouse: hand selection back to it
+	// rather than letting a keyboard copy cursor and a drag fight over the
+	// same SelAnchor/SelHead.
+	if t.copy.active {
+		t.exitCopyMode(w)
+	}
 	// Scrollbar takes priority over selection and host mouse reporting: it is
 	// a local overlay drawn on top of the grid. Only interactive while the
 	// thumb is visible, so a faded scrollbar never swallows clicks.

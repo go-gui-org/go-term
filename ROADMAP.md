@@ -96,6 +96,24 @@ keyboard-only if upstream work is non-trivial.
 - [x] Keyboard move: `Cmd+Alt+[` / `Cmd+Alt+]`
 - [x] Persistence: already correct (tab order is JSON array order)
 
+### Phase 47 — Copy mode (issue #102)
+
+Keyboard-only selection: no mouse path existed for scrolling the buffer,
+anchoring a selection, and copying, so keyboard-only and ssh workflows could
+not get text out at all. A modal vim keymap plus one overlay on top of the
+existing selection / search / mark / viewport machinery — widget-level only,
+no parser changes, no new lock.
+
+- [x] `term.copy-mode` entry chord (`Cmd+Shift+Space` / `Ctrl+Shift+Space`),
+      in-mode keys as a copy-mode group in the same `defaultBindings` table
+- [x] Motion: `hjkl` + arrows, `w`/`b`, `0`/`$`, `g`/`G`, `Ctrl+U`/`Ctrl+D`,
+      PageUp/PageDown, all clamped to the buffer
+- [x] Selection `v` / `V`, yank `y` (falls back to the cell under the cursor)
+- [x] Viewport freeze (`grid.ViewFrozen`) + "output paused" indicator bar
+- [x] Search `/` `?` `n` `N` reusing `grid_search.go` via `findMatch`
+- [x] Prompt marks `[` / `]` reusing `grid_mark.go`
+- [x] `docs/config.md` copy-mode section; help overlay lists only the entry chord
+
 ### Phase 41 — Export audit + Godoc pass
 
 Every exported symbol gets a deliberate reason and complete doc comment.

@@ -144,7 +144,7 @@ func (t *Term) drawBgPass(ds *drawState) {
 	if ds.partialRow != nil {
 		t.drawBgPrecomputed(dc, -1, ds.partialRow, yOff, cols, ds.g)
 	}
-	for r := range ds.renderRows {
+	for r := ds.renderTop; r < ds.renderRows; r++ {
 		t.drawBgResolved(dc, r, yOff, ds)
 	}
 }
@@ -247,7 +247,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 	}
 
 	var fr flushState
-	for r := range ds.renderRows {
+	for r := ds.renderTop; r < ds.renderRows; r++ {
 		fr.open = false
 		t.draw.runBuf.Reset()
 		fr.cols = 0

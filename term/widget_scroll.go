@@ -166,44 +166,80 @@ func (t *Term) jumpToMark(backward bool, w *gui.Window) {
 	}
 }
 
+// findMatch locates the next (forward=true) or previous (forward=false) match
+// for the current search query, starting from the last jump target or, failing
+// that, the viewport top. Returns the match position and whether one was found;
+// it does not move anything, so both the search bar and copy mode can drive it.
+// Takes Mu.
+//
+// The start position is derived inside the same critical section as the search
+// itself: the reader goroutine can evict scrollback rows at any moment, and a
+// start row computed under one lock and used under the next would search from
+// a row index that has since shifted.
+func (t *Term) findMatch(forward bool) (contentPos, bool) {
+	if t.search.query == "" {
+		return contentPos{}, false
+	}
+	g := t.grid
+	g.Mu.Lock()
+	defer g.Mu.Unlock()
+	sb := g.Scrollback.Len()
+	var start contentPos
+	if len(t.search.matches) > 0 && t.search.idx < len(t.search.matches) {
+		start = t.search.matches[t.search.idx].contentPos
+	} else {
+		start = contentPos{Row: sb - clamp(g.ViewOffset, 0, sb)}
+	}
+	return t.findMatchLocked(start, forward)
+}
+
+// findMatchFrom searches for the current query starting at the given content
+// position. Copy-mode n/N use this so each press advances from the cursor
+// instead of from stale search-bar match state, which is what happens when
+// findMatch's t.search.idx is no longer updated after the bar closes. Takes Mu.
+func (t *Term) findMatchFrom(start contentPos, forward bool) (contentPos, bool) {
+	if t.search.query == "" {
+		return contentPos{}, false
+	}
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	return t.findMatchLocked(start, forward)
+}
+
+// findMatchLocked is the shared search core: it picks the regex or literal
+// matcher according to the search bar's mode. Caller holds Mu and has already
+// checked that the query is non-empty.
+func (t *Term) findMatchLocked(start contentPos, forward bool) (contentPos, bool) {
+	g := t.grid
+	if t.search.regex {
+		if t.search.re == nil {
+			return contentPos{}, false
+		}
+		pos, _, ok := g.FindRegex(t.search.re, start, forward)
+		return pos, ok
+	}
+	pos, ok := g.Find(t.search.query, start, forward)
+	return pos, ok
+}
+
 // searchJump finds the next (forward=true) or previous (forward=false) match
 // for the current search query and scrolls the viewport to show it.
 func (t *Term) searchJump(forward bool, w *gui.Window) {
-	if t.search.query == "" {
+	pos, ok := t.findMatch(forward)
+	if !ok {
 		return
 	}
-	ok := func() bool {
+	func() {
 		g := t.grid
 		g.Mu.Lock()
 		defer g.Mu.Unlock()
 		sb := g.Scrollback.Len()
-		var start contentPos
-		if len(t.search.matches) > 0 && t.search.idx < len(t.search.matches) {
-			start = t.search.matches[t.search.idx].contentPos
+		if pos.Row-sb >= 0 {
+			g.ViewOffset = 0
 		} else {
-			start = contentPos{Row: sb - clamp(g.ViewOffset, 0, sb)}
+			g.ViewOffset = clamp(sb-pos.Row, 0, sb)
 		}
-		var (
-			pos contentPos
-			ok  bool
-		)
-		if t.search.regex && t.search.re != nil {
-			pos, _, ok = g.FindRegex(t.search.re, start, forward)
-		} else if !t.search.regex {
-			pos, ok = g.Find(t.search.query, start, forward)
-		}
-		if ok {
-			liveRow := pos.Row - sb
-			if liveRow >= 0 {
-				g.ViewOffset = 0
-			} else {
-				g.ViewOffset = clamp(sb-pos.Row, 0, sb)
-			}
-			g.ViewSubPx = 0
-		}
-		return ok
+		g.ViewSubPx = 0
 	}()
-	if ok {
-		t.scheduleViewUpdate(w)
-	}
+	t.scheduleViewUpdate(w)
 }

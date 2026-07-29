@@ -103,6 +103,36 @@ type searchState struct {
 	cacheRegex bool
 }
 
+// copySelMode is copy mode's selection state: none yet, character-wise (v), or
+// line-wise (V).
+type copySelMode uint8
+
+const (
+	copySelNone copySelMode = iota
+	copySelChar
+	copySelLine
+)
+
+// copyState holds keyboard copy-mode state. Like searchState, every field is
+// touched on the GUI goroutine only (onKeyDown, onChar, onDraw), so no lock is
+// needed — the grid coordinates it derives are written under grid.Mu by
+// syncSelection.
+//
+// cursor and anchor are *cell* positions, whereas grid.SelAnchor/SelHead are
+// cell boundaries; syncSelection converts between the two.
+type copyState struct {
+	cursor contentPos // copy cursor
+	anchor contentPos // selection anchor cell; meaningful when sel != copySelNone
+	active bool
+	sel    copySelMode
+
+	// searching is set while '/' or '?' has the search bar open on copy mode's
+	// behalf, so the search handlers keep their normal behavior and control
+	// returns here on Enter/Escape instead of to the plain search path.
+	searching bool
+	backward  bool // direction of the last search, for n/N
+}
+
 // scrollbarState manages the auto-hide scrollbar thumb timer plus the
 // hit-test geometry needed to click/drag the thumb. Main-thread only
 // (until/timer created lazily in showScrollbar; the geometry fields are
@@ -287,6 +317,8 @@ type Term struct {
 	cfg Cfg
 
 	search searchState
+
+	copy copyState
 
 	mouse mouseState
 

@@ -3282,7 +3282,7 @@ func TestDrawGraphics_EmptyGraphicsNoOp(t *testing.T) {
 	g := newGrid(4, 8)
 	dc := &gui.DrawContext{}
 	// Must not panic when Graphics is nil/empty.
-	term.drawGraphics(dc, g, g.Rows, 0)
+	term.drawGraphics(dc, g, 0, g.Rows, 0)
 	if len(dc.Images()) != 0 {
 		t.Errorf("Images = %d; want 0 for empty graphics", len(dc.Images()))
 	}
@@ -3295,7 +3295,7 @@ func TestDrawGraphics_DegenerateRowsSkipped(t *testing.T) {
 		{Src: "/tmp/test.png", OriginR: 0, OriginC: 0, Cols: 4, Rows: 0},
 	}
 	dc := &gui.DrawContext{}
-	term.drawGraphics(dc, g, g.Rows, 0)
+	term.drawGraphics(dc, g, 0, g.Rows, 0)
 	if len(dc.Images()) != 0 {
 		t.Error("graphic with Rows=0 should be skipped")
 	}
@@ -3308,7 +3308,7 @@ func TestDrawGraphics_DegenerateColsSkipped(t *testing.T) {
 		{Src: "/tmp/test.png", OriginR: 0, OriginC: 0, Cols: 0, Rows: 4},
 	}
 	dc := &gui.DrawContext{}
-	term.drawGraphics(dc, g, g.Rows, 0)
+	term.drawGraphics(dc, g, 0, g.Rows, 0)
 	if len(dc.Images()) != 0 {
 		t.Error("graphic with Cols=0 should be skipped")
 	}
@@ -3322,7 +3322,7 @@ func TestDrawGraphics_BelowViewportSkipped(t *testing.T) {
 		{Src: "/tmp/test.png", OriginR: 10, OriginC: 0, Cols: 2, Rows: 2},
 	}
 	dc := &gui.DrawContext{}
-	term.drawGraphics(dc, g, g.Rows, 0)
+	term.drawGraphics(dc, g, 0, g.Rows, 0)
 	if len(dc.Images()) != 0 {
 		t.Error("graphic entirely below viewport should be skipped")
 	}
@@ -3340,7 +3340,7 @@ func TestDrawGraphics_AboveViewportSkipped(t *testing.T) {
 		{Src: "/tmp/test.png", OriginR: -3, OriginC: 0, Cols: 2, Rows: 2},
 	}
 	dc := &gui.DrawContext{}
-	term.drawGraphics(dc, g, g.Rows, 0)
+	term.drawGraphics(dc, g, 0, g.Rows, 0)
 	if len(dc.Images()) != 0 {
 		t.Error("graphic entirely above viewport should be skipped")
 	}
@@ -3353,7 +3353,7 @@ func TestDrawGraphics_VisibleGraphicRendered(t *testing.T) {
 		{Src: "/tmp/test.png", OriginR: 1, OriginC: 2, Cols: 3, Rows: 2},
 	}
 	dc := &gui.DrawContext{}
-	term.drawGraphics(dc, g, g.Rows, 0)
+	term.drawGraphics(dc, g, 0, g.Rows, 0)
 	entries := dc.Images()
 	if len(entries) != 1 {
 		t.Fatalf("Images = %d; want 1", len(entries))
@@ -3387,7 +3387,7 @@ func TestDrawGraphics_PartiallyAboveViewportStillRenders(t *testing.T) {
 		{Src: "/tmp/test.png", OriginR: -5, OriginC: 0, Cols: 2, Rows: 10},
 	}
 	dc := &gui.DrawContext{}
-	term.drawGraphics(dc, g, g.Rows, 0)
+	term.drawGraphics(dc, g, 0, g.Rows, 0)
 	if len(dc.Images()) != 1 {
 		t.Error("graphic overlapping viewport from above should render")
 	}

@@ -33,14 +33,56 @@ const (
 	ActionFontInc        Action = "term.font-inc"
 	ActionFontDec        Action = "term.font-dec"
 	ActionFontReset      Action = "term.font-reset"
+	ActionCopyMode       Action = "term.copy-mode"
 )
 
-// actionSet indexes actionOrder for ParseAction. Built once at init rather
-// than scanned per lookup — a config file naming every action would otherwise
-// be quadratic, and this keeps actionOrder the single list to maintain.
+// Copy-mode actions. These are only consulted while copy mode is active, so
+// their chords are bare letters that would otherwise reach the child process.
+// They live in the same binding table as every other Action — the mode gates
+// *when* the table is consulted, not which table — so they stay rebindable
+// through [keybindings] without a second matcher.
+//
+// They are deliberately absent from actionOrder: the help overlay is a flat
+// list, and twenty vim keys would swamp it. Copy mode shows its own key hints
+// in its indicator bar, and docs/config.md lists the action names.
+const (
+	ActionCopyModeExit         Action = "term.copy-mode.exit"
+	ActionCopyModeLeft         Action = "term.copy-mode.left"
+	ActionCopyModeDown         Action = "term.copy-mode.down"
+	ActionCopyModeUp           Action = "term.copy-mode.up"
+	ActionCopyModeRight        Action = "term.copy-mode.right"
+	ActionCopyModeWordFwd      Action = "term.copy-mode.word-fwd"
+	ActionCopyModeWordBack     Action = "term.copy-mode.word-back"
+	ActionCopyModeLineStart    Action = "term.copy-mode.line-start"
+	ActionCopyModeLineEnd      Action = "term.copy-mode.line-end"
+	ActionCopyModeTop          Action = "term.copy-mode.top"
+	ActionCopyModeBottom       Action = "term.copy-mode.bottom"
+	ActionCopyModeHalfPageUp   Action = "term.copy-mode.half-page-up"
+	ActionCopyModeHalfPageDown Action = "term.copy-mode.half-page-down"
+	ActionCopyModePageUp       Action = "term.copy-mode.page-up"
+	ActionCopyModePageDown     Action = "term.copy-mode.page-down"
+	ActionCopyModeSelectChar   Action = "term.copy-mode.select-char"
+	ActionCopyModeSelectLine   Action = "term.copy-mode.select-line"
+	ActionCopyModeYank         Action = "term.copy-mode.yank"
+	ActionCopyModeSearchFwd    Action = "term.copy-mode.search-fwd"
+	ActionCopyModeSearchBack   Action = "term.copy-mode.search-back"
+	ActionCopyModeNextMatch    Action = "term.copy-mode.next-match"
+	ActionCopyModePrevMatch    Action = "term.copy-mode.prev-match"
+	ActionCopyModePrevMark     Action = "term.copy-mode.prev-mark"
+	ActionCopyModeNextMark     Action = "term.copy-mode.next-mark"
+)
+
+// actionSet indexes both action lists for ParseAction. Built once at init
+// rather than scanned per lookup — a config file naming every action would
+// otherwise be quadratic, and this keeps the two order slices the only lists
+// to maintain. Copy-mode actions are included: they are rebindable even though
+// they don't appear in the help overlay.
 var actionSet = func() map[Action]struct{} {
-	m := make(map[Action]struct{}, len(actionOrder))
+	m := make(map[Action]struct{}, len(actionOrder)+len(copyActionOrder))
 	for _, a := range actionOrder {
+		m[a] = struct{}{}
+	}
+	for _, a := range copyActionOrder {
 		m[a] = struct{}{}
 	}
 	return m
@@ -118,6 +160,24 @@ var actionOrder = []Action{
 	ActionNextMatch, ActionPrevMatch, ActionPrevPrompt, ActionNextPrompt,
 	ActionScrollPageUp, ActionScrollPageDown, ActionScrollTop, ActionScrollBottom,
 	ActionFontInc, ActionFontDec, ActionFontReset,
+	ActionCopyMode,
+}
+
+// copyActionOrder lists the copy-mode Actions. Kept separate from actionOrder
+// so shortcutsFrom (and therefore the help overlay) skips them while
+// ParseAction and defaultBindings still cover them.
+var copyActionOrder = []Action{
+	ActionCopyModeExit,
+	ActionCopyModeLeft, ActionCopyModeDown, ActionCopyModeUp, ActionCopyModeRight,
+	ActionCopyModeWordFwd, ActionCopyModeWordBack,
+	ActionCopyModeLineStart, ActionCopyModeLineEnd,
+	ActionCopyModeTop, ActionCopyModeBottom,
+	ActionCopyModeHalfPageUp, ActionCopyModeHalfPageDown,
+	ActionCopyModePageUp, ActionCopyModePageDown,
+	ActionCopyModeSelectChar, ActionCopyModeSelectLine, ActionCopyModeYank,
+	ActionCopyModeSearchFwd, ActionCopyModeSearchBack,
+	ActionCopyModeNextMatch, ActionCopyModePrevMatch,
+	ActionCopyModePrevMark, ActionCopyModeNextMark,
 }
 
 // actionLabels are the human-readable names shown in the help overlay.
@@ -137,6 +197,35 @@ var actionLabels = map[Action]string{
 	ActionFontInc:        "Increase font size",
 	ActionFontDec:        "Decrease font size",
 	ActionFontReset:      "Reset font size",
+	ActionCopyMode:       "Copy mode",
+
+	// Copy-mode labels are unused by the flat help overlay (copyActionOrder is
+	// not walked by shortcutsFrom) but kept complete so an embedder rendering
+	// its own copy-mode cheatsheet from the table has names to show.
+	ActionCopyModeExit:         "Exit copy mode",
+	ActionCopyModeLeft:         "Move left",
+	ActionCopyModeDown:         "Move down",
+	ActionCopyModeUp:           "Move up",
+	ActionCopyModeRight:        "Move right",
+	ActionCopyModeWordFwd:      "Next word",
+	ActionCopyModeWordBack:     "Previous word",
+	ActionCopyModeLineStart:    "Line start",
+	ActionCopyModeLineEnd:      "Line end",
+	ActionCopyModeTop:          "Buffer top",
+	ActionCopyModeBottom:       "Buffer bottom",
+	ActionCopyModeHalfPageUp:   "Half page up",
+	ActionCopyModeHalfPageDown: "Half page down",
+	ActionCopyModePageUp:       "Page up",
+	ActionCopyModePageDown:     "Page down",
+	ActionCopyModeSelectChar:   "Select (character-wise)",
+	ActionCopyModeSelectLine:   "Select (line-wise)",
+	ActionCopyModeYank:         "Yank selection",
+	ActionCopyModeSearchFwd:    "Search forward",
+	ActionCopyModeSearchBack:   "Search backward",
+	ActionCopyModeNextMatch:    "Next match",
+	ActionCopyModePrevMatch:    "Previous match",
+	ActionCopyModePrevMark:     "Previous prompt mark",
+	ActionCopyModeNextMark:     "Next prompt mark",
 }
 
 // defaultBindings returns the built-in binding table, with every chord run
@@ -187,6 +276,59 @@ func defaultBindings() map[Action]binding {
 		ActionFontInc:   b(true, k(gui.KeyEqual, gui.ModSuper)),
 		ActionFontDec:   b(true, k(gui.KeyMinus, gui.ModSuper)),
 		ActionFontReset: b(true, k(gui.Key0, gui.ModSuper)),
+
+		// Copy mode entry. Two chords for the same reason Copy has two: the
+		// macOS form and the Ctrl+Shift form Linux terminals use — Alacritty
+		// binds its Vi mode to Ctrl+Shift+Space. Writing only the Super form
+		// would remap to Ctrl+Alt+Space on Windows, which nobody expects.
+		// Cmd+Space (Spotlight) and Ctrl+Space (input source) are avoided.
+		ActionCopyMode: b(false,
+			k(gui.KeySpace, gui.ModSuper|gui.ModShift),
+			k(gui.KeySpace, gui.ModCtrlShift)),
+
+		// --- copy mode: bare vim keys, only matched while the mode is active.
+		//
+		// shiftOptional is false throughout: Shift is what tells v from V,
+		// g from G, and n from N, so tolerating it would make the uppercase
+		// form unreachable.
+		ActionCopyModeExit: b(false, k(gui.KeyEscape, 0), k(gui.KeyQ, 0)),
+
+		// Arrows are alternates on the same action, so a user who rebinds
+		// (say) .down still keeps the arrow key — the override replaces the
+		// whole chord list, which is the documented behavior of KeyMap.
+		ActionCopyModeLeft:  b(false, k(gui.KeyH, 0), k(gui.KeyLeft, 0)),
+		ActionCopyModeDown:  b(false, k(gui.KeyJ, 0), k(gui.KeyDown, 0)),
+		ActionCopyModeUp:    b(false, k(gui.KeyK, 0), k(gui.KeyUp, 0)),
+		ActionCopyModeRight: b(false, k(gui.KeyL, 0), k(gui.KeyRight, 0)),
+
+		ActionCopyModeWordFwd:  b(false, k(gui.KeyW, 0)),
+		ActionCopyModeWordBack: b(false, k(gui.KeyB, 0)),
+
+		// '0' is unshifted; '$' is Shift+4 on a US layout. Layout-dependent
+		// like every other chord literal here, and rebindable.
+		ActionCopyModeLineStart: b(false, k(gui.Key0, 0), k(gui.KeyHome, 0)),
+		ActionCopyModeLineEnd:   b(false, k(gui.Key4, gui.ModShift), k(gui.KeyEnd, 0)),
+
+		ActionCopyModeTop:    b(false, k(gui.KeyG, 0)),
+		ActionCopyModeBottom: b(false, k(gui.KeyG, gui.ModShift)),
+
+		ActionCopyModeHalfPageUp:   b(false, k(gui.KeyU, gui.ModCtrl)),
+		ActionCopyModeHalfPageDown: b(false, k(gui.KeyD, gui.ModCtrl)),
+		ActionCopyModePageUp:       b(false, k(gui.KeyPageUp, 0), k(gui.KeyB, gui.ModCtrl)),
+		ActionCopyModePageDown:     b(false, k(gui.KeyPageDown, 0), k(gui.KeyF, gui.ModCtrl)),
+
+		ActionCopyModeSelectChar: b(false, k(gui.KeyV, 0)),
+		ActionCopyModeSelectLine: b(false, k(gui.KeyV, gui.ModShift)),
+		ActionCopyModeYank:       b(false, k(gui.KeyY, 0), k(gui.KeyEnter, 0)),
+
+		// '?' is Shift+/ on a US layout.
+		ActionCopyModeSearchFwd:  b(false, k(gui.KeySlash, 0)),
+		ActionCopyModeSearchBack: b(false, k(gui.KeySlash, gui.ModShift)),
+		ActionCopyModeNextMatch:  b(false, k(gui.KeyN, 0)),
+		ActionCopyModePrevMatch:  b(false, k(gui.KeyN, gui.ModShift)),
+
+		ActionCopyModePrevMark: b(false, k(gui.KeyLeftBracket, 0)),
+		ActionCopyModeNextMark: b(false, k(gui.KeyRightBracket, 0)),
 	}
 }
 

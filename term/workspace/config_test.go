@@ -673,3 +673,21 @@ func TestApplyKeybindingOverrides_Unbind(t *testing.T) {
 		t.Errorf("workspace.closePane = %+v, want unbound", cmds[1].Shortcut)
 	}
 }
+
+// Copy-mode actions are rebindable through the same [keybindings] path, both
+// the mode entry and the in-mode keys, even though the help overlay lists only
+// the entry chord.
+func TestApplyKeybindingOverrides_CopyModeActions(t *testing.T) {
+	km := applyKeybindingOverrides(sampleCmds(), map[string]string{
+		"term.copy-mode":      "Cmd+Shift+Y",
+		"term.copy-mode.down": "Ctrl+N",
+	})
+	wantEntry := gui.Shortcut{Key: gui.KeyY, Modifiers: gui.ModSuper | gui.ModShift}
+	if km[term.ActionCopyMode] != wantEntry {
+		t.Errorf("term.copy-mode = %+v, want %+v", km[term.ActionCopyMode], wantEntry)
+	}
+	wantDown := gui.Shortcut{Key: gui.KeyN, Modifiers: gui.ModCtrl}
+	if km[term.ActionCopyModeDown] != wantDown {
+		t.Errorf("term.copy-mode.down = %+v, want %+v", km[term.ActionCopyModeDown], wantDown)
+	}
+}

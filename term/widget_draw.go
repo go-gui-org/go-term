@@ -62,10 +62,14 @@ type drawState struct {
 	style         gui.TextStyle
 	rows, cols    int
 	renderRows    int
-	imeCursor     int
-	renderYOff    float32
-	live          bool
-	doResize      bool
+	// renderTop is the first viewport row the text passes paint, reserving the
+	// rows above it for an overlay bar. Copy mode sets it to 1: its status bar
+	// sits at the top, so the row it covers must not be painted under it.
+	renderTop  int
+	imeCursor  int
+	renderYOff float32
+	live       bool
+	doResize   bool
 	// blinkOff is true during the hidden half of the SGR 5/6 blink cycle.
 	blinkOff bool
 	// IME composition state, populated by drawIME and consumed by drawCursor.
@@ -184,7 +188,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.preparePartialRow(&ds)
 	t.drawBgPass(&ds)
 	t.drawFgPass(&ds)
-	t.drawGraphics(ds.dc, ds.g, ds.renderRows, ds.renderYOff)
+	t.drawGraphics(ds.dc, ds.g, ds.renderTop, ds.renderRows, ds.renderYOff)
 	t.drawIME(&ds)
 	t.drawCursor(&ds)
 	t.drawOverlays(&ds)
@@ -261,9 +265,18 @@ func (t *Term) prepareResize(ds *drawState) {
 func (t *Term) prepareFastPath(ds *drawState) {
 	g := ds.g
 	ds.renderYOff = g.ViewSubPx
-	ds.live = g.ViewOffset == 0 && ds.renderYOff == 0 && !g.SelActive && !t.search.active
+	ds.live = g.ViewOffset == 0 && ds.renderYOff == 0 && !g.SelActive &&
+		!t.search.active && !t.copy.active
 	ds.cells = g.Cells
 	ds.renderRows = ds.rows
+	// Copy mode's bar occupies the top cellH pixels. Reserving from the *top*
+	// (rather than the bottom, as the search bar does) keeps the last row on
+	// screen: that is where the shell prompt and the newest output sit, and it
+	// is what the user entered copy mode to select. The cost is the oldest
+	// visible row, one 'k' away.
+	if t.copy.active {
+		ds.renderTop = copyBarRows
+	}
 	if t.search.active {
 		ds.renderRows -= searchOverlap(t.cellH, ds.renderYOff, ds.dc.Height, ds.rows)
 		if ds.renderRows < 0 {
@@ -303,7 +316,7 @@ func (t *Term) prepareSearch(ds *drawState) {
 		t.search.cacheRegex = t.search.regex
 	}
 	for _, m := range t.search.matches {
-		if vr, ok := g.ContentRowToViewport(m.Row); ok && vr < ds.renderRows {
+		if vr, ok := g.ContentRowToViewport(m.Row); ok && vr >= ds.renderTop && vr < ds.renderRows {
 			ds.vMatchesByRow[vr] = append(ds.vMatchesByRow[vr], vMatch{m.Col, m.Len})
 		}
 	}
@@ -400,7 +413,7 @@ func (t *Term) prepareBiDi(ds *drawState) {
 	ds.bidiVisRows = t.draw.bidiVisRows
 	ds.bidiV2LRows = t.draw.bidiV2LRows
 	cols := ds.cols
-	for r := range renderRows {
+	for r := ds.renderTop; r < renderRows; r++ {
 		var hasRTL bool
 		if ds.live {
 			hasRTL = rowHasRTL(ds.cells[r*cols:(r+1)*cols], cols)
@@ -430,7 +443,9 @@ func (t *Term) prepareBiDi(ds *drawState) {
 // preparePartialRow resolves the partial top row (visible when sub-pixel
 // scrolled) and applies BiDi reordering when needed.
 func (t *Term) preparePartialRow(ds *drawState) {
-	if ds.renderYOff <= 0 {
+	// The partial row draws above viewport row 0 — exactly where a reserved
+	// top bar sits, and text paints over rects, so it would show through.
+	if ds.renderYOff <= 0 || ds.renderTop > 0 {
 		return
 	}
 	row := ds.g.partialTopRow()
