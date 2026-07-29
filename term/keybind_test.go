@@ -19,14 +19,19 @@ var primary = remapMod(gui.ModSuper)
 // --- default table fidelity ---
 
 // The labels the hand-maintained Shortcuts() literal produced before the table
-// became the source of truth. Order is the help-overlay order and is part of
-// the contract.
+// became the source of truth, plus anything added since. Order is the
+// help-overlay order and is part of the contract.
+//
+// "Copy mode" is the only entry copy mode contributes: the in-mode vim keys
+// live in copyActionOrder, which shortcutsFrom deliberately skips so the flat
+// overlay doesn't grow by twenty rows.
 var legacyShortcutLabels = []string{
 	"Copy", "Paste", "Find", "Toggle regex (in Find)",
 	"Next match (in Find)", "Previous match (in Find)",
 	"Previous prompt mark", "Next prompt mark",
 	"Scroll page up", "Scroll page down", "Scroll to top", "Scroll to bottom",
 	"Increase font size", "Decrease font size", "Reset font size",
+	"Copy mode",
 }
 
 func TestShortcuts_MatchesLegacyList(t *testing.T) {

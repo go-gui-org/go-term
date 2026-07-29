@@ -47,8 +47,18 @@ func (t *Term) recompileSearchRE() {
 }
 
 // onChar receives printable character input from the OS.
-func (t *Term) onChar(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
+func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if e.CharCode == 0 {
+		return
+	}
+	// Copy mode: bare printable keys (the vim motions) arrive here, not in
+	// onKeyDown — on macOS an unmodified printable key produces only OnChar.
+	// See the dispatch-split comment in widget_copymode.go. Always swallow,
+	// matched or not: a leaked 'j' would land in the shell's command line. The
+	// search bar, which copy mode can open, still needs its characters.
+	if t.copy.active && !t.copy.searching {
+		t.handleCopyModeChar(rune(e.CharCode), w)
+		e.IsHandled = true
 		return
 	}
 	if t.search.active {
@@ -330,6 +340,30 @@ func funcKeySeq(k gui.KeyCode, shift, ctrl bool) []byte {
 // move the viewport instead of writing to the pty; any other key snaps
 // the viewport back to live.
 func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	// Copy mode first: while it is active it owns the keyboard, and its entry
+	// chord must be seen even when a search bar is open.
+	if t.binds(ActionCopyMode, e) {
+		if t.copy.active {
+			t.exitCopyMode(w)
+		} else {
+			t.enterCopyMode(w)
+		}
+		e.IsHandled = true
+		return
+	}
+	// While copy mode has the search bar open, the search handlers run as
+	// usual; finishCopySearch hands control back on Enter/Escape.
+	if t.copy.active && !t.copy.searching {
+		// Bare printable chords belong to onChar — on macOS they never reach
+		// here at all, and on backends that deliver both events dispatching in
+		// both places would double-apply every motion. Still swallowed, so
+		// nothing leaks to the child either way.
+		if !producesChar(e) {
+			t.handleCopyModeKey(e, w)
+		}
+		e.IsHandled = true
+		return
+	}
 	if t.handleSearchKey(e, w) {
 		return
 	}
@@ -404,12 +438,28 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 	// While in search mode, intercept navigation and editing keys.
 	if t.search.active {
 		switch {
-		// Prev before next: the two share the Enter key and are told apart
-		// by Shift, so the shifted binding has to be tested first.
+		// Prev before next reads naturally but is not load-bearing: neither
+		// match action is shiftOptional (see defaultBindings), so matching is
+		// exact on the modifier bits and Shift+Enter cannot satisfy the plain
+		// Enter chord. What separates the two is the binding table, not the
+		// case order.
+		//
+		// Opened from copy mode, Enter closes the bar and moves the copy
+		// cursor to the match instead of only scrolling the viewport; Shift
+		// reverses the direction, as it does outside copy mode.
 		case t.binds(ActionPrevMatch, e):
-			t.searchJump(false, w)
+			if t.copy.searching {
+				t.copy.backward = !t.copy.backward
+				t.finishCopySearch(true, w)
+			} else {
+				t.searchJump(false, w)
+			}
 		case t.binds(ActionNextMatch, e):
-			t.searchJump(true, w)
+			if t.copy.searching {
+				t.finishCopySearch(true, w)
+			} else {
+				t.searchJump(true, w)
+			}
 		case t.binds(ActionToggleRegex, e):
 			t.search.regex = !t.search.regex
 			t.recompileSearchRE()
@@ -428,6 +478,12 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 			t.search.active = false
 			t.search.query = ""
 			t.search.matches = nil
+			if t.copy.searching {
+				// Escape dismisses the bar but stays in copy mode; a second
+				// Escape then leaves the mode.
+				t.finishCopySearch(false, w)
+				break
+			}
 			t.bumpVersion()
 			w.UpdateWindow()
 		}

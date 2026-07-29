@@ -92,7 +92,8 @@ func (t *Term) drawIME(ds *drawState) {
 	}
 	ds.imeCursor = min(t.ime.compCursor, len(ds.imeRunes))
 
-	if len(ds.imeRunes) == 0 || g.CursorR >= ds.renderRows || g.ViewOffset != 0 || ds.renderYOff != 0 {
+	if len(ds.imeRunes) == 0 || g.CursorR < ds.renderTop || g.CursorR >= ds.renderRows ||
+		g.ViewOffset != 0 || ds.renderYOff != 0 {
 		return
 	}
 	startX := float32(g.CursorC) * t.cellW
@@ -119,7 +120,14 @@ func (t *Term) drawIME(ds *drawState) {
 // visual column.
 func (t *Term) drawCursor(ds *drawState) {
 	g := ds.g
-	if !g.CursorVisible || g.CursorR >= ds.renderRows || g.ViewOffset != 0 || ds.renderYOff != 0 {
+	// Copy mode draws its own cursor. Two cursors on screen at once is worse
+	// than none — on entry they overlap exactly, so the user cannot tell which
+	// one their motion keys are moving.
+	if t.copy.active {
+		return
+	}
+	if !g.CursorVisible || g.CursorR < ds.renderTop || g.CursorR >= ds.renderRows ||
+		g.ViewOffset != 0 || ds.renderYOff != 0 {
 		return
 	}
 	if t.cursorBlinkOff(ds.now) {
@@ -205,6 +213,13 @@ func (t *Term) drawOverlays(ds *drawState) {
 		t.scrollbar.hovered = false
 	}
 
+	// Copy mode: its cursor, then its status bar. The two bars no longer
+	// contend — copy's is at the top, search's at the bottom — so a search
+	// opened from copy mode shows both, which is what the state actually is.
+	if t.copy.active {
+		t.drawCopyCursor(ds)
+		t.drawCopyBar(ds)
+	}
 	if t.search.active {
 		t.drawSearchBar(ds.dc, ds.style)
 	}
@@ -446,6 +461,75 @@ func (t *Term) drawRecordIndicator(ds *drawState) {
 	// the terminal content matters more than the badge.
 	ds.dc.FilledRoundedRect(x, y, w, h, h/2, gui.RGBA(150, 30, 30, 210))
 	ds.dc.Text(x+recordIndicatorPad, y+recordIndicatorPad/2, label, cs)
+}
+
+// copyCursorColor is the copy-mode cursor's fill. Deliberately not the theme's
+// cursor color: the copy cursor must be distinguishable from the terminal
+// cursor at a glance, or there is no feedback that a motion key did anything —
+// on entry the two sit on the same cell.
+var copyCursorColor = gui.RGB(255, 176, 0)
+
+// drawCopyCursor paints the copy-mode cursor at its viewport position.
+// Separate from drawCursor, which deliberately bails whenever ViewOffset != 0 —
+// copy mode is mostly used while scrolled back, which is exactly the case
+// drawCursor skips. Called under Mu (inside onDraw).
+func (t *Term) drawCopyCursor(ds *drawState) {
+	g := ds.g
+	vr, ok := g.ContentRowToViewport(t.copy.cursor.Row)
+	if !ok || vr < ds.renderTop || vr >= ds.renderRows {
+		return
+	}
+	cc := clamp(t.copy.cursor.Col, 0, max(ds.cols-1, 0))
+	x := float32(cc) * t.cellW
+	y := float32(vr)*t.cellH + ds.renderYOff
+
+	// Steady, never blinking: it marks a position the user is aiming with, and
+	// a blinking target is harder to track than a still one.
+	ds.dc.FilledRect(x, y, t.cellW, t.cellH, copyCursorColor)
+
+	cell := maskGlyph(g.ViewCellAt(vr, cc), ds.blinkOff)
+	cs := ds.style
+	cs.Color = g.Theme.DefaultBG
+	cs.EmojiBoxWidth = float32(cell.Width) * t.cellW
+	ds.dc.Text(x, y, t.cellText(cell), cs)
+}
+
+// copyBarHint is the key cheatsheet shown in copy mode's status bar. The flat
+// help overlay lists only the entry chord (see copyActionOrder), so this is
+// where the in-mode keys are discoverable.
+const copyBarHint = "hjkl move  w/b word  v/V select  y yank  / search  [ ] prompt  Esc exit"
+
+// copyBarLabels is the bar's full text for each selection state, indexed by
+// copySelMode. Built once rather than concatenated per frame: drawCopyBar runs
+// in the draw path, where the repo's rule is not to allocate.
+//
+// "output paused" is stated explicitly because the mode freezes the viewport —
+// a user watching a live log would otherwise think the terminal had hung.
+var copyBarLabels = [...]string{
+	copySelNone: "COPY  output paused  ·  " + copyBarHint,
+	copySelChar: "COPY [select]  output paused  ·  " + copyBarHint,
+	copySelLine: "COPY [select line]  output paused  ·  " + copyBarHint,
+}
+
+// drawCopyBar paints copy mode's status bar across the top cellH pixels. Top,
+// not bottom: the row it covers is not painted (drawState.renderTop), and
+// giving up the oldest visible row costs less than giving up the newest — and
+// it leaves the bottom band free for the search bar copy mode can open.
+// Called under Mu (inside onDraw).
+func (t *Term) drawCopyBar(ds *drawState) {
+	dc := ds.dc
+	y := float32(0)
+	dc.FilledRect(0, y, dc.Width, t.cellH, gui.RGB(30, 70, 45))
+
+	label := copyBarLabels[copySelNone]
+	if int(t.copy.sel) < len(copyBarLabels) {
+		label = copyBarLabels[t.copy.sel]
+	}
+
+	cs := ds.style
+	cs.Color = gui.RGB(220, 220, 220)
+	cs.Typeface = glyph.TypefaceRegular
+	dc.Text(0, y, label, cs)
 }
 
 // drawSearchBar paints a status bar over the bottom cellH pixels of the

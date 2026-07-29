@@ -9,7 +9,12 @@ import "github.com/go-gui-org/go-gui/gui"
 // graphics are skipped.
 //
 // Called from onDraw while grid.Mu is held.
-func (t *Term) drawGraphics(dc *gui.DrawContext, g *grid, rows int, renderYOff float32) {
+// top is the first paintable viewport row (see drawState.renderTop): an image
+// lying entirely in the rows a status bar reserved is skipped. One straddling
+// the boundary still paints across it — images are drawn whole, and clipping
+// them per row is not worth the code for an overlay the user dismisses with a
+// keystroke.
+func (t *Term) drawGraphics(dc *gui.DrawContext, g *grid, top, rows int, renderYOff float32) {
 	if len(g.Graphics) == 0 {
 		return
 	}
@@ -23,7 +28,7 @@ func (t *Term) drawGraphics(dc *gui.DrawContext, g *grid, rows int, renderYOff f
 		// Skip only when the image rectangle has no overlap with the
 		// viewport. A negative vr means the top is above the viewport;
 		// dc.Image clips to the canvas so the visible portion renders.
-		if vr >= rows || vr+gr.Rows <= 0 {
+		if vr >= rows || vr+gr.Rows <= top {
 			continue
 		}
 		x := float32(gr.OriginC) * t.cellW

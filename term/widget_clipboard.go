@@ -78,8 +78,13 @@ func (t *Term) pasteFromClipboard(w *gui.Window) {
 }
 
 // copySelection writes the current selection to the system clipboard
-// and returns true if anything was copied.
+// and returns true if anything was copied. A nil window (no clipboard to write
+// to, as in tests) reports false rather than panicking — callers treat that
+// the same as "nothing selected".
 func (t *Term) copySelection(w *gui.Window) bool {
+	if w == nil {
+		return false
+	}
 	var text string
 	func() {
 		t.grid.Mu.Lock()
