@@ -153,17 +153,65 @@ func (t *Term) jumpToMark(backward bool, w *gui.Window) {
 			row, found = t.grid.NextMark(viewTop, markPromptStart)
 		}
 		if found {
-			if row >= sb {
-				t.grid.ViewOffset = 0
-			} else {
-				t.grid.ViewOffset = sb - row
-			}
-			t.grid.ViewSubPx = 0
+			t.grid.scrollTopTo(row)
 		}
 	}()
 	if found {
 		t.scheduleViewUpdate(w)
 	}
+}
+
+// jumpToFailure moves to the newest failed command above the reference row,
+// wrapping to the newest failure overall when there is none above, so
+// repeated presses walk back through failures instead of sticking at the
+// oldest. In copy mode it moves the copy cursor (matching copyMarkJump);
+// otherwise it scrolls the viewport. Suppressed while the alt screen is
+// active, and a silent no-op when nothing has failed.
+func (t *Term) jumpToFailure(w *gui.Window) {
+	var found, copyMode bool
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		g := t.grid
+		if g.AltActive {
+			return
+		}
+		copyMode = t.copy.active
+		span, ok := g.lastFailedBefore(t.markRefRow())
+		if !ok || span.Prompt < 0 {
+			return
+		}
+		found = true
+		if copyMode {
+			t.copy.cursor = contentPos{Row: span.Prompt}
+			return
+		}
+		g.scrollTopTo(span.Prompt)
+	}()
+	if !found {
+		return
+	}
+	if copyMode {
+		t.revealCursor(w) // takes Mu itself
+		return
+	}
+	t.scheduleViewUpdate(w)
+}
+
+// markRefRow is the content row that mark-relative navigation measures from:
+// the copy cursor in copy mode, the viewport top when scrolled back, and the
+// bottom of the content when sitting live — so a first press from the live
+// view finds the newest match rather than nothing. Caller holds Mu.
+func (t *Term) markRefRow() int {
+	g := t.grid
+	if t.copy.active {
+		return t.copy.cursor.Row
+	}
+	sb := g.Scrollback.Len()
+	if off := clamp(g.ViewOffset, 0, sb); off > 0 {
+		return sb - off
+	}
+	return g.ContentRows()
 }
 
 // findMatch locates the next (forward=true) or previous (forward=false) match

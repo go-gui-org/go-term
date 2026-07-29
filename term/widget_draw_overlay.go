@@ -70,6 +70,73 @@ func scrollbarOffsetForY(sbLen, rows int, y, viewH float32) float32 {
 	return off
 }
 
+// Failure ticks: small red marks in the scrollbar track at the prompt row of
+// every command that exited non-zero, so a failure buried in a long build log
+// is findable by eye rather than only by chord.
+var scrollbarFailColor = gui.RGB(214, 74, 66)
+
+const (
+	scrollbarTickH float32 = 2
+	// Ticks stay painted when the scrollbar is idle — a marker you can only
+	// see while already scrolling cannot be the thing that tells you where to
+	// scroll. The low idle alpha keeps it a quiet lane rather than a
+	// permanent red bar; it brightens with the thumb.
+	scrollbarTickIdleAlpha   uint8 = 120
+	scrollbarTickActiveAlpha uint8 = 235
+)
+
+// scrollbarRowY maps a content row to the y of its band in the scrollbar
+// track, on the same total-rows scale as scrollbarGeometry so a tick and the
+// thumb covering it agree to the pixel.
+func scrollbarRowY(row, sbLen, rows int, viewH float32) float32 {
+	if viewH <= 0 || math.IsNaN(float64(viewH)) || math.IsInf(float64(viewH), 0) {
+		return 0
+	}
+	total := float32(sbLen + rows)
+	if total <= 0 {
+		return 0
+	}
+	y := float32(row) / total * viewH
+	if y < 0 {
+		return 0
+	}
+	if y > viewH {
+		return viewH
+	}
+	return y
+}
+
+// drawScrollbarFailures paints one tick per failed command. The failure rows
+// are cached against the mark version, so the per-frame cost is a version
+// compare plus a bounded loop; adjacent ticks closer than one tick height are
+// skipped, which keeps a dense run of failures from becoming a solid bar and
+// bounds the draw calls regardless of how many commands failed.
+func (t *Term) drawScrollbarFailures(ds *drawState, sw, inset float32, thumbVisible bool) {
+	g := ds.g
+	rows := g.failureRows()
+	if len(rows) == 0 {
+		return
+	}
+	alpha := scrollbarTickIdleAlpha
+	if thumbVisible || t.scrollbar.hovered {
+		alpha = scrollbarTickActiveAlpha
+	}
+	c := scrollbarFailColor
+	c.A = alpha
+
+	x := ds.dc.Width - sw - inset
+	sb := g.Scrollback.Len()
+	prevY := float32(-1e9)
+	for _, row := range rows {
+		y := scrollbarRowY(row, sb, g.Rows, ds.dc.Height)
+		if y-prevY < scrollbarTickH {
+			continue // coalesce ticks that would overlap anyway
+		}
+		prevY = y
+		ds.dc.FilledRect(x, y, sw, scrollbarTickH, c)
+	}
+}
+
 // drawIME renders the IME composition string at the cursor position. Fills
 // the background under the composition, draws each rune, and underlines the
 // full span. Populates ds.ime* fields for consumption by drawCursor.
@@ -188,12 +255,21 @@ func (t *Term) drawOverlays(ds *drawState) {
 	visible := ds.now.Before(t.scrollbar.until) || g.ViewOffset > 0 || g.ViewSubPx > 0 || t.scrollbar.dragging
 	active := visible && sb > 0 && ds.dc.Width >= sw && sw > 0
 	t.scrollbar.active = active
+
+	// Inset the thumb from the window's right edge only for panes flush
+	// against it, so the thumb clears the OS window-resize band. Hoisted
+	// above the active check because the failure ticks share it.
+	inset := t.scrollbarEdgeInset(ds.dc.Width)
+
+	// Failure ticks go under the thumb: the thumb is only alpha 120, so a
+	// tick beneath it tints through instead of disappearing.
+	if sb > 0 && sw > 0 && ds.dc.Width >= sw && !g.AltActive {
+		t.drawScrollbarFailures(ds, sw, inset, active)
+	}
+
 	if active {
-		// Inset the thumb from the window's right edge only for panes flush
-		// against it, so the thumb clears the OS window-resize band. The
-		// clickable region extends inward (leftward) to scrollbarHitWidth so
-		// the grabbable area stays wide even when the visual thumb is narrow.
-		inset := t.scrollbarEdgeInset(ds.dc.Width)
+		// The clickable region extends inward (leftward) to scrollbarHitWidth
+		// so the grabbable area stays wide even when the visual thumb is narrow.
 		thumbX := ds.dc.Width - sw - inset
 		viewOffsetVal := float32(g.ViewOffset) + g.ViewSubPx/t.cellH
 		thumbY, thumbH := scrollbarGeometry(sb, g.Rows, viewOffsetVal, ds.dc.Height)

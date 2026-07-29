@@ -435,6 +435,19 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 		return true
 	}
 
+	// The other two mark-driven actions: jump to the newest failed command,
+	// and select a command's output region.
+	if t.binds(ActionJumpFailure, e) {
+		t.jumpToFailure(w)
+		e.IsHandled = true
+		return true
+	}
+	if t.binds(ActionSelectOutput, e) {
+		t.selectCommandOutput(w)
+		e.IsHandled = true
+		return true
+	}
+
 	// While in search mode, intercept navigation and editing keys.
 	if t.search.active {
 		switch {

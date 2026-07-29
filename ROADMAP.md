@@ -114,6 +114,34 @@ no parser changes, no new lock.
 - [x] Prompt marks `[` / `]` reusing `grid_mark.go`
 - [x] `docs/config.md` copy-mode section; help overlay lists only the entry chord
 
+### Phase 48 — OSC 133 failures + output selection (issue #103)
+
+The OSC 133 marks recorded since Phase 26 carried more structure than the
+prompt-jump chords used. Exit status was parsed off the wire and discarded, so
+a failed command buried in a long build log was findable only by reading. This
+phase consumes the exit status and the command regions the marks imply.
+
+Fold — collapsing a command's output to a placeholder row — is **deferred to
+its own issue**. Every subsystem in the widget assumes viewport row `r` is
+content row `sb-off+r`, and that invariant is inlined rather than abstracted
+(`ViewCellAt`, `grid_search.go`, graphics origins, scrollbar geometry, mouse
+hit-testing, momentum, sub-pixel scroll). Collapsing rows breaks it everywhere
+and needs a visual-row coordinate layer, which is a project on its own.
+
+- [x] Parse exit status from `OSC 133;D;<exit>` into `mark.Exit`; a missing or
+      unparsable status stays `markExitUnknown` and never reads as success
+- [x] Re-map marks, selection and graphics through reflow (`trackRows` on
+      `reflowConfig`) — the flat scrollback delta drifted every row below a
+      line that re-wrapped to a different physical row count
+- [x] `commandSpan` model derived from the mark stream, tolerating the
+      incomplete A/B/C/D sequences real shells emit
+- [x] `term.jump-failure` (`Cmd+Shift+E`) — newest failure above the cursor,
+      wrapping; works in copy mode too
+- [x] `term.select-output` (`Cmd+Shift+O`) — selects a command's output region
+      and enters copy mode with it live, ready for `y` / `Cmd+C`
+- [x] Red failure ticks in the scrollbar track, cached against the mark version
+- [x] `docs/config.md` shell-integration section
+
 ### Phase 41 — Export audit + Godoc pass
 
 Every exported symbol gets a deliberate reason and complete doc comment.
@@ -205,6 +233,8 @@ When go-gui ships v1.0.0:
 | 42 | DECSCA + VT420 rectangular areas | DEC forms apps, vttest menu 8 |
 | 45 | Session recording and replay | `falcon --record` / `--replay`, `gotermrec` |
 | 46 | OSC 1337 file download + sizing keys | `imgcat -d file`, `imgcat -W 40` |
+| 47 | Copy mode | `Cmd+Shift+Space`, vim keys, `y` |
+| 48 | OSC 133 failures + output selection | `Cmd+Shift+E`, `Cmd+Shift+O`, scrollbar ticks |
 
 ## Commands
 

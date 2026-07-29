@@ -384,6 +384,25 @@ type grid struct {
 	// AddMark; adjusted by scrollback trim and Resize; capped at maxMarks.
 	Marks []mark
 
+	// marksVer is bumped on every Marks mutation. It is the cache key for
+	// failRows below, so the draw path never rescans the mark stream.
+	marksVer uint64
+
+	// failRows caches the prompt rows of failed commands, oldest first, as
+	// derived by failureRows(). failRowsValid distinguishes "never built"
+	// from "built and legitimately empty at version 0".
+	failRows      []int
+	failRowsVer   uint64
+	failRowsValid bool
+
+	// resizeTrack lets the widget ride extra content rows through the same
+	// reflow re-map Resize applies to marks, selection and graphics. Copy
+	// mode's cursor and anchor live in the widget, so the grid cannot
+	// collect them itself. Set it immediately before Resize; Resize rewrites
+	// the entries in place (-1 for a row the re-wrap discarded) and the
+	// caller clears it afterwards.
+	resizeTrack []int
+
 	kittyFlagStack []uint32
 
 	// Graphics holds decoded images (Phase 32). Origin is in content
@@ -701,9 +720,29 @@ func (g *grid) trimGraphics(extra int) {
 	g.Graphics = g.Graphics[:j]
 }
 
-// shiftGraphics applies delta to all graphic origin rows, dropping those
-// that fall entirely outside [0, total). Called after a resize changes
-// scrollback depth. Caller holds Mu.
+// remapGraphics rewrites graphic origins from the mapping logicalReflow
+// produced: rows[i] is the new content row of Graphics[i], -1 meaning the
+// re-wrap discarded it. Length mismatches are ignored defensively — a
+// short slice simply drops the unmapped tail. Caller holds Mu.
+func (g *grid) remapGraphics(rows []int) {
+	if len(g.Graphics) == 0 {
+		return
+	}
+	j := 0
+	for i, gr := range g.Graphics {
+		if i >= len(rows) || rows[i] < 0 {
+			continue
+		}
+		gr.OriginR = rows[i]
+		g.Graphics[j] = gr
+		j++
+	}
+	g.Graphics = g.Graphics[:j]
+}
+
+// shiftGraphics applies a flat delta to every graphic origin. Only correct
+// when no re-wrap happened (rows kept their identity); the reflow path uses
+// remapGraphics instead.
 func (g *grid) shiftGraphics(delta, total int) {
 	if len(g.Graphics) == 0 {
 		return

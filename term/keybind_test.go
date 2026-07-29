@@ -29,6 +29,7 @@ var legacyShortcutLabels = []string{
 	"Copy", "Paste", "Find", "Toggle regex (in Find)",
 	"Next match (in Find)", "Previous match (in Find)",
 	"Previous prompt mark", "Next prompt mark",
+	"Jump to last failed command", "Select command output",
 	"Scroll page up", "Scroll page down", "Scroll to top", "Scroll to bottom",
 	"Increase font size", "Decrease font size", "Reset font size",
 	"Copy mode",

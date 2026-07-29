@@ -1,5 +1,7 @@
 package term
 
+import "sort"
+
 // reflowBuffer copies src (oldRows×oldCols) into a freshly allocated
 // newRows×newCols buffer, preserving the top-left intersection and
 // padding the rest with default cells. Used by Resize for both the
@@ -146,6 +148,12 @@ type reflowConfig struct {
 	cursorR       int
 	cursorC       int
 	scrollbackCap int
+
+	// trackRows lists content rows (scrollback + live, the same coordinate
+	// space as mark.Row) to re-map through the re-wrap. Order is preserved
+	// and the slice need not be sorted. Marks, selection endpoints, and
+	// graphics origins all ride this one channel so they cannot drift apart.
+	trackRows []int
 }
 
 // reflowResult holds the output of logicalReflow.
@@ -156,6 +164,11 @@ type reflowResult struct {
 	sbWrapped  []bool
 	cursorR    int
 	cursorC    int
+
+	// trackedRows is cfg.trackRows in the new coordinate space — same
+	// length and order, with -1 for a row the re-wrap discarded (scrolled
+	// out of the capped scrollback, or off the bottom of the live buffer).
+	trackedRows []int
 }
 
 // logicalReflow joins soft-wrapped physical rows into logical lines,
@@ -206,6 +219,7 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 	)
 
 	nSB := len(scrollback)
+	origNSB, origOldRows := nSB, oldRows
 	total := nSB + oldRows
 	// Cap total so a runaway scrollback count doesn't trigger a
 	// massive physRow allocation. MaxScrollbackCap + MaxGridDim
@@ -218,6 +232,36 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 		}
 		oldRows = total - nSB
 		cells = cells[len(cells)-oldRows*oldCols:]
+	}
+
+	// Convert tracked content rows into phys[] indices up front, while the
+	// old geometry is still in scope. Both the scrollback and the live
+	// buffer are trimmed from the *front* by the cap above, so a tracked
+	// row that fell inside the discarded prefix is dropped here (-1) rather
+	// than silently aliasing a surviving row.
+	var trackPhys []int
+	if len(cfg.trackRows) > 0 {
+		dropSB := origNSB - nSB
+		dropLive := origOldRows - oldRows
+		trackPhys = make([]int, len(cfg.trackRows))
+		for i, row := range cfg.trackRows {
+			switch {
+			case row < 0:
+				trackPhys[i] = -1
+			case row < origNSB: // scrollback row
+				if p := row - dropSB; p >= 0 {
+					trackPhys[i] = p
+				} else {
+					trackPhys[i] = -1
+				}
+			default: // live row
+				if r := row - origNSB - dropLive; r >= 0 && r < oldRows {
+					trackPhys[i] = nSB + r
+				} else {
+					trackPhys[i] = -1
+				}
+			}
+		}
 	}
 	phys := make([]physRow, total)
 	for i, row := range scrollback {
@@ -296,6 +340,18 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 	cursorNewPhysStart := 0
 	var cursorLineRewrapped []physRow
 
+	// Row tracking bookkeeping. A row's *virtual* index is its index in
+	// allNew plus everything trimmed off the front so far; because the trim
+	// only ever removes from the front, actual = virtual - dropped once the
+	// loop is done. Recording a bare actual index instead would be silently
+	// invalidated by every subsequent trim.
+	dropped := 0
+	var lineBase, lineRows []int
+	if len(trackPhys) > 0 {
+		lineBase = make([]int, len(lines))
+		lineRows = make([]int, len(lines))
+	}
+
 	// lineCells is reused across logical lines to avoid per-line allocation.
 	var lineCells []cell
 
@@ -341,12 +397,17 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 			cursorNewPhysStart = len(allNew)
 			cursorLineRewrapped = rewrapped
 		}
+		if lineBase != nil {
+			lineBase[li] = len(allNew) + dropped
+			lineRows[li] = len(rewrapped)
+		}
 		allNew = append(allNew, rewrapped...)
 
 		if li < cursorLineIdx {
 			capRows := max(newRows+scrollbackCap, newRows*2)
-			if len(allNew) > capRows {
-				allNew = allNew[len(allNew)-capRows:]
+			if d := len(allNew) - capRows; d > 0 {
+				allNew = allNew[d:]
+				dropped += d
 			}
 		}
 	}
@@ -376,10 +437,43 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 		newScrollback = append(newScrollback, pr.cells)
 		newSbWrapped = append(newSbWrapped, pr.wrapped)
 	}
+	// sbTrim is hoisted because the tracked-row conversion below needs it:
+	// content row 0 is allNew[sbTrim], for scrollback and live rows alike.
+	sbTrim := 0
 	if scrollbackCap > 0 && len(newScrollback) > scrollbackCap {
-		trim := len(newScrollback) - scrollbackCap
-		newScrollback = newScrollback[trim:]
-		newSbWrapped = newSbWrapped[trim:]
+		sbTrim = len(newScrollback) - scrollbackCap
+		newScrollback = newScrollback[sbTrim:]
+		newSbWrapped = newSbWrapped[sbTrim:]
+	}
+
+	// Resolve tracked rows into the new content coordinate space. A tracked
+	// row sits at the start of its physical row, so its offset within the
+	// logical line is the same computation the cursor uses with cursorC = 0.
+	// Indices into allNew map uniformly onto content rows: a scrollback row
+	// lands at i-sbTrim, and live row r sits at allNew[liveStart+r] with
+	// len(newScrollback) == liveStart-sbTrim, which is also i-sbTrim.
+	var trackedRows []int
+	if len(trackPhys) > 0 {
+		trackedRows = make([]int, len(trackPhys))
+		liveEnd := liveStart + newRows
+		for i, p := range trackPhys {
+			trackedRows[i] = -1
+			if p < 0 || len(lines) == 0 {
+				continue
+			}
+			// First logical line whose end reaches p; lines are contiguous
+			// and ascending, so this is the line containing p.
+			li := sort.Search(len(lines), func(j int) bool { return lines[j].end >= p })
+			if li >= len(lines) || p < lines[li].start {
+				continue
+			}
+			rowInLine := min((p-lines[li].start)*oldCols/newCols, lineRows[li]-1)
+			idx := lineBase[li] + rowInLine - dropped
+			if idx < sbTrim || idx >= liveEnd {
+				continue // scrolled out of the capped scrollback, or past the live buffer
+			}
+			trackedRows[i] = idx - sbTrim
+		}
 	}
 
 	newCells = make([]cell, newRows*newCols)
@@ -411,12 +505,13 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 		newCursorC = newCols - 1
 	}
 	return reflowResult{
-		cells:      newCells,
-		rowWrapped: newRowWrapped,
-		scrollback: newScrollback,
-		sbWrapped:  newSbWrapped,
-		cursorR:    newCursorR,
-		cursorC:    newCursorC,
+		cells:       newCells,
+		rowWrapped:  newRowWrapped,
+		scrollback:  newScrollback,
+		sbWrapped:   newSbWrapped,
+		cursorR:     newCursorR,
+		cursorC:     newCursorC,
+		trackedRows: trackedRows,
 	}
 }
 
@@ -442,12 +537,56 @@ func (g *grid) Resize(rows, cols int) {
 
 	oldSbLen := g.Scrollback.Len()
 
+	// Collect every content row that must survive the re-wrap into one
+	// tracking slice: marks, then the selection endpoints, then graphics
+	// origins, then the widget's own rows. They share a single channel so
+	// they cannot drift apart, and so the "shift everything by the
+	// scrollback delta" approach — which is wrong the moment a logical line
+	// re-wraps to a different row count — exists in exactly zero places on
+	// the reflow path.
+	//
+	// Marks and graphics always describe main-screen content, so they ride
+	// the reflow even while the alt screen is up. The selection and the
+	// widget's copy-mode rows do not: on the alt screen those address alt
+	// rows, which are only cropped and padded, so there the flat scrollback
+	// delta is exactly right and remapping them through the *main* reflow
+	// would scatter them across unrelated history.
+	trackWidgetRows := !g.AltActive
+	nMarks := len(g.Marks)
+	nSel := 0
+	if trackWidgetRows && g.SelActive {
+		nSel = 2
+	}
+	nGfx := len(g.Graphics)
+	nWidget := 0
+	if trackWidgetRows {
+		nWidget = len(g.resizeTrack)
+	}
+	trackRows := make([]int, 0, nMarks+nSel+nGfx+nWidget)
+	for _, m := range g.Marks {
+		trackRows = append(trackRows, m.Row)
+	}
+	if nSel > 0 {
+		trackRows = append(trackRows, g.SelAnchor.Row, g.SelHead.Row)
+	}
+	for _, gr := range g.Graphics {
+		trackRows = append(trackRows, gr.OriginR)
+	}
+	if nWidget > 0 {
+		trackRows = append(trackRows, g.resizeTrack...)
+	}
+
 	sbRows := make([][]cell, oldSbLen)
 	sbWrap := make([]bool, oldSbLen)
 	for i := range oldSbLen {
 		sbRows[i] = g.Scrollback.Row(i) // aliases backing buffer; safe under Mu
 		sbWrap[i] = g.Scrollback.Wrapped(i)
 	}
+
+	// tracked is trackRows in the new coordinate space, or nil when no
+	// reflow ran (alt screen with a mismatched saved main buffer) — that
+	// one path still falls back to the flat shift.
+	var tracked []int
 
 	if g.AltActive {
 
@@ -473,7 +612,12 @@ func (g *grid) Resize(rows, cols int) {
 				cursorR:       g.mainSaved.cursorR,
 				cursorC:       g.mainSaved.cursorC,
 				scrollbackCap: g.ScrollbackCap,
+				// Marks, selection and graphics describe main-screen
+				// content, so they remap against this reflow even though
+				// the alt buffer itself is only cropped/padded.
+				trackRows: trackRows,
 			})
+			tracked = res.trackedRows
 			g.mainSaved.cells = res.cells
 			g.mainSaved.rowWrapped = res.rowWrapped
 			g.repopulateScrollback(res.scrollback, res.sbWrapped, cols)
@@ -495,7 +639,9 @@ func (g *grid) Resize(rows, cols int) {
 			cursorR:       g.CursorR,
 			cursorC:       g.CursorC,
 			scrollbackCap: g.ScrollbackCap,
+			trackRows:     trackRows,
 		})
+		tracked = res.trackedRows
 		g.Cells = res.cells
 		g.RowWrapped = res.rowWrapped
 		g.repopulateScrollback(res.scrollback, res.sbWrapped, cols)
@@ -513,23 +659,72 @@ func (g *grid) Resize(rows, cols int) {
 	g.ViewOffset = 0
 	g.ViewSubPx = 0
 
-	if g.SelActive {
-		delta := g.Scrollback.Len() - oldSbLen
-		total := g.Scrollback.Len() + rows
+	delta := g.Scrollback.Len() - oldSbLen
+	total := g.Scrollback.Len() + rows
+
+	if tracked != nil {
+		// Unpack the one tracking slice back into its consumers, in the
+		// order they were appended above.
+		g.remapMarks(tracked[:nMarks])
+		if nSel > 0 {
+			// Phase 17 contract: an active selection survives a resize. A
+			// surviving endpoint takes its remapped row; one whose content
+			// the re-wrap discarded is clamped to the edge it fell off,
+			// inferred from which side of the surviving endpoint it was on.
+			g.SelAnchor.Row, g.SelHead.Row = resolveSelRows(
+				tracked[nMarks], tracked[nMarks+1],
+				g.SelAnchor.Row, g.SelHead.Row, total)
+		}
+		g.remapGraphics(tracked[nMarks+nSel : nMarks+nSel+nGfx])
+		// The widget's rows come back in place; -1 entries stay -1 so the
+		// caller can decide what a discarded row means for it.
+		if nWidget > 0 {
+			copy(g.resizeTrack, tracked[nMarks+nSel+nGfx:])
+		}
+	} else {
+		// No reflow ran (alt screen, saved main buffer unusable). Nothing
+		// was re-wrapped, so the flat scrollback delta is exactly right here.
+		g.shiftMarks(delta, total)
+		g.shiftGraphics(delta, total)
+	}
+
+	// Rows that did not ride the reflow: either nothing reflowed at all, or
+	// the alt screen is up and these address alt rows that only moved by the
+	// scrollback delta. nSel/nWidget are zero in exactly those cases.
+	if nSel == 0 && g.SelActive {
 		g.SelAnchor.Row = clamp(g.SelAnchor.Row+delta, 0, total-1)
 		g.SelHead.Row = clamp(g.SelHead.Row+delta, 0, total-1)
 	}
-
-	if len(g.Marks) > 0 {
-		delta := g.Scrollback.Len() - oldSbLen
-		total := g.Scrollback.Len() + rows
-		g.shiftMarks(delta, total)
+	if nWidget == 0 {
+		for i, row := range g.resizeTrack {
+			g.resizeTrack[i] = clamp(row+delta, 0, total-1)
+		}
 	}
+}
 
-	if len(g.Graphics) > 0 {
-		delta := g.Scrollback.Len() - oldSbLen
-		total := g.Scrollback.Len() + rows
-		g.shiftGraphics(delta, total)
+// resolveSelRows turns the remapped selection endpoints (newA/newH, -1 when
+// the re-wrap discarded that row) back into a usable pair. oldA/oldH are the
+// pre-resize rows, used only to decide which edge a discarded endpoint fell
+// off: an endpoint that sat below the surviving one clamps to the bottom,
+// otherwise to the top. With neither endpoint surviving the selection spans
+// content that is entirely gone, so it collapses onto the last row.
+func resolveSelRows(newA, newH, oldA, oldH, total int) (int, int) {
+	last := max(total-1, 0)
+	switch {
+	case newA >= 0 && newH >= 0:
+		return newA, newH
+	case newA >= 0:
+		if oldH > oldA {
+			return newA, last
+		}
+		return newA, 0
+	case newH >= 0:
+		if oldA > oldH {
+			return last, newH
+		}
+		return 0, newH
+	default:
+		return last, last
 	}
 }
 

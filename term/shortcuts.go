@@ -26,6 +26,8 @@ const (
 	ActionPrevMatch      Action = "term.prev-match"
 	ActionPrevPrompt     Action = "term.prev-prompt"
 	ActionNextPrompt     Action = "term.next-prompt"
+	ActionJumpFailure    Action = "term.jump-failure"
+	ActionSelectOutput   Action = "term.select-output"
 	ActionScrollPageUp   Action = "term.scroll-page-up"
 	ActionScrollPageDown Action = "term.scroll-page-down"
 	ActionScrollTop      Action = "term.scroll-top"
@@ -158,6 +160,7 @@ func (b binding) matches(key gui.KeyCode, mods gui.Modifier) bool {
 var actionOrder = []Action{
 	ActionCopy, ActionPaste, ActionFind, ActionToggleRegex,
 	ActionNextMatch, ActionPrevMatch, ActionPrevPrompt, ActionNextPrompt,
+	ActionJumpFailure, ActionSelectOutput,
 	ActionScrollPageUp, ActionScrollPageDown, ActionScrollTop, ActionScrollBottom,
 	ActionFontInc, ActionFontDec, ActionFontReset,
 	ActionCopyMode,
@@ -190,6 +193,8 @@ var actionLabels = map[Action]string{
 	ActionPrevMatch:      "Previous match (in Find)",
 	ActionPrevPrompt:     "Previous prompt mark",
 	ActionNextPrompt:     "Next prompt mark",
+	ActionJumpFailure:    "Jump to last failed command",
+	ActionSelectOutput:   "Select command output",
 	ActionScrollPageUp:   "Scroll page up",
 	ActionScrollPageDown: "Scroll page down",
 	ActionScrollTop:      "Scroll to top",
@@ -263,6 +268,10 @@ func defaultBindings() map[Action]binding {
 
 		ActionPrevPrompt: b(true, k(gui.KeyUp, gui.ModSuper)),
 		ActionNextPrompt: b(true, k(gui.KeyDown, gui.ModSuper)),
+
+		// shiftOptional is moot for a chord that already names Shift.
+		ActionJumpFailure:  b(false, k(gui.KeyE, gui.ModSuper|gui.ModShift)),
+		ActionSelectOutput: b(false, k(gui.KeyO, gui.ModSuper|gui.ModShift)),
 
 		// One chord each: shiftOptional makes plain PageUp and Shift+PageUp
 		// both match, and scrollbackIntercept's own alt-screen check decides
