@@ -278,6 +278,39 @@ func TestParser_OSC133_AllKinds(t *testing.T) {
 	}
 }
 
+// TestParser_OSC133_ExitStatus checks the status survives the whole path
+// from wire bytes to the stored mark, not just the oscExitStatus unit.
+func TestParser_OSC133_ExitStatus(t *testing.T) {
+	tests := []struct {
+		seq  string
+		want int16
+	}{
+		{"\x1b]133;D\x07", markExitUnknown},
+		{"\x1b]133;D;0\x07", 0},
+		{"\x1b]133;D;1\x07", 1},
+		{"\x1b]133;D;127;aid=9\x07", 127},
+		{"\x1b]133;D;bogus\x07", markExitUnknown},
+	}
+	for _, tt := range tests {
+		g, p := newParserGrid(4, 80)
+		feed(t, g, p, []byte(tt.seq))
+		g.Mu.Lock()
+		n := len(g.Marks)
+		var exit int16
+		if n > 0 {
+			exit = g.Marks[0].Exit
+		}
+		g.Mu.Unlock()
+		if n != 1 {
+			t.Errorf("seq %q: want 1 mark, got %d", tt.seq, n)
+			continue
+		}
+		if exit != tt.want {
+			t.Errorf("seq %q: exit got %d, want %d", tt.seq, exit, tt.want)
+		}
+	}
+}
+
 func TestParser_OSC133_UnknownSubcommandDropped(t *testing.T) {
 	g, p := newParserGrid(4, 80)
 	feed(t, g, p, []byte("\x1b]133;Z\x07"))

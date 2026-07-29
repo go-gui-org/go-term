@@ -237,7 +237,23 @@ func (t *Term) prepareResize(ds *drawState) {
 			t.resize.pendingSince = now
 		}
 		if elapsed := now.Sub(t.resize.pendingSince); elapsed >= resizeDebounce {
+			// Copy mode's cursor and anchor are content rows living in the
+			// widget, so they must ride the same reflow re-map the grid
+			// applies to its own marks and selection. Without this a resize
+			// leaves the selection anchored to whatever text drifted into
+			// those row numbers, and Resize's ViewOffset reset drops the
+			// frozen viewport at the live bottom, far from the selection.
+			var track [2]int
+			if t.copy.active {
+				track[0] = t.copy.cursor.Row
+				track[1] = t.copy.anchor.Row
+				t.grid.resizeTrack = track[:]
+			}
 			t.grid.Resize(ds.rows, ds.cols)
+			if t.copy.active {
+				t.grid.resizeTrack = nil
+				t.applyCopyResize(track[0], track[1])
+			}
 			ds.doResize = true
 			t.resize.pendingSince = time.Time{}
 		} else {

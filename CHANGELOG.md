@@ -8,6 +8,17 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `term`: OSC 133 shell integration now uses the exit status shells report in
+  `OSC 133;D;<exit>` (#103). `term.jump-failure` (`Cmd+Shift+E`) scrolls to the
+  most recent command that exited non-zero — repeated presses walk back through
+  older failures and wrap — and each failure gets a red tick in the scrollbar
+  track so one buried in a long build log is findable by eye.
+  `term.select-output` (`Cmd+Shift+O`) selects exactly the output region of the
+  command under the cursor and enters copy mode with that selection live, ready
+  for `y` or `Cmd+C`; on a fresh prompt it selects the previous command's
+  output. Both are no-ops on the alt screen, and a command whose shell reported
+  no exit status never counts as a failure. See `docs/config.md`.
+
 - User config file covering fonts, theme, terminal settings and Term-level
   keybindings (#94). The existing INI at `~/.config/go-term/config` gains
   `[font]` (`family`, `size`) and `[general]` (`theme`, `scrollback`, `bell`,
@@ -102,6 +113,15 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   parser's lifetime.
 
 ### Fixed
+
+- `term`: OSC 133 marks, the selection, and graphics origins no longer drift
+  off their text when a window resize re-wraps content (#103). All three were
+  shifted by the flat scrollback-depth delta, which is wrong as soon as a
+  logical line re-wraps into a different number of physical rows — everything
+  below it moved by the accumulated difference. They now re-map through the
+  re-wrap itself, reusing the same logical-line mapping the cursor already
+  used. Visible as prompt jumping landing on the wrong row after resizing a
+  window with wrapped output in scrollback.
 
 - Windows: the tail of a session's output is no longer truncated when the
   shell exits. ConPTY's output pipe is fed by conhost from its own process,

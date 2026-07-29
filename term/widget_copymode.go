@@ -125,28 +125,56 @@ func (t *Term) syncSelection() {
 // Main-thread only; takes Mu itself, so callers must not hold it.
 func (t *Term) revealCursor(w *gui.Window) {
 	func() {
-		g := t.grid
-		g.Mu.Lock()
-		defer g.Mu.Unlock()
-		t.clampCopyCursor()
-		// ContentRowToScreen is unclamped, so its sign tells us both the
-		// direction and the distance to scroll. ScrollView takes positive =
-		// back into history, hence the negations.
-		//
-		// The floor is viewport row 1, not 0: the copy bar covers row 0 and
-		// that row is not painted, so a cursor there would be invisible. At
-		// the very top of the buffer ScrollView clamps and the cursor does
-		// land on row 0 — the one place the bar can hide it, and only for the
-		// oldest line in the scrollback.
-		switch sr := g.ContentRowToScreen(t.copy.cursor.Row); {
-		case sr < copyBarRows:
-			g.ScrollView(copyBarRows - sr)
-		case sr >= g.Rows:
-			g.ScrollView(-(sr - g.Rows + 1))
-		}
-		t.syncSelection()
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		t.revealCursorLocked()
 	}()
 	t.scheduleViewUpdate(w)
+}
+
+// revealCursorLocked is revealCursor's critical section, split out for callers
+// that already hold Mu (the resize path runs inside onDraw's lock). Caller
+// holds Mu.
+func (t *Term) revealCursorLocked() {
+	g := t.grid
+	t.clampCopyCursor()
+	// ContentRowToScreen is unclamped, so its sign tells us both the
+	// direction and the distance to scroll. ScrollView takes positive =
+	// back into history, hence the negations.
+	//
+	// The floor is viewport row 1, not 0: the copy bar covers row 0 and
+	// that row is not painted, so a cursor there would be invisible. At
+	// the very top of the buffer ScrollView clamps and the cursor does
+	// land on row 0 — the one place the bar can hide it, and only for the
+	// oldest line in the scrollback.
+	switch sr := g.ContentRowToScreen(t.copy.cursor.Row); {
+	case sr < copyBarRows:
+		g.ScrollView(copyBarRows - sr)
+	case sr >= g.Rows:
+		g.ScrollView(-(sr - g.Rows + 1))
+	}
+	t.syncSelection()
+}
+
+// applyCopyResize restores copy mode's content-row state after grid.Resize
+// re-mapped it through the reflow. newCursor/newAnchor are the re-mapped rows,
+// -1 for a row the re-wrap discarded. It also pulls the viewport back onto the
+// cursor: Resize resets ViewOffset to the live bottom, which would otherwise
+// strand a frozen copy-mode view. Caller holds Mu.
+func (t *Term) applyCopyResize(newCursor, newAnchor int) {
+	if t.copy.sel == copySelNone {
+		if newCursor >= 0 {
+			t.copy.cursor.Row = newCursor
+		}
+	} else {
+		// Same rule the grid selection uses: an endpoint whose content the
+		// re-wrap discarded collapses onto the edge it fell off rather than
+		// taking the whole selection with it.
+		anc, cur := resolveSelRows(newAnchor, newCursor,
+			t.copy.anchor.Row, t.copy.cursor.Row, t.grid.ContentRows())
+		t.copy.anchor.Row, t.copy.cursor.Row = anc, cur
+	}
+	t.revealCursorLocked()
 }
 
 // copyPageStep returns the row distance for a full-page motion, matching
@@ -231,6 +259,85 @@ func (t *Term) yankCopySelection(w *gui.Window) {
 	}
 	t.copySelection(w)
 	t.exitCopyMode(w)
+}
+
+// selectCommandOutput selects exactly the output region of the command under
+// the reference row and leaves the selection live in copy mode, ready for y
+// or Cmd+C.
+//
+// Outside copy mode it enters it, which is what gives the selection an
+// owner: the viewport freezes so the text cannot scroll away under it, Esc
+// drops it, and the copy bar says what to press next. A bare selection
+// painted on the live view would survive only until some unrelated keystroke
+// cleared it. Suppressed on the alt screen; a no-op when no command region
+// covers the reference row.
+func (t *Term) selectCommandOutput(w *gui.Window) {
+	// Resolve the reference row *before* entering copy mode. Entering it
+	// parks the copy cursor on the terminal cursor — the live bottom — which
+	// would throw away a scrolled-back viewport and silently retarget the
+	// newest command instead of the one on screen.
+	ref, alt := func() (int, bool) {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		return t.markRefRow(), t.grid.AltActive
+	}()
+	if alt {
+		return
+	}
+
+	entered := false
+	if !t.copy.active {
+		t.enterCopyMode(w)
+		entered = true
+	}
+
+	ok := func() bool {
+		g := t.grid
+		g.Mu.Lock()
+		defer g.Mu.Unlock()
+		if g.AltActive {
+			return false
+		}
+		span, found := g.commandAt(ref)
+		if !found || !span.hasOutput() {
+			// Either ref sits past the last span (live view, nothing
+			// running) or on a command with no output — usually the fresh,
+			// not-yet-run prompt left behind once a command finishes. Either
+			// way the interesting output belongs to the command before.
+			from := ref
+			if found {
+				from = span.start()
+			}
+			span, found = g.outputBefore(from)
+		}
+		if !found || !span.hasOutput() {
+			return false
+		}
+		t.copy.anchor = contentPos{Row: span.OutStart}
+		t.copy.cursor = contentPos{Row: span.OutEnd}
+		t.copy.sel = copySelLine
+		t.clampCopyCursor()
+		t.syncSelection()
+		// Show the *first* line of the output, not the last. The cursor sits
+		// on the final row so j/k extend downward from there, but revealing
+		// the cursor would scroll the whole selection off the top the moment
+		// the output runs past one screen — the user is left staring at its
+		// tail with no idea what was selected.
+		if sr := g.ContentRowToScreen(span.OutStart); sr != copyBarRows {
+			// ScrollView takes positive = back into history, so the sign of
+			// the gap to the first painted row is already correct.
+			g.ScrollView(copyBarRows - sr)
+		}
+		return true
+	}()
+
+	if !ok {
+		if entered {
+			t.exitCopyMode(w) // leave no half-entered mode behind
+		}
+		return
+	}
+	t.scheduleViewUpdate(w)
 }
 
 // copyWordMotion moves the cursor a word forward or back.
@@ -475,6 +582,14 @@ func (t *Term) handleCopyModeKey(e *gui.Event, w *gui.Window) {
 		t.copyMarkJump(true, w)
 	case t.binds(ActionCopyModeNextMark, e):
 		t.copyMarkJump(false, w)
+
+	// Copy mode's dispatch runs first and consumes everything, so the two
+	// Term-level mark chords need explicit cases here or they would die
+	// silently the moment copy mode is active.
+	case t.binds(ActionJumpFailure, e):
+		t.jumpToFailure(w)
+	case t.binds(ActionSelectOutput, e):
+		t.selectCommandOutput(w)
 	}
 	// Consume unconditionally, matched or not: an unhandled letter reaching
 	// the shell is the one failure mode a modal keymap must never have.

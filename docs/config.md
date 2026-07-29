@@ -182,6 +182,8 @@ actually want to press.
 | `term.prev-match` | `Shift+Enter` (in Find) |
 | `term.prev-prompt` | `Cmd+Up` |
 | `term.next-prompt` | `Cmd+Down` |
+| `term.jump-failure` | `Cmd+Shift+E` |
+| `term.select-output` | `Cmd+Shift+O` |
 | `term.scroll-page-up` | `PageUp` |
 | `term.scroll-page-down` | `PageDown` |
 | `term.scroll-top` | `Shift+Home` |
@@ -202,6 +204,25 @@ Several `term.*` actions only fire in context, and that gate is *not* part of
 the binding: `Ctrl+C` still sends SIGINT when nothing is selected, the Find
 keys only apply while the search bar is open, and `term.copy` only copies when
 there is a selection.
+
+#### Shell integration: prompt marks, failures, output selection
+
+Four actions are driven by OSC 133 semantic marks, which your shell must emit
+(bash via `bash-preexec`, or the zsh/fish shell-integration snippets). Without
+them these keys do nothing:
+
+- `term.prev-prompt` / `term.next-prompt` scroll between prompts.
+- `term.jump-failure` scrolls to the most recent command that exited non-zero,
+  and each failure gets a red tick in the scrollbar track. Repeated presses
+  walk back through older failures and then wrap to the newest. A command whose
+  shell reported *no* exit status never counts as a failure.
+- `term.select-output` selects exactly the output region of the command under
+  the cursor and enters copy mode with that selection live, so `y` or `Cmd+C`
+  copies it. With the cursor on a fresh prompt it selects the previous
+  command's output, which is the usual case right after a command finishes.
+
+All four are no-ops while a full-screen app owns the alt screen, since marks
+are not recorded there.
 
 #### Caveat: PageUp/PageDown on the alt screen
 

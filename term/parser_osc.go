@@ -8,6 +8,34 @@ import (
 	"strings"
 )
 
+// oscExitStatus parses the optional exit status out of an OSC 133 D payload
+// ("D", "D;0", "D;1;aid=17"). Returns markExitUnknown when the status is
+// absent or unparsable — shells vary in what they emit, and a missing status
+// must never read as success. Out-of-range values clamp to the int16 max,
+// which is still non-zero and so still reads as a failure.
+func oscExitStatus(pt string) int16 {
+	if len(pt) < 2 || pt[1] != ';' {
+		return markExitUnknown
+	}
+	field := pt[2:]
+	if i := strings.IndexByte(field, ';'); i >= 0 {
+		field = field[:i] // trailing OSC 133 keys such as aid=/err=
+	}
+	n, err := strconv.Atoi(field)
+	if err != nil {
+		return markExitUnknown
+	}
+	if n < 0 {
+		// A negative status is not meaningful; treat it as "reported, but
+		// not a success" rather than discarding the fact a command ended.
+		return math.MaxInt16
+	}
+	if n > math.MaxInt16 {
+		return math.MaxInt16
+	}
+	return int16(n)
+}
+
 // notifyMax caps notification strings before handing them to onNotify.
 // Prevents subprocess arg-length overflows and large heap allocations
 // from hostile OSC payloads.
@@ -155,7 +183,7 @@ func (p *parser) dispatchOSC() {
 		case 'C':
 			p.g.AddMark(markOutputStart)
 		case 'D':
-			p.g.AddMark(markCommandEnd)
+			p.g.AddCommandEnd(oscExitStatus(pt))
 		}
 	case 9:
 		// iTerm2-style notification: OSC 9 ; message BEL — body only, no title.

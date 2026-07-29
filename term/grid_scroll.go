@@ -155,6 +155,19 @@ func (g *grid) ScrollViewPx(deltaPx, cellH float32) {
 	g.ViewSubPx = float32(total - float64(rows)*float64(cellH))
 }
 
+// scrollTopTo puts contentRow at the top of the viewport. A row in the live
+// region snaps to the live view, since the live rows are always the bottom
+// of the content and cannot be scrolled above. Caller holds Mu.
+func (g *grid) scrollTopTo(contentRow int) {
+	sb := g.Scrollback.Len()
+	if contentRow >= sb {
+		g.ViewOffset = 0
+	} else {
+		g.ViewOffset = clamp(sb-contentRow, 0, sb)
+	}
+	g.ViewSubPx = 0
+}
+
 // ResetView snaps the viewport back to the live grid.
 func (g *grid) ResetView() {
 	g.ViewOffset = 0

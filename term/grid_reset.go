@@ -107,6 +107,7 @@ func (g *grid) HardReset() {
 		g.Scrollback.DropBacking()
 	}
 	g.Marks = g.Marks[:0]
+	g.marksVer++
 	g.Graphics = g.Graphics[:0]
 	g.ClearSelection()
 	g.ResetView()
