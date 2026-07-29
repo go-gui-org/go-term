@@ -396,3 +396,55 @@ func TestAllocLeafID_StaysUniqueAcrossChurn(t *testing.T) {
 		t.Errorf("leaves = %v, want 4 after three splits", ids)
 	}
 }
+
+// ExitWhenLastShellExits closes the window directly, which only raises
+// gui.Window's close flag — OnCloseRequest never runs. An embedder that
+// persists state on quit therefore needs OnLastShellExit; without it the
+// workspace file would never be updated on this path.
+func TestOnPaneExit_LastShellRunsExitHook(t *testing.T) {
+	cfg := hermeticCfg(t)
+	cfg.ExitWhenLastShellExits = true
+	var hookWindow *gui.Window
+	calls := 0
+	cfg.OnLastShellExit = func(w *gui.Window) {
+		calls++
+		hookWindow = w
+	}
+	ws := newLiveWorkspaceCfg(t, cfg)
+
+	tab := activeTabOf(t, ws)
+	ws.onPaneExit(tab.focused)
+
+	if calls != 1 {
+		t.Fatalf("OnLastShellExit calls = %d, want 1", calls)
+	}
+	if hookWindow != ws.w {
+		t.Error("hook got a different window than the workspace's")
+	}
+	// The hook owns the close, so the workspace must not have requested it.
+	if ws.w.CloseRequested() {
+		t.Error("window closed by the workspace despite the hook owning it")
+	}
+	// State is torn down before the hook runs, so a Save from inside it
+	// records an empty session rather than a tab with a dead pane.
+	if len(ws.tabs) != 0 {
+		t.Errorf("tabs = %d after last shell exit, want 0", len(ws.tabs))
+	}
+	if snap := ws.snapshot(); len(snap.Tabs) != 0 {
+		t.Errorf("snapshot tabs = %d, want 0", len(snap.Tabs))
+	}
+}
+
+// With no hook installed the workspace still closes the window itself.
+func TestOnPaneExit_LastShellClosesWindowWithoutHook(t *testing.T) {
+	cfg := hermeticCfg(t)
+	cfg.ExitWhenLastShellExits = true
+	ws := newLiveWorkspaceCfg(t, cfg)
+
+	tab := activeTabOf(t, ws)
+	ws.onPaneExit(tab.focused)
+
+	if !ws.w.CloseRequested() {
+		t.Error("window not closed after the last shell exited")
+	}
+}

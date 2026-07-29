@@ -52,6 +52,11 @@ func run() int {
 		savePath:   start.effectiveSavePath(),
 		recordPath: start.recordPath,
 	}
+	// Exiting the last shell closes the window without going through
+	// OnCloseRequest, so route that path through saveAndClose too — otherwise
+	// the workspace file keeps whatever it held at startup. Set after the
+	// literal because it closes over a.
+	a.wc.OnLastShellExit = a.saveAndClose
 	defer a.close()
 
 	backendRunApp(gui.NewWindow(a.windowCfg()))

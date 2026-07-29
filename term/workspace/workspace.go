@@ -38,6 +38,17 @@ type Cfg struct {
 	// process exits, rather than replacing it with a fresh tab.
 	ExitWhenLastShellExits bool
 
+	// OnLastShellExit, when non-nil, runs *instead of* the direct window
+	// close that ExitWhenLastShellExits performs. It exists because
+	// gui.Window.Close only raises the close flag — it does not invoke the
+	// window's OnCloseRequest hook — so an embedder that persists state on
+	// quit would silently skip that work on this path. The callback owns
+	// closing the window. Ignored when ExitWhenLastShellExits is false.
+	//
+	// The workspace is already empty when this runs, so a Save here writes
+	// a zero-tab file and the next launch starts fresh.
+	OnLastShellExit func(w *gui.Window)
+
 	// opts carries the per-Term settings resolved from the config file. The
 	// workspace fills it in; embedders configure these through the config
 	// file, not here.
@@ -179,6 +190,13 @@ func (ws *Workspace) closePaneInTab(tab *Tab, leafID string) {
 		// instead of spawning a replacement tab.
 		if ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1 {
 			ws.tabs = nil
+			// Hand the close to the embedder when it asked for it, so
+			// quit-time work (persisting the workspace) still happens —
+			// w.Close alone bypasses OnCloseRequest.
+			if ws.cfg.OnLastShellExit != nil {
+				ws.cfg.OnLastShellExit(ws.w)
+				return
+			}
 			ws.w.Close()
 			return
 		}
