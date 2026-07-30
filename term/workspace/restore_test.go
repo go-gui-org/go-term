@@ -9,6 +9,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -331,6 +332,89 @@ func TestCycleTheme_NoThemesIsNoOp(t *testing.T) {
 
 	if ws.ActivePane().Theme() != before {
 		t.Error("theme changed despite no configured themes")
+	}
+}
+
+// After cycling, persistableThemeName must reflect the newly active theme so
+// a workspace saved next writes the correct theme into the file.
+func TestCycleTheme_UpdatesPersistedThemeName(t *testing.T) {
+	cfg := hermeticCfg(t)
+	cfg.Themes = []term.NamedTheme{
+		{Name: "Default", Theme: term.DefaultTheme},
+		{Name: "Dracula", Theme: term.DraculaTheme},
+	}
+	ws := newLiveWorkspaceCfg(t, cfg)
+
+	ws.CycleTheme()
+
+	if name := ws.persistableThemeName(); name != "Dracula" {
+		t.Errorf("persistableThemeName after cycle = %q, want Dracula", name)
+	}
+}
+
+// SaveRestore_PreservesTheme writes a workspace with a non-default theme
+// and verifies the restored workspace applies it to all panes.
+func TestSaveRestore_PreservesTheme(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspace.json")
+	cfg := hermeticCfg(t)
+	cfg.Themes = []term.NamedTheme{
+		{Name: "Default", Theme: term.DefaultTheme},
+		{Name: "Dracula", Theme: term.DraculaTheme},
+	}
+	ws := newLiveWorkspaceCfg(t, cfg)
+	ws.applyTheme(1) // Dracula
+
+	if err := ws.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), `"theme": "Dracula"`) {
+		t.Errorf("snapshot JSON should include theme Dracula: %s", data)
+	}
+
+	restoreCfg := hermeticCfg(t)
+	restoreCfg.Themes = []term.NamedTheme{
+		{Name: "Default", Theme: term.DefaultTheme},
+		{Name: "Dracula", Theme: term.DraculaTheme},
+	}
+	restored, err := Restore(&gui.Window{}, restoreCfg, path)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	t.Cleanup(func() { _ = restored.Close() })
+
+	if got := restored.ActivePane().Theme(); got != term.DraculaTheme {
+		t.Errorf("restored theme = %+v, want Dracula", got)
+	}
+}
+
+// Restore with a zero-tab workspace (last-shell-exit) still applies the
+// persisted theme to its fresh single pane.
+func TestRestore_ZeroTabAppliesTheme(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspace.json")
+	data := `{"version":1,"activeTab":0,"tabs":[],"theme":"Dracula"}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := hermeticCfg(t)
+	cfg.Themes = []term.NamedTheme{
+		{Name: "Default", Theme: term.DefaultTheme},
+		{Name: "Dracula", Theme: term.DraculaTheme},
+	}
+	restored, err := Restore(&gui.Window{}, cfg, path)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	t.Cleanup(func() { _ = restored.Close() })
+
+	if got := restored.ActivePane().Theme(); got != term.DraculaTheme {
+		t.Errorf("zero-tab restored theme = %+v, want Dracula", got)
+	}
+	if name := restored.persistableThemeName(); name != "Dracula" {
+		t.Errorf("zero-tab persistableThemeName = %q, want Dracula", name)
 	}
 }
 

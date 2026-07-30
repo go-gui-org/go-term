@@ -495,7 +495,6 @@ func TestConfigDir_XDGEnvVar(t *testing.T) {
 }
 
 func TestSnapshotJSON_Schema(t *testing.T) {
-	// Verify the JSON schema matches the roadmap example.
 	tab := &Tab{
 		id:      "tab-0",
 		root:    split(SplitVertical, 0.5, leaf("tab-0-pane-0"), leaf("tab-0-pane-1")),
@@ -511,5 +510,99 @@ func TestSnapshotJSON_Schema(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("JSON missing %q:\n%s", want, s)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// persistableThemeName
+// ---------------------------------------------------------------------------
+
+func TestPersistableThemeName_NilThemeOptsReturnsEmpty(t *testing.T) {
+	ws := &Workspace{
+		cfg: Cfg{
+			Themes: []term.NamedTheme{
+				{Name: "Default", Theme: term.DefaultTheme},
+			},
+		},
+	}
+	if got := ws.persistableThemeName(); got != "" {
+		t.Errorf("nil opts.theme: got %q, want empty", got)
+	}
+}
+
+func TestPersistableThemeName_NoThemesReturnsEmpty(t *testing.T) {
+	th := term.DefaultTheme
+	ws := &Workspace{cfg: Cfg{opts: termOpts{theme: &th}}}
+	if got := ws.persistableThemeName(); got != "" {
+		t.Errorf("zero Themes slice: got %q, want empty", got)
+	}
+}
+
+func TestPersistableThemeName_DefaultThemeReturnsEmpty(t *testing.T) {
+	th := term.DefaultTheme
+	ws := &Workspace{
+		cfg: Cfg{
+			Themes: []term.NamedTheme{
+				{Name: "Default", Theme: th},
+				{Name: "Dracula", Theme: term.DraculaTheme},
+			},
+			opts: termOpts{theme: &th},
+		},
+	}
+	if got := ws.persistableThemeName(); got != "" {
+		t.Errorf("default theme (Themes[0]): got %q, want empty", got)
+	}
+}
+
+func TestPersistableThemeName_NonDefaultReturnsName(t *testing.T) {
+	th := term.DraculaTheme
+	ws := &Workspace{
+		cfg: Cfg{
+			Themes: []term.NamedTheme{
+				{Name: "Default", Theme: term.DefaultTheme},
+				{Name: "Dracula", Theme: th},
+			},
+			opts: termOpts{theme: &th},
+		},
+	}
+	if got := ws.persistableThemeName(); got != "Dracula" {
+		t.Errorf("non-default theme: got %q, want %q", got, "Dracula")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// snapshot Theme field
+// ---------------------------------------------------------------------------
+
+func TestSnapshot_ThemeOmittedForDefault(t *testing.T) {
+	ws := &Workspace{cfg: Cfg{}}
+	snap := ws.snapshot()
+	if snap.Theme != "" {
+		t.Errorf("snapshot Theme = %q, want empty for default", snap.Theme)
+	}
+	data, _ := json.Marshal(snap)
+	if strings.Contains(string(data), `"theme"`) {
+		t.Error("theme field should be omitted for default (omitempty)")
+	}
+}
+
+func TestSnapshot_ThemePresentWhenNonDefault(t *testing.T) {
+	th := term.DraculaTheme
+	ws := &Workspace{
+		cfg: Cfg{
+			Themes: []term.NamedTheme{
+				{Name: "Default", Theme: term.DefaultTheme},
+				{Name: "Dracula", Theme: th},
+			},
+			opts: termOpts{theme: &th},
+		},
+	}
+	snap := ws.snapshot()
+	if snap.Theme != "Dracula" {
+		t.Errorf("snapshot Theme = %q, want Dracula", snap.Theme)
+	}
+	data, _ := json.Marshal(snap)
+	if !strings.Contains(string(data), `"theme":"Dracula"`) {
+		t.Errorf("snapshot JSON should contain theme Dracula: %s", data)
 	}
 }

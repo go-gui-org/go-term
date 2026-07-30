@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"strconv"
+	"strings"
 
 	glyph "github.com/go-gui-org/go-glyph"
 	"github.com/go-gui-org/go-gui/gui"
@@ -482,18 +483,48 @@ func (ws *Workspace) themePickerPanel() gui.View {
 	return gui.Column(panel)
 }
 
-// applyTheme sets the given theme index on all panes across all tabs.
+// applyTheme sets the given theme index on all panes across all tabs
+// and refreshes the window. Callers that are already building the view
+// (restoreWorkspace, Restore zero-tab path) should use applyThemeByName
+// instead, which skips the extra UpdateWindow.
 func (ws *Workspace) applyTheme(idx int) {
 	if idx < 0 || idx >= len(ws.cfg.Themes) {
 		return
 	}
 	nt := ws.cfg.Themes[idx]
+	ws.applyThemeImpl(nt)
+	ws.w.UpdateWindow()
+}
+
+// applyThemeImpl sets the active theme pointer and calls SetTheme on every
+// pane across every tab. Does not refresh the window — callers that need a
+// refresh must call UpdateWindow themselves.
+func (ws *Workspace) applyThemeImpl(nt term.NamedTheme) {
+	ws.cfg.opts.theme = &nt.Theme
 	for _, tab := range ws.tabs {
 		for _, tm := range tab.terms {
 			tm.SetTheme(nt.Theme)
 		}
 	}
-	ws.w.UpdateWindow()
+}
+
+// applyThemeByName looks up name in the configured theme list
+// (case-insensitively) and applies the matched theme to all panes.
+// Returns false when no theme matches. Unlike applyTheme it does not
+// call UpdateWindow — callers that are already building the view
+// (restoreWorkspace, Restore zero-tab path) will trigger a refresh
+// themselves.
+func (ws *Workspace) applyThemeByName(name string) bool {
+	if len(ws.cfg.Themes) == 0 || name == "" {
+		return false
+	}
+	for i, nt := range ws.cfg.Themes {
+		if strings.EqualFold(nt.Name, name) {
+			ws.applyThemeImpl(ws.cfg.Themes[i])
+			return true
+		}
+	}
+	return false
 }
 
 // themePickerMoveUp moves the highlight up by one entry and applies
@@ -780,12 +811,7 @@ func (ws *Workspace) CycleTheme() {
 		cur = 0
 	}
 	next := (cur + 1) % len(ws.cfg.Themes)
-	for _, tab := range ws.tabs {
-		for _, tm := range tab.terms {
-			tm.SetTheme(ws.cfg.Themes[next].Theme)
-		}
-	}
-	ws.w.UpdateWindow()
+	ws.applyTheme(next)
 }
 
 // onPaneTitle is called from the Term's OnTitle callback (via

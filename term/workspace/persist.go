@@ -25,6 +25,10 @@ type persistedWorkspace struct {
 	Version   int            `json:"version"`
 	ActiveTab int            `json:"activeTab"`
 	Tabs      []persistedTab `json:"tabs"`
+	// Theme is the user's active theme name, saved on quit and restored
+	// on next launch. Empty when the default theme (Themes[0]) is active
+	// or the theme list is empty.
+	Theme string `json:"theme,omitempty"`
 }
 
 // persistedTab captures one tab's split tree and which leaf was active.
@@ -51,8 +55,6 @@ type persistedNode struct {
 
 // snapshot captures the current workspace state. Pure, no I/O.
 func (ws *Workspace) snapshot() persistedWorkspace {
-	// Panes at this size are unzoomed; snapshotNode omits FontSize for them so
-	// the JSON only records genuine zoom overrides.
 	defaultSize := ws.cfg.TextStyle.Size
 	tabs := make([]persistedTab, len(ws.tabs))
 	for i, tab := range ws.tabs {
@@ -61,11 +63,35 @@ func (ws *Workspace) snapshot() persistedWorkspace {
 			Root:       snapshotNode(tab.root, tab.terms, defaultSize),
 		}
 	}
+	themeName := ws.persistableThemeName()
 	return persistedWorkspace{
 		Version:   1,
 		ActiveTab: ws.activeTab,
 		Tabs:      tabs,
+		Theme:     themeName,
 	}
+}
+
+// persistableThemeName returns the non-default theme name for snapshot,
+// or "" when no theme is active or the default is selected. Uses
+// cfg.opts.theme (which applyTheme and applyPaneTheme both maintain)
+// rather than probing the active pane, so it works even when tabs have
+// been cleared (last-shell-exit path).
+func (ws *Workspace) persistableThemeName() string {
+	if ws.cfg.opts.theme == nil || len(ws.cfg.Themes) == 0 {
+		return ""
+	}
+	for _, nt := range ws.cfg.Themes {
+		if nt.Theme == *ws.cfg.opts.theme {
+			// Omit the default (Themes[0]) so a fresh workspace JSON stays
+			// clean and only user-initiated theme changes leave a trace.
+			if nt.Name == ws.cfg.Themes[0].Name {
+				return ""
+			}
+			return nt.Name
+		}
+	}
+	return ""
 }
 
 func snapshotNode(n *splitNode, terms map[string]*term.Term, defaultSize float32) persistedNode {
@@ -140,7 +166,14 @@ func Restore(w *gui.Window, cfg Cfg, path string) (*Workspace, error) {
 		return New(w, cfg)
 	}
 	if len(pw.Tabs) == 0 {
-		return New(w, cfg)
+		// A zero-tab workspace (last-shell-exit path) starts fresh but
+		// still carries a user's theme choice when one was persisted.
+		ws, err := New(w, cfg)
+		if err != nil {
+			return nil, err
+		}
+		ws.applyThemeByName(pw.Theme)
+		return ws, nil
 	}
 	return restoreWorkspace(w, cfg, pw)
 }
@@ -209,6 +242,9 @@ func restoreWorkspace(w *gui.Window, cfg Cfg, pw persistedWorkspace) (*Workspace
 		activeTab = 0
 	}
 	ws.activeTab = activeTab
+
+	// Apply the user's last theme choice over the config file default.
+	ws.applyThemeByName(pw.Theme)
 
 	tab := ws.tabs[ws.activeTab]
 	if t, ok := tab.terms[tab.focused]; ok {
