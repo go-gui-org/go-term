@@ -3,6 +3,9 @@
 
 DEMO_BIN     := falcon
 APP_NAME     := Falcon
+# Pre-built .icns (see examples/falcon/icon/README.md); buildapp copies it
+# into the bundle verbatim, so no sips/iconutil conversion runs here.
+APP_ICON     := examples/falcon/icon/falcon.icns
 BUILDAPP_DIR := ../go-gui/cmd/buildapp
 BUILDAPP_BIN := $(BUILDAPP_DIR)/buildapp
 
@@ -56,10 +59,12 @@ app: $(APP_NAME).app
 $(BUILDAPP_BIN):
 	cd $(BUILDAPP_DIR) && go build -o buildapp .
 
-$(APP_NAME).app: $(BUILDAPP_BIN)
+# Depends on the icon so swapping artwork forces a rebundle; Go source
+# changes are caught by go build itself, not by make's timestamp check.
+$(APP_NAME).app: $(BUILDAPP_BIN) $(APP_ICON)
 	cd examples/falcon && go build -o $(CURDIR)/$(DEMO_BIN) .
 	$(BUILDAPP_BIN) -bundle-deps -o . -name $(APP_NAME) \
-		-id github.com.go-gui-org.go-term $(DEMO_BIN)
+		-id github.com.go-gui-org.go-term -icon $(APP_ICON) $(DEMO_BIN)
 
 clean-app:
 	rm -f $(DEMO_BIN)

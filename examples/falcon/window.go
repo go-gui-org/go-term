@@ -40,6 +40,7 @@ func (a *app) windowCfg() gui.WindowCfg {
 		Title:          "go-term",
 		Width:          windowWidth,
 		Height:         windowHeight,
+		IconPNG:        appIconPNG,
 		OnCloseRequest: a.onCloseRequest,
 		OnInit:         a.onInit,
 	}
@@ -131,6 +132,20 @@ func (a *app) close() {
 	}
 }
 
+// replayWindowCfg builds the WindowCfg for the --replay viewer. Split out
+// of runReplay so the static fields are reachable from a test: runReplay
+// itself opens a real window and runs the app loop, so nothing inside it
+// can be asserted on.
+func replayWindowCfg(path string, onInit func(*gui.Window)) gui.WindowCfg {
+	return gui.WindowCfg{
+		Title:   "go-term replay — " + filepath.Base(path),
+		Width:   windowWidth,
+		Height:  windowHeight,
+		IconPNG: appIconPNG,
+		OnInit:  onInit,
+	}
+}
+
 // runReplay opens a single-pane window playing back a recording. There is no
 // shell, so no quit confirmation and no workspace to save; playback controls
 // (space, +/-, '.', '0') are keystrokes routed to the replay source.
@@ -138,30 +153,25 @@ func runReplay(rc replayCfg) int {
 	applyTheme()
 	var tm *term.Term
 	var initErr error
-	w := gui.NewWindow(gui.WindowCfg{
-		Title:  "go-term replay — " + filepath.Base(rc.path),
-		Width:  windowWidth,
-		Height: windowHeight,
-		OnInit: func(w *gui.Window) {
-			var err error
-			tm, err = term.NewReplay(w, term.Cfg{
-				TextStyle: defaultTextStyle(),
-				Themes:    []term.NamedTheme{{Name: "Default", Theme: term.DefaultTheme}},
-			}, term.ReplayCfg{
-				Path:      rc.path,
-				Speed:     rc.speed,
-				IdleLimit: rc.idle,
-				Loop:      rc.loop,
-				Controls:  true,
-			})
-			if err != nil {
-				initErr = err
-				w.Close()
-				return
-			}
-			w.UpdateView(tm.View)
-		},
-	})
+	w := gui.NewWindow(replayWindowCfg(rc.path, func(w *gui.Window) {
+		var err error
+		tm, err = term.NewReplay(w, term.Cfg{
+			TextStyle: defaultTextStyle(),
+			Themes:    []term.NamedTheme{{Name: "Default", Theme: term.DefaultTheme}},
+		}, term.ReplayCfg{
+			Path:      rc.path,
+			Speed:     rc.speed,
+			IdleLimit: rc.idle,
+			Loop:      rc.loop,
+			Controls:  true,
+		})
+		if err != nil {
+			initErr = err
+			w.Close()
+			return
+		}
+		w.UpdateView(tm.View)
+	}))
 	defer func() {
 		if tm != nil {
 			_ = tm.Close()
