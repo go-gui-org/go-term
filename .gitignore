@@ -18,6 +18,10 @@ main
 *.dylib
 
 # Built example binaries
+# `make app` output — the bundle's files have extensions, so the
+# unignore-all-dirs rule above would otherwise track them. Matched by
+# suffix rather than by name so it survives a change to APP_NAME.
+*.app/
 
 # Test binary
 *.test
