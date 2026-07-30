@@ -249,3 +249,68 @@ func TestApplyTheme_OutOfBoundsReturns(t *testing.T) {
 	ws.applyTheme(-1)
 	ws.applyTheme(5)
 }
+
+// ---------------------------------------------------------------------------
+// applyThemeByName
+// ---------------------------------------------------------------------------
+
+func TestApplyThemeByName_EmptyNameReturnsFalse(t *testing.T) {
+	ws := &Workspace{
+		cfg: Cfg{Themes: []term.NamedTheme{{Name: "a", Theme: term.DefaultTheme}}},
+	}
+	if ws.applyThemeByName("") {
+		t.Error("empty name should return false")
+	}
+}
+
+func TestApplyThemeByName_NoThemesReturnsFalse(t *testing.T) {
+	ws := &Workspace{cfg: Cfg{}}
+	if ws.applyThemeByName("a") {
+		t.Error("no themes should return false")
+	}
+}
+
+func TestApplyThemeByName_UnknownNameReturnsFalse(t *testing.T) {
+	ws := &Workspace{
+		cfg: Cfg{Themes: []term.NamedTheme{{Name: "a", Theme: term.DefaultTheme}}},
+	}
+	if ws.applyThemeByName("unknown") {
+		t.Error("unknown name should return false")
+	}
+}
+
+func TestApplyThemeByName_CaseInsensitiveMatch(t *testing.T) {
+	th := term.DraculaTheme
+	ws := &Workspace{
+		cfg: Cfg{
+			Themes: []term.NamedTheme{
+				{Name: "Dracula", Theme: th},
+			},
+			opts: termOpts{theme: &term.DefaultTheme},
+		},
+	}
+	if !ws.applyThemeByName("dRaCuLa") {
+		t.Error("case-insensitive match should return true")
+	}
+	if ws.cfg.opts.theme == nil || *ws.cfg.opts.theme != th {
+		t.Error("opts.theme not updated after applyThemeByName")
+	}
+}
+
+func TestApplyThemeByName_SetsTheme(t *testing.T) {
+	ws := &Workspace{
+		tabs: []*Tab{{terms: make(map[string]*term.Term)}},
+		cfg: Cfg{
+			Themes: []term.NamedTheme{
+				{Name: "Default", Theme: term.DefaultTheme},
+				{Name: "Dracula", Theme: term.DraculaTheme},
+			},
+		},
+	}
+	if !ws.applyThemeByName("Dracula") {
+		t.Fatal("applyThemeByName returned false")
+	}
+	if ws.persistableThemeName() != "Dracula" {
+		t.Errorf("persistableThemeName = %q, want Dracula", ws.persistableThemeName())
+	}
+}
