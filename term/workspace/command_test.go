@@ -147,3 +147,18 @@ func TestDismissOverlay_NoOverlayOpen(t *testing.T) {
 		t.Error("picker flag flipped from false to true")
 	}
 }
+
+// focusedCwd must degrade to "" (child inherits the process CWD) rather than
+// panicking when there is no active tab or the focused leaf has no live Term.
+func TestFocusedCwd_NoPane(t *testing.T) {
+	if got := (&Workspace{activeTab: -1}).focusedCwd(); got != "" {
+		t.Errorf("no tabs: focusedCwd() = %q, want empty", got)
+	}
+	ws := &Workspace{
+		tabs:      []*Tab{{focused: "gone", terms: map[string]*term.Term{}}},
+		activeTab: 0,
+	}
+	if got := ws.focusedCwd(); got != "" {
+		t.Errorf("dead pane: focusedCwd() = %q, want empty", got)
+	}
+}

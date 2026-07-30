@@ -99,18 +99,19 @@ func New(w *gui.Window, cfg Cfg) (*Workspace, error) {
 	// configured font, theme, and scrollback rather than being corrected after.
 	ws.loadAndApplyConfig()
 
-	_, err := ws.addTab()
+	_, err := ws.addTab("")
 	if err != nil {
 		return nil, err
 	}
 	return ws, nil
 }
 
-// addTab creates a new tab and appends it.
-func (ws *Workspace) addTab() (*Tab, error) {
+// addTab creates a new tab and appends it. dir sets the shell's working
+// directory (empty = inherit the process CWD).
+func (ws *Workspace) addTab(dir string) (*Tab, error) {
 	tabID := "tab-" + strconv.Itoa(ws.nextTabID)
 	ws.nextTabID++
-	tab, err := newTab(ws.w, ws.cfg, tabID, ws.hooks())
+	tab, err := newTab(ws.w, ws.cfg, tabID, dir, ws.hooks())
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +131,7 @@ func (ws *Workspace) removeTab(idx int) bool {
 	ws.tabs[idx].closeAll()
 	ws.tabs = append(ws.tabs[:idx], ws.tabs[idx+1:]...)
 	if len(ws.tabs) == 0 {
-		if _, err := ws.addTab(); err != nil {
+		if _, err := ws.addTab(""); err != nil {
 			ws.w.Close()
 			return false
 		}

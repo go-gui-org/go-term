@@ -353,14 +353,17 @@ func (ws *Workspace) SplitPane(horizontal bool) {
 	// the split inherits the source pane's zoom (matching Ghostty). An unzoomed
 	// source reports the workspace default, so the new pane matches it either
 	// way; addPane treats zero as "inherit default" for the no-source case.
+	// The split also inherits the source pane's CWD (empty when the shell
+	// never reported one via OSC 7 — then the child inherits the process CWD).
 	var inheritSize float32
+	cwd := ws.focusedCwd()
 	if old, ok := tab.terms[tab.focused]; ok {
 		inheritSize = old.FontSize()
 		old.SetFocused(false)
 		old.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 	}
 	newLeafID := tab.allocLeafID()
-	if err := tab.addPane(ws.w, ws.cfg, newLeafID, "", inheritSize, ws.hooks()); err != nil {
+	if err := tab.addPane(ws.w, ws.cfg, newLeafID, cwd, inheritSize, ws.hooks()); err != nil {
 		return
 	}
 	newRoot := splitLeaf(tab.root, tab.focused, newLeafID, dir)
@@ -394,8 +397,27 @@ func (ws *Workspace) PrevPane() {
 	}
 }
 
-// AddTab creates a new tab with a single terminal and switches to it.
+// focusedCwd returns the working directory of the focused pane of the active
+// tab, as reported by the shell over OSC 7. Empty when there is no live pane
+// or the shell never emitted OSC 7 — callers pass that straight through, which
+// leaves the child inheriting the process CWD.
+func (ws *Workspace) focusedCwd() string {
+	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs) {
+		return ""
+	}
+	tab := ws.tabs[ws.activeTab]
+	tm, ok := tab.terms[tab.focused]
+	if !ok {
+		return ""
+	}
+	return cwdLocalPath(tm.Cwd())
+}
+
+// AddTab creates a new tab with a single terminal and switches to it. The new
+// tab's shell starts in the CWD of the pane the command was issued from.
 func (ws *Workspace) AddTab() {
+	// Capture the source CWD before the active tab index moves.
+	cwd := ws.focusedCwd()
 	// Unfocus old tab's pane.
 	oldIdx := ws.activeTab
 	if oldIdx >= 0 && oldIdx < len(ws.tabs) {
@@ -405,7 +427,7 @@ func (ws *Workspace) AddTab() {
 			t.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 		}
 	}
-	_, err := ws.addTab()
+	_, err := ws.addTab(cwd)
 	if err != nil {
 		return
 	}
