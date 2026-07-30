@@ -167,6 +167,126 @@ func TestParser_APC_KittyPlace(t *testing.T) {
 	}
 }
 
+// --- Cursor movement policy (C=) ---
+
+// C=1 on a=T must leave the cursor exactly where the image was placed;
+// without it the placement advances one row per image row.
+func TestParser_APC_KittyTransmitAndDisplay_NoCursorMove(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,C=1,q=1;" + b64)
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics; want 1", len(h.g.Graphics))
+	}
+	if h.g.CursorR != 0 {
+		t.Fatalf("CursorR = %d after C=1 display; want 0", h.g.CursorR)
+	}
+}
+
+// The C=0 default (and a missing C= key) keeps the historical behavior:
+// one Newline per row the image covers.
+func TestParser_APC_KittyTransmitAndDisplay_CursorMovesByDefault(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,q=1;" + b64)
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics; want 1", len(h.g.Graphics))
+	}
+	want := h.g.Graphics[0].Rows
+	if h.g.CursorR != want {
+		t.Fatalf("CursorR = %d; want %d (one row per image row)", h.g.CursorR, want)
+	}
+}
+
+// C=1 must also suppress the advance on the place action (a=p), which is the
+// path yazi uses to re-show an already-transmitted preview.
+func TestParser_APC_KittyPlace_NoCursorMove(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=t,f=100,i=9,q=1;" + b64)
+	h.feedAPC("a=p,i=9,C=1,q=1;")
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics after place; want 1", len(h.g.Graphics))
+	}
+	if h.g.CursorR != 0 {
+		t.Fatalf("CursorR = %d after C=1 place; want 0", h.g.CursorR)
+	}
+}
+
+// Lowercase c= is the placement column count, not the cursor policy; it must
+// not be mistaken for C=1.
+func TestParser_APC_KittyLowercaseC_NotCursorPolicy(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,c=1,q=1;" + b64)
+	if h.g.CursorR == 0 {
+		t.Fatal("c=1 suppressed the cursor advance; only C=1 should")
+	}
+}
+
+// The place action without C= must keep advancing the cursor — the C=1 gate
+// must not leak into the default path.
+func TestParser_APC_KittyPlace_CursorMovesByDefault(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=t,f=100,i=10,q=1;" + b64)
+	h.feedAPC("a=p,i=10,q=1;")
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics after place; want 1", len(h.g.Graphics))
+	}
+	want := h.g.Graphics[0].Rows
+	if h.g.CursorR != want {
+		t.Fatalf("CursorR = %d after default place; want %d", h.g.CursorR, want)
+	}
+}
+
+// Only the exact value "1" suppresses the advance. Anything else — a
+// non-numeric value, or a numeric one the spec doesn't define — falls back to
+// moving the cursor, matching how m= is treated.
+func TestParser_APC_KittyC_NonOneValuesMoveCursor(t *testing.T) {
+	for _, val := range []string{"0", "2", "x", "", "01"} {
+		t.Run("C="+val, func(t *testing.T) {
+			h := newAPCHelper(t)
+			_, b64 := makePNG(t)
+			h.feedAPC("a=T,f=100,C=" + val + ",q=1;" + b64)
+			if h.g.CursorR == 0 {
+				t.Fatalf("C=%q suppressed the cursor advance; only C=1 should", val)
+			}
+		})
+	}
+}
+
+// An anonymous transmit (no i=) displays via the id == 0 branch of kittyFinish
+// rather than the action == 'T' one; C=1 has to gate that branch too.
+func TestParser_APC_KittyAnonymousTransmit_NoCursorMove(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=t,f=100,C=1,q=1;" + b64)
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics; want 1 (anonymous transmit displays)", len(h.g.Graphics))
+	}
+	if h.g.CursorR != 0 {
+		t.Fatalf("CursorR = %d after anonymous C=1 display; want 0", h.g.CursorR)
+	}
+}
+
+// A chunked transfer carries C= on its opening chunk only — the placement at
+// m=0 must still honor it.
+func TestParser_APC_KittyChunked_NoCursorMove(t *testing.T) {
+	h := newAPCHelper(t)
+	raw, _ := makePNG(t)
+	full := base64.StdEncoding.EncodeToString(raw)
+	mid := len(full) / 2
+	h.feedAPC("a=T,f=100,C=1,i=11,m=1,q=1;" + full[:mid])
+	h.feedAPC("m=0,q=1;" + full[mid:])
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics; want 1", len(h.g.Graphics))
+	}
+	if h.g.CursorR != 0 {
+		t.Fatalf("CursorR = %d after chunked C=1 display; want 0", h.g.CursorR)
+	}
+}
+
 // --- Chunked transmission ---
 
 func TestParser_APC_KittyChunked(t *testing.T) {

@@ -45,6 +45,7 @@ type kgpParams struct {
 	action   byte   // a=: 't' transmit, 'T' transmit+display, 'p' place, 'q' query, 'd' delete; default 'T'
 	medium   byte   // t=: 'd' direct (default), 'f' file, 't' temp-file, 's' shared-memory
 	more     bool   // m=: true when m=1 (more chunks follow)
+	noCursor bool   // C=: true when C=1 (place without moving the cursor)
 }
 
 // parseIntKV parses a KGP integer key=value, logging on error.
@@ -90,7 +91,7 @@ func (p *parser) handleKittyGraphics(payload []byte) {
 		// Accumulate raw base64 text; decode only at end of chunks.
 		p.kittyAccumulate(params, rawB64)
 	case 'p':
-		p.kittyPlace(params.imageID, params.quiet)
+		p.kittyPlace(params)
 	case 'd':
 		p.kittyDeleteID(params.imageID, params.deleteOp)
 		p.kittyReply(params.imageID, params.quiet, true)
@@ -162,6 +163,13 @@ func splitKGPPayload(payload []byte) (kgpParams, []byte) {
 			}
 		case 'm':
 			params.more = val == "1"
+		case 'C':
+			// Cursor movement policy. C=1 means "do not move the cursor";
+			// any other value (including the C=0 default) leaves the normal
+			// post-placement movement in place. Note the key is case-
+			// sensitive: lowercase 'c' is the placement column count, which
+			// this parser does not implement.
+			params.noCursor = val == "1"
 		case 'i':
 			if n, ok := parseUint32KV(val, 'i'); ok {
 				params.imageID = n
@@ -277,13 +285,25 @@ func (p *parser) kittyFinish(params kgpParams, id uint32, assembledB64 []byte) {
 	}
 
 	if params.action == 'T' || id == 0 {
-		_, rows := p.g.AddGraphicKitty(path, b.Dx(), b.Dy(), id)
-		for range rows {
-			p.g.Newline()
-		}
+		p.kittyDisplay(path, b.Dx(), b.Dy(), id, params.noCursor)
 	}
 
 	p.kittyReply(id, params.quiet, true)
+}
+
+// kittyDisplay registers a placement for the image at path and advances the
+// cursor past it, one Newline per row the image covers. noCursor (C=1) skips
+// the advance, leaving the client's own positioning intact. Shared by the
+// display half of a transmission (a=T) and the place action (a=p), so the
+// cursor policy has one home rather than one per call site.
+func (p *parser) kittyDisplay(path string, widthPx, heightPx int, id uint32, noCursor bool) {
+	_, rows := p.g.AddGraphicKitty(path, widthPx, heightPx, id)
+	if noCursor {
+		return
+	}
+	for range rows {
+		p.g.Newline()
+	}
 }
 
 // kittyStoreImage records the PNG at path in the off-screen store under id,
@@ -320,8 +340,10 @@ func (p *parser) kittyStoreImage(id uint32, path string, w, h int) {
 }
 
 // kittyPlace retrieves a previously transmitted image by id and renders
-// it at the current cursor position.
-func (p *parser) kittyPlace(id uint32, quiet int) {
+// it at the current cursor position. C=1 (noCursor) suppresses the cursor
+// advance so the caller's own positioning survives the placement.
+func (p *parser) kittyPlace(params kgpParams) {
+	id, quiet := params.imageID, params.quiet
 	if p.kittyStore == nil {
 		p.kittyReply(id, quiet, false)
 		return
@@ -331,10 +353,7 @@ func (p *parser) kittyPlace(id uint32, quiet int) {
 		p.kittyReply(id, quiet, false)
 		return
 	}
-	_, rows := p.g.AddGraphicKitty(e.path, e.w, e.h, id)
-	for range rows {
-		p.g.Newline()
-	}
+	p.kittyDisplay(e.path, e.w, e.h, id, params.noCursor)
 	p.kittyReply(id, quiet, true)
 }
 
