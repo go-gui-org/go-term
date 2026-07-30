@@ -323,6 +323,11 @@ func (g *grid) putCell(ch rune, clusterID uint16, w int) {
 			*c = head.continuation()
 		}
 	}
+	// Text written into an image's cells destroys it, for the protocols that
+	// have no delete sequence. The length check is the hot-path cost.
+	if len(g.Graphics) != 0 {
+		g.occludeGraphics(g.CursorR, 1, g.CursorC, g.CursorC+w)
+	}
 	g.markDirty(g.CursorR)
 	// Remember what was written so REP can repeat it. w (not the caller's
 	// width) is recorded because the no-autowrap path above may have narrowed
@@ -546,6 +551,11 @@ func (g *grid) eraseSpan(r, from, to int, selective bool) {
 		}
 		row[c] = blank
 	}
+	// An erase over an image's cells removes it, same as overwriting it with
+	// text — see grid.occludeGraphics.
+	if len(g.Graphics) != 0 {
+		g.occludeGraphics(r, 1, from, to)
+	}
 	g.markDirty(r)
 }
 
@@ -576,11 +586,9 @@ func (g *grid) EraseChars(n int) {
 	// partner cell too so no orphaned continuation half is left behind.
 	g.eraseWideAt(row, from)
 	g.eraseWideAt(row, to-1)
-	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
-	for c := from; c < to; c++ {
-		g.Cells[row*g.Cols+c] = blank
-	}
-	g.markDirty(row)
+	// eraseSpan owns the blanking, so ECH picks up image occlusion on the
+	// same terms as EL/ED — an erase over an image's cells removes it.
+	g.eraseSpan(row, from, to, false)
 }
 
 // EraseInDisplay implements CSI J. mode: 0 = cursor to end of screen,
@@ -620,6 +628,10 @@ func (g *grid) eraseInDisplay(mode int, selective bool) {
 			blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 			for i := range g.Cells {
 				g.Cells[i] = blank
+			}
+			// The flat fill skips eraseSpan, so clear the images itself.
+			if len(g.Graphics) != 0 {
+				g.occludeGraphics(0, g.Rows, 0, g.Cols)
 			}
 		}
 		// Mode 3 additionally erases saved lines (scrollback). Dropping

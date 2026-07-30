@@ -89,7 +89,41 @@ Supports a modern xterm/kitty-compatible subset:
   `Smulx`/`Setulc` to advertise styled + colored underlines), sixel graphics,
   synchronized updates.
 - APC: Kitty Graphics Protocol (transmit/display/place/delete; PNG, raw
-  RGBA/RGB; chunked base64).
+  RGBA/RGB; chunked base64 — the opening chunk's `f=`/`s=`/`v=`/`a=` govern
+  the whole transfer, continuation chunks carry only `m=` and payload).
+
+Image lifetime differs by protocol and this distinction is load-bearing.
+Kitty placements are their own layer: text drawn over their cells leaves them
+alone, and only `a=d` removes them (`kittyDeleteID` — lowercase `d=` drops the
+placement, uppercase also frees the stored data). Sixel and iTerm2 images have
+no delete sequence, so a client clears one by painting over the cells it
+occupies; `grid.occludeGraphics`, called from `putCell`, `eraseSpan` (so EL,
+ED and ECH alike) and the ED 2/3 flat fill, is what makes that work.
+
+The two layers share one `grid.Graphics` list, so each removal path filters on
+`graphic.kgp` and the split is symmetric: `occludeGraphics` skips KGP entries,
+`deleteGraphics` touches *only* KGP entries. In particular `a=d,d=a` deletes
+every Kitty placement and leaves sixel/iTerm2 images standing — `a=d` is a
+Kitty command, and painting over the cells is the only removal signal the
+other protocols have.
+
+Two guards keep occlusion honest. `EnterAlt` swaps `Cells` but *not*
+`Graphics`, and leaves `Scrollback` alone, so an alt-screen row maps onto the
+same content row as a main-screen image — occlusion is therefore skipped
+entirely while `AltActive`, or every full-screen app would wipe the images
+behind it. And `grid.occludeMaxR` bounds the per-glyph scan: it is one past
+the highest content row any occludable image covers, so once they have all
+scrolled into scrollback the check costs one comparison instead of walking up
+to `maxGraphics` entries (measured: 81µs → 0.6µs per 80-column row). The
+invariant is one-directional — the bound may be too high, never too low — so
+paths that move origins downward (`shiftGraphics`, `remapGraphics`) just set
+`occludeBoundUnknown` and let the next scan recompute it exactly.
+
+Both halves are needed for yazi, which picks its image protocol from
+`TERM_PROGRAM`. `startPTY` scrubs the host terminal's identity variables
+(`hostTerminalEnvKeys`) so that choice reflects go-term's own advertised
+capabilities rather than whichever emulator launched the app; `cfg.Env` is
+applied after the scrub, so an embedder can still declare an identity.
 
 When extending: add cases in the appropriate `parser_*.go` file.
 Don't let parser code reach into go-gui — it must stay grid-only.

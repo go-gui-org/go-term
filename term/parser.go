@@ -17,8 +17,11 @@ import (
 // Unrecognized escape sequences are silently consumed.
 type parser struct {
 	g           *grid
-	kittyChunks map[uint32][]byte     // partial transmissions: id → raw base64 text
-	kittyStore  map[uint32]kittyEntry // off-screen cache: image id → entry
+	kittyChunks map[uint32]kittyPending // partial transmissions: id → chunk state
+	kittyStore  map[uint32]kittyEntry   // off-screen cache: image id → entry
+	// kittyOpenID is the id of the transmission an m=1 chunk left open, so the
+	// continuation chunks — which carry no i= key — land in the right entry.
+	kittyOpenID uint32
 
 	// onTitle, if non-nil, is invoked for OSC 0/1/2 (window title).
 	// onReply, if non-nil, is invoked when the parser needs to write

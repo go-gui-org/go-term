@@ -97,3 +97,29 @@ func TestDefaultUTF8Locale(t *testing.T) {
 		t.Errorf("defaultUTF8Locale() = %q, base is not a valid locale name", got)
 	}
 }
+
+func TestDropEnv(t *testing.T) {
+	in := []string{
+		"PATH=/bin",
+		"TERM_PROGRAM=iTerm.app",
+		"TERM_PROGRAM_VERSION=3.5",
+		"ITERM_SESSION_ID=w0t0p0",
+		"TERM=xterm-256color",
+		"TERM_PROGRAMMER=me", // prefix match must not catch this
+		"TERM_PROGRAM",       // no '=' at all
+	}
+	got := dropEnv(in, hostTerminalEnvKeys[:])
+	want := []string{"PATH=/bin", "TERM=xterm-256color", "TERM_PROGRAMMER=me", "TERM_PROGRAM"}
+	if len(got) != len(want) {
+		t.Fatalf("dropEnv = %q; want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("dropEnv = %q; want %q", got, want)
+		}
+	}
+	// The caller's slice must come through untouched — cfg.Env may be shared.
+	if in[1] != "TERM_PROGRAM=iTerm.app" {
+		t.Errorf("dropEnv mutated its input: %q", in)
+	}
+}

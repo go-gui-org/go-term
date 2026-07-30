@@ -27,11 +27,22 @@ import (
 // text passes don't overstrike the image; the rendering pass paints
 // the image on top of background fill.
 type graphic struct {
-	Src      string // file path passed to dc.Image (PNG on disk)
-	OriginR  int    // content-row index
-	OriginC  int    // column at origin row
-	Cols     int    // width in cells (covered rectangle)
-	Rows     int    // height in cells
+	Src string // file path passed to dc.Image (PNG on disk)
+	// ID is the Kitty Graphics Protocol image id this placement came from,
+	// 0 for Sixel / iTerm2 images and for KGP transmissions that carried no
+	// i= key. It exists so a later `a=d,d=i` delete can find the placements
+	// belonging to one image.
+	ID uint32
+	// kgp marks a Kitty Graphics Protocol placement. KGP images are a layer
+	// of their own: they survive text drawn over their cells and go away only
+	// on an explicit delete (a=d). Sixel and iTerm2 images have no delete
+	// sequence at all, so for those the client painting over the cells is the
+	// only removal signal there is — see grid.occludeGraphics.
+	kgp      bool
+	OriginR  int // content-row index
+	OriginC  int // column at origin row
+	Cols     int // width in cells (covered rectangle)
+	Rows     int // height in cells
 	WidthPx  int
 	HeightPx int
 }
@@ -44,6 +55,11 @@ const (
 	maxSixelHeight = 4096
 	// Cap on Graphics retained by a grid. Oldest are evicted first.
 	maxGraphics = 256
+
+	// occludeBoundUnknown is grid.occludeMaxR's "recompute me" value: high
+	// enough that the bound check always falls through to a full scan, which
+	// then replaces it with the exact maximum.
+	occludeBoundUnknown = math.MaxInt
 )
 
 // sixelDefaultPalette is the VT340 16-entry palette used when a Sixel

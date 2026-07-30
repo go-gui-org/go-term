@@ -132,3 +132,39 @@ func TestStartPTY_CfgEnvOverridesColorterm(t *testing.T) {
 		t.Errorf("COLORTERM = %q, want empty (caller override)", got)
 	}
 }
+
+// A child must probe this terminal's capabilities, not inherit the host's
+// identity: yazi selects its image protocol from TERM_PROGRAM, so leaking it
+// made preview behavior depend on which terminal launched the app.
+func TestStartPTY_ScrubsHostTerminalIdentity(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "iTerm.app")
+	t.Setenv("TERM_PROGRAM_VERSION", "3.5")
+	t.Setenv("ITERM_SESSION_ID", "w0t0p0")
+
+	p, err := startPTY(24, 80, Cfg{Command: "/bin/sh", Args: []string{"-c", "exit 0"}})
+	if err != nil {
+		t.Skipf("startPTY: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	for _, k := range hostTerminalEnvKeys {
+		if v := envValue(p.cmd.Env, k); v != "" {
+			t.Errorf("%s leaked to child as %q", k, v)
+		}
+	}
+}
+
+// cfg.Env is applied after the scrub, so an embedder can still say who it is.
+func TestStartPTY_CfgEnvCanRestoreTermProgram(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "iTerm.app")
+	p, err := startPTY(24, 80, Cfg{
+		Command: "/bin/sh", Args: []string{"-c", "exit 0"},
+		Env: []string{"TERM_PROGRAM=falcon"},
+	})
+	if err != nil {
+		t.Skipf("startPTY: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	if got := envValue(p.cmd.Env, "TERM_PROGRAM"); got != "falcon" {
+		t.Errorf("TERM_PROGRAM = %q; want falcon", got)
+	}
+}
