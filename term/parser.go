@@ -75,6 +75,7 @@ type parser struct {
 	escInter            byte // ESC intermediate introducer like '(' in ESC(B
 	oscIsImage          bool // true once "1337;" prefix detected
 	oscTrunc            bool // true once a byte was dropped for exceeding the OSC cap
+	dcsTrunc            bool // true once a byte was dropped for exceeding the DCS cap
 	allowClipboardWrite bool
 }
 
@@ -83,18 +84,29 @@ type parser struct {
 // subdir per Term so cleanup on Close removes only its own files.
 func (p *parser) SetGraphicsDir(dir string) { p.graphicsDir = dir }
 
-func (p *parser) oscReset() {
-	// An OSC 1337 payload can grow the backing array to maxOSC1337Bytes.
-	// Truncating alone would pin that array for the parser's lifetime, so
-	// drop anything grown past the ordinary OSC cap and let the next OSC
-	// start from a small allocation again.
-	if cap(p.osc) > maxOSCBytes {
-		p.osc = nil
-	} else {
-		p.osc = p.osc[:0]
+// resetPayload readies an escape-payload buffer for reuse. Image-carrying
+// sequences (OSC 1337, sixel over DCS) can grow their backing array to tens
+// of MB; truncating alone would pin that array for the parser's lifetime, so
+// anything grown past retain is dropped and the next sequence starts from a
+// small allocation again. Buffers at or under retain are kept, so the common
+// case — and every frame of a sixel animation — stays allocation-free.
+func resetPayload(buf []byte, retain int) []byte {
+	if cap(buf) > retain {
+		return nil
 	}
+	return buf[:0]
+}
+
+func (p *parser) oscReset() {
+	p.osc = resetPayload(p.osc, maxOSCBytes)
 	p.oscIsImage = false
 	p.oscTrunc = false
+}
+
+// dcsReset starts a fresh DCS payload.
+func (p *parser) dcsReset() {
+	p.dcs = resetPayload(p.dcs, maxDCSRetain)
+	p.dcsTrunc = false
 }
 
 // SetTitleHandler registers a callback for OSC 0/1/2. Pass nil to

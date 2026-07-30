@@ -237,6 +237,131 @@ func TestParser_DCS_SixelOversizedDropped(t *testing.T) {
 	}
 }
 
+// A full-window sixel frame is over a megabyte — `chafa shot.png` in a 160×45
+// pane emits ~1.6 MB. Under the old 1 MiB DCS cap the tail was dropped and the
+// image decoded to its top half. The whole frame must survive the parser.
+func TestParser_DCS_SixelLargePayloadNotTruncated(t *testing.T) {
+	// Bloat the byte count without bloating the dimensions: re-selecting the
+	// color register per column costs 3 bytes a pixel column, so 3500 columns
+	// per band × 100 bands ≈ 1.05 MB of payload for a 3500×600 image — over
+	// the old cap, inside the decoder's 4096×4096 limit.
+	const (
+		bandCols = 3500
+		bands    = 100
+	)
+	var body strings.Builder
+	body.Grow(bandCols*3*bands + bands)
+	for range bands {
+		for range bandCols {
+			body.WriteString("#0~")
+		}
+		body.WriteByte('-') // next band
+	}
+	if body.Len() <= 1<<20 {
+		t.Fatalf("test payload is %d bytes; must exceed the old 1 MiB cap", body.Len())
+	}
+
+	g := feedSixel(t, 50, 200, "", body.String())
+	if len(g.Graphics) != 1 {
+		t.Fatalf("got %d graphics; want 1", len(g.Graphics))
+	}
+	gr := g.Graphics[0]
+	// Each band is 6 pixels tall. The trailing '-' opens a further band but
+	// writes no pixel into it, and height tracks written pixels, not bands.
+	if wantH := bands * 6; gr.HeightPx != wantH {
+		t.Errorf("HeightPx = %d; want %d (frame truncated)", gr.HeightPx, wantH)
+	}
+	if gr.WidthPx != bandCols {
+		t.Errorf("WidthPx = %d; want %d", gr.WidthPx, bandCols)
+	}
+}
+
+// Over the cap the sequence is refused outright: a partially rendered frame
+// looks like a rendering bug, an absent one looks like the refusal it is.
+func TestParser_DCS_OverCapDropped(t *testing.T) {
+	g := newGrid(10, 80)
+	g.CellPxW, g.CellPxH = 8, 16
+	p := newParser(g)
+	p.SetGraphicsDir(t.TempDir())
+
+	p.dcs = append(p.dcs, sixelPayload("", "#0!24~")...)
+	p.dcsTrunc = true
+	p.dispatchDCS()
+
+	if len(g.Graphics) != 0 {
+		t.Fatalf("got %d graphics for a truncated payload; want 0", len(g.Graphics))
+	}
+}
+
+// dcsReset must clear the truncation flag, or one oversized frame would
+// poison every DCS that follows it.
+func TestParser_DCS_ResetClearsTruncation(t *testing.T) {
+	g := newGrid(10, 80)
+	g.CellPxW, g.CellPxH = 8, 16
+	p := newParser(g)
+	p.SetGraphicsDir(t.TempDir())
+
+	p.dcsTrunc = true
+	p.Feed([]byte("\x1bP" + sixelPayload("", "#0!24~") + "\x1b\\"))
+	if len(g.Graphics) != 1 {
+		t.Fatalf("got %d graphics after a fresh DCS; want 1", len(g.Graphics))
+	}
+}
+
+// The DCS buffer must not stay pinned after the sequence is dispatched.
+// At maxDCSBytes an unreleased buffer costs tens of MB per idle pane.
+func TestParser_DCS_BufferReleasedAfterDispatch(t *testing.T) {
+	g := newGrid(10, 80)
+	g.CellPxW, g.CellPxH = 8, 16
+	p := newParser(g)
+	p.SetGraphicsDir(t.TempDir())
+
+	// A body comfortably past maxDCSRetain so dcsReset drops the array
+	// instead of merely reslicing it.
+	body := strings.Repeat("#0~", (maxDCSRetain/3)+1000)
+	p.Feed([]byte("\x1bP" + sixelPayload("", body) + "\x1b\\"))
+
+	if got := cap(p.dcs); got > maxDCSRetain {
+		t.Errorf("cap(p.dcs) = %d after dispatch; want <= %d (buffer pinned)",
+			got, maxDCSRetain)
+	}
+}
+
+// End-to-end counterpart to TestParser_DCS_OverCapDropped: a payload that
+// actually overruns maxDCSBytes on the wire must be refused, and must not
+// poison the next frame.
+func TestParser_DCS_FeedOverCapDroppedThenRecovers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("allocates maxDCSBytes of payload")
+	}
+	g := newGrid(10, 80)
+	g.CellPxW, g.CellPxH = 8, 16
+	p := newParser(g)
+	p.SetGraphicsDir(t.TempDir())
+
+	// Filler is plain 'A': not a sixel data byte, so nothing decodes even
+	// if the drop were to fail — the assertion is about the guard, and the
+	// trailing "#0~" only exists to make the payload nominally drawable.
+	var b strings.Builder
+	b.Grow(maxDCSBytes + 64)
+	b.WriteString(sixelPayload("", ""))
+	b.WriteString(strings.Repeat("A", maxDCSBytes+1))
+	b.WriteString("#0~")
+	p.Feed([]byte("\x1bP" + b.String() + "\x1b\\"))
+
+	// dcsTrunc is cleared by the post-dispatch reset, so the observable
+	// evidence is the absent graphic, not the flag.
+	if len(g.Graphics) != 0 {
+		t.Fatalf("got %d graphics for an over-cap payload; want 0", len(g.Graphics))
+	}
+
+	// The parser must be usable again straight afterwards.
+	p.Feed([]byte("\x1bP" + sixelPayload("", "#0!24~") + "\x1b\\"))
+	if len(g.Graphics) != 1 {
+		t.Fatalf("got %d graphics after recovery; want 1", len(g.Graphics))
+	}
+}
+
 func TestGrid_TrimGraphics_EvictsOffTop(t *testing.T) {
 	g := newGrid(4, 10)
 	g.CellPxW, g.CellPxH = 8, 16

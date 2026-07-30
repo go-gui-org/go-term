@@ -14,10 +14,26 @@ const maxOSCBytes = 4096
 // truncated payload to the decoder.
 const maxOSC1337Bytes = 32 << 20
 
-// maxDCSBytes caps DCS payloads. Sixel images can be sizable (a small
-// 320×240 sample is ~50 KB of sixel data); 1 MiB tolerates real-world
-// frames while keeping a malicious stream bounded.
-const maxDCSBytes = 1 << 20
+// maxDCSBytes caps DCS payloads, which in practice means Sixel frames.
+// Sixel costs roughly 1.7 bytes per pixel at photographic densities
+// (measured: chafa 1.18 emits 1.6 MB for a 1200×800 image), so the old
+// 1 MiB cap truncated any full-window picture — `chafa shot.png` in a
+// 160×45 pane rendered as the top half of the image. The decoder rejects
+// frames beyond maxSixelWidth×maxSixelHeight, and 4096×4096 at that
+// density is ~28 MB, so 32 MiB clears the largest frame the decoder will
+// accept from a real encoder. (Sixel has no upper bound on bytes per
+// pixel — a stream that re-selects a color register between every pixel
+// can still be cut short — but that is a synthetic shape, not one an
+// encoder produces.) Matches the OSC 1337 limit.
+const maxDCSBytes = 32 << 20
+
+// maxDCSRetain bounds the DCS buffer kept between sequences. A sixel frame
+// can grow p.dcs to maxDCSBytes; keeping that array alive would pin tens of
+// MB per pane for the session, while dropping it after every frame would
+// re-allocate on each frame of a sixel animation. Retaining up to 4 MiB
+// covers ordinary frames (a full-window chafa image is ~1.6 MB) and releases
+// only the outliers.
+const maxDCSRetain = 4 << 20
 
 // maxAPCBytes caps a single APC escape payload. Kitty Graphics Protocol
 // recommends ≤4096 base64 chars per chunk (~3 KB decoded); 8 KB is plenty.

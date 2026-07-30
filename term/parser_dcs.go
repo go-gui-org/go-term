@@ -476,6 +476,12 @@ func (p *parser) replyXTGETTCAP(body []byte) {
 }
 
 func (p *parser) dispatchDCS() {
+	// A payload that hit maxDCSBytes is missing its tail. Half a sixel frame
+	// decodes into the top slice of the picture, so drop the whole sequence
+	// instead of drawing something the client never sent.
+	if p.dcsTrunc {
+		return
+	}
 	if len(p.dcs) < 2 {
 
 		if len(p.dcs) == 1 && p.dcs[0] == 'q' {
