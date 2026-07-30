@@ -129,7 +129,7 @@ func (p *parser) feedChunk(b []byte) {
 				p.apc = p.apc[:0]
 			case 'P':
 				p.state = stDCS
-				p.dcs = p.dcs[:0]
+				p.dcsReset()
 			case '7':
 				p.g.SaveCursor()
 				p.state = stGround
@@ -231,16 +231,29 @@ func (p *parser) feedChunk(b []byte) {
 			default:
 				if len(p.dcs) < maxDCSBytes {
 					p.dcs = append(p.dcs, c)
+				} else {
+					// Over the cap: remember it so dispatchDCS drops the
+					// sequence. Rendering the prefix would paint a half
+					// image, which reads as a rendering bug rather than as
+					// the refused oversized frame it is.
+					p.dcsTrunc = true
 				}
 			}
 			i++
 		case stDCSEsc:
 			if c == '\\' {
 				p.dispatchDCS()
+				// Release the payload immediately, as the OSC path does.
+				// dispatchDCS keeps no reference to p.dcs (handleSixel
+				// decodes into an image), and a sixel frame can leave tens
+				// of MB in the backing array — waiting for the *next* DCS
+				// to reset it would pin that memory per pane for as long as
+				// the client stays quiet.
+				p.dcsReset()
 				p.state = stGround
 				i++
 			} else {
-				p.dcs = p.dcs[:0]
+				p.dcsReset()
 				p.state = stEsc
 			}
 		case stOSC:
