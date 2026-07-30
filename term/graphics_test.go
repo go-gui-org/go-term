@@ -395,3 +395,169 @@ func TestHLSToRGB_AllRegions(t *testing.T) {
 		}
 	}
 }
+
+// --- Occlusion: images the client can only remove by painting over them ---
+
+// gridWithGraphic parks a 2×2-cell image at (row, col) and returns the grid.
+func gridWithGraphic(t *testing.T, row, col int) *grid {
+	t.Helper()
+	g := newGrid(10, 40)
+	g.CellPxW, g.CellPxH = 8, 16
+	g.CursorR, g.CursorC = row, col
+	if cols, rows := g.AddGraphic("img.png", 16, 32); cols != 2 || rows != 2 {
+		t.Fatalf("AddGraphic footprint = %dx%d; want 2x2", cols, rows)
+	}
+	return g
+}
+
+// The bug from yazi's iTerm2 preview: the protocol has no delete sequence, so
+// the client clears an image by writing spaces over its cells. Keeping the
+// image left it on screen for the rest of the session.
+func TestGrid_OccludeGraphics_TextOverwrite(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.CursorR, g.CursorC = 3, 5
+	g.Put(' ')
+	if len(g.Graphics) != 0 {
+		t.Fatal("image survived text written into its cells")
+	}
+}
+
+func TestGrid_OccludeGraphics_TextBesideImageKeepsIt(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.CursorR, g.CursorC = 3, 7 // one column past the 2-cell width
+	g.Put('x')
+	g.CursorR, g.CursorC = 5, 5 // one row past the 2-cell height
+	g.Put('x')
+	if len(g.Graphics) != 1 {
+		t.Fatal("image removed by text that does not touch it")
+	}
+}
+
+func TestGrid_OccludeGraphics_EraseInLine(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.CursorR, g.CursorC = 3, 0
+	g.EraseInLine(2)
+	if len(g.Graphics) != 0 {
+		t.Fatal("image survived EL over its row")
+	}
+}
+
+func TestGrid_OccludeGraphics_EraseInDisplay(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.CursorR, g.CursorC = 0, 0
+	g.EraseInDisplay(2)
+	if len(g.Graphics) != 0 {
+		t.Fatal("image survived ED 2")
+	}
+}
+
+// Kitty placements are their own layer: text over them is not a delete. They
+// go away only through a=d, which kittyDeleteID handles.
+func TestGrid_OccludeGraphics_KittyExempt(t *testing.T) {
+	g := newGrid(10, 40)
+	g.CellPxW, g.CellPxH = 8, 16
+	g.CursorR, g.CursorC = 3, 5
+	g.AddGraphicKitty("img.png", 16, 32, 7)
+	g.CursorR, g.CursorC = 3, 5
+	g.Put('x')
+	g.EraseInDisplay(2)
+	if len(g.Graphics) != 1 {
+		t.Fatal("KGP placement removed by text/erase; only a=d may remove it")
+	}
+}
+
+// ECH (CSI X) blanks cells like EL does, so it must occlude on the same terms.
+func TestGrid_OccludeGraphics_EraseChars(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.CursorR, g.CursorC = 3, 5
+	g.EraseChars(2)
+	if len(g.Graphics) != 0 {
+		t.Fatal("image survived ECH over its cells")
+	}
+}
+
+// EnterAlt swaps Cells but not Graphics, and leaves Scrollback alone, so an
+// alt-screen row shares a content row with a main-screen image. A full-screen
+// app must not silently destroy images sitting on the main screen behind it.
+func TestGrid_OccludeGraphics_AltScreenLeavesMainImages(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.EnterAlt()
+	for r := range g.Rows { // a TUI painting its whole screen
+		g.CursorR, g.CursorC = r, 0
+		for range g.Cols {
+			g.Put('x')
+		}
+	}
+	if len(g.Graphics) != 1 {
+		t.Fatal("alt-screen text destroyed a main-screen image")
+	}
+	g.ExitAlt()
+	if len(g.Graphics) != 1 {
+		t.Fatal("image lost across the alt-screen round trip")
+	}
+}
+
+// An image that has scrolled entirely into scrollback can no longer be
+// reached by a live-screen write, which is what occludeMaxR encodes. Writing
+// over the row it *used* to occupy must leave it alone.
+func TestGrid_OccludeGraphics_ScrollbackImageSurvives(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.ScrollbackCap = 100
+	for range g.Rows { // push the image off the live screen
+		g.CursorR = g.Rows - 1
+		g.Newline()
+	}
+	if g.Scrollback.Len() < g.occludeMaxR {
+		t.Fatalf("setup: image still live (base %d, bound %d)",
+			g.Scrollback.Len(), g.occludeMaxR)
+	}
+	g.CursorR, g.CursorC = 3, 5
+	g.Put('x')
+	if len(g.Graphics) != 1 {
+		t.Fatal("scrollback image removed by an unrelated live-screen write")
+	}
+}
+
+// The bound may be too high (a wasted scan) but never too low. Reflow moves
+// origins arbitrarily, so it must invalidate rather than keep a stale value.
+func TestGrid_OccludeGraphics_BoundSurvivesReflow(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.Resize(10, 20) // narrower: re-wrap remaps graphic origins
+	if len(g.Graphics) != 1 {
+		t.Skip("resize dropped the graphic; nothing to assert")
+	}
+	gr := g.Graphics[0]
+	g.CursorR, g.CursorC = gr.OriginR-g.Scrollback.Len(), gr.OriginC
+	if g.CursorR < 0 || g.CursorR >= g.Rows {
+		t.Skip("graphic not on the live screen after resize")
+	}
+	g.Put('x')
+	if len(g.Graphics) != 0 {
+		t.Fatal("stale occlusion bound let a write miss the image under it")
+	}
+}
+
+// The per-glyph occlusion check must stay free once images leave the live
+// screen — a long previewer session parks up to maxGraphics of them there.
+func BenchmarkPutCell_GraphicsInScrollback(b *testing.B) {
+	g := newGrid(24, 80)
+	g.CellPxW, g.CellPxH = 8, 16
+	g.ScrollbackCap = 1000
+	for range maxGraphics {
+		g.CursorR, g.CursorC = g.Rows-1, 40
+		g.AddGraphic("img.png", 8, 16)
+		g.Newline()
+	}
+	for range 64 { // push every image well past the live screen
+		g.CursorR = g.Rows - 1
+		g.Newline()
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		g.CursorR, g.CursorC = 0, 0
+		for range 80 {
+			g.Put('x')
+		}
+	}
+}

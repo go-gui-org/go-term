@@ -35,6 +35,44 @@ func clampWinsize(n int) uint16 {
 	return uint16(n)
 }
 
+// hostTerminalEnvKeys lists variables that identify the terminal emulator the
+// *parent* process was running under. They are stale the moment a child runs
+// inside go-term, and children act on them: yazi picks its image protocol from
+// TERM_PROGRAM, so a falcon launched from iTerm2 got the iTerm2 inline-image
+// protocol while the same falcon launched from Ghostty got Kitty graphics —
+// same terminal, different behavior, decided by who opened the window.
+//
+// Dropping them makes the child fall back to feature detection (DA1, the KGP
+// query, XTVERSION), which reports what go-term actually implements. Callers
+// that want to impersonate a specific emulator can still set these through
+// cfg.Env, which is applied after the scrub.
+var hostTerminalEnvKeys = [...]string{
+	"TERM_PROGRAM",
+	"TERM_PROGRAM_VERSION", // meaningless once TERM_PROGRAM is gone
+	"ITERM_SESSION_ID",
+}
+
+// dropEnv returns env without any entry naming one of keys. The input slice is
+// never mutated: os.Environ() hands back a fresh slice, but cfg.Env may not.
+func dropEnv(env []string, keys []string) []string {
+	// Sized for the common case (nothing dropped) so the append loop never
+	// grows the backing array.
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		drop := false
+		for _, k := range keys {
+			if len(e) > len(k) && e[len(k)] == '=' && e[:len(k)] == k {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // localeEnvKeys lists the variables that select the child's character-set
 // locale, in POSIX precedence order: LC_ALL beats LC_CTYPE beats LANG.
 var localeEnvKeys = [...]string{"LC_ALL", "LC_CTYPE", "LANG"}

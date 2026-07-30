@@ -14,6 +14,16 @@ type kittyEntry struct {
 	w, h int // pixel dimensions of the stored image
 }
 
+// kittyPending is an in-flight chunked transmission (m=1 seen, m=0 not yet).
+// The opening chunk carries the control data — format, pixel dimensions,
+// action — and the continuation chunks carry only `m=` and payload, so the
+// opening params have to be remembered here or the final chunk decodes with
+// protocol defaults (f=32, s=0, v=0) and the image is silently dropped.
+type kittyPending struct {
+	params kgpParams
+	b64    []byte
+}
+
 // dispatchAPC processes a completed APC sequence (ESC _ payload ESC \).
 // Only the Kitty Graphics Protocol (payload starting with 'G') is handled;
 // everything else is silently dropped.
@@ -173,28 +183,67 @@ func splitKGPPayload(payload []byte) (kgpParams, []byte) {
 // When m=0, decodes the assembled base64, writes PNG, optionally places.
 func (p *parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 	id := params.imageID
-	if p.kittyChunks == nil {
-		p.kittyChunks = make(map[uint32][]byte)
+	// Continuation chunks carry no i= key. Route them to the transmission the
+	// opening chunk started rather than to anonymous id 0, which would mix two
+	// concurrent transfers together.
+	if id == 0 && p.kittyOpenID != 0 {
+		id = p.kittyOpenID
 	}
-	if len(rawB64) > 0 {
-		cur, known := p.kittyChunks[id]
-		// Refuse new IDs when the pending-chunk table is full to prevent a
-		// DoS where a malicious server opens many IDs with m=1 and never
-		// finalises them.
-		if !known && len(p.kittyChunks) >= maxKittyPendingChunks {
-			return
-		}
-		if len(cur)+len(rawB64) <= maxKittyImageBytes {
-			p.kittyChunks[id] = append(cur, rawB64...)
-		}
-	}
-	if params.more {
+	pend, known := p.kittyChunks[id]
+
+	// A self-contained transmission — no m=1 opened this id and none opens it
+	// now — decodes straight from the chunk in hand. Keeping it out of the
+	// pending table matters: otherwise a table filled by abandoned chunked
+	// transfers would swallow ordinary single-shot images.
+	if !known && !params.more {
+		params.imageID = id
+		p.kittyFinish(params, id, rawB64)
 		return
 	}
 
-	assembledB64 := p.kittyChunks[id]
+	if len(rawB64) > 0 {
+		if p.kittyChunks == nil {
+			p.kittyChunks = make(map[uint32]kittyPending)
+		}
+		// Refuse new IDs when the pending-chunk table is full to prevent a
+		// DoS where a malicious server opens many IDs with m=1 and never
+		// finalises them. Reply so the client doesn't wait on a dead transfer.
+		if !known && len(p.kittyChunks) >= maxKittyPendingChunks {
+			p.kittyReply(id, params.quiet, false)
+			return
+		}
+		if !known {
+			// First chunk: its control data governs the whole transmission.
+			pend.params = params
+		}
+		if len(pend.b64)+len(rawB64) <= maxKittyImageBytes {
+			pend.b64 = append(pend.b64, rawB64...)
+			p.kittyChunks[id] = pend
+			known = true
+		}
+	}
+	if params.more {
+		if known {
+			p.kittyOpenID = id
+		}
+		return
+	}
+	p.kittyOpenID = 0
 	delete(p.kittyChunks, id)
 
+	// Decode with the opening chunk's format and dimensions; only q= (whether
+	// to reply) is taken from the chunk in hand.
+	quiet := params.quiet
+	params = pend.params
+	params.quiet = quiet
+	params.imageID = id
+	p.kittyFinish(params, id, pend.b64)
+}
+
+// kittyFinish decodes one complete transmission's base64 text, stores the
+// resulting PNG under id when id is non-zero, and places it when the action
+// asks for it. params must already carry the *opening* chunk's control data.
+func (p *parser) kittyFinish(params kgpParams, id uint32, assembledB64 []byte) {
 	var raw []byte
 	if len(assembledB64) > 0 {
 		// Decode []byte directly to avoid a string copy of a potentially large buffer.
@@ -224,58 +273,50 @@ func (p *parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 
 	b := img.Bounds()
 	if id != 0 {
-		if p.kittyStore == nil {
-			p.kittyStore = make(map[uint32]kittyEntry)
-		}
-		// Evict one entry when at capacity. Prefer an entry not
-		// currently rendered so we don't delete a visible image's
-		// file, but fall back to evicting any entry so the store
-		// doesn't permanently freeze when all images are on screen.
-		if len(p.kittyStore) >= maxKittyStoreEntries {
-			var fallbackID uint32
-			for evictID, e := range p.kittyStore {
-				fallbackID = evictID
-				inUse := false
-				for _, gr := range p.g.Graphics {
-					if gr.Src == e.path {
-						inUse = true
-						break
-					}
-				}
-				if !inUse {
-					_ = os.Remove(e.path)
-					delete(p.kittyStore, evictID)
-					fallbackID = 0
-					break
-				}
-			}
-			if fallbackID != 0 {
-				deletedPath := p.kittyStore[fallbackID].path
-				_ = os.Remove(deletedPath)
-				delete(p.kittyStore, fallbackID)
-				// Remove dangling Graphics entries so the
-				// renderer doesn't try to draw the deleted file.
-				j := 0
-				for _, gr := range p.g.Graphics {
-					if gr.Src != deletedPath {
-						p.g.Graphics[j] = gr
-						j++
-					}
-				}
-				p.g.Graphics = p.g.Graphics[:j]
-			}
-		}
-		p.kittyStore[id] = kittyEntry{path: path, w: b.Dx(), h: b.Dy()}
+		p.kittyStoreImage(id, path, b.Dx(), b.Dy())
 	}
 
 	if params.action == 'T' || id == 0 {
-		_, rows := p.g.AddGraphic(path, b.Dx(), b.Dy())
+		_, rows := p.g.AddGraphicKitty(path, b.Dx(), b.Dy(), id)
 		for range rows {
 			p.g.Newline()
 		}
 	}
 
 	p.kittyReply(id, params.quiet, true)
+}
+
+// kittyStoreImage records the PNG at path in the off-screen store under id,
+// evicting one entry first when the store is at capacity. Eviction prefers an
+// image not currently on screen so a visible picture's file doesn't vanish
+// under the renderer, but falls back to any entry — otherwise the store would
+// freeze permanently once every stored image is displayed.
+func (p *parser) kittyStoreImage(id uint32, path string, w, h int) {
+	if p.kittyStore == nil {
+		p.kittyStore = make(map[uint32]kittyEntry)
+	}
+	if len(p.kittyStore) >= maxKittyStoreEntries {
+		var fallbackID uint32
+		for evictID, e := range p.kittyStore {
+			fallbackID = evictID
+			if p.g.graphicsUseSrc(e.path) {
+				continue
+			}
+			_ = os.Remove(e.path)
+			delete(p.kittyStore, evictID)
+			fallbackID = 0
+			break
+		}
+		if fallbackID != 0 {
+			evicted := p.kittyStore[fallbackID].path
+			_ = os.Remove(evicted)
+			delete(p.kittyStore, fallbackID)
+			// Drop the placements too, or the renderer keeps trying to draw
+			// a file that is no longer there.
+			p.g.deleteGraphicsBySrc(evicted)
+		}
+	}
+	p.kittyStore[id] = kittyEntry{path: path, w: w, h: h}
 }
 
 // kittyPlace retrieves a previously transmitted image by id and renders
@@ -290,29 +331,53 @@ func (p *parser) kittyPlace(id uint32, quiet int) {
 		p.kittyReply(id, quiet, false)
 		return
 	}
-	_, rows := p.g.AddGraphic(e.path, e.w, e.h)
+	_, rows := p.g.AddGraphicKitty(e.path, e.w, e.h, id)
 	for range rows {
 		p.g.Newline()
 	}
 	p.kittyReply(id, quiet, true)
 }
 
-// kittyDeleteID removes an image from kittyStore. Op "a"/"A" clears all.
-// Empty op (no d= key) defaults to delete-by-ID per the KGP spec.
+// kittyDeleteID handles the delete action (a=d). The d= key selects what goes;
+// with no d= key at all the spec says "delete all images visible on screen",
+// i.e. the same as d=a. Case carries meaning: the lowercase variant removes
+// only the on-screen placements and keeps the stored image data so the client
+// can re-display it with a=p, the uppercase variant frees the data too.
+//
+// Implemented selectors:
+//
+//	a/A  every placement on screen (what yazi and other previewers send to
+//	     clear a preview: ESC _ G q=2,a=d,d=A ESC \)
+//	i/I  the placements of the image named by i=
+//
+// The remaining selectors (n, c, f, p, q, x, y, z) are ignored rather than
+// falling through to delete-by-id, which would drop images the client never
+// named.
 func (p *parser) kittyDeleteID(id uint32, op string) {
-	if p.kittyStore == nil {
-		return
+	sel := byte('a') // no d= key means "all visible placements"
+	if op != "" {
+		sel = op[0]
 	}
-	if op == "a" || op == "A" {
-		for _, e := range p.kittyStore {
-			_ = os.Remove(e.path)
+	freeData := sel >= 'A' && sel <= 'Z'
+	sel |= 0x20 // fold to lowercase; only the ASCII letters above matter
+
+	switch sel {
+	case 'a':
+		p.g.deleteGraphics(0, true)
+		if freeData {
+			for _, e := range p.kittyStore {
+				_ = os.Remove(e.path)
+			}
+			p.kittyStore = nil
 		}
-		p.kittyStore = make(map[uint32]kittyEntry)
-		return
-	}
-	if e, ok := p.kittyStore[id]; ok {
-		_ = os.Remove(e.path)
-		delete(p.kittyStore, id)
+	case 'i':
+		p.g.deleteGraphics(id, false)
+		if freeData {
+			if e, ok := p.kittyStore[id]; ok {
+				_ = os.Remove(e.path)
+				delete(p.kittyStore, id)
+			}
+		}
 	}
 }
 

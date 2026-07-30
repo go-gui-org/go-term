@@ -199,7 +199,8 @@ func TestParser_APC_KittyDelete(t *testing.T) {
 	if h.p.kittyStore[9].path == "" {
 		t.Fatal("transmit failed")
 	}
-	h.feedAPC("a=d,i=9,q=2;")
+	// Uppercase I: delete by id *and* free the stored data.
+	h.feedAPC("a=d,d=I,i=9,q=2;")
 	if h.p.kittyStore != nil && h.p.kittyStore[9].path != "" {
 		t.Fatal("image not deleted from kittyStore")
 	}
@@ -210,9 +211,112 @@ func TestParser_APC_KittyDeleteAll(t *testing.T) {
 	_, b64 := makePNG(t)
 	h.feedAPC("a=t,f=100,i=10,q=1;" + b64)
 	h.feedAPC("a=t,f=100,i=11,q=1;" + b64)
+	// Lowercase a: placements go, stored data survives for a later a=p.
 	h.feedAPC("a=d,d=a,q=2;")
+	if len(h.p.kittyStore) != 2 {
+		t.Fatalf("kittyStore has %d entries after d=a; want 2 (data kept)",
+			len(h.p.kittyStore))
+	}
+}
+
+// --- Delete removes the on-screen placement, not just the stored data ---
+
+// The bug this covers: yazi (and other previewers) clear an image preview with
+// ESC _ G q=2,a=d,d=A ESC \. Freeing only kittyStore left the image painted on
+// screen for the rest of the session.
+func TestParser_APC_KittyDeleteAll_RemovesPlacements(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=12,q=1;" + b64)
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics after display; want 1", len(h.g.Graphics))
+	}
+	h.feedAPC("q=2,a=d,d=A;") // yazi's erase sequence, verbatim
+	if len(h.g.Graphics) != 0 {
+		t.Fatalf("got %d graphics after d=A; want 0", len(h.g.Graphics))
+	}
 	if len(h.p.kittyStore) != 0 {
-		t.Fatalf("kittyStore still has %d entries after d=a", len(h.p.kittyStore))
+		t.Fatalf("kittyStore has %d entries after d=A; want 0", len(h.p.kittyStore))
+	}
+}
+
+// a=d is a Kitty command and Kitty owns only its own layer. Sixel and iTerm2
+// images share the Graphics list but have no delete sequence at all — they go
+// away only when the client paints over them — so d=a must step over them.
+func TestParser_APC_KittyDeleteAll_LeavesSixel(t *testing.T) {
+	h := newAPCHelper(t)
+	// A non-KGP image (sixel/iTerm2 both land here) next to a Kitty one.
+	h.g.CursorR, h.g.CursorC = 0, 0
+	h.g.AddGraphic("sixel.png", 16, 32)
+	h.g.CursorR, h.g.CursorC = 5, 0
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=19,q=1;" + b64)
+	if len(h.g.Graphics) != 2 {
+		t.Fatalf("setup: got %d graphics; want 2", len(h.g.Graphics))
+	}
+
+	h.feedAPC("q=2,a=d,d=A;")
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics after d=A; want 1 (sixel must survive)",
+			len(h.g.Graphics))
+	}
+	if got := h.g.Graphics[0].Src; got != "sixel.png" {
+		t.Errorf("surviving graphic Src = %q; want sixel.png", got)
+	}
+	if h.g.Graphics[0].kgp {
+		t.Error("surviving graphic is a KGP placement; d=A should have taken it")
+	}
+}
+
+// No d= key at all means "delete all visible placements" per the spec.
+func TestParser_APC_KittyDelete_NoSelectorDeletesAll(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=13,q=1;" + b64)
+	h.feedAPC("a=d,q=2;")
+	if len(h.g.Graphics) != 0 {
+		t.Fatalf("got %d graphics after bare a=d; want 0", len(h.g.Graphics))
+	}
+	// Data kept: bare a=d is the lowercase (soft) form.
+	if h.p.kittyStore[13].path == "" {
+		t.Fatal("bare a=d freed the stored image data; want it kept")
+	}
+}
+
+// d=i removes only the named image's placements and leaves the others.
+func TestParser_APC_KittyDeleteByID_LeavesOthers(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=14,q=1;" + b64)
+	h.feedAPC("a=T,f=100,i=15,q=1;" + b64)
+	if len(h.g.Graphics) != 2 {
+		t.Fatalf("got %d graphics; want 2", len(h.g.Graphics))
+	}
+	h.feedAPC("a=d,d=i,i=14,q=2;")
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics after d=i,i=14; want 1", len(h.g.Graphics))
+	}
+	if h.g.Graphics[0].ID != 15 {
+		t.Fatalf("surviving graphic has ID %d; want 15", h.g.Graphics[0].ID)
+	}
+	// Lowercase i keeps the data, so the image can be re-placed.
+	h.feedAPC("a=p,i=14,q=1;")
+	if len(h.g.Graphics) != 2 {
+		t.Fatalf("re-place after d=i failed; got %d graphics", len(h.g.Graphics))
+	}
+}
+
+// Unimplemented selectors must be no-ops, not an accidental delete-by-id.
+func TestParser_APC_KittyDelete_UnknownSelectorIsNoOp(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=16,q=1;" + b64)
+	h.feedAPC("a=d,d=z,i=16,q=2;")
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("d=z removed %d graphics; want it ignored", 1-len(h.g.Graphics))
+	}
+	if h.p.kittyStore[16].path == "" {
+		t.Fatal("d=z freed stored data; want it ignored")
 	}
 }
 
@@ -346,10 +450,10 @@ func TestParser_APC_KittyStore_EvictsAtCapacity(t *testing.T) {
 func TestParser_APC_KittyChunked_OversizeDropped(t *testing.T) {
 	h := newAPCHelper(t)
 	// Pre-fill accumulator to the per-image byte cap.
-	h.p.kittyChunks = map[uint32][]byte{42: make([]byte, maxKittyImageBytes)}
+	h.p.kittyChunks = map[uint32]kittyPending{42: {b64: make([]byte, maxKittyImageBytes)}}
 	// Additional data must be silently dropped (would exceed cap).
 	h.feedAPC("a=T,f=100,i=42,m=1;AAAA")
-	if got := len(h.p.kittyChunks[42]); got != maxKittyImageBytes {
+	if got := len(h.p.kittyChunks[42].b64); got != maxKittyImageBytes {
 		t.Fatalf("accumulator grew to %d after cap; want %d", got, maxKittyImageBytes)
 	}
 }
@@ -538,5 +642,88 @@ func TestSplitKGP_AllValidNumericParams(t *testing.T) {
 	}
 	if params.quiet != 1 {
 		t.Errorf("quiet = %d; want 1", params.quiet)
+	}
+}
+
+// --- Chunked transmission: control data lives on the opening chunk only ---
+
+// Per the KGP spec a chunked transfer carries f=/s=/v=/a= on the first chunk;
+// continuation chunks carry only m= and payload. Re-parsing each chunk in
+// isolation made the finalising m=0 chunk decode with the protocol defaults
+// (f=32, s=0, v=0), which silently dropped every chunked raw-format image —
+// exactly what yazi sends when it uses the Kitty adapter.
+func TestParser_APC_KittyChunked_RawKeepsOpeningParams(t *testing.T) {
+	h := newAPCHelper(t)
+	// 4×2 RGB image = 24 raw bytes.
+	raw := make([]byte, 4*2*3)
+	for i := range raw {
+		raw[i] = byte(i)
+	}
+	full := base64.StdEncoding.EncodeToString(raw)
+	mid := len(full) / 2
+
+	h.feedAPC("a=T,f=24,s=4,v=2,m=1;" + full[:mid])
+	h.feedAPC("m=0;" + full[mid:]) // continuation: no f=, s=, v=, a=
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics; want 1 (opening f=/s=/v= must carry over)",
+			len(h.g.Graphics))
+	}
+	if got := h.g.Graphics[0].WidthPx; got != 4 {
+		t.Errorf("image width = %d; want 4", got)
+	}
+}
+
+// A self-contained transmission needs no slot in the pending-chunk table, so
+// abandoned chunked transfers filling that table must not swallow it. The
+// earlier code returned silently, dropping the image with no reply at all.
+func TestParser_APC_KittySingleShot_SurvivesFullPendingTable(t *testing.T) {
+	h := newAPCHelper(t)
+	h.p.kittyChunks = make(map[uint32]kittyPending, maxKittyPendingChunks)
+	for i := range uint32(maxKittyPendingChunks) {
+		h.p.kittyChunks[1000+i] = kittyPending{b64: []byte("AAAA")}
+	}
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=17,q=1;" + b64)
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics; want 1 (full pending table must not block "+
+			"an unchunked transmission)", len(h.g.Graphics))
+	}
+	if h.p.kittyStore[17].path == "" {
+		t.Fatal("image not stored")
+	}
+}
+
+// Opening a *new* chunked transfer with the table full is refused — but the
+// client gets an error reply rather than waiting forever on a dead transfer.
+func TestParser_APC_KittyChunked_FullTableRepliesError(t *testing.T) {
+	h := newAPCHelper(t)
+	h.p.kittyChunks = make(map[uint32]kittyPending, maxKittyPendingChunks)
+	for i := range uint32(maxKittyPendingChunks) {
+		h.p.kittyChunks[1000+i] = kittyPending{b64: []byte("AAAA")}
+	}
+	h.feedAPC("a=T,f=100,i=18,m=1,q=0;AAAA")
+	if len(h.replies) != 1 {
+		t.Fatalf("got %d replies; want 1 error reply", len(h.replies))
+	}
+	if !bytes.Contains(h.replies[0], []byte("EINVAL")) {
+		t.Fatalf("reply = %q; want an EINVAL error", h.replies[0])
+	}
+}
+
+// Continuation chunks carry no i= key, so they must be attributed to the
+// transmission the opening chunk left open rather than to anonymous id 0.
+func TestParser_APC_KittyChunked_ContinuationKeepsID(t *testing.T) {
+	h := newAPCHelper(t)
+	raw, _ := makePNG(t)
+	full := base64.StdEncoding.EncodeToString(raw)
+	mid := len(full) / 2
+
+	h.feedAPC("a=t,f=100,i=21,m=1,q=1;" + full[:mid])
+	h.feedAPC("m=0,q=1;" + full[mid:])
+	if h.p.kittyStore[21].path == "" {
+		t.Fatal("chunked image not stored under its opening id")
+	}
+	if len(h.p.kittyChunks) != 0 {
+		t.Fatalf("%d pending chunk entries left behind", len(h.p.kittyChunks))
 	}
 }

@@ -139,6 +139,9 @@ func TestReflow_GraphicsRideTheSameRemap(t *testing.T) {
 	writeLine(g, strings.Repeat("x", 55)) // 3 rows at 20 cols, 6 at 10
 	g.AddMark(markPromptStart)
 	g.AddGraphic("img", 4, 4) // same content row as the mark
+	// Text drawn into an image's cells removes it (occludeGraphics), so keep
+	// the following line clear of the single cell the image covers.
+	g.CursorC = 2
 	writeLine(g, "target")
 
 	if len(g.Graphics) != 1 || len(g.Marks) != 1 {

@@ -410,6 +410,16 @@ type grid struct {
 	// text near them. Capped at maxGraphics; oldest evicted first.
 	Graphics []graphic
 
+	// occludeMaxR is one past the highest content row covered by any
+	// occludable (non-KGP) graphic — the bound that lets the per-write
+	// occlusion check in putCell/eraseSpan skip its scan once every image has
+	// scrolled off the live screen. occludeBoundUnknown means "not known,
+	// scan and recompute". The invariant is one-directional on purpose: this
+	// value may be too high (a wasted scan) but never too low (a missed
+	// occlusion), so every path that moves origins upward may simply mark it
+	// unknown rather than track the exact maximum.
+	occludeMaxR int
+
 	// searchRunes and searchCols are reusable buffers for searchRow,
 	// persisted on the grid so repeated Find / ViewportMatches calls
 	// don't re-allocate them from nil every time.
@@ -738,6 +748,7 @@ func (g *grid) remapGraphics(rows []int) {
 		j++
 	}
 	g.Graphics = g.Graphics[:j]
+	g.occludeMaxR = occludeBoundUnknown // re-wrap moved origins arbitrarily
 }
 
 // shiftGraphics applies a flat delta to every graphic origin. Only correct
@@ -756,6 +767,9 @@ func (g *grid) shiftGraphics(delta, total int) {
 		}
 	}
 	g.Graphics = g.Graphics[:j]
+	if delta > 0 {
+		g.occludeMaxR = occludeBoundUnknown // origins moved down
+	}
 }
 
 // AddGraphic registers a decoded image at the cursor's current content
@@ -765,6 +779,131 @@ func (g *grid) shiftGraphics(delta, total int) {
 // holds Mu.
 func (g *grid) AddGraphic(src string, widthPx, heightPx int) (int, int) {
 	return g.addGraphicCells(src, widthPx, heightPx, 0, 0)
+}
+
+// AddGraphicKitty is AddGraphic for the Kitty Graphics Protocol: the
+// placement records the KGP image id so a later delete (`a=d,d=i,i=…`) can
+// find it. Caller holds Mu.
+func (g *grid) AddGraphicKitty(src string, widthPx, heightPx int, id uint32) (int, int) {
+	cols, rows := g.addGraphicCells(src, widthPx, heightPx, 0, 0)
+	if cols <= 0 || rows <= 0 {
+		return 0, 0 // rejected: nothing was appended to tag
+	}
+	last := &g.Graphics[len(g.Graphics)-1]
+	last.ID, last.kgp = id, true
+	return cols, rows
+}
+
+// occludeGraphics drops every non-Kitty image whose covered rectangle
+// intersects rows [lr, lr+n) of the live screen, columns [from, to).
+//
+// Sixel and iTerm2 inline images have no delete sequence: an application
+// clears one by painting over the cells it occupies, which is exactly what
+// yazi does when the preview moves off an image. Without this the picture
+// stays on screen for the rest of the session. Kitty placements are exempt —
+// KGP is explicit about images being their own layer that text does not
+// disturb, so those go away only via a=d (see kittyDeleteID).
+//
+// Callers guard on len(g.Graphics) != 0 so the common no-image case costs one
+// length check on the write path. Caller holds Mu.
+func (g *grid) occludeGraphics(lr, n, from, to int) {
+	// EnterAlt swaps Cells but not Graphics, and leaves Scrollback alone, so
+	// an alt-screen row maps onto the same content row as a main-screen
+	// graphic. Occluding from alt would let any full-screen app — vim, less —
+	// silently destroy images sitting on the main screen behind it.
+	if g.AltActive {
+		return
+	}
+	base := g.Scrollback.Len()
+	// Every occludable image sits entirely in scrollback, so no live-screen
+	// write can reach one. Skipping here is what keeps a long previewer
+	// session — which parks images in scrollback up to maxGraphics — from
+	// paying a full scan on every glyph written afterwards.
+	if g.occludeMaxR <= base {
+		return
+	}
+	top, bottom := base+lr, base+lr+n // [top, bottom)
+	j, removed, maxR := 0, 0, 0
+	for _, gr := range g.Graphics {
+		if !gr.kgp && gr.OriginR < bottom && top < gr.OriginR+gr.Rows &&
+			gr.OriginC < to && from < gr.OriginC+gr.Cols {
+			removed++
+			continue
+		}
+		if !gr.kgp && gr.OriginR+gr.Rows > maxR {
+			maxR = gr.OriginR + gr.Rows
+		}
+		g.Graphics[j] = gr
+		j++
+	}
+	// The loop saw every graphic, so this tightens the bound exactly — the
+	// one place it is ever allowed to shrink.
+	g.occludeMaxR = maxR
+	if removed > 0 {
+		g.Graphics = g.Graphics[:j]
+		g.markAllDirty()
+	}
+}
+
+// graphicsUseSrc reports whether any placement draws the file at src. Caller
+// holds Mu.
+func (g *grid) graphicsUseSrc(src string) bool {
+	for _, gr := range g.Graphics {
+		if gr.Src == src {
+			return true
+		}
+	}
+	return false
+}
+
+// deleteGraphicsBySrc drops every placement drawing the file at src. Used when
+// the backing file is removed, so the renderer never reaches for a dead path.
+// Caller holds Mu.
+func (g *grid) deleteGraphicsBySrc(src string) {
+	j, removed := 0, 0
+	for _, gr := range g.Graphics {
+		if gr.Src == src {
+			removed++
+			continue
+		}
+		g.Graphics[j] = gr
+		j++
+	}
+	if removed > 0 {
+		g.Graphics = g.Graphics[:j]
+		g.markAllDirty()
+	}
+}
+
+// deleteGraphics removes Kitty placements: every one when all is set (KGP
+// `d=a`), otherwise those carrying the given Kitty image id.
+//
+// Only KGP placements are touched. `a=d` is a Kitty command and Kitty owns
+// only its own layer — a sixel or iTerm2 image is removed by painting over it
+// (see occludeGraphics), never by a delete sequence, so `d=a` must leave those
+// alone even though they share one Graphics list.
+//
+// Dropping the placement is the visible half of a KGP delete — freeing the
+// stored image data alone leaves the picture on screen forever. The cells
+// under the image were blanked when it was added and stay blank, but the
+// image layer changed, so the screen is marked dirty to force a repaint.
+// Caller holds Mu.
+func (g *grid) deleteGraphics(id uint32, all bool) {
+	if len(g.Graphics) == 0 {
+		return
+	}
+	j := 0
+	for _, gr := range g.Graphics {
+		if gr.kgp && (all || (id != 0 && gr.ID == id)) {
+			continue
+		}
+		g.Graphics[j] = gr
+		j++
+	}
+	if j != len(g.Graphics) {
+		g.Graphics = g.Graphics[:j]
+		g.markAllDirty()
+	}
 }
 
 // addGraphicCells is AddGraphic with an explicit cell footprint. Non-positive
@@ -803,6 +942,12 @@ func (g *grid) addGraphicCells(src string, widthPx, heightPx, cols, rows int) (i
 	if len(g.Graphics) >= maxGraphics {
 		copy(g.Graphics, g.Graphics[1:])
 		g.Graphics = g.Graphics[:maxGraphics-1]
+	}
+	// Widen the occlusion bound. AddGraphicKitty marks the entry kgp only
+	// afterwards, so a KGP placement widens it too — costing at most a scan
+	// that finds nothing, never a missed occlusion.
+	if end := originR + rows; end > g.occludeMaxR {
+		g.occludeMaxR = end
 	}
 	g.Graphics = append(g.Graphics, graphic{
 		Src:      src,
