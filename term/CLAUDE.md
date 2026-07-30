@@ -89,8 +89,11 @@ Supports a modern xterm/kitty-compatible subset:
   `Smulx`/`Setulc` to advertise styled + colored underlines), sixel graphics,
   synchronized updates.
 - APC: Kitty Graphics Protocol (transmit/display/place/delete; PNG, raw
-  RGBA/RGB; chunked base64 — the opening chunk's `f=`/`s=`/`v=`/`a=` govern
-  the whole transfer, continuation chunks carry only `m=` and payload).
+  RGBA/RGB; chunked base64 — the opening chunk's `f=`/`s=`/`v=`/`a=`/`C=`
+  govern the whole transfer, continuation chunks carry only `m=` and payload).
+  `C=1` suppresses the post-placement cursor advance on both `a=T` and `a=p`.
+  Unicode placeholder placement (`U=1`) is *not* implemented — an image sent
+  that way is placed at the cursor instead of at the placeholder cells.
 
 Image lifetime differs by protocol and this distinction is load-bearing.
 Kitty placements are their own layer: text drawn over their cells leaves them
