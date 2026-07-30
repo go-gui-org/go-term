@@ -32,8 +32,11 @@ Whitespace around `=` is trimmed. Keys and values are capped at 128 bytes each.
 
 `Cmd+Shift+,` (`Ctrl+Alt+,` on Windows) re-reads the file and applies it to
 every open pane without restarting: font, theme, scrollback, bell, scrollbar
-and every keybinding. `Cmd+,` is deliberately left free for a future settings
-UI.
+and every keybinding.
+
+`Cmd+,` opens this file in the OS-default editor, creating a commented stub
+first if it doesn't exist yet. That binding belongs to falcon, not to
+`term/workspace`, so it isn't rebindable through the `[keys]` section below.
 
 A setting **deleted** from the file reverts to the embedder's built-in default
 on the next reload — the file is always re-applied to a pristine base rather

@@ -14,8 +14,8 @@ github.com/go-gl/gl v0.0.0-20260331235117-4566fea9a276 h1:IO5P06Pcj9K04d+l4nrf3c
 github.com/go-gl/gl v0.0.0-20260331235117-4566fea9a276/go.mod h1:9YTyiznxEY1fVinfM7RvRcjRHbw2xLBJ3AAGIT0I4Nw=
 github.com/go-gui-org/go-glyph v1.18.0 h1:8NGOBORtHRgkWH7BYRNGcjnFXIAOY98AU3VxViGTymo=
 github.com/go-gui-org/go-glyph v1.18.0/go.mod h1:1Nta2shuXtETUdEXJJn0oFRisUXPxi1ToSVb0Sfi7kU=
-github.com/go-gui-org/go-gui v0.43.0 h1:+uAsWfYpIiaVvlPed7hRBx2oGUmR2B0ty5sstsTA+io=
-github.com/go-gui-org/go-gui v0.43.0/go.mod h1:97Broq2uxfflnTVdCH8JUMZf1HrswG1plVNHQC9MvpA=
+github.com/go-gui-org/go-gui v0.44.0 h1:R8NSDna/lKYAbZlHIOqqrX80BYYBc5cgN0Dg0/AEN5o=
+github.com/go-gui-org/go-gui v0.44.0/go.mod h1:97Broq2uxfflnTVdCH8JUMZf1HrswG1plVNHQC9MvpA=
 github.com/go-pdf/fpdf v0.9.0 h1:PPvSaUuo1iMi9KkaAn90NuKi+P4gwMedWPHhj8YlJQw=
 github.com/go-pdf/fpdf v0.9.0/go.mod h1:oO8N111TkmKb9D7VvWGLvLJlaZUQVPM+6V42pp3iV4Y=
 github.com/go-text/typesetting v0.3.4 h1:YYurUOtEb9kGSOz4uE3k4OpBGsp1dDL8+fjCeaFamAU=

@@ -323,6 +323,18 @@ func DefaultWorkspacePath() (string, error) {
 	return filepath.Join(dir, "workspace.json"), nil
 }
 
+// DefaultConfigPath returns the path loadConfig reads when the embedder
+// leaves Cfg.ConfigPath empty. Exported so an embedder can show or open the
+// file (a "Preferences"/"Open config" menu item) without re-deriving the
+// resolution order — see docs/config.md. Empty when no config dir resolves.
+func DefaultConfigPath() string {
+	dir, err := configDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "config")
+}
+
 // configDir returns the directory for go-term configuration files.
 // Resolution order:
 //  1. $XDG_CONFIG_HOME/go-term

@@ -59,7 +59,11 @@ func run() int {
 	a.wc.OnLastShellExit = a.saveAndClose
 	defer a.close()
 
-	backendRunApp(gui.NewWindow(a.windowCfg()))
+	// The App has to exist before the window: onInit installs the menubar on
+	// it, and SetNativeMenubar is a no-op until the main window is registered
+	// — which RunApp does before it dispatches OnInit.
+	a.gapp = gui.NewApp()
+	backendRunApp(a.gapp, gui.NewWindow(a.windowCfg()))
 	if a.initErr != nil {
 		log.Printf("workspace init: %v", a.initErr)
 		return 1
@@ -70,6 +74,6 @@ func run() int {
 // backendRunApp runs the multi-window app loop: only it honors an
 // OnCloseRequest veto (single-window backend.Run quits unconditionally on
 // Cmd+Q).
-func backendRunApp(w *gui.Window) {
-	backend.RunApp(gui.NewApp(), w)
+func backendRunApp(app *gui.App, w *gui.Window) {
+	backend.RunApp(app, w)
 }

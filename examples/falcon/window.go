@@ -27,6 +27,10 @@ type app struct {
 	recordPath string // .gtr file for the starting pane ("" = don't record)
 
 	ws *workspace.Workspace
+	// gapp is the gui.App the window runs under. Held because the native
+	// menubar is installed on the App, not the window, and onInit is the
+	// first point where the main window is registered with it.
+	gapp *gui.App
 	// initErr records a fatal OnInit failure. OnInit can't return an
 	// error and must not log.Fatal — that would skip the deferred
 	// teardown in run() — so it's stashed here and reported after the
@@ -37,7 +41,7 @@ type app struct {
 // windowCfg builds the WindowCfg for the normal (non-replay) path.
 func (a *app) windowCfg() gui.WindowCfg {
 	return gui.WindowCfg{
-		Title:          "go-term",
+		Title:          appName,
 		Width:          windowWidth,
 		Height:         windowHeight,
 		IconPNG:        appIconPNG,
@@ -79,6 +83,12 @@ func (a *app) onInit(w *gui.Window) {
 		}
 	}
 	w.UpdateView(s.View)
+	registerCommands(w)
+	// After the workspace exists: the Help menu's shortcut item resolves
+	// against the workspace commands registered by workspace.New.
+	if a.gapp != nil {
+		a.installMenubar(a.gapp, w)
+	}
 }
 
 // onCloseRequest optionally confirms, then saves and closes.
@@ -104,7 +114,7 @@ func (a *app) onCloseRequest(w *gui.Window) {
 		// dedup, so it could stack duplicate dialogs.
 		w.Dialog(gui.DialogCfg{
 			DialogType: gui.DialogConfirm,
-			Title:      "Quit go-term?",
+			Title:      "Quit " + appName + "?",
 			Body: fmt.Sprintf(
 				"%d active terminal(s) will be terminated. Quit anyway?", n),
 			OnOkYes: a.saveAndClose,
@@ -138,7 +148,7 @@ func (a *app) close() {
 // can be asserted on.
 func replayWindowCfg(path string, onInit func(*gui.Window)) gui.WindowCfg {
 	return gui.WindowCfg{
-		Title:   "go-term replay — " + filepath.Base(path),
+		Title:   appName + " replay — " + filepath.Base(path),
 		Width:   windowWidth,
 		Height:  windowHeight,
 		IconPNG: appIconPNG,
@@ -178,7 +188,7 @@ func runReplay(rc replayCfg) int {
 		}
 	}()
 	log.Printf("replaying %s — space pauses, +/- speed, . steps, 0 restarts", rc.path)
-	backendRunApp(w)
+	backendRunApp(gui.NewApp(), w)
 	if initErr != nil {
 		log.Printf("replay: %v", initErr)
 		return 1
