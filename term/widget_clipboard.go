@@ -49,17 +49,24 @@ func stripPasteEnd(s string) string {
 	return strings.ReplaceAll(s, pasteEnd, "")
 }
 
-// pasteFromClipboard reads the clipboard, strips paste-end markers, and
-// writes the payload to the pty — wrapped in bracketed-paste markers
-// when the application has enabled DEC ?2004.
-func (t *Term) pasteFromClipboard(w *gui.Window) {
-	text := w.GetClipboard()
-	if text == "" {
+// cleanPaste caps s at maxPasteBytes and removes any embedded paste-end
+// marker. Both paste entry points — SendInput and the clipboard path — share
+// it so they can never disagree on what a sanitized payload is.
+func cleanPaste(s string) string {
+	return stripPasteEnd(truncatePaste(s, maxPasteBytes))
+}
+
+// pasteText snaps to live, brackets clean according to this pane's own DEC
+// ?2004 state, and writes it to the pty. clean must already be truncated and
+// stripped — see cleanPaste.
+func (t *Term) pasteText(clean string) {
+	// Guarded here rather than at the callers so a payload that sanitizes
+	// away to nothing — empty clipboard, or a string of nothing but paste-end
+	// markers — can never reach the child as a bare ESC[200~ ESC[201~ pair.
+	if clean == "" {
 		return
 	}
-	text = truncatePaste(text, maxPasteBytes)
 	t.snapToLive()
-	clean := stripPasteEnd(text)
 	// Read BracketedPaste under the lock, then release before calling
 	// pw.Write — holding Mu across a blocking pty write can deadlock
 	// when the slave-side input buffer is full and the reader goroutine
@@ -71,9 +78,28 @@ func (t *Term) pasteFromClipboard(w *gui.Window) {
 	if bracketed {
 		payload = pasteStart + clean + pasteEnd
 	}
-	t.rec.Load().Input([]byte(payload))
-	if _, err := t.pw.Write([]byte(payload)); err != nil {
+	// One conversion shared by the recorder and the pty — payload can be a
+	// megabyte, so the second copy is worth avoiding.
+	out := []byte(payload)
+	t.rec.Load().Input(out)
+	if _, err := t.pw.Write(out); err != nil {
 		log.Printf("term: pty paste: %v", err)
+	}
+}
+
+// pasteFromClipboard reads the clipboard, strips paste-end markers, and
+// writes the payload to the pty — wrapped in bracketed-paste markers
+// when the application has enabled DEC ?2004.
+func (t *Term) pasteFromClipboard(w *gui.Window) {
+	clean := cleanPaste(w.GetClipboard())
+	if clean == "" {
+		return
+	}
+	t.pasteText(clean)
+	// The tap gets the *unwrapped* text: a receiving pane may have a
+	// different ?2004 state, so it must apply its own markers via Paste.
+	if t.cfg.OnInput != nil {
+		t.cfg.OnInput([]byte(clean), InputPaste)
 	}
 }
 

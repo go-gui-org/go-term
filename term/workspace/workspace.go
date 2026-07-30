@@ -109,7 +109,7 @@ func New(w *gui.Window, cfg Cfg) (*Workspace, error) {
 func (ws *Workspace) addTab() (*Tab, error) {
 	tabID := "tab-" + strconv.Itoa(ws.nextTabID)
 	ws.nextTabID++
-	tab, err := newTab(ws.w, ws.cfg, tabID, ws.onPaneExit, ws.onPaneFocus, ws.onPaneTitle)
+	tab, err := newTab(ws.w, ws.cfg, tabID, ws.hooks())
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +156,17 @@ func (ws *Workspace) closeTabAt(idx int) {
 		}
 	}
 	ws.refresh()
+}
+
+// hooks returns the per-pane callback set every construction path hands to
+// newTab / addPane.
+func (ws *Workspace) hooks() paneHooks {
+	return paneHooks{
+		onExit:  ws.onPaneExit,
+		onFocus: ws.onPaneFocus,
+		onTitle: ws.onPaneTitle,
+		onInput: ws.onPaneInput,
+	}
 }
 
 // onPaneFocus is called synchronously from Term.onClick when the user
@@ -324,6 +335,11 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 		content = []gui.View{ws.tabBarView(), gui.Column(area)}
 	} else {
 		content = []gui.View{split}
+	}
+	// Appended before the overlays so a help panel or theme picker draws
+	// over the pill rather than under it.
+	if tab.broadcast {
+		content = append(content, ws.broadcastPill())
 	}
 	if ws.helpVisible {
 		// Float children are excluded from normal flow, so the backdrop
@@ -698,7 +714,7 @@ func (ws *Workspace) splitView(node *splitNode, tab *Tab, boxW, boxH float32) gu
 			firstC.Content = []gui.View{first}
 			border := tight(gui.FixedFill)
 			border.Width = borderPx
-			border.Color = gui.CurrentTheme().ColorBorder
+			border.Color = dividerColor(tab)
 			secondC := tight(gui.FillFill)
 			secondC.Content = []gui.View{second}
 
@@ -716,7 +732,7 @@ func (ws *Workspace) splitView(node *splitNode, tab *Tab, boxW, boxH float32) gu
 		firstC.Content = []gui.View{first}
 		border := tight(gui.FillFixed)
 		border.Height = borderPx
-		border.Color = gui.CurrentTheme().ColorBorder
+		border.Color = dividerColor(tab)
 		secondC := tight(gui.FillFill)
 		secondC.Content = []gui.View{second}
 

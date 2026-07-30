@@ -247,6 +247,38 @@ func (t *Term) Write(p []byte) (int, error) {
 	return t.pw.Write(p)
 }
 
+// SendInput injects user input into this pane's child as if it had been typed
+// or pasted here. It is the receiving counterpart of Cfg.OnInput: what the tap
+// hands out, SendInput takes back in, which is how a pane manager mirrors
+// input to sibling panes (term/workspace broadcast mode).
+//
+// kind is not decoration. InputKey bytes are already encoded and go through
+// verbatim; InputPaste text is re-wrapped according to *this* pane's own
+// bracketed-paste (DEC ?2004) state, because that is a mode each child enables
+// for itself — copying the source pane's wrapper would feed a literal
+// ESC[200~ to a pane that has it off.
+//
+// Both kinds snap this pane back to the live view first, exactly as local
+// typing does. A pane the user had scrolled into its scrollback must not sit
+// frozen while its shell runs what was just sent to it.
+//
+// Main-thread only, unlike Write. It deliberately does not fire Cfg.OnInput,
+// so a mirrored write cannot re-enter the tap and loop between panes. p is not
+// retained past the call.
+func (t *Term) SendInput(p []byte, kind InputKind) {
+	if kind == InputPaste {
+		// The conversion is also the copy that keeps p un-retained;
+		// cleanPaste returns it unchanged when no marker is present.
+		t.pasteText(cleanPaste(string(p)))
+		return
+	}
+	if len(p) == 0 {
+		return
+	}
+	t.snapToLive()
+	t.writeRaw(p)
+}
+
 // Cwd returns the most recent working directory reported via OSC 7,
 // or "" if the shell has never emitted one. Typical payload format
 // is "file://host/path"; embedders parse as needed.
@@ -515,7 +547,21 @@ func (t *Term) effectiveScrollbarWidth() float32 {
 // new cache key, forcing go-gui to re-invoke OnDraw for this frame.
 func (t *Term) bumpVersion() { t.drawVersion.Add(1) }
 
+// writeBytes sends keyboard-derived bytes to the child. This is the single
+// choke point for onChar/onKeyDown output, which is why the OnInput tap hangs
+// here rather than at each call site.
 func (t *Term) writeBytes(out []byte) {
+	t.writeRaw(out)
+	// Fired after the local write so the pane the user is looking at never
+	// lags behind the panes a broadcasting embedder mirrors to.
+	if t.cfg.OnInput != nil {
+		t.cfg.OnInput(out, InputKey)
+	}
+}
+
+// writeRaw records out and pushes it to the pty. Split out of writeBytes so
+// SendInput can reuse the write without re-firing the tap it came from.
+func (t *Term) writeRaw(out []byte) {
 	t.rec.Load().Input(out)
 	if _, err := t.pw.Write(out); err != nil {
 		log.Printf("term: pty write: %v", err)

@@ -472,3 +472,31 @@ func TestOnPaneTitle_KeepsStateIntact(t *testing.T) {
 		t.Error("ActivePane = nil after title update")
 	}
 }
+
+// Broadcast is transient state, never persisted: a workspace restored hours
+// later must not start silently typing into every pane.
+func TestSaveRestore_BroadcastStartsOff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspace.json")
+
+	ws := newLiveWorkspace(t)
+	ws.SplitPane(false)
+	ws.ToggleBroadcast()
+	if !ws.Broadcasting() {
+		t.Fatal("precondition: broadcast should be on before saving")
+	}
+	if err := ws.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	restored, err := Restore(&gui.Window{}, hermeticCfg(t), path)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	t.Cleanup(func() { _ = restored.Close() })
+
+	for i, tab := range restored.tabs {
+		if tab.broadcast {
+			t.Errorf("restored tab %d came back broadcasting", i)
+		}
+	}
+}

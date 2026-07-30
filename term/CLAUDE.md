@@ -144,6 +144,22 @@ When `KittyKeyFlags != 0` the widget emits KKP sequences (`CSI codepoint
 Ctrl+letters, and functional keys. `onKeyUp` emits release events when
 flag bit 2 is set.
 
+`writeBytes` is the single choke point for everything `onChar`/`onKeyDown`
+send to the child, which is why `Cfg.OnInput` taps there rather than at each
+call site. The paste path taps separately, with the *unwrapped* text, because
+bracketed paste (`?2004`) is a per-child mode — a mirrored paste must be
+re-encoded by the receiver. Mouse reports, focus reports and pty replies bypass
+`writeBytes` and are therefore never tapped, which is correct: they describe
+this pane's viewport.
+
+`Term.SendInput` is the receiving half of that tap and the only place the
+per-kind replay rules live: `InputKey` bytes go through verbatim, `InputPaste`
+text is re-wrapped for the receiver's own `?2004` state. Both snap the pane to
+live first, matching local typing — a mirrored keystroke that left a
+scrolled-back pane frozen was the first bug this pairing produced. `SendInput`
+shares `writeRaw` with `writeBytes` but skips the tap, which is what stops two
+panes mirroring to each other from looping.
+
 The widget claims focus via `IDFocus` set to a unique per-Term `focusID`
 on its outer `gui.Column`. In multi-Term windows the pane manager calls
 `SetFocused` to route `IDFocus` to the active Term.

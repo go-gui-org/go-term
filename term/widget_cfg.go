@@ -28,6 +28,21 @@ type desktopNotifier struct{}
 
 func (desktopNotifier) Notify(title, body string) { sendDesktopNotify(title, body) }
 
+// InputKind labels the user-input path a Cfg.OnInput callback observed, and
+// selects how Term.SendInput replays it. The two are distinguished because a
+// paste cannot simply be copied to another pane: bracketed paste (DEC ?2004)
+// is a mode each child enables for itself, so the markers have to be applied
+// per receiver.
+type InputKind int
+
+const (
+	// InputKey is a typed key, already encoded for the pane it came from.
+	InputKey InputKind = iota
+	// InputPaste is clipboard text with the paste-end marker stripped and no
+	// bracketed-paste wrapper applied.
+	InputPaste
+)
+
 // Cfg configures a Term widget. All fields are optional.
 type Cfg struct {
 
@@ -61,6 +76,20 @@ type Cfg struct {
 	// terminal canvas. Multi-Term embedders use this to switch focus to
 	// the clicked pane. Runs synchronously during the click handler.
 	OnClickFocus func()
+
+	// OnInput, if non-nil, is called on the main thread with every byte
+	// sequence this pane sends to its child as a direct result of user
+	// input. It runs alongside the local write and cannot suppress it — it
+	// exists so a pane manager can mirror input to sibling panes (broadcast
+	// mode). Mouse reporting, focus reports and pty replies are deliberately
+	// excluded: those describe *this* pane's viewport and would be wrong
+	// anywhere else.
+	//
+	// p is owned by the widget and is only valid for the duration of the
+	// call; copy it if it must outlive the callback. Neither Term.Write nor
+	// Term.SendInput — the method that replays what this tap hands out —
+	// fires the hook, so a mirrored write cannot re-enter it.
+	OnInput func(p []byte, kind InputKind)
 
 	// Command overrides the shell command. When empty (default), $SHELL
 	// from the environment is used (with /bin/sh as fallback). Set this

@@ -132,6 +132,14 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Global:   true,
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleRecording() },
 		},
+		// Broadcast input to every pane in the active tab.
+		{
+			ID:       "workspace.toggleBroadcast",
+			Label:    "Broadcast Input to All Panes",
+			Shortcut: gui.Shortcut{Key: gui.KeyI, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleBroadcast() },
+		},
 		// Theme.
 		{
 			ID:       "workspace.chooseTheme",
@@ -352,7 +360,7 @@ func (ws *Workspace) SplitPane(horizontal bool) {
 		old.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 	}
 	newLeafID := tab.allocLeafID()
-	if err := tab.addPane(ws.w, ws.cfg, newLeafID, "", inheritSize, ws.onPaneExit, ws.onPaneFocus, ws.onPaneTitle); err != nil {
+	if err := tab.addPane(ws.w, ws.cfg, newLeafID, "", inheritSize, ws.hooks()); err != nil {
 		return
 	}
 	newRoot := splitLeaf(tab.root, tab.focused, newLeafID, dir)
