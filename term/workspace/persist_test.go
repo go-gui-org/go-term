@@ -461,6 +461,26 @@ func TestDefaultWorkspacePath_XDGEnvVar(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigPath_NonEmpty(t *testing.T) {
+	p := DefaultConfigPath()
+	if p == "" {
+		t.Skip("DefaultConfigPath empty (no config dir available)")
+	}
+	if !strings.HasSuffix(p, "config") {
+		t.Errorf("path %q should end with config", p)
+	}
+}
+
+func TestDefaultConfigPath_XDGEnvVar(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	got := DefaultConfigPath()
+	want := filepath.Join(tmp, "go-term", "config")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestConfigDir_XDGEnvVar(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmp)

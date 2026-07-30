@@ -3,6 +3,14 @@
 
 DEMO_BIN     := falcon
 APP_NAME     := Falcon
+# Version reported by the About dialog, stamped into main.version at link
+# time. --always keeps a shallow or tag-less checkout building (falls back to a
+# bare hash); --dirty marks uncommitted trees so a local build can't be
+# mistaken for the release it was cut from.
+VERSION      := $(shell git describe --tags --always --dirty 2>/dev/null)
+LDFLAGS      := -X main.version=$(VERSION)
+# CFBundleShortVersionString wants a bare number, so drop the tag's leading v.
+BUNDLE_VER   := $(patsubst v%,%,$(VERSION))
 # Pre-built .icns (see examples/falcon/icon/README.md); buildapp copies it
 # into the bundle verbatim, so no sips/iconutil conversion runs here.
 APP_ICON     := examples/falcon/icon/falcon.icns
@@ -51,7 +59,7 @@ build:
 
 # Build the falcon binary (ensures it compiles).
 build-falcon:
-	go build ./examples/falcon
+	go build -ldflags '$(LDFLAGS)' ./examples/falcon
 
 # Package falcon as a macOS .app bundle.
 app: $(APP_NAME).app
@@ -62,9 +70,10 @@ $(BUILDAPP_BIN):
 # Depends on the icon so swapping artwork forces a rebundle; Go source
 # changes are caught by go build itself, not by make's timestamp check.
 $(APP_NAME).app: $(BUILDAPP_BIN) $(APP_ICON)
-	cd examples/falcon && go build -o $(CURDIR)/$(DEMO_BIN) .
+	cd examples/falcon && go build -ldflags '$(LDFLAGS)' -o $(CURDIR)/$(DEMO_BIN) .
 	$(BUILDAPP_BIN) -bundle-deps -o . -name $(APP_NAME) \
-		-id github.com.go-gui-org.go-term -icon $(APP_ICON) $(DEMO_BIN)
+		-id github.com.go-gui-org.go-term -icon $(APP_ICON) \
+		-version $(BUNDLE_VER) $(DEMO_BIN)
 
 clean-app:
 	rm -f $(DEMO_BIN)

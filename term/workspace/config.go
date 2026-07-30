@@ -7,7 +7,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -319,11 +318,10 @@ func parseKeyName(name string) (gui.KeyCode, bool) {
 func loadConfig(cfg Cfg) workspaceConfig {
 	path := cfg.ConfigPath
 	if path == "" {
-		dir, err := configDir()
-		if err != nil {
+		path = DefaultConfigPath()
+		if path == "" {
 			return workspaceConfig{}
 		}
-		path = filepath.Join(dir, "config")
 	}
 	f, err := os.Open(path)
 	if err != nil {
