@@ -70,12 +70,17 @@ input) lives in `term/CLAUDE.md`, loaded when working under `term/`.
 - Comments wrap at ~90 columns.
 - Public API in `term/` is small on purpose: `Cfg`, `Term`, `NamedTheme`,
   `Theme`, `BellMode`, `New`, `View`, `Close`, `Cwd`, `SetTheme`, `Rows`,
-  `Cols`, `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`,
+  `Cols`, `Write`, `SendInput`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`,
   `StartRecording`/`StopRecording`/`Recording`, `NewReplay`/`ReplayCfg`, plus
   `Shortcuts`/`ShortcutInfo` (display metadata for help overlays) and
   `Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings`/`ParseAction` (rebindable
   Term-level shortcuts), and the live setters a config reload needs —
-  `SetTextStyle`, `SetScrollbackRows`, `SetBellMode`, `SetScrollbarWidth`.
+  `SetTextStyle`, `SetScrollbackRows`, `SetBellMode`, `SetScrollbarWidth`,
+  plus `InputKind`/`Cfg.OnInput`/`SendInput` — the symmetric input tap and
+  injection pair a pane manager needs to mirror keys and pastes to sibling
+  panes (`term/workspace` broadcast mode). What the tap hands out, `SendInput`
+  takes back in; keep them symmetric, and keep the per-kind encoding rules in
+  `SendInput` rather than in the embedder.
   Keep it that way; add unexported helpers freely. The recording
   *format* stays in `internal/recfmt` precisely so it never becomes public API.
 - User settings (fonts, theme, terminal settings, keybindings) are parsed and

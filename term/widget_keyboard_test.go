@@ -527,3 +527,85 @@ func TestOnKeyUp_KittyFlagsRelease_EmitsSequence(t *testing.T) {
 		t.Errorf("onKeyUp Enter release: got %q, want %q", *buf, want)
 	}
 }
+
+// --- Cfg.OnInput tap ---
+//
+// The tap is what lets a pane manager mirror input to sibling panes
+// (workspace broadcast). Its value depends entirely on covering exactly the
+// user-input paths and nothing else: a mouse report or a mirrored write
+// replayed into another pane would be wrong or would loop.
+
+// typed keys reach the tap, through both onChar (printable) and onKeyDown
+// (control chords), and the tap sees the same bytes the pty did.
+func TestOnInput_FiresForTypedKeys(t *testing.T) {
+	tm, buf := newKeyboardTerm(24, 80)
+	var tapped []byte
+	kinds := make([]InputKind, 0, 2)
+	tm.cfg.OnInput = func(p []byte, kind InputKind) {
+		tapped = append(tapped, p...)
+		kinds = append(kinds, kind)
+	}
+
+	tm.onChar(nil, &gui.Event{CharCode: 'x'}, nil)
+	tm.onKeyDown(nil, &gui.Event{KeyCode: gui.KeyC, Modifiers: gui.ModCtrl}, nil)
+
+	if len(kinds) != 2 {
+		t.Fatalf("OnInput fired %d times; want 2", len(kinds))
+	}
+	for i, k := range kinds {
+		if k != InputKey {
+			t.Errorf("call %d: kind = %v, want InputKey", i, k)
+		}
+	}
+	if string(tapped) != string(*buf) {
+		t.Errorf("tap saw %q; pty saw %q", tapped, *buf)
+	}
+	if want := "x\x03"; string(tapped) != want {
+		t.Errorf("tapped %q, want %q", tapped, want)
+	}
+}
+
+// Term.Write is the path broadcast mirrors *through*. If it fired the tap,
+// two panes in a broadcasting tab would write to each other without end.
+func TestOnInput_NotFiredByWrite(t *testing.T) {
+	tm, _ := newKeyboardTerm(24, 80)
+	fired := 0
+	tm.cfg.OnInput = func([]byte, InputKind) { fired++ }
+	if _, err := tm.Write([]byte("echo hi\r")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if fired != 0 {
+		t.Errorf("Write fired OnInput %d times; want 0", fired)
+	}
+}
+
+// Mouse reports describe *this* pane's viewport — coordinates from one pane
+// are meaningless in another, so they must stay out of the tap.
+func TestOnInput_NotFiredByMouseReport(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	fired := 0
+	tm.cfg.OnInput = func([]byte, InputKind) { fired++ }
+
+	tm.grid.Mu.Lock()
+	tm.grid.MouseSGR = true
+	tm.grid.MouseTrackBtn = true
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+	tm.mouse.lastR, tm.mouse.lastC = -1, -1
+	tm.onMouseMove(nil, &gui.Event{MouseX: 10, MouseY: 25}, &gui.Window{})
+
+	if len(*buf) == 0 {
+		t.Fatal("expected a mouse report on the pty")
+	}
+	if fired != 0 {
+		t.Errorf("mouse report fired OnInput %d times; want 0", fired)
+	}
+}
+
+// A nil OnInput is the common case (standalone Term) and must not panic.
+func TestOnInput_NilIsSafe(t *testing.T) {
+	tm, _ := newKeyboardTerm(24, 80)
+	tm.onChar(nil, &gui.Event{CharCode: 'x'}, nil)
+}

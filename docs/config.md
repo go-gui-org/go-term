@@ -167,11 +167,35 @@ actually want to press.
 | `workspace.prevTab` | `Cmd+Shift+[` |
 | `workspace.tab1` … `workspace.tab9` | `Cmd+1` … `Cmd+9` |
 | `workspace.toggleRecording` | `Cmd+Shift+R` |
+| `workspace.toggleBroadcast` | `Cmd+Shift+I` |
 | `workspace.chooseTheme` | `Cmd+Shift+T` |
 | `workspace.reloadConfig` | `Cmd+Shift+,` |
 | `workspace.toggleHelp` | `Cmd+/` |
 | `workspace.dismissOverlay` | `Escape` (only while an overlay is open) |
 | `workspace.themePickerUp` / `Down` / `Confirm` | `Up` / `Down` / `Enter` (only while the theme picker is open) |
+
+#### Broadcast input
+
+`workspace.toggleBroadcast` mirrors what you type into **every live pane in the
+active tab** — the multiplexer feature for driving several hosts in lockstep
+(`tmux setw synchronize-panes`, iTerm2 "Broadcast Input"). While it is on, the
+split dividers turn amber and a `⌁ BROADCAST` badge sits at the bottom of the
+window.
+
+- Scope is one tab. Panes in other tabs never receive broadcast input.
+- Typed keys and pastes are mirrored. Mouse reporting, selection, copy and
+  scrolling stay per-pane.
+- A paste is re-encoded for each receiving pane according to that pane's own
+  bracketed-paste (`?2004`) state. Typed keys are mirrored as encoded by the
+  pane you typed in, so panes sitting in different cursor-key or Kitty-keyboard
+  modes may see the wrong bytes for special keys.
+- Receiving panes snap back to the live view, exactly as they would if you had
+  typed into them directly — a pane scrolled into its scrollback won't sit
+  frozen while its shell runs what you just sent.
+- The toggle is unconditional, like tmux's. It can be armed on a single pane
+  and stays armed when a tab drops back to one, so a later split resumes
+  broadcasting. The badge is on screen whenever the mode is on.
+- It is never persisted: a restored workspace starts with broadcast off.
 
 ### `term.*` actions
 

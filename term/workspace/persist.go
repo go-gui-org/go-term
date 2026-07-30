@@ -190,8 +190,7 @@ func restoreWorkspace(w *gui.Window, cfg Cfg, pw persistedWorkspace) (*Workspace
 
 	for _, pt := range pw.Tabs {
 		tabID := "tab-" + strconv.Itoa(ws.nextTabID)
-		tab, err := newTabFromPersisted(w, ws.cfg, tabID, pt,
-			ws.onPaneExit, ws.onPaneFocus, ws.onPaneTitle)
+		tab, err := newTabFromPersisted(w, ws.cfg, tabID, pt, ws.hooks())
 		if err != nil {
 			for _, t := range ws.tabs {
 				t.closeAll()
@@ -228,9 +227,7 @@ func newTabFromPersisted(
 	cfg Cfg,
 	tabID string,
 	pt persistedTab,
-	onExit func(string),
-	onFocus func(string),
-	onTitle func(string, string),
+	hooks paneHooks,
 ) (*Tab, error) {
 	t := &Tab{
 		id:     tabID,
@@ -244,7 +241,7 @@ func newTabFromPersisted(
 		if spawnErr != nil {
 			return
 		}
-		if err := t.addPane(w, cfg, leafID, cwd, fontSize, onExit, onFocus, onTitle); err != nil {
+		if err := t.addPane(w, cfg, leafID, cwd, fontSize, hooks); err != nil {
 			spawnErr = err
 		}
 	}, idMap, &nextID)

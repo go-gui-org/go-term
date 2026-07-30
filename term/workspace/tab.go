@@ -15,17 +15,28 @@ type Tab struct {
 	titles  map[string]string     // leafID → OSC 0/2 title
 	focused string                // leafID of focused pane
 	nextID  int                   // monotonic leaf ID counter
+
+	// broadcast mirrors user input from the focused pane to every other
+	// live pane in *this* tab. Toggled unconditionally, including on a
+	// single-pane tab — the status pill, not a pane-count rule, is what
+	// keeps the mode from being a surprise. Deliberately not persisted:
+	// a restored workspace starts with it off (see broadcast.go).
+	broadcast bool
+}
+
+// paneHooks bundles the per-pane callbacks handed to every Term a Tab builds.
+// Grouped rather than passed individually because every construction path
+// (new tab, split, restore) needs the whole set, and threading them one at a
+// time grew each signature with the feature list.
+type paneHooks struct {
+	onExit  func(leafID string)
+	onFocus func(leafID string)
+	onTitle func(leafID, title string)
+	onInput func(leafID string, p []byte, kind term.InputKind)
 }
 
 // newTab creates a Tab with a single leaf running a shell.
-func newTab(
-	w *gui.Window,
-	cfg Cfg,
-	tabID string,
-	onExit func(leafID string),
-	onFocus func(leafID string),
-	onTitle func(leafID, title string),
-) (*Tab, error) {
+func newTab(w *gui.Window, cfg Cfg, tabID string, hooks paneHooks) (*Tab, error) {
 	leafID := tabID + "-pane-0"
 	t := &Tab{
 		id:     tabID,
@@ -34,7 +45,7 @@ func newTab(
 		titles: make(map[string]string),
 		nextID: 1,
 	}
-	tm, err := term.New(w, t.termCfg(w, cfg, leafID, "", onExit, onFocus, onTitle))
+	tm, err := term.New(w, t.termCfg(w, cfg, leafID, "", hooks))
 	if err != nil {
 		return nil, err
 	}
@@ -47,15 +58,7 @@ func newTab(
 
 // termCfg builds a term.Cfg for a pane. dir sets the child's working
 // directory (empty = inherit process CWD).
-func (t *Tab) termCfg(
-	w *gui.Window,
-	cfg Cfg,
-	panelID string,
-	dir string,
-	onExit func(leafID string),
-	onFocus func(leafID string),
-	onTitle func(leafID, title string),
-) term.Cfg {
+func (t *Tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHooks) term.Cfg {
 	return term.Cfg{
 		NoWindowHandler: true,
 		TextStyle:       cfg.TextStyle,
@@ -70,16 +73,22 @@ func (t *Tab) termCfg(
 		OnTitle: func(title string) {
 			w.QueueCommand(func(w *gui.Window) {
 				t.titles[panelID] = title
-				onTitle(panelID, title)
+				hooks.onTitle(panelID, title)
 			})
 		},
 		OnExit: func() {
 			w.QueueCommand(func(w *gui.Window) {
-				onExit(panelID)
+				hooks.onExit(panelID)
 			})
 		},
 		OnClickFocus: func() {
-			onFocus(panelID)
+			hooks.onFocus(panelID)
+		},
+		// Runs synchronously on the main thread inside the pane's key or
+		// paste handler; the workspace mirrors it to siblings when this
+		// tab is broadcasting.
+		OnInput: func(p []byte, kind term.InputKind) {
+			hooks.onInput(panelID, p, kind)
 		},
 	}
 }
@@ -95,11 +104,9 @@ func (t *Tab) addPane(
 	leafID string,
 	dir string,
 	fontSize float32,
-	onExit func(leafID string),
-	onFocus func(leafID string),
-	onTitle func(leafID, title string),
+	hooks paneHooks,
 ) error {
-	tm, err := term.New(w, t.termCfg(w, cfg, leafID, dir, onExit, onFocus, onTitle))
+	tm, err := term.New(w, t.termCfg(w, cfg, leafID, dir, hooks))
 	if err != nil {
 		return err
 	}
