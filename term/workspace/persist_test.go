@@ -24,6 +24,14 @@ func TestCwdLocalPath_FileURI(t *testing.T) {
 		{"file://", ""},
 		{"/bare/path", "/bare/path"},
 		{"", ""},
+		// Percent-decoding: shells emit %20 for spaces, %C3%A9 for é.
+		{"file:///home/u/My%20Docs", "/home/u/My Docs"},
+		{"file://host/tmp/caf%C3%A9", "/tmp/café"},
+		// A stray '%' fails to decode; keep the raw bytes rather than
+		// dropping a mostly-usable path.
+		{"file:///home/100%done", "/home/100%done"},
+		// Bare paths are not URIs — a literal '%' must survive untouched.
+		{"/tmp/100%20", "/tmp/100%20"},
 	}
 	for _, c := range cases {
 		if got := cwdLocalPath(c.in); got != c.want {

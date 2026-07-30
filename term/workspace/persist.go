@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -120,16 +121,33 @@ func snapshotNode(n *splitNode, terms map[string]*term.Term, defaultSize float32
 }
 
 // cwdLocalPath extracts the local filesystem path from an OSC 7 CWD value.
-// Handles file://[host]/path → /path and bare /path → /path.
+// Handles file://[host]/path → /path and bare /path → /path. The path portion
+// of a file:// URI is percent-encoded by every shell integration that emits
+// one, so it is decoded here — without that, any directory with a space or a
+// non-ASCII name fails to resolve. A decode failure (stray '%') keeps the raw
+// bytes: a slightly wrong path is caught later by the os.Stat guard, whereas
+// dropping the value loses a usable CWD outright.
+//
+// On Windows the URI path carries a leading slash before the drive letter
+// ("/C:/Users/x"); VolumeName is empty on every other OS, so the strip is
+// inherently platform-correct.
 func cwdLocalPath(cwd string) string {
+	p := cwd
 	if strings.HasPrefix(cwd, "file://") {
 		rest := cwd[len("file://"):]
-		if slash := strings.IndexByte(rest, '/'); slash >= 0 {
-			return rest[slash:]
+		slash := strings.IndexByte(rest, '/')
+		if slash < 0 {
+			return ""
 		}
-		return ""
+		p = rest[slash:]
+		if dec, err := url.PathUnescape(p); err == nil {
+			p = dec
+		}
 	}
-	return cwd
+	if len(p) > 1 && p[0] == '/' && filepath.VolumeName(p[1:]) != "" {
+		p = p[1:]
+	}
+	return p
 }
 
 // Save writes the current workspace layout to path atomically (temp + rename).

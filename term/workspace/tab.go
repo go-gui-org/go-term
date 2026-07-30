@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"path/filepath"
 	"strconv"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -35,8 +36,9 @@ type paneHooks struct {
 	onInput func(leafID string, p []byte, kind term.InputKind)
 }
 
-// newTab creates a Tab with a single leaf running a shell.
-func newTab(w *gui.Window, cfg Cfg, tabID string, hooks paneHooks) (*Tab, error) {
+// newTab creates a Tab with a single leaf running a shell. dir sets the
+// shell's working directory (empty = inherit the process CWD).
+func newTab(w *gui.Window, cfg Cfg, tabID, dir string, hooks paneHooks) (*Tab, error) {
 	leafID := tabID + "-pane-0"
 	t := &Tab{
 		id:     tabID,
@@ -45,7 +47,7 @@ func newTab(w *gui.Window, cfg Cfg, tabID string, hooks paneHooks) (*Tab, error)
 		titles: make(map[string]string),
 		nextID: 1,
 	}
-	tm, err := term.New(w, t.termCfg(w, cfg, leafID, "", hooks))
+	tm, err := term.New(w, t.termCfg(w, cfg, leafID, dir, hooks))
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +60,18 @@ func newTab(w *gui.Window, cfg Cfg, tabID string, hooks paneHooks) (*Tab, error)
 
 // termCfg builds a term.Cfg for a pane. dir sets the child's working
 // directory (empty = inherit process CWD).
+//
+// Every pane path — new tab, split, restore — funnels through here, so this is
+// where an untrustworthy dir is filtered. Both sources are outside our control:
+// OSC 7 is whatever the child process printed, and a restored dir comes from a
+// hand-editable workspace.json. A relative value would resolve against the
+// *process* CWD, spawning the shell somewhere the user never named, so only
+// absolute paths survive. A non-existent absolute path is left to term's own
+// os.Stat guard, which falls back to $HOME.
 func (t *Tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHooks) term.Cfg {
+	if dir != "" && !filepath.IsAbs(dir) {
+		dir = ""
+	}
 	return term.Cfg{
 		NoWindowHandler: true,
 		TextStyle:       cfg.TextStyle,
