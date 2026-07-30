@@ -328,7 +328,7 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 	if ws.helpVisible {
 		// Float children are excluded from normal flow, so the backdrop
 		// and panel overlay the panes without disturbing their layout.
-		content = append(content, ws.helpBackdrop(ww, wh), ws.helpPanel())
+		content = append(content, ws.helpBackdrop(ww, wh), ws.helpPanel(ww, wh))
 	}
 	if ws.themePickerVisible {
 		content = append(content, ws.themePickerBackdrop(ww, wh),
@@ -336,122 +336,6 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 	}
 	outer.Content = content
 	return gui.Column(outer)
-}
-
-// ToggleHelp shows or hides the keyboard-shortcut overlay and rebuilds
-// the view. Bound to Cmd+/ (toggle) and Escape (close, when visible).
-func (ws *Workspace) ToggleHelp() {
-	ws.helpVisible = !ws.helpVisible
-	ws.refresh()
-}
-
-// helpBackdrop is a window-sized translucent float behind the panel that
-// dims the panes and dismisses the overlay on click.
-func (ws *Workspace) helpBackdrop(ww, wh int) gui.View {
-	b := tight(gui.FixedFixed)
-	b.Width = float32(ww)
-	b.Height = float32(wh)
-	b.Float = true
-	b.FloatAnchor = gui.FloatTopLeft
-	b.FloatTieOff = gui.FloatTopLeft
-	b.FloatZIndex = 999
-	b.Color = gui.RGBA(0, 0, 0, 120)
-	b.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-		// Ignore clicks near window edges — the platform (notably
-		// macOS) dispatches MouseDown to the content view even when
-		// the user is starting a window-resize drag at a corner or
-		// edge. Without this guard the dialog would dismiss on the
-		// first touch of a resize instead of on an intentional
-		// click-outside-to-dismiss.
-		const edgePx = float32(30)
-		if e.MouseX < edgePx || e.MouseX > float32(ww)-edgePx ||
-			e.MouseY < edgePx || e.MouseY > float32(wh)-edgePx {
-			return
-		}
-		ws.helpVisible = false
-		ws.refresh()
-		e.IsHandled = true
-	}
-	return gui.Column(b)
-}
-
-// helpPanel is the centered float listing every keyboard shortcut. The
-// workspace section is generated from the live command registry; the terminal
-// section from the active pane's effective bindings, so rebound shortcuts show
-// their real chords rather than the built-in defaults. Neither is
-// hand-maintained.
-func (ws *Workspace) helpPanel() gui.View {
-	theme := gui.CurrentTheme()
-	rows := []gui.View{ws.helpHeader("Workspace", theme)}
-	for _, cmd := range ws.commands {
-		if cmd.Label == "" || !cmd.Shortcut.IsSet() {
-			continue
-		}
-		rows = append(rows, ws.helpRow(cmd.Label, cmd.Shortcut.String(), theme))
-	}
-	rows = append(rows, ws.helpHeader("Terminal", theme))
-	// Fall back to the package defaults when no pane is live (e.g. the last
-	// shell exited but the overlay is still up).
-	termShortcuts := term.Shortcuts()
-	if active := ws.ActivePane(); active != nil {
-		termShortcuts = active.Shortcuts()
-	}
-	for _, s := range termShortcuts {
-		rows = append(rows, ws.helpRow(s.Label, s.Keys, theme))
-	}
-
-	panel := tight(gui.FixedFit)
-	panel.Width = 460
-	panel.Float = true
-	panel.FloatAnchor = gui.FloatMiddleCenter
-	panel.FloatTieOff = gui.FloatMiddleCenter
-	panel.FloatZIndex = 1000
-	panel.Color = theme.ColorPanel
-	panel.ColorBorder = theme.ColorBorder
-	panel.SizeBorder = gui.SomeF(1)
-	panel.Radius = gui.SomeF(6)
-	panel.Padding = gui.SomeP(14, 18, 14, 18)
-	panel.Spacing = gui.SomeF(3)
-	// Swallow clicks so they don't fall through to the backdrop, which
-	// would dismiss the overlay when clicking inside the panel.
-	panel.OnClick = func(_ *gui.Layout, e *gui.Event, _ *gui.Window) { e.IsHandled = true }
-	panel.Content = rows
-	return gui.Column(panel)
-}
-
-// helpHeader renders a section label with a thin divider below.
-func (ws *Workspace) helpHeader(text string, theme gui.Theme) gui.View {
-	style := theme.M5
-	style.Typeface = glyph.TypefaceBold
-	headerRow := tight(gui.FillFit)
-	headerRow.Padding = gui.SomeP(6, 0, 2, 0)
-	headerRow.Content = []gui.View{gui.Text(gui.TextCfg{Text: text, TextStyle: style})}
-
-	col := tight(gui.FillFit)
-	col.Spacing = gui.SomeF(0)
-	col.Content = []gui.View{
-		gui.Row(headerRow),
-		gui.Rectangle(gui.RectangleCfg{
-			Sizing: gui.FillFixed,
-			Height: 1.2,
-			Color:  theme.ColorBorder,
-		}),
-	}
-	return gui.Column(col)
-}
-
-// helpRow renders one "label … keys" line with the keys right-aligned.
-func (ws *Workspace) helpRow(label, keys string, theme gui.Theme) gui.View {
-	labelStyle := theme.M5
-	keyStyle := theme.M5
-	fill := tight(gui.FillFit)
-	row := tight(gui.FillFit)
-	row.Content = []gui.View{
-		gui.Text(gui.TextCfg{Text: label, TextStyle: labelStyle}),
-		gui.Row(fill),
-		gui.Text(gui.TextCfg{Text: keys, TextStyle: keyStyle}),
-	}
-	return gui.Row(row)
 }
 
 // — theme picker overlay ————————————————————————————————————
@@ -533,7 +417,10 @@ func (ws *Workspace) themePickerPanel() gui.View {
 	}
 
 	rows := make([]gui.View, 0, len(ws.cfg.Themes)+1)
-	rows = append(rows, ws.helpHeader("Themes", theme))
+	// The picker keeps the roomier M5 type; only the help overlay tightens.
+	headStyle := theme.M5
+	headStyle.Typeface = glyph.TypefaceBold
+	rows = append(rows, ws.helpHeader("Themes", theme, headStyle))
 	for i, nt := range ws.cfg.Themes {
 		idx := i // capture
 		bg := gui.Color{}
