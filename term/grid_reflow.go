@@ -557,7 +557,10 @@ func (g *grid) Resize(rows, cols int) {
 	if trackWidgetRows && g.SelActive {
 		nSel = 2
 	}
-	nGfx := len(g.Graphics)
+	// Graphics are per-screen: on the alt screen the main list is the one
+	// parked in mainSaved, and it is that list the reflow remaps.
+	mainGfx, _ := g.mainGraphics()
+	nGfx := len(*mainGfx)
 	nWidget := 0
 	if trackWidgetRows {
 		nWidget = len(g.resizeTrack)
@@ -569,7 +572,7 @@ func (g *grid) Resize(rows, cols int) {
 	if nSel > 0 {
 		trackRows = append(trackRows, g.SelAnchor.Row, g.SelHead.Row)
 	}
-	for _, gr := range g.Graphics {
+	for _, gr := range *mainGfx {
 		trackRows = append(trackRows, gr.OriginR)
 	}
 	if nWidget > 0 {
@@ -686,6 +689,15 @@ func (g *grid) Resize(rows, cols int) {
 		// was re-wrapped, so the flat scrollback delta is exactly right here.
 		g.shiftMarks(delta, total)
 		g.shiftGraphics(delta, total)
+	}
+
+	// Images the alt screen placed itself address alt rows, which were only
+	// cropped and padded — like the selection they move by the flat
+	// scrollback delta, never through the main buffer's re-wrap. (When the
+	// main screen is active g.Graphics *is* the main list, already handled
+	// above.)
+	if g.AltActive {
+		gfxShift(&g.Graphics, &g.occludeMaxR, delta, total)
 	}
 
 	// Rows that did not ride the reflow: either nothing reflowed at all, or

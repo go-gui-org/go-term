@@ -37,6 +37,10 @@ func (g *grid) scrollUpRegion(n int) {
 		if g.ViewFrozen {
 			g.ViewOffset = clamp(g.ViewOffset+n, 0, g.Scrollback.Len())
 		}
+	} else {
+		// Nothing entered scrollback, so the content-row space did not
+		// absorb the scroll — images have to travel with their text.
+		g.scrollGraphicsRegion(g.Top, g.Bottom, n, false)
 	}
 
 	if n < height {
@@ -68,6 +72,9 @@ func (g *grid) scrollDownRegion(n int) {
 	if n > height {
 		n = height
 	}
+	// Down-scroll never touches scrollback, so images always travel with
+	// the rows they sit on.
+	g.scrollGraphicsRegion(g.Top, g.Bottom, n, true)
 	if n < height {
 
 		for r := g.Bottom; r >= g.Top+n; r-- {

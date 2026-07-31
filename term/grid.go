@@ -333,6 +333,16 @@ type altSavedScreen struct {
 	insertMode       bool
 	top, bottom      int
 	saved            savedCursor
+	// graphics is the main screen's image list, parked here while the alt
+	// screen is up (occludeMaxR is its matching occlusion bound). Images
+	// belong to a screen the same way cells do; keeping them on the alt
+	// screen is what left a sixel visible underneath yazi.
+	//
+	// maxGraphics is enforced per list, so a grid retains at most
+	// 2*maxGraphics placements — one screen's worth on each side of the
+	// swap, and no more no matter how often an app toggles ?1049.
+	graphics    []graphic
+	occludeMaxR int
 }
 
 const (
@@ -405,9 +415,18 @@ type grid struct {
 
 	kittyFlagStack []uint32
 
-	// Graphics holds decoded images (Phase 32). Origin is in content
-	// coordinates so images travel through scrollback alongside the
-	// text near them. Capped at maxGraphics; oldest evicted first.
+	// Graphics holds decoded images (Phase 32) belonging to the *active*
+	// screen. Origin is in content coordinates so images travel through
+	// scrollback alongside the text near them. Capped at maxGraphics; oldest
+	// evicted first.
+	//
+	// The list is per-screen, like Cells: EnterAlt stashes the main-screen
+	// images in mainSaved and starts the alt screen with none, ExitAlt
+	// restores them and drops whatever the alt screen placed. That is what
+	// every image-capable terminal does — an image belongs to the screen it
+	// was drawn on — and it is what makes `chafa img.png` followed by yazi
+	// behave: the picture disappears while the full-screen app is up and
+	// comes back when it exits.
 	Graphics []graphic
 
 	// occludeMaxR is one past the highest content row covered by any
@@ -712,64 +731,154 @@ func (g *grid) markDirty(r int) {
 	}
 }
 
-// trimGraphics drops `extra` rows from the front of all graphic origins,
-// discarding any whose covered range falls entirely above row 0. Called
-// after scrollback is trimmed. Caller holds Mu.
-func (g *grid) trimGraphics(extra int) {
-	if extra <= 0 || len(g.Graphics) == 0 {
-		return
+// mainGraphics returns the main screen's image list and its occlusion bound:
+// the live pair when the main screen is active, the stashed pair while the alt
+// screen is up. Marks and graphics describe main-screen content, so the reflow
+// and scrollback-trim paths address the main list either way.
+func (g *grid) mainGraphics() (*[]graphic, *int) {
+	if g.AltActive {
+		return &g.mainSaved.graphics, &g.mainSaved.occludeMaxR
+	}
+	return &g.Graphics, &g.occludeMaxR
+}
+
+// gfxTrim drops `extra` rows from the front of every origin in list,
+// discarding any whose covered range falls entirely above row 0.
+func gfxTrim(list []graphic, extra int) []graphic {
+	if len(list) == 0 {
+		return list
 	}
 	j := 0
-	for _, gr := range g.Graphics {
+	for _, gr := range list {
 		gr.OriginR -= extra
 		if gr.OriginR+gr.Rows > 0 {
-			g.Graphics[j] = gr
+			list[j] = gr
 			j++
 		}
 	}
-	g.Graphics = g.Graphics[:j]
+	return list[:j]
 }
 
-// remapGraphics rewrites graphic origins from the mapping logicalReflow
-// produced: rows[i] is the new content row of Graphics[i], -1 meaning the
-// re-wrap discarded it. Length mismatches are ignored defensively — a
-// short slice simply drops the unmapped tail. Caller holds Mu.
-func (g *grid) remapGraphics(rows []int) {
-	if len(g.Graphics) == 0 {
+// gfxShift applies a flat delta to every origin in list, dropping any pushed
+// outside [0, total). bound is the list's occlusion bound, marked unknown when
+// origins moved down (the invariant allows too high, never too low).
+func gfxShift(list *[]graphic, bound *int, delta, total int) {
+	if len(*list) == 0 {
 		return
 	}
 	j := 0
-	for i, gr := range g.Graphics {
-		if i >= len(rows) || rows[i] < 0 {
+	for _, gr := range *list {
+		gr.OriginR += delta
+		if gr.OriginR+gr.Rows > 0 && gr.OriginR < total {
+			(*list)[j] = gr
+			j++
+		}
+	}
+	*list = (*list)[:j]
+	if delta > 0 {
+		*bound = occludeBoundUnknown
+	}
+}
+
+// gfxDropSrc removes every placement in list drawing the file at src,
+// reporting how many went.
+func gfxDropSrc(list []graphic, src string) ([]graphic, int) {
+	j, removed := 0, 0
+	for _, gr := range list {
+		if gr.Src == src {
+			removed++
 			continue
 		}
-		gr.OriginR = rows[i]
+		list[j] = gr
+		j++
+	}
+	return list[:j], removed
+}
+
+// scrollGraphicsRegion moves the active screen's images with a region scroll
+// whose rows did *not* go into scrollback — the alt screen (which never pushes)
+// and any DECSTBM region on the main screen. Where rows are pushed instead, the
+// content-row space absorbs the scroll and origins stay put; here the text
+// slides under fixed origins, so an image would drift away from the cells it
+// was placed on and the occlusion rectangle would stop describing it.
+//
+// top/bottom are the inclusive live-screen region rows and n the row count;
+// down selects the SD/IL direction. Images that leave the region are dropped,
+// matching the text that scrolled out with them. Caller holds Mu.
+func (g *grid) scrollGraphicsRegion(top, bottom, n int, down bool) {
+	if n <= 0 || len(g.Graphics) == 0 {
+		return
+	}
+	base := g.Scrollback.Len()
+	rTop, rBot := base+top, base+bottom // inclusive, content coordinates
+	delta := -n
+	if down {
+		delta = n
+	}
+	j := 0
+	for _, gr := range g.Graphics {
+		// Only images overlapping the scrolled region move; one sitting
+		// outside it (scrollback, or rows the region excludes) is untouched.
+		if gr.OriginR+gr.Rows > rTop && gr.OriginR <= rBot {
+			gr.OriginR += delta
+			if gr.OriginR+gr.Rows <= rTop || gr.OriginR > rBot {
+				continue // scrolled out of the region entirely
+			}
+		}
 		g.Graphics[j] = gr
 		j++
 	}
 	g.Graphics = g.Graphics[:j]
-	g.occludeMaxR = occludeBoundUnknown // re-wrap moved origins arbitrarily
+	if down {
+		g.occludeMaxR = occludeBoundUnknown // origins moved down
+	}
 }
 
-// shiftGraphics applies a flat delta to every graphic origin. Only correct
-// when no re-wrap happened (rows kept their identity); the reflow path uses
-// remapGraphics instead.
-func (g *grid) shiftGraphics(delta, total int) {
-	if len(g.Graphics) == 0 {
+// trimGraphics drops `extra` rows from the front of all graphic origins,
+// discarding any whose covered range falls entirely above row 0. Called
+// after scrollback is trimmed. Both screens' lists are anchored to the same
+// content-row space, so an alt screen's own images move with them. Caller
+// holds Mu.
+func (g *grid) trimGraphics(extra int) {
+	if extra <= 0 {
+		return
+	}
+	g.Graphics = gfxTrim(g.Graphics, extra)
+	if g.AltActive {
+		g.mainSaved.graphics = gfxTrim(g.mainSaved.graphics, extra)
+	}
+}
+
+// remapGraphics rewrites main-screen graphic origins from the mapping
+// logicalReflow produced: rows[i] is the new content row of the main list's
+// entry i, -1 meaning the re-wrap discarded it. Length mismatches are ignored
+// defensively — a short slice simply drops the unmapped tail. Caller holds Mu.
+func (g *grid) remapGraphics(rows []int) {
+	list, bound := g.mainGraphics()
+	if len(*list) == 0 {
 		return
 	}
 	j := 0
-	for _, gr := range g.Graphics {
-		gr.OriginR += delta
-		if gr.OriginR+gr.Rows > 0 && gr.OriginR < total {
-			g.Graphics[j] = gr
-			j++
+	for i, gr := range *list {
+		if i >= len(rows) || rows[i] < 0 {
+			continue
 		}
+		gr.OriginR = rows[i]
+		(*list)[j] = gr
+		j++
 	}
-	g.Graphics = g.Graphics[:j]
-	if delta > 0 {
-		g.occludeMaxR = occludeBoundUnknown // origins moved down
-	}
+	*list = (*list)[:j]
+	*bound = occludeBoundUnknown // re-wrap moved origins arbitrarily
+}
+
+// shiftGraphics applies a flat delta to every main-screen graphic origin. Only
+// correct when no re-wrap happened (rows kept their identity); the reflow path
+// uses remapGraphics instead. The alt screen's own images are shifted by
+// Resize directly, alongside the selection, since they only ever move by the
+// flat scrollback delta.
+func (g *grid) shiftGraphics(delta, total int) {
+	list, bound := g.mainGraphics()
+	gfxShift(list, bound, delta, total)
 }
 
 // AddGraphic registers a decoded image at the cursor's current content
@@ -807,13 +916,9 @@ func (g *grid) AddGraphicKitty(src string, widthPx, heightPx int, id uint32) (in
 // Callers guard on len(g.Graphics) != 0 so the common no-image case costs one
 // length check on the write path. Caller holds Mu.
 func (g *grid) occludeGraphics(lr, n, from, to int) {
-	// EnterAlt swaps Cells but not Graphics, and leaves Scrollback alone, so
-	// an alt-screen row maps onto the same content row as a main-screen
-	// graphic. Occluding from alt would let any full-screen app — vim, less —
-	// silently destroy images sitting on the main screen behind it.
-	if g.AltActive {
-		return
-	}
+	// g.Graphics is the active screen's list — EnterAlt parks the main
+	// screen's images out of reach — so a full-screen app painting over its
+	// own alt rows can only ever clear images it placed itself.
 	base := g.Scrollback.Len()
 	// Every occludable image sits entirely in scrollback, so no live-screen
 	// write can reach one. Skipping here is what keeps a long previewer
@@ -853,6 +958,13 @@ func (g *grid) graphicsUseSrc(src string) bool {
 			return true
 		}
 	}
+	// The parked main-screen list counts too: its files must survive the alt
+	// screen or the images come back to a dead path on ExitAlt.
+	for _, gr := range g.mainSaved.graphics {
+		if gr.Src == src {
+			return true
+		}
+	}
 	return false
 }
 
@@ -860,19 +972,15 @@ func (g *grid) graphicsUseSrc(src string) bool {
 // the backing file is removed, so the renderer never reaches for a dead path.
 // Caller holds Mu.
 func (g *grid) deleteGraphicsBySrc(src string) {
-	j, removed := 0, 0
-	for _, gr := range g.Graphics {
-		if gr.Src == src {
-			removed++
-			continue
-		}
-		g.Graphics[j] = gr
-		j++
-	}
+	var removed int
+	g.Graphics, removed = gfxDropSrc(g.Graphics, src)
 	if removed > 0 {
-		g.Graphics = g.Graphics[:j]
 		g.markAllDirty()
 	}
+	// The parked main-screen list is purged too: the file is gone, so a
+	// placement restored by ExitAlt would draw a dead path. Nothing on screen
+	// changes, so no repaint is needed for that half.
+	g.mainSaved.graphics, _ = gfxDropSrc(g.mainSaved.graphics, src)
 }
 
 // deleteGraphics removes Kitty placements: every one when all is set (KGP
@@ -1269,25 +1377,33 @@ func (g *grid) EnterAlt() {
 		return
 	}
 	g.mainSaved = altSavedScreen{
-		cells:      g.Cells,
-		rowWrapped: g.RowWrapped,
-		cursorR:    g.CursorR,
-		cursorC:    g.CursorC,
-		curFG:      g.CurFG,
-		curBG:      g.CurBG,
-		curAttrs:   g.CurAttrs,
-		curULStyle: g.CurULStyle,
-		curULColor: g.CurULColor,
-		charsetG0:  g.CharsetG0,
-		charsetG1:  g.CharsetG1,
-		activeG:    g.ActiveG,
-		autoWrap:   g.AutoWrap,
-		originMode: g.OriginMode,
-		insertMode: g.InsertMode,
-		top:        g.Top,
-		bottom:     g.Bottom,
-		saved:      g.saved,
+		cells:       g.Cells,
+		rowWrapped:  g.RowWrapped,
+		cursorR:     g.CursorR,
+		cursorC:     g.CursorC,
+		curFG:       g.CurFG,
+		curBG:       g.CurBG,
+		curAttrs:    g.CurAttrs,
+		curULStyle:  g.CurULStyle,
+		curULColor:  g.CurULColor,
+		charsetG0:   g.CharsetG0,
+		charsetG1:   g.CharsetG1,
+		activeG:     g.ActiveG,
+		autoWrap:    g.AutoWrap,
+		originMode:  g.OriginMode,
+		insertMode:  g.InsertMode,
+		top:         g.Top,
+		bottom:      g.Bottom,
+		saved:       g.saved,
+		graphics:    g.Graphics,
+		occludeMaxR: g.occludeMaxR,
 	}
+	// The alt screen starts with no images of its own. Parking the main
+	// screen's list is what hides a sixel behind a full-screen app and, in
+	// the other direction, is what lets that app's own images be occluded
+	// normally when it paints over them.
+	g.Graphics = nil
+	g.occludeMaxR = 0
 	cells := make([]cell, g.Rows*g.Cols)
 	blank := defaultCell()
 	for i := range cells {
@@ -1336,6 +1452,9 @@ func (g *grid) ExitAlt() {
 	g.InsertMode = g.mainSaved.insertMode
 	g.Top, g.Bottom = g.mainSaved.top, g.mainSaved.bottom
 	g.saved = g.mainSaved.saved
+	// Images the alt screen placed die with it; the main screen's come back.
+	g.Graphics = g.mainSaved.graphics
+	g.occludeMaxR = g.mainSaved.occludeMaxR
 	g.mainSaved = altSavedScreen{}
 	g.AltActive = false
 	g.ResetView()
