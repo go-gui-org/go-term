@@ -25,7 +25,7 @@ func (p *parser) dispatchCSI(final byte) {
 				// reply carries the private marker and, on a real VT, a page
 				// number; xterm omits the page and clients accept that.
 				if p.param(0, 0) == 6 && p.onReply != nil {
-					row, col := p.g.CursorR+1, p.g.CursorC+1
+					row, col := p.g.CursorR+1, p.g.settledCol()+1
 					p.onReply([]byte("\x1b[?" + strconv.Itoa(row) + ";" +
 						strconv.Itoa(col) + "R"))
 				}
@@ -169,7 +169,7 @@ func (p *parser) dispatchCSI(final byte) {
 		case 5:
 			p.onReply([]byte("\x1b[0n"))
 		case 6:
-			row, col := p.g.CursorR+1, p.g.CursorC+1
+			row, col := p.g.CursorR+1, p.g.settledCol()+1
 			p.onReply([]byte("\x1b[" + strconv.Itoa(row) + ";" + strconv.Itoa(col) + "R"))
 		}
 	case 't':
@@ -298,6 +298,34 @@ func (p *parser) applyDECMode(set bool) {
 			// Grapheme clustering is unconditional (PutRune always clusters),
 			// so DECSET/DECRST 2027 are accepted as no-ops. decModeState
 			// reports it permanently set.
+		case 5:
+			// DECSCNM — reverse video. Render-only, but every cell's
+			// resolved colors change, so the whole screen must repaint.
+			if p.g.ReverseScreen != set {
+				p.g.ReverseScreen = set
+				p.g.markAllDirty()
+			}
+		case 3:
+			// DECCOLM. Gated on ?40, exactly as xterm gates it on the
+			// allow80to132 resource: an application that has not asked for
+			// column switching should not be able to narrow the pane by
+			// accident. vttest enables ?40 before its cursor-movement tests
+			// and then relies on ?3l/?3h to put the right margin at 80/132
+			// regardless of window size.
+			if p.g.AllowColumnMode {
+				if set {
+					p.g.SetColumnMode(132)
+				} else {
+					p.g.SetColumnMode(80)
+				}
+			}
+		case 40:
+			p.g.AllowColumnMode = set
+			if !set {
+				// Revoking permission releases the pin too, so a crashed app
+				// cannot strand the pane at 80 columns.
+				p.g.SetColumnMode(0)
+			}
 		case 7:
 			p.g.AutoWrap = set
 		case 6:
@@ -368,6 +396,15 @@ func (p *parser) decModeState(n int) int {
 	switch n {
 	case 1:
 		return boolState(p.g.AppCursorKeys)
+	case 5:
+		return boolState(p.g.ReverseScreen)
+	case 3:
+		// DECCOLM reports set only at 132 columns, which is what the mode
+		// means — 80 is the reset state, and an unpinned grid is 80's
+		// equivalent as far as a querying application is concerned.
+		return boolState(p.g.ColumnMode == 132)
+	case 40:
+		return boolState(p.g.AllowColumnMode)
 	case 6:
 		return boolState(p.g.OriginMode)
 	case 7:

@@ -73,31 +73,14 @@ func (p *parser) feedChunk(b []byte) {
 				p.g.FlushGrapheme()
 			}
 			switch {
-			case c == 0x07:
-				p.g.Bell()
-				i++
-			case c == 0x08:
-				p.g.Backspace()
-				i++
-			case c == 0x09:
-				p.g.Tab()
-				i++
-			case c == 0x0A:
-				p.g.Newline()
-				i++
-			case c == 0x0D:
-				p.g.CarriageReturn()
-				i++
-			case c == 0x0E:
-				p.g.ActiveG = 1
-				i++
-			case c == 0x0F:
-				p.g.ActiveG = 0
-				i++
 			case c == 0x1B:
 				p.state = stEsc
 				i++
 			case c < 0x20:
+				// execC0 covers BEL/BS/HT/LF/VT/FF/CR/SO/SI and ignores the
+				// rest; it is the same routine the mid-sequence execute path
+				// uses.
+				p.execC0(c)
 				i++
 			default:
 
@@ -111,7 +94,25 @@ func (p *parser) feedChunk(b []byte) {
 				i += sz
 			}
 		case stEsc:
+			// A C0 control arriving mid-sequence is executed immediately and
+			// the sequence carries on around it (ECMA-48 §5.4; the same
+			// "execute" action the DEC/Williams state machine takes in
+			// escape/csi states). vttest's "cursor-control characters inside
+			// ESC sequences" screen is built entirely out of this.
+			if c < 0x20 && c != 0x1B {
+				if p.abortsSequence(c) {
+					p.state = stGround
+				}
+				p.execC0(c)
+				i++
+				continue
+			}
 			switch c {
+			case 0x1B:
+				// ESC ESC: the second one restarts the sequence rather than
+				// ending it, so the byte after it is still read as a final
+				// rather than printed. Matches the other two collecting
+				// states above.
 			case '[':
 				p.state = stCSI
 				p.params = p.params[:0]
@@ -160,7 +161,7 @@ func (p *parser) feedChunk(b []byte) {
 			case '>':
 				p.g.AppKeypad = false
 				p.state = stGround
-			case '(', ')', '*', '+', '-', '.', '/':
+			case '(', ')', '*', '+', '-', '.', '/', '#':
 
 				p.escInter = c
 				p.state = stEscInter
@@ -170,17 +171,65 @@ func (p *parser) feedChunk(b []byte) {
 			}
 			i++
 		case stEscInter:
-
+			// ESC abandons the sequence in progress and starts a new one —
+			// the state machine's "escape" entry action, not an intermediate
+			// byte. Absorbing it instead would splice the next sequence's
+			// bytes onto this one.
+			if c == 0x1B {
+				p.escInter = 0
+				p.state = stEsc
+				i++
+				continue
+			}
+			// See stEsc: execute the control, keep collecting the sequence.
+			if c < 0x20 {
+				if p.abortsSequence(c) {
+					p.state = stGround
+					p.escInter = 0
+				}
+				p.execC0(c)
+				i++
+				continue
+			}
 			switch p.escInter {
 			case '(':
 				p.g.CharsetG0 = c
 			case ')':
 				p.g.CharsetG1 = c
+			case '#':
+				// ESC # 8 is DECALN, the screen alignment pattern. vttest
+				// paints it and then erases back to a frame of E's, so an
+				// ignored DECALN reads as "the test drew nothing".
+				// ESC # 3..6 (double-height/width lines) are recognised here
+				// only so they are consumed rather than printed; the grid has
+				// no double-size line attribute, so they stay no-ops.
+				if c == '8' {
+					p.g.ScreenAlignment()
+				}
 			}
 			p.escInter = 0
 			p.state = stGround
 			i++
 		case stCSI:
+			// See stEscInter: ESC abandons this CSI and opens a new sequence.
+			// Absorbing it would make `CSI 1 ESC [ 2 m` parse as the single
+			// sequence `CSI 1;2 m`, applying a parameter the child never sent.
+			if c == 0x1B {
+				p.csiReset()
+				p.state = stEsc
+				i++
+				continue
+			}
+			// See stEsc: execute the control, keep collecting the sequence.
+			if c < 0x20 {
+				if p.abortsSequence(c) {
+					p.state = stGround
+					p.csiReset()
+				}
+				p.execC0(c)
+				i++
+				continue
+			}
 			switch {
 			case c >= '<' && c <= '?' && p.leader == 0 && !p.hasP && len(p.params) == 0:
 
@@ -321,6 +370,51 @@ func (p *parser) feedChunk(b []byte) {
 	// arrive in the next chunk (a ZWJ emoji split across a PTY read boundary).
 	// Committing it now would write it as broken pieces. The caller flushes
 	// once the burst drains; Feed (the batch wrapper) flushes immediately.
+}
+
+// abortsSequence reports whether a C0 control cancels the escape sequence it
+// arrived in. CAN and SUB are the two defined cancels; every other control is
+// executed and the sequence resumes.
+func (p *parser) abortsSequence(c byte) bool {
+	return c == 0x18 || c == 0x1A
+}
+
+// csiReset drops the parameter/leader state accumulated for a CSI sequence.
+// Used when a control cancels the sequence part-way through.
+func (p *parser) csiReset() {
+	p.params = p.params[:0]
+	p.paramSub = p.paramSub[:0]
+	p.curP = 0
+	p.hasP = false
+	p.nextIsSub = false
+	p.leader = 0
+	p.intermediate = 0
+}
+
+// execC0 executes one C0 control. Shared by the ground-state dispatch and the
+// mid-sequence "execute" path, so a control means the same thing wherever the
+// parser happens to be. CAN/SUB have no display action of their own — the
+// caller has already used abortsSequence to cancel the sequence.
+func (p *parser) execC0(c byte) {
+	p.g.FlushGrapheme()
+	switch c {
+	case 0x07:
+		p.g.Bell()
+	case 0x08:
+		p.g.Backspace()
+	case 0x09:
+		p.g.Tab()
+	// VT and FF are line feeds on a terminal, exactly like LF — vttest drives
+	// its ESC-sequence tests with VT specifically because of that equivalence.
+	case 0x0A, 0x0B, 0x0C:
+		p.g.Newline()
+	case 0x0D:
+		p.g.CarriageReturn()
+	case 0x0E:
+		p.g.ActiveG = 1
+	case 0x0F:
+		p.g.ActiveG = 0
+	}
 }
 
 func appendReply(out []byte, body []byte) []byte {

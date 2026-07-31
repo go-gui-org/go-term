@@ -3880,3 +3880,31 @@ func TestHandleDisplayKey_Zero0WithoutCmd_PassesThrough(t *testing.T) {
 		t.Errorf("0 without Cmd must not change fontSize: %v -> %v", prev, term.fontSize)
 	}
 }
+
+// TestShowSizeBadge_SuppressedUntilFirstResize covers the startup case: the
+// window's initial sizing runs through the same prepareResize path as a drag,
+// and flashing the readout at launch would be noise.
+func TestShowSizeBadge_SuppressedUntilFirstResize(t *testing.T) {
+	tm := &Term{}
+	now := time.Now()
+
+	tm.showSizeBadge(24, 80, now)
+	if !tm.resize.badgeUntil.IsZero() {
+		t.Fatal("badge should stay hidden before the first applied resize")
+	}
+	// Dims are still recorded, so the first real drag frame has them.
+	if tm.resize.badgeRows != 24 || tm.resize.badgeCols != 80 {
+		t.Fatalf("dims = %dx%d, want 24x80",
+			tm.resize.badgeRows, tm.resize.badgeCols)
+	}
+
+	tm.resize.sized = true
+	tm.showSizeBadge(37, 124, now)
+	if !tm.resize.badgeUntil.After(now) {
+		t.Fatal("badge should be visible after a user resize")
+	}
+	if tm.resize.badgeRows != 37 || tm.resize.badgeCols != 124 {
+		t.Fatalf("dims = %dx%d, want 37x124",
+			tm.resize.badgeRows, tm.resize.badgeCols)
+	}
+}

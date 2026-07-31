@@ -212,3 +212,108 @@ func TestGrid_HardReset_ClearsRepeatState(t *testing.T) {
 		t.Errorf("row = %q, want blanks", got)
 	}
 }
+
+// TestGrid_SetColumnMode_PinsWidthAndClears covers DECCOLM's full contract:
+// the width changes, the screen is erased, the cursor homes, and the scroll
+// region is reset. vttest draws a box immediately after each switch and
+// depends on every part of that.
+func TestGrid_SetColumnMode_PinsWidthAndClears(t *testing.T) {
+	g := newGrid(10, 40)
+	g.Put('X')
+	g.Top, g.Bottom = 2, 5
+	g.MoveCursor(4, 4)
+
+	g.SetColumnMode(132)
+	if g.Cols != 132 || g.ColumnMode != 132 {
+		t.Fatalf("cols = %d, mode = %d, want 132/132", g.Cols, g.ColumnMode)
+	}
+	if c := g.At(0, 0); c == nil || c.Ch != ' ' {
+		t.Error("screen not erased by DECCOLM")
+	}
+	if g.CursorR != 0 || g.CursorC != 0 {
+		t.Errorf("cursor = (%d,%d), want home", g.CursorR, g.CursorC)
+	}
+	if g.Top != 0 || g.Bottom != g.Rows-1 {
+		t.Errorf("region = %d..%d, want full screen", g.Top, g.Bottom)
+	}
+
+	g.SetColumnMode(80)
+	if g.Cols != 80 {
+		t.Fatalf("cols = %d, want 80", g.Cols)
+	}
+
+	// Releasing the pin leaves the width alone — the widget restores the
+	// window-derived width on its next frame.
+	g.SetColumnMode(0)
+	if g.ColumnMode != 0 {
+		t.Fatalf("mode = %d, want released", g.ColumnMode)
+	}
+}
+
+// TestGrid_HardResetReleasesColumnMode: RIS is what `reset` runs to recover a
+// terminal, so it has to undo a column pin an application left behind.
+func TestGrid_HardResetReleasesColumnMode(t *testing.T) {
+	g := newGrid(10, 40)
+	g.AllowColumnMode = true
+	g.SetColumnMode(132)
+
+	g.HardReset()
+	if g.ColumnMode != 0 || g.AllowColumnMode {
+		t.Fatalf("mode = %d, allow = %v, want 0/false",
+			g.ColumnMode, g.AllowColumnMode)
+	}
+}
+
+// TestGrid_SetColumnMode_SkipsRedundantResize: Resize runs the full reflow
+// whatever the content, and a child drives DECCOLM with six bytes. Asking for
+// the width the grid already has must not pay for it.
+func TestGrid_SetColumnMode_SkipsRedundantResize(t *testing.T) {
+	g := newGrid(10, 80)
+	before := &g.Cells[0]
+
+	g.SetColumnMode(80)
+	if g.ColumnMode != 80 || g.Cols != 80 {
+		t.Fatalf("mode = %d, cols = %d, want 80/80", g.ColumnMode, g.Cols)
+	}
+	// A reflow replaces the cell backing store; skipping it keeps the same
+	// array, which is the cheapest observable proxy for "no Resize ran".
+	if &g.Cells[0] != before {
+		t.Error("same-width DECCOLM reallocated the cell buffer")
+	}
+}
+
+// DECALN and DECCOLM both flat-fill the screen, bypassing eraseSpan — which is
+// what normally removes sixel/iTerm2 images. Those protocols have no delete
+// sequence, so an image the fill did not drop stays painted over a screen the
+// application believes it cleared.
+func TestGrid_FlatFillClears_DropsOccludableGraphics(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(g *grid)
+	}{
+		{"DECALN", func(g *grid) { g.ScreenAlignment() }},
+		{"DECCOLM", func(g *grid) { g.SetColumnMode(132) }},
+		{"ClearAll", func(g *grid) { g.ClearAll() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := gridWithGraphic(t, 3, 5)
+			tc.run(g)
+			if len(g.Graphics) != 0 {
+				t.Fatalf("image survived a full-screen clear: %d left",
+					len(g.Graphics))
+			}
+		})
+	}
+}
+
+// Kitty placements are their own layer: they survive text drawn over their
+// cells and go away only via a=d. A flat-fill clear must not take them.
+func TestGrid_FlatFillClears_KeepsKittyPlacements(t *testing.T) {
+	g := newGrid(10, 40)
+	g.CellPxW, g.CellPxH = 8, 16
+	g.AddGraphicKitty("img.png", 16, 32, 0, 0, 7)
+	g.ScreenAlignment()
+	if len(g.Graphics) != 1 {
+		t.Fatalf("DECALN removed a Kitty placement: %d left", len(g.Graphics))
+	}
+}

@@ -621,6 +621,26 @@ type grid struct {
 	AppCursorKeys  bool  // DEC ?1 — application cursor key mode
 	AppKeypad      bool  // DECNKM — application keypad mode
 
+	// ReverseScreen is DECSCNM (DEC ?5) — reverse video applied to the whole
+	// screen. Purely a rendering flag: the cells keep their real colors, so
+	// selection copy, search and the recording format are unaffected.
+	ReverseScreen bool
+
+	// AllowColumnMode is DEC ?40 (xterm's allow80to132). DECCOLM is inert
+	// until a client asks for it, because a stray ?3h from a confused app
+	// would otherwise silently narrow the pane.
+	AllowColumnMode bool
+
+	// ColumnMode is the column count DECCOLM (?3) has pinned the grid to —
+	// 80, 132, or 0 when the width follows the window as usual. The widget
+	// derives rows from the canvas either way; only the width is pinned, so
+	// a pinned grid simply leaves the surplus canvas width unpainted.
+	//
+	// This is what lets vttest's cursor-movement screens pass in a window
+	// that is not 80 columns wide: they test clamping at the right margin,
+	// and the margin has to be where vttest asked for it.
+	ColumnMode int
+
 	// SyncBegan records when the current synchronized-update block started
 	// (see BeginSync). The widget's watchdog uses it as the deadline base so
 	// a block whose end never arrives cannot suppress repaints forever.
@@ -1340,6 +1360,12 @@ func (g *grid) ReverseIndex() {
 func (g *grid) ClearAll() {
 	for i := range g.Cells {
 		g.Cells[i] = defaultCell()
+	}
+	// Sixel/iTerm2 images are removed only by painting over their cells, so
+	// the flat fill has to do it explicitly — eraseSpan, which normally
+	// carries this, is bypassed here. Matches ED 2's flat-fill path.
+	if len(g.Graphics) != 0 {
+		g.occludeGraphics(0, g.Rows, 0, g.Cols)
 	}
 	g.CursorR, g.CursorC = 0, 0
 	g.markAllDirty()

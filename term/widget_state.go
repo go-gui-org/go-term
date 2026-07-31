@@ -48,8 +48,28 @@ const maxReplyQueueBytes = 4 << 20 // 4 MiB
 type resizeState struct {
 	pendingSince time.Time
 	timer        *time.Timer // wakes main thread to apply after debounce
-	pendingRows  int
-	pendingCols  int
+
+	// badgeUntil/badgeTimer drive the transient "COLS × ROWS" readout shown
+	// while the window is being dragged. The badge tracks the *candidate*
+	// dims, not the grid's, so it updates on every drag frame rather than
+	// only when the debounce lets a reflow through — the feedback is the
+	// whole point.
+	badgeUntil time.Time
+	badgeTimer *time.Timer
+	badgeRows  int
+	badgeCols  int
+
+	pendingRows int
+	pendingCols int
+
+	// ptyLastRows/ptyLastCols are the dims the child was last told about.
+	// Zero initially, so the first frame always publishes.
+	ptyLastRows int
+	ptyLastCols int
+
+	// sized suppresses the badge for the window's initial sizing, which is
+	// not a user gesture and would flash the readout at startup.
+	sized bool
 }
 
 // syncState is the mode-2026 synchronized-update watchdog. applyChunk

@@ -413,17 +413,13 @@ func (g *grid) CarriageReturn() { g.CursorC = 0 }
 
 // Backspace moves cursor left one column. No erase.
 func (g *grid) Backspace() {
-	if g.CursorC > 0 {
-		g.CursorC--
-	}
+	g.CursorC = max(g.settledCol()-1, 0)
 }
 
 // Tab advances the cursor to the next tab stop. Scans TabStops from
 // CursorC+1; if no stop exists within the row, clamps to Cols-1.
 func (g *grid) Tab() {
-	if g.CursorC < 0 {
-		g.CursorC = 0
-	}
+	g.CursorC = max(g.settledCol(), 0)
 	for c := g.CursorC + 1; c < g.Cols; c++ {
 		if g.TabStops[c] {
 			g.CursorC = c

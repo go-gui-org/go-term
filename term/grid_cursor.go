@@ -108,9 +108,27 @@ func (g *grid) CursorDown(n int) {
 	g.MoveCursor(r, g.CursorC)
 }
 
-func (g *grid) CursorForward(n int) { g.MoveCursor(g.CursorR, g.CursorC+n) }
+func (g *grid) CursorForward(n int) { g.MoveCursor(g.CursorR, g.settledCol()+n) }
 
-func (g *grid) CursorBack(n int) { g.MoveCursor(g.CursorR, g.CursorC-n) }
+func (g *grid) CursorBack(n int) { g.MoveCursor(g.CursorR, g.settledCol()-n) }
+
+// settledCol is the cursor's real column, with the deferred-wrap state
+// collapsed. putCell encodes "wrap pending" by leaving CursorC at Cols: the
+// glyph that filled the last column has been written, and the wrap happens
+// only when the next one arrives. DEC terminals keep that as a separate flag
+// with the cursor still *on* the last column, so every cursor-relative
+// operation has to read it that way — otherwise it computes from a column that
+// does not exist. A backspace out of the pending state is the case that shows:
+// it must land one column left of the right margin, not on it.
+//
+// Deliberately not applied to the erase operations, which have their own
+// documented handling of the pending column (see eraseInLine).
+func (g *grid) settledCol() int {
+	if g.CursorC >= g.Cols {
+		return max(g.Cols-1, 0)
+	}
+	return g.CursorC
+}
 
 // SaveCursor snapshots cursor position and SGR state. Implements
 // DECSC (ESC 7) and CSI s. Subsequent SaveCursor calls overwrite.

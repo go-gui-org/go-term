@@ -31,7 +31,34 @@ conventions; this file holds the per-subsystem detail.
 
 Supports a modern xterm/kitty-compatible subset:
 
-- C0: `BEL`, `BS`, `HT`, `LF`, `CR`, `ESC`.
+- C0: `BEL`, `BS`, `HT`, `LF`, `VT`, `FF`, `CR`, `SO`, `SI`, `ESC`. A C0
+  control arriving *inside* an escape/CSI sequence is executed immediately and
+  the sequence resumes around it (ECMA-48 §5.4) — `execC0` is the single
+  routine for both cases, so ground-state and mid-sequence handling cannot
+  drift. `CAN`/`SUB` cancel the sequence instead, and `ESC` abandons it and
+  opens a new one — it is not an intermediate byte, so absorbing it would
+  splice the next sequence's parameters onto the abandoned one.
+- Deferred wrap is encoded as `CursorC == Cols`; `grid.settledCol` collapses it
+  for every cursor-relative operation (BS, CUF/CUB, HT, CPR). Without it a
+  backspace out of the pending state lands on the right margin instead of one
+  column left of it, which drifts every subsequent glyph on the row.
+- `ESC # 8` (DECALN) fills the screen with `E`, homes the cursor and resets the
+  region. `ESC # 3`–`6` (double-height/width lines) are consumed but ignored —
+  the grid has no double-size line attribute.
+- DECSCNM (`CSI ?5h`/`?5l`) — reverse video for the whole screen. Render-only:
+  folded into `fgOf`/`bgOf` as an XOR against `attrInverse` (one comparison, so
+  `resolveColor` keeps inlining), with `grid.defaultFG`/`defaultBG` for the
+  paint sites that use theme colors directly — the canvas fill in `View`,
+  `fillRun`'s skip test, the IME strip. Those must agree with what `bgOf`
+  resolves for a default cell or the screen reverses only halfway. The cells
+  keep their real colors, so copy/search/recording are unaffected. RIS clears
+  it; DECSTR does not.
+- DECCOLM (`CSI ?3h`/`?3l`), gated on `CSI ?40h` as xterm gates it on
+  `allow80to132`. Pins `grid.ColumnMode` to 132/80; `prepareResize` honors the
+  pin so the window no longer drives the width, and the surplus canvas width
+  goes unpainted. Switching erases the screen, homes the cursor and resets the
+  region. RIS releases both the pin and the permission; DECSTR leaves them
+  (VT510's soft-reset table does not list DECCOLM).
 - SGR (`CSI … m`): reset; bold/dim/italic/underline/inverse/strikethrough;
   blink (5/6, one attribute) and conceal (8) with their 25/28 resets;
   extended underlines (4:1–4:5, SGR 21); underline color (58); fg/bg
@@ -138,7 +165,8 @@ alone, and only `a=d` removes them (`kittyDeleteID` — lowercase `d=` drops the
 placement, uppercase also frees the stored data). Sixel and iTerm2 images have
 no delete sequence, so a client clears one by painting over the cells it
 occupies; `grid.occludeGraphics`, called from `putCell`, `eraseSpan` (so EL,
-ED and ECH alike) and the ED 2/3 flat fill, is what makes that work.
+ED and ECH alike) and every flat fill that bypasses `eraseSpan` — ED 2/3,
+`ClearAll` (DECCOLM) and `ScreenAlignment` (DECALN) — is what makes that work.
 
 The two layers share one `grid.Graphics` list, so each removal path filters on
 `graphic.kgp` and the split is symmetric: `occludeGraphics` skips KGP entries,
