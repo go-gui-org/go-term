@@ -40,8 +40,24 @@ const maxDCSRetain = 4 << 20
 const maxAPCBytes = 8192
 
 // maxKittyImageBytes caps the assembled (pre-decode) base64 text for a single
-// KGP image across all chunks. Matches the iTerm2 OSC 1337 limit.
-const maxKittyImageBytes = 4 << 20
+// KGP image across all chunks. Raw RGBA costs 4 bytes per pixel and base64
+// inflates that by 4/3, so the old 4 MiB cap stopped at ~786k pixels — an
+// image only ~1000×786, which `chafa -f kitty` exceeds at around 100 columns.
+// Past the cap the tail chunks were dropped and the truncated buffer failed to
+// decode, so the picture simply never appeared. 32 MiB covers ~6.3M pixels
+// (about 2900×2200 RGBA), beyond any full-window image at realistic cell
+// sizes, and matches the sixel (maxDCSBytes) and iTerm2 (maxOSC1337Bytes)
+// limits. Raw transmissions that declare dimensions past the decoder's
+// maxSixelWidth×maxSixelHeight ceiling are rejected on the opening chunk, so
+// this cap is only ever reached by a stream sending more than it declared.
+const maxKittyImageBytes = 32 << 20
+
+// maxKittyPendingBytes caps the base64 buffered across *all* in-flight KGP
+// transmissions. Without it maxKittyPendingChunks abandoned transfers could
+// each hold maxKittyImageBytes — 2 GiB of live buffers per pane. 64 MiB lets
+// one full-size image through with room for the ordinary case of a few small
+// concurrent transfers, which is the only shape real clients produce.
+const maxKittyPendingBytes = 64 << 20
 
 // maxKittyPendingChunks caps concurrent in-flight KGP chunked transmissions
 // (m=1 sequences that have not yet received a finalising m=0). Bounds

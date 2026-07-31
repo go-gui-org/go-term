@@ -578,6 +578,106 @@ func TestParser_APC_KittyChunked_OversizeDropped(t *testing.T) {
 	}
 }
 
+// A raw transmission declares its pixel dimensions on the opening chunk, so an
+// image past the decoder's ceiling is refused there — buffering up to
+// maxKittyImageBytes of base64 first only to have kittyRawToNRGBA reject it
+// wastes tens of MB per hostile stream.
+func TestParser_APC_KittyChunked_OversizeDimsRejectedUpFront(t *testing.T) {
+	h := newAPCHelper(t)
+	h.feedAPC("a=T,f=32,s=99999,v=10,i=7,m=1,q=0;AAAA")
+	if len(h.p.kittyChunks) != 0 {
+		t.Errorf("buffered %d pending transmissions; want 0 (dims rejected)",
+			len(h.p.kittyChunks))
+	}
+	if len(h.replies) != 1 || !bytes.Contains(h.replies[0], []byte("EINVAL")) {
+		t.Fatalf("replies = %q; want one EINVAL", h.replies)
+	}
+}
+
+// A refused opening chunk leaves payload-only continuations still coming down
+// the wire. They must be discarded: routing them to the previously open id
+// would splice a hostile stream's bytes into an unrelated live transfer.
+func TestParser_APC_KittyChunked_RefusedOpenerDiscardsContinuations(t *testing.T) {
+	h := newAPCHelper(t)
+	_, full := makePNG(t)
+	mid := len(full) / 2
+
+	h.feedAPC("a=t,f=100,i=21,m=1,q=1;" + full[:mid]) // legitimate, in flight
+	// Refused: raw dimensions past the decoder's ceiling.
+	h.feedAPC("a=T,f=32,s=99999,v=10,i=7,m=1,q=1;QUFB")
+	h.feedAPC("m=1;QUFB") // continuation of the refused transfer
+	h.feedAPC("m=0;QUFB") // its finalising chunk
+	h.feedAPC("i=21,m=0,q=1;" + full[mid:])
+
+	if h.p.kittyStore[21].path == "" {
+		t.Fatal("live transfer 21 was corrupted by the refused transfer's chunks")
+	}
+	if len(h.p.kittyChunks) != 0 {
+		t.Errorf("%d pending entries left behind; want 0", len(h.p.kittyChunks))
+	}
+	if h.p.kittyOpenDropped {
+		t.Error("kittyOpenDropped still set after the refused transfer closed")
+	}
+}
+
+// maxKittyImageBytes bounds one transmission; without a second, shared bound
+// maxKittyPendingChunks abandoned transfers could each hold a full-size buffer.
+func TestParser_APC_KittyChunked_TotalPendingByteCap(t *testing.T) {
+	h := newAPCHelper(t)
+	h.p.kittyChunks = make(map[uint32]kittyPending)
+	// One transfer already holds the whole shared budget.
+	h.p.putKittyPending(1, kittyPending{b64: make([]byte, maxKittyPendingBytes)})
+
+	h.feedAPC("a=T,f=100,i=2,m=1,q=1;AAAA")
+	if got := len(h.p.kittyChunks[2].b64); got != 0 {
+		t.Errorf("second transfer buffered %d bytes; want 0 (budget spent)", got)
+	}
+	if got := h.p.kittyPendingBytes; got != maxKittyPendingBytes {
+		t.Errorf("kittyPendingBytes = %d; want %d", got, maxKittyPendingBytes)
+	}
+}
+
+// The shared budget is returned when a transmission completes, or a long
+// session of chunked images would starve itself.
+func TestParser_APC_KittyChunked_PendingBytesReleasedOnFinish(t *testing.T) {
+	h := newAPCHelper(t)
+	_, full := makePNG(t)
+	mid := len(full) / 2
+
+	h.feedAPC("a=t,f=100,i=31,m=1,q=1;" + full[:mid])
+	if h.p.kittyPendingBytes != mid {
+		t.Fatalf("kittyPendingBytes = %d after first chunk; want %d",
+			h.p.kittyPendingBytes, mid)
+	}
+	h.feedAPC("i=31,m=0,q=1;" + full[mid:])
+	if h.p.kittyPendingBytes != 0 {
+		t.Errorf("kittyPendingBytes = %d after finish; want 0", h.p.kittyPendingBytes)
+	}
+}
+
+// A transmission whose tail was dropped for exceeding a byte cap can only
+// decode to garbage, so it must answer the client with an error rather than
+// spending a full-size decode buffer on it — and must leave no graphic behind.
+func TestParser_APC_KittyChunked_TruncatedRepliesError(t *testing.T) {
+	h := newAPCHelper(t)
+	h.p.kittyChunks = make(map[uint32]kittyPending)
+	h.p.putKittyPending(42, kittyPending{b64: make([]byte, maxKittyImageBytes)})
+
+	h.feedAPC("a=T,f=100,i=42,m=1,q=0;QUFB") // dropped: over the per-image cap
+	h.feedAPC("i=42,m=0,q=0;QUFB")
+
+	if len(h.g.Graphics) != 0 {
+		t.Errorf("got %d graphics from a truncated transmission; want 0",
+			len(h.g.Graphics))
+	}
+	if len(h.replies) != 1 || !bytes.Contains(h.replies[0], []byte("EINVAL")) {
+		t.Fatalf("replies = %q; want one EINVAL", h.replies)
+	}
+	if h.p.kittyPendingBytes != 0 {
+		t.Errorf("kittyPendingBytes = %d after finish; want 0", h.p.kittyPendingBytes)
+	}
+}
+
 // --- Additional action tests ---
 
 func TestParser_APC_KittyDeleteAll_Uppercase(t *testing.T) {
@@ -790,6 +890,39 @@ func TestParser_APC_KittyChunked_RawKeepsOpeningParams(t *testing.T) {
 	}
 	if got := h.g.Graphics[0].WidthPx; got != 4 {
 		t.Errorf("image width = %d; want 4", got)
+	}
+}
+
+// chafa opens a chunked transfer with a *control-only* chunk — no ';' and no
+// payload at all — then sends payload-only continuations. Recording the
+// opening params only once a chunk carried payload therefore threw away
+// f=/s=/v=/q=, and the finalising chunk decoded a raw image with width 0:
+// every `chafa -f kitty` render came back "EINVAL:unsupported".
+func TestParser_APC_KittyChunked_ControlOnlyOpeningChunk(t *testing.T) {
+	h := newAPCHelper(t)
+	// 4×2 RGB image = 24 raw bytes.
+	raw := make([]byte, 4*2*3)
+	for i := range raw {
+		raw[i] = byte(i)
+	}
+	full := base64.StdEncoding.EncodeToString(raw)
+	mid := len(full) / 2
+
+	h.feedAPC("a=T,f=24,s=4,v=2,m=1,q=2") // control only: no ';', no payload
+	h.feedAPC("m=1;" + full[:mid])
+	h.feedAPC("m=0;" + full[mid:])
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics; want 1 (control-only opener must be kept)",
+			len(h.g.Graphics))
+	}
+	if got := h.g.Graphics[0].WidthPx; got != 4 {
+		t.Errorf("image width = %d; want 4", got)
+	}
+	// q=2 rode in on the opening chunk; continuations never repeat it, so the
+	// reply must still be suppressed.
+	if len(h.replies) != 0 {
+		t.Errorf("got %d replies %q; want none (opening q=2 suppresses all)",
+			len(h.replies), h.replies)
 	}
 }
 

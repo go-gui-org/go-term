@@ -52,6 +52,31 @@ var hostTerminalEnvKeys = [...]string{
 	"ITERM_SESSION_ID",
 }
 
+// selfIdentityEnv names this terminal to children, replacing the host identity
+// the scrub above removed. Scrubbing alone left TERM_PROGRAM unset, which reads
+// as "no information" rather than "a terminal that is not the one that launched
+// me" — and every value here is true, unlike the alternative of answering to
+// some other emulator's name to inherit its capability profile.
+//
+// This does not, on its own, get pixel graphics out of tools that key off the
+// name: none of them know "go-term" yet, and the ones that matter should be
+// asking the terminal instead (chafa, for one, detects sixel from DA1 but
+// detects the Kitty protocol only from TERM_PROGRAM/TERM, never sending the
+// a=q query go-term already answers). Advertising an honest name is what makes
+// growing that support possible; claiming a false one is not.
+var selfIdentityEnv = [...]string{
+	"TERM_PROGRAM=go-term",
+	"TERM_PROGRAM_VERSION=" + termVersion,
+}
+
+// setTerminalIdentity drops the host emulator's identity variables and names
+// this terminal in their place. The two halves belong together — a scrub
+// without the replacement leaves TERM_PROGRAM unset — so every startPTY goes
+// through here rather than pairing dropEnv with an append of its own.
+func setTerminalIdentity(env []string) []string {
+	return append(dropEnv(env, hostTerminalEnvKeys[:]), selfIdentityEnv[:]...)
+}
+
 // dropEnv returns env without any entry naming one of keys. The input slice is
 // never mutated: os.Environ() hands back a fresh slice, but cfg.Env may not.
 func dropEnv(env []string, keys []string) []string {
