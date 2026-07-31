@@ -43,6 +43,7 @@ exit
 ```
 
 This produces two files:
+
 - `fixture.script` — raw terminal bytes (what we want)
 - `fixture.script.time` — timing metadata (discard)
 
@@ -60,12 +61,14 @@ go run ./term/script2fixture \
 ```
 
 The helper:
+
 1. Reads the typescript file
 2. Feeds it through a fresh `Parser` + `Grid`
 3. Captures the final grid state, cursor position, title, and CWD
 4. Writes a `.json` fixture to `term/testdata/`
 
 After generating the fixture:
+
 ```bash
 # Verify it replays correctly.
 go test -run TestEmulatorReplayFixtures -count=1 ./term
@@ -97,7 +100,7 @@ EOF
 ## Determining Expected Output
 
 The hardest part of manual fixture creation is knowing what the grid
-*should* look like after feeding the input. Two approaches:
+_should_ look like after feeding the input. Two approaches:
 
 1. **Feed-and-inspect**: temporarily modify `TestCaptureFixture` to
    use your recorded bytes, run it, and copy the `want_lines` it prints.

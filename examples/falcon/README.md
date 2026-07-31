@@ -48,15 +48,15 @@ the root `Makefile`). Icon sources and regeneration steps live in
 
 ## Command-line flags
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--workspace <path>` | default path, if it exists | Workspace JSON to restore on startup |
-| `--save-workspace <path>` | `--workspace`, else the default path | Workspace JSON to write on quit |
-| `--record <path.gtr>` | off | Record the starting pane's session |
-| `--replay <path.gtr>` | off | Play back a recording instead of starting a shell |
-| `--replay-speed <n>` | `1` | Playback speed multiplier |
-| `--replay-idle-limit <dur>` | `0` (no cap) | Cap any single gap between recorded frames, e.g. `250ms` |
-| `--replay-loop` | off | Restart playback at the end of the recording |
+| Flag                        | Default                              | Meaning                                                  |
+| --------------------------- | ------------------------------------ | -------------------------------------------------------- |
+| `--workspace <path>`        | default path, if it exists           | Workspace JSON to restore on startup                     |
+| `--save-workspace <path>`   | `--workspace`, else the default path | Workspace JSON to write on quit                          |
+| `--record <path.gtr>`       | off                                  | Record the starting pane's session                       |
+| `--replay <path.gtr>`       | off                                  | Play back a recording instead of starting a shell        |
+| `--replay-speed <n>`        | `1`                                  | Playback speed multiplier                                |
+| `--replay-idle-limit <dur>` | `0` (no cap)                         | Cap any single gap between recorded frames, e.g. `250ms` |
+| `--replay-loop`             | off                                  | Restart playback at the end of the recording             |
 
 `--replay` is a viewer path, not a multiplexer: one pane, no tabs, no shell,
 no workspace persistence.
@@ -129,20 +129,20 @@ something that is (e.g. `Menlo`).
 `Cmd+/` opens the in-app help overlay, which is generated from the live
 binding table — it is always accurate for your config. Highlights:
 
-| Chord | Action |
-|---|---|
-| `Cmd+D` / `Cmd+Shift+D` | Split vertically / horizontally |
-| `Cmd+[` / `Cmd+]` | Previous / next pane |
-| `Cmd+Ctrl+←↑↓→` | Resize the split |
-| `Cmd+T` / `Cmd+Shift+W` / `Cmd+Ctrl+W` | New tab / close pane / close tab |
-| `Cmd+1`…`Cmd+9`, `Cmd+Shift+[` / `]` | Select tab, previous / next tab |
-| `Cmd+C` / `Cmd+V` | Copy / paste (`Ctrl+Shift+C/V` also) |
-| `Cmd+F` | Find, with `Ctrl+R` for regex |
-| `Cmd+Shift+Space` | Copy mode — vim-keyed selection, output frozen |
-| `Cmd+↑` / `Cmd+↓` / `Cmd+Shift+E` | Previous / next prompt, jump to last failure (needs OSC 133) |
-| `Cmd+=` / `Cmd+-` / `Cmd+0` | Font zoom in / out / reset |
-| `Cmd+Shift+T` / `Cmd+Shift+I` / `Cmd+Shift+R` | Theme picker / broadcast input / toggle recording |
-| `Cmd+,` / `Cmd+Shift+,` | Open config / reload config |
+| Chord                                         | Action                                                       |
+| --------------------------------------------- | ------------------------------------------------------------ |
+| `Cmd+D` / `Cmd+Shift+D`                       | Split vertically / horizontally                              |
+| `Cmd+[` / `Cmd+]`                             | Previous / next pane                                         |
+| `Cmd+Ctrl+←↑↓→`                               | Resize the split                                             |
+| `Cmd+T` / `Cmd+Shift+W` / `Cmd+Ctrl+W`        | New tab / close pane / close tab                             |
+| `Cmd+1`…`Cmd+9`, `Cmd+Shift+[` / `]`          | Select tab, previous / next tab                              |
+| `Cmd+C` / `Cmd+V`                             | Copy / paste (`Ctrl+Shift+C/V` also)                         |
+| `Cmd+F`                                       | Find, with `Ctrl+R` for regex                                |
+| `Cmd+Shift+Space`                             | Copy mode — vim-keyed selection, output frozen               |
+| `Cmd+↑` / `Cmd+↓` / `Cmd+Shift+E`             | Previous / next prompt, jump to last failure (needs OSC 133) |
+| `Cmd+=` / `Cmd+-` / `Cmd+0`                   | Font zoom in / out / reset                                   |
+| `Cmd+Shift+T` / `Cmd+Shift+I` / `Cmd+Shift+R` | Theme picker / broadcast input / toggle recording            |
+| `Cmd+,` / `Cmd+Shift+,`                       | Open config / reload config                                  |
 
 On Windows the Super key is OS-reserved, so `Cmd`-based defaults are remapped
 (`Cmd`→`Ctrl+Shift`, `Cmd+Shift`→`Ctrl+Alt`, …). Chords written in the config
@@ -184,14 +184,14 @@ home directory can't be resolved.
 
 ## Source map
 
-| File | Holds |
-|---|---|
-| `main.go` | Flag parsing, app/window construction, exit-code plumbing |
-| `config.go` | CLI config structs, workspace path resolution, font, theme list, download dir |
-| `window.go` | `app` struct, workspace create/restore, quit confirmation, save-and-close, replay window |
-| `menu.go` | Native menubar, About dialog, `Cmd+,` config command, config stub |
-| `version.go` | Version resolution: linker stamp → module version → VCS revision → `dev` |
-| `icon.go`, `icon/` | Embedded window/Dock icon and platform icon assets |
+| File               | Holds                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| `main.go`          | Flag parsing, app/window construction, exit-code plumbing                                |
+| `config.go`        | CLI config structs, workspace path resolution, font, theme list, download dir            |
+| `window.go`        | `app` struct, workspace create/restore, quit confirmation, save-and-close, replay window |
+| `menu.go`          | Native menubar, About dialog, `Cmd+,` config command, config stub                        |
+| `version.go`       | Version resolution: linker stamp → module version → VCS revision → `dev`                 |
+| `icon.go`, `icon/` | Embedded window/Dock icon and platform icon assets                                       |
 
 Design notes worth knowing before editing:
 

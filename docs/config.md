@@ -49,10 +49,10 @@ outrank the new configured size until the next `Cmd+0`.
 
 ## `[font]`
 
-| Key | Type | Default | Meaning |
-|---|---|---|---|
+| Key      | Type   | Default            | Meaning                                                  |
+| -------- | ------ | ------------------ | -------------------------------------------------------- |
 | `family` | string | embedder's default | Font family name, as the font's own name table spells it |
-| `size` | number | embedder's default | Point size, clamped to 4–72 |
+| `size`   | number | embedder's default | Point size, clamped to 4–72                              |
 
 ```ini
 [font]
@@ -66,12 +66,12 @@ Mono appears as `JetBrainsMono NFM`.
 
 ## `[general]`
 
-| Key | Type | Default | Meaning |
-|---|---|---|---|
-| `theme` | string | embedder's first theme | Color theme, by display name (case-insensitive) |
-| `scrollback` | integer | `5000` | Scrollback rows. `0` restores the default; a negative value disables scrollback |
-| `bell` | enum | `auto` | `auto`, `audible`, `visual`, `both`, `none` |
-| `scrollbar` | number | `4` | Scrollbar thumb width in px. Negative hides the scrollbar |
+| Key          | Type    | Default                | Meaning                                                                         |
+| ------------ | ------- | ---------------------- | ------------------------------------------------------------------------------- |
+| `theme`      | string  | embedder's first theme | Color theme, by display name (case-insensitive)                                 |
+| `scrollback` | integer | `5000`                 | Scrollback rows. `0` restores the default; a negative value disables scrollback |
+| `bell`       | enum    | `auto`                 | `auto`, `audible`, `visual`, `both`, `none`                                     |
+| `scrollbar`  | number  | `4`                    | Scrollbar thumb width in px. Negative hides the scrollbar                       |
 
 ```ini
 [general]
@@ -148,30 +148,30 @@ actually want to press.
 
 ### `workspace.*` commands
 
-| Command | Default |
-|---|---|
-| `workspace.splitVertical` | `Cmd+D` |
-| `workspace.splitHorizontal` | `Cmd+Shift+D` |
-| `workspace.closePane` | `Cmd+Shift+W` |
-| `workspace.nextPane` | `Cmd+]` |
-| `workspace.prevPane` | `Cmd+[` |
-| `workspace.resizeLeft` | `Cmd+Ctrl+Left` |
-| `workspace.resizeRight` | `Cmd+Ctrl+Right` |
-| `workspace.resizeUp` | `Cmd+Ctrl+Up` |
-| `workspace.resizeDown` | `Cmd+Ctrl+Down` |
-| `workspace.newTab` | `Cmd+T` |
-| `workspace.closeTab` | `Cmd+Ctrl+W` |
-| `workspace.moveTabLeft` | `Cmd+Alt+[` |
-| `workspace.moveTabRight` | `Cmd+Alt+]` |
-| `workspace.nextTab` | `Cmd+Shift+]` |
-| `workspace.prevTab` | `Cmd+Shift+[` |
-| `workspace.tab1` … `workspace.tab9` | `Cmd+1` … `Cmd+9` |
-| `workspace.toggleRecording` | `Cmd+Shift+R` |
-| `workspace.toggleBroadcast` | `Cmd+Shift+I` |
-| `workspace.chooseTheme` | `Cmd+Shift+T` |
-| `workspace.reloadConfig` | `Cmd+Shift+,` |
-| `workspace.toggleHelp` | `Cmd+/` |
-| `workspace.dismissOverlay` | `Escape` (only while an overlay is open) |
+| Command                                        | Default                                                       |
+| ---------------------------------------------- | ------------------------------------------------------------- |
+| `workspace.splitVertical`                      | `Cmd+D`                                                       |
+| `workspace.splitHorizontal`                    | `Cmd+Shift+D`                                                 |
+| `workspace.closePane`                          | `Cmd+Shift+W`                                                 |
+| `workspace.nextPane`                           | `Cmd+]`                                                       |
+| `workspace.prevPane`                           | `Cmd+[`                                                       |
+| `workspace.resizeLeft`                         | `Cmd+Ctrl+Left`                                               |
+| `workspace.resizeRight`                        | `Cmd+Ctrl+Right`                                              |
+| `workspace.resizeUp`                           | `Cmd+Ctrl+Up`                                                 |
+| `workspace.resizeDown`                         | `Cmd+Ctrl+Down`                                               |
+| `workspace.newTab`                             | `Cmd+T`                                                       |
+| `workspace.closeTab`                           | `Cmd+Ctrl+W`                                                  |
+| `workspace.moveTabLeft`                        | `Cmd+Alt+[`                                                   |
+| `workspace.moveTabRight`                       | `Cmd+Alt+]`                                                   |
+| `workspace.nextTab`                            | `Cmd+Shift+]`                                                 |
+| `workspace.prevTab`                            | `Cmd+Shift+[`                                                 |
+| `workspace.tab1` … `workspace.tab9`            | `Cmd+1` … `Cmd+9`                                             |
+| `workspace.toggleRecording`                    | `Cmd+Shift+R`                                                 |
+| `workspace.toggleBroadcast`                    | `Cmd+Shift+I`                                                 |
+| `workspace.chooseTheme`                        | `Cmd+Shift+T`                                                 |
+| `workspace.reloadConfig`                       | `Cmd+Shift+,`                                                 |
+| `workspace.toggleHelp`                         | `Cmd+/`                                                       |
+| `workspace.dismissOverlay`                     | `Escape` (only while an overlay is open)                      |
 | `workspace.themePickerUp` / `Down` / `Confirm` | `Up` / `Down` / `Enter` (only while the theme picker is open) |
 
 #### Broadcast input
@@ -199,26 +199,26 @@ window.
 
 ### `term.*` actions
 
-| Action | Default |
-|---|---|
-| `term.copy` | `Cmd+C` / `Ctrl+Shift+C` |
-| `term.paste` | `Cmd+V` / `Ctrl+Shift+V` |
-| `term.find` | `Cmd+F` |
-| `term.toggle-regex` | `Ctrl+R` (in Find) |
-| `term.next-match` | `Enter` (in Find) |
-| `term.prev-match` | `Shift+Enter` (in Find) |
-| `term.prev-prompt` | `Cmd+Up` |
-| `term.next-prompt` | `Cmd+Down` |
-| `term.jump-failure` | `Cmd+Shift+E` |
-| `term.select-output` | `Cmd+Shift+O` |
-| `term.scroll-page-up` | `PageUp` |
-| `term.scroll-page-down` | `PageDown` |
-| `term.scroll-top` | `Shift+Home` |
-| `term.scroll-bottom` | `Shift+End` |
-| `term.font-inc` | `Cmd+=` |
-| `term.font-dec` | `Cmd+-` |
-| `term.font-reset` | `Cmd+0` |
-| `term.copy-mode` | `Cmd+Shift+Space` / `Ctrl+Shift+Space` |
+| Action                  | Default                                |
+| ----------------------- | -------------------------------------- |
+| `term.copy`             | `Cmd+C` / `Ctrl+Shift+C`               |
+| `term.paste`            | `Cmd+V` / `Ctrl+Shift+V`               |
+| `term.find`             | `Cmd+F`                                |
+| `term.toggle-regex`     | `Ctrl+R` (in Find)                     |
+| `term.next-match`       | `Enter` (in Find)                      |
+| `term.prev-match`       | `Shift+Enter` (in Find)                |
+| `term.prev-prompt`      | `Cmd+Up`                               |
+| `term.next-prompt`      | `Cmd+Down`                             |
+| `term.jump-failure`     | `Cmd+Shift+E`                          |
+| `term.select-output`    | `Cmd+Shift+O`                          |
+| `term.scroll-page-up`   | `PageUp`                               |
+| `term.scroll-page-down` | `PageDown`                             |
+| `term.scroll-top`       | `Shift+Home`                           |
+| `term.scroll-bottom`    | `Shift+End`                            |
+| `term.font-inc`         | `Cmd+=`                                |
+| `term.font-dec`         | `Cmd+-`                                |
+| `term.font-reset`       | `Cmd+0`                                |
+| `term.copy-mode`        | `Cmd+Shift+Space` / `Ctrl+Shift+Space` |
 
 An override replaces the action's whole default chord list with the single
 chord you give, but inherits the action's Shift tolerance. Where Shift is a
@@ -227,7 +227,7 @@ Find — a stray Shift still matches, so rebinding `term.find` to `Cmd+G` also
 answers `Cmd+Shift+G`. Where Shift picks a direction (`term.next-match` vs
 `term.prev-match`) it is matched exactly.
 
-Several `term.*` actions only fire in context, and that gate is *not* part of
+Several `term.*` actions only fire in context, and that gate is _not_ part of
 the binding: `Ctrl+C` still sends SIGINT when nothing is selected, the Find
 keys only apply while the search bar is open, and `term.copy` only copies when
 there is a selection.
@@ -242,7 +242,7 @@ them these keys do nothing:
 - `term.jump-failure` scrolls to the most recent command that exited non-zero,
   and each failure gets a red tick in the scrollbar track. Repeated presses
   walk back through older failures and then wrap to the newest. A command whose
-  shell reported *no* exit status never counts as a failure.
+  shell reported _no_ exit status never counts as a failure.
 - `term.select-output` selects exactly the output region of the command under
   the cursor and enters copy mode with that selection live, so `y` or `Cmd+C`
   copies it. With the cursor on a fresh prompt it selects the previous
@@ -282,32 +282,32 @@ the mouse.
 These actions are rebindable like any other, but they are deliberately left out
 of the `Cmd+/` help overlay — twenty extra rows in a flat list helps nobody.
 
-| Action | Default | Does |
-|---|---|---|
-| `term.copy-mode.exit` | `Escape` / `q` | Leave copy mode |
-| `term.copy-mode.left` | `h` / `Left` | Move one cell left |
-| `term.copy-mode.down` | `j` / `Down` | Move one row down |
-| `term.copy-mode.up` | `k` / `Up` | Move one row up |
-| `term.copy-mode.right` | `l` / `Right` | Move one cell right |
-| `term.copy-mode.word-fwd` | `w` | Start of the next word |
-| `term.copy-mode.word-back` | `b` | Start of the previous word |
-| `term.copy-mode.line-start` | `0` / `Home` | First column |
-| `term.copy-mode.line-end` | `$` / `End` | Last non-blank cell |
-| `term.copy-mode.top` | `g` | Oldest scrollback row |
-| `term.copy-mode.bottom` | `G` | Newest row |
-| `term.copy-mode.half-page-up` | `Ctrl+U` | Up half a screen |
-| `term.copy-mode.half-page-down` | `Ctrl+D` | Down half a screen |
-| `term.copy-mode.page-up` | `PageUp` / `Ctrl+B` | Up one screen |
-| `term.copy-mode.page-down` | `PageDown` / `Ctrl+F` | Down one screen |
-| `term.copy-mode.select-char` | `v` | Start/cancel a character-wise selection |
-| `term.copy-mode.select-line` | `V` | Start/cancel a line-wise selection |
-| `term.copy-mode.yank` | `y` / `Enter` | Copy the selection and exit |
-| `term.copy-mode.search-fwd` | `/` | Open the search bar, searching forward |
-| `term.copy-mode.search-back` | `?` | Open the search bar, searching backward |
-| `term.copy-mode.next-match` | `n` | Move to the next match |
-| `term.copy-mode.prev-match` | `N` | Move to the previous match |
-| `term.copy-mode.prev-mark` | `[` | Previous shell prompt (needs OSC 133) |
-| `term.copy-mode.next-mark` | `]` | Next shell prompt (needs OSC 133) |
+| Action                          | Default               | Does                                    |
+| ------------------------------- | --------------------- | --------------------------------------- |
+| `term.copy-mode.exit`           | `Escape` / `q`        | Leave copy mode                         |
+| `term.copy-mode.left`           | `h` / `Left`          | Move one cell left                      |
+| `term.copy-mode.down`           | `j` / `Down`          | Move one row down                       |
+| `term.copy-mode.up`             | `k` / `Up`            | Move one row up                         |
+| `term.copy-mode.right`          | `l` / `Right`         | Move one cell right                     |
+| `term.copy-mode.word-fwd`       | `w`                   | Start of the next word                  |
+| `term.copy-mode.word-back`      | `b`                   | Start of the previous word              |
+| `term.copy-mode.line-start`     | `0` / `Home`          | First column                            |
+| `term.copy-mode.line-end`       | `$` / `End`           | Last non-blank cell                     |
+| `term.copy-mode.top`            | `g`                   | Oldest scrollback row                   |
+| `term.copy-mode.bottom`         | `G`                   | Newest row                              |
+| `term.copy-mode.half-page-up`   | `Ctrl+U`              | Up half a screen                        |
+| `term.copy-mode.half-page-down` | `Ctrl+D`              | Down half a screen                      |
+| `term.copy-mode.page-up`        | `PageUp` / `Ctrl+B`   | Up one screen                           |
+| `term.copy-mode.page-down`      | `PageDown` / `Ctrl+F` | Down one screen                         |
+| `term.copy-mode.select-char`    | `v`                   | Start/cancel a character-wise selection |
+| `term.copy-mode.select-line`    | `V`                   | Start/cancel a line-wise selection      |
+| `term.copy-mode.yank`           | `y` / `Enter`         | Copy the selection and exit             |
+| `term.copy-mode.search-fwd`     | `/`                   | Open the search bar, searching forward  |
+| `term.copy-mode.search-back`    | `?`                   | Open the search bar, searching backward |
+| `term.copy-mode.next-match`     | `n`                   | Move to the next match                  |
+| `term.copy-mode.prev-match`     | `N`                   | Move to the previous match              |
+| `term.copy-mode.prev-mark`      | `[`                   | Previous shell prompt (needs OSC 133)   |
+| `term.copy-mode.next-mark`      | `]`                   | Next shell prompt (needs OSC 133)       |
 
 With no selection yet, `y` copies the single cell under the cursor. Pressing
 `v` or `V` a second time cancels the selection without leaving the mode.
