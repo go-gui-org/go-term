@@ -50,6 +50,74 @@ func (g *grid) SoftReset() {
 	g.markAllDirty()
 }
 
+// ScreenAlignment implements DECALN (ESC # 8): fill every cell of the screen
+// with 'E' in the default attributes, reset the scroll region to the full
+// screen, and home the cursor. Originally a CRT alignment pattern; today it
+// survives as the fastest way for a test program to put known content in every
+// cell, which is exactly how vttest uses it.
+//
+// Nothing goes to scrollback: this overwrites the screen in place.
+func (g *grid) ScreenAlignment() {
+	g.FlushGrapheme()
+
+	// Default attributes, not the current SGR — DECALN's pattern is defined
+	// as the plain character, and vttest reads the result visually.
+	fill := defaultCell()
+	fill.Ch = 'E'
+	for i := range g.Cells {
+		g.Cells[i] = fill
+	}
+	// Flat fill, so occlusion is not carried by eraseSpan — see ClearAll.
+	if len(g.Graphics) != 0 {
+		g.occludeGraphics(0, g.Rows, 0, g.Cols)
+	}
+	for r := range g.RowWrapped {
+		g.RowWrapped[r] = false
+	}
+	g.Top, g.Bottom = 0, g.Rows-1
+	g.CursorR, g.CursorC = 0, 0
+	g.markAllDirty()
+}
+
+// SetColumnMode implements DECCOLM (DEC ?3). cols is 80 or 132 to pin the
+// grid's width, or 0 to release the pin and let the width follow the window
+// again. Per DEC STD 070 and xterm, switching column mode also erases the
+// screen, homes the cursor and resets the scroll region — applications rely on
+// that (vttest draws each of its boxes immediately after the switch and
+// expects a blank canvas).
+//
+// The screen is erased *before* the resize so the discarded content is not
+// first reflowed into scrollback: DECCOLM is a mode switch, not a window
+// resize, and the text it drops was never meant to be history.
+func (g *grid) SetColumnMode(cols int) {
+	if g.ColumnMode == cols {
+		return
+	}
+	g.FlushGrapheme()
+	g.ColumnMode = cols
+
+	g.ClearAll()
+	// Drop the wrap flags with the text: a stale one would make the reflow
+	// inside Resize splice together rows that no longer hold anything.
+	for r := range g.RowWrapped {
+		g.RowWrapped[r] = false
+	}
+	// Only when the width actually moves: Resize runs the full reflow, which
+	// costs ~100µs and ~700 KB of arena regardless of how little content
+	// there is, and a child can drive this path with 6 bytes of input. A
+	// window already at the requested width (the common `?3l` on an 80-column
+	// pane) must not pay it.
+	if cols > 0 && cols != g.Cols {
+		g.Resize(g.Rows, cols)
+	}
+	// Resize already normalises the region, but the release path (cols == 0)
+	// does not resize here — the widget restores the window-derived width on
+	// its next frame — so reset the region unconditionally.
+	g.Top, g.Bottom = 0, g.Rows-1
+	g.CursorR, g.CursorC = 0, 0
+	g.markAllDirty()
+}
+
 // HardReset implements RIS (ESC c) — the power-on state. Everything SoftReset
 // does, plus: leave the alt screen, wipe the screen and scrollback, clear
 // images and shell marks, restore default tab stops, and drop every host-set
@@ -77,6 +145,19 @@ func (g *grid) HardReset() {
 	// DECSACE back to the power-on stream extent. DECSTR leaves it alone —
 	// VT510's soft-reset table does not list it.
 	g.RectExtent = 0
+
+	// DECSCNM. A pane left in reverse video by a crashed app is exactly the
+	// kind of state `reset` exists to clear.
+	g.ReverseScreen = false
+
+	// DECCOLM: release the column pin and revoke permission to set it again.
+	// Deliberately not in SoftReset — VT510's soft-reset table does not list
+	// DECCOLM, and xterm's DECSTR leaves the column count alone. Assigned
+	// directly rather than through SetColumnMode because the surrounding
+	// HardReset already erases the screen and homes the cursor; the widget's
+	// next frame restores the window-derived width.
+	g.AllowColumnMode = false
+	g.ColumnMode = 0
 
 	// Cursor appearance (DECSCUSR / OSC 12).
 	g.cursorShape = cursorBlock

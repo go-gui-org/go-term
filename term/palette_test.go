@@ -258,3 +258,59 @@ func TestRGBToGUIColor_PreservesAlphaZero(t *testing.T) {
 		t.Errorf("alpha bits should be ignored: got %+v, want %+v", got, want)
 	}
 }
+
+// TestGrid_DECSCNM_ReversesScreen covers vttest's light/dark background
+// screens: DECSCNM swaps foreground and background for the whole screen, so a
+// default cell renders inverted while a cell that is *already* inverse comes
+// back out normal.
+func TestGrid_DECSCNM_ReversesScreen(t *testing.T) {
+	g := newGrid(1, 4)
+	plain := defaultCell()
+	inverse := defaultCell()
+	inverse.Attrs |= attrInverse
+
+	fg, bg := g.Theme.DefaultFG, g.Theme.DefaultBG
+
+	if got := g.fgOf(plain); got != fg {
+		t.Errorf("normal fg = %v, want %v", got, fg)
+	}
+
+	g.ReverseScreen = true
+	if got := g.fgOf(plain); got != bg {
+		t.Errorf("reversed fg = %v, want %v", got, bg)
+	}
+	if got := g.bgOf(plain); got != fg {
+		t.Errorf("reversed bg = %v, want %v", got, fg)
+	}
+	// Double reversal cancels.
+	if got := g.fgOf(inverse); got != fg {
+		t.Errorf("reversed inverse fg = %v, want %v", got, fg)
+	}
+	// The theme-color paint sites must agree with what bgOf resolves for a
+	// default cell, or the canvas fill and the cell runs disagree.
+	if g.defaultBG() != g.bgOf(plain) || g.defaultFG() != g.fgOf(plain) {
+		t.Error("defaultFG/defaultBG disagree with fgOf/bgOf under DECSCNM")
+	}
+}
+
+// TestParser_DECSCNM_SetResetAndRIS wires the mode through the parser and
+// checks that a hard reset clears it — a pane left reversed by a crashed app
+// is what `reset` has to recover from.
+func TestParser_DECSCNM_SetResetAndRIS(t *testing.T) {
+	g := newGrid(2, 4)
+	p := newParser(g)
+
+	feed(t, g, p, []byte("\x1b[?5h"))
+	if !g.ReverseScreen {
+		t.Fatal("?5h did not enable reverse video")
+	}
+	feed(t, g, p, []byte("\x1b[?5l"))
+	if g.ReverseScreen {
+		t.Fatal("?5l did not disable reverse video")
+	}
+
+	feed(t, g, p, []byte("\x1b[?5h\x1bc"))
+	if g.ReverseScreen {
+		t.Fatal("RIS did not clear reverse video")
+	}
+}

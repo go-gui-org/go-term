@@ -463,19 +463,44 @@ func (g *grid) resolveColor(c uint32, def gui.Color) gui.Color {
 }
 
 // fgOf resolves a cell's foreground to a Color, honoring inverse.
+//
+// DECSCNM (?5) is folded in as an XOR rather than a second branch: reverse
+// video is defined as swapping foreground and background for the *whole*
+// screen, which is per-cell inverse applied globally, so a cell that is
+// already inverse comes out unreversed. Keeping it to one comparison also
+// keeps resolveColor inlining here, which the foreground pass depends on.
 func (g *grid) fgOf(c cell) gui.Color {
-	if c.Attrs&attrInverse != 0 {
+	if (c.Attrs&attrInverse != 0) != g.ReverseScreen {
 		return g.resolveColor(c.BG, g.Theme.DefaultBG)
 	}
 	return g.resolveColor(c.FG, g.Theme.DefaultFG)
 }
 
-// bgOf resolves a cell's background to a Color, honoring inverse.
+// bgOf resolves a cell's background to a Color, honoring inverse and DECSCNM.
 func (g *grid) bgOf(c cell) gui.Color {
-	if c.Attrs&attrInverse != 0 {
+	if (c.Attrs&attrInverse != 0) != g.ReverseScreen {
 		return g.resolveColor(c.FG, g.Theme.DefaultFG)
 	}
 	return g.resolveColor(c.BG, g.Theme.DefaultBG)
+}
+
+// defaultFG/defaultBG are the theme's default colors with DECSCNM applied.
+// Used by the paint sites that work in theme colors directly rather than
+// through a cell — the canvas fill, fillRun's skip test, the IME strip — all
+// of which must agree with what bgOf resolves for a default cell or reverse
+// video leaves the screen half-swapped.
+func (g *grid) defaultFG() gui.Color {
+	if g.ReverseScreen {
+		return g.Theme.DefaultBG
+	}
+	return g.Theme.DefaultFG
+}
+
+func (g *grid) defaultBG() gui.Color {
+	if g.ReverseScreen {
+		return g.Theme.DefaultFG
+	}
+	return g.Theme.DefaultBG
 }
 
 // Selection highlight tint. Terminal.app-style: a selected cell keeps its own

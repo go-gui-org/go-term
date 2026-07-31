@@ -480,3 +480,169 @@ func TestCurrentSGRString_AllPaths(t *testing.T) {
 		}
 	}
 }
+
+// TestParser_ESCRestartsSequenceInProgress: ESC is not an intermediate byte —
+// it abandons whatever sequence is being collected and opens a new one.
+// Absorbing it instead splices the next sequence's bytes onto the abandoned
+// one, so a truncated write (a child killed mid-sequence, a `printf` cut off)
+// silently applies parameters nobody sent.
+func TestParser_ESCRestartsSequenceInProgress(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			// Absorbed, this parsed as CSI 1;2 m — two SGR params from one
+			// sequence — and then printed nothing. Restarted, the abandoned
+			// `CSI 1` is dropped and `CSI 2 m` stands on its own.
+			name:  "esc_inside_csi_params",
+			input: "\x1b[1\x1b[2mAB",
+			want:  "AB   ",
+		},
+		{
+			// ESC inside a charset-designator sequence (stEscInter).
+			name:  "esc_inside_charset_designator",
+			input: "\x1b(\x1b[2mAB",
+			want:  "AB   ",
+		},
+		{
+			// ESC ESC: the second restarts, so `c` is still read as a final
+			// (RIS) rather than printed as a literal.
+			name:  "double_esc_keeps_next_byte_as_final",
+			input: "AB\x1b\x1bc",
+			want:  "     ",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g, p := newParserGrid(2, 5)
+			feed(t, g, p, []byte(tt.input))
+			if got := rowText(g, 0); got != tt.want {
+				t.Errorf("row = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParser_GroundStateFormFeedAndVerticalTab: VT and FF are line feeds on a
+// terminal. They were previously dropped in ground state, so `printf '\f'`
+// (and anything emitting FF as a newline) left the cursor where it was.
+func TestParser_GroundStateFormFeedAndVerticalTab(t *testing.T) {
+	for _, c := range []byte{0x0B, 0x0C} {
+		g, p := newParserGrid(4, 5)
+		g.Put('x')
+		feed(t, g, p, []byte{c})
+		if g.CursorR != 1 {
+			t.Errorf("control %#x: row = %d, want 1", c, g.CursorR)
+		}
+		// A line feed does not carry the cursor to column zero.
+		if g.CursorC != 1 {
+			t.Errorf("control %#x: col = %d, want 1", c, g.CursorC)
+		}
+	}
+}
+
+// TestParser_PendingWrapIsCollapsedForCursorOps: deferred wrap is stored as
+// CursorC == Cols, a column that does not exist. Every cursor-relative
+// operation has to read it as "on the last column" or it computes from the
+// phantom one and the whole row drifts.
+func TestParser_PendingWrapIsCollapsedForCursorOps(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string // fed after the row is filled into pending wrap
+		want  int    // resulting CursorC
+	}{
+		{"cursor_back", "\x1b[1D", 3},
+		{"cursor_forward", "\x1b[1C", 4},
+		{"tab", "\t", 4},
+		{"backspace", "\x08", 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g, p := newParserGrid(1, 5)
+			feed(t, g, p, []byte("abcde")) // fills the row; wrap now pending
+			if g.CursorC != g.Cols {
+				t.Fatalf("setup: CursorC = %d, want pending wrap at %d",
+					g.CursorC, g.Cols)
+			}
+			feed(t, g, p, []byte(tt.input))
+			if g.CursorC != tt.want {
+				t.Errorf("CursorC = %d, want %d", g.CursorC, tt.want)
+			}
+		})
+	}
+}
+
+// CPR must report the settled column too: an application that asks "where am
+// I?" after filling a row would otherwise be told column Cols+1, which is off
+// the screen it just measured.
+func TestParser_CPRReportsSettledColumn(t *testing.T) {
+	for _, seq := range []string{"\x1b[6n", "\x1b[?6n"} {
+		g, p := newParserGrid(1, 5)
+		var reply []byte
+		p.onReply = func(b []byte) { reply = append(reply, b...) }
+		feed(t, g, p, []byte("abcde"))
+		feed(t, g, p, []byte(seq))
+		if want := "5R"; len(reply) < 2 || string(reply[len(reply)-2:]) != want {
+			t.Errorf("%q reply = %q, want it to end in %q", seq, reply, want)
+		}
+	}
+}
+
+// TestParser_DECCOLM_GatedAndReported covers the ?40 gate, the pin it enables,
+// the release when permission is revoked, and what DECRQM reports throughout.
+func TestParser_DECCOLM_GatedAndReported(t *testing.T) {
+	g, p := newParserGrid(4, 80)
+
+	// Ungated: inert.
+	feed(t, g, p, []byte("\x1b[?3h"))
+	if g.ColumnMode != 0 {
+		t.Fatalf("DECCOLM applied without ?40: mode = %d", g.ColumnMode)
+	}
+	if got := p.decModeState(3); got != boolState(false) {
+		t.Errorf("DECRQM ?3 = %d, want reset", got)
+	}
+
+	feed(t, g, p, []byte("\x1b[?40h"))
+	if !g.AllowColumnMode || p.decModeState(40) != boolState(true) {
+		t.Fatal("?40h did not grant column-switch permission")
+	}
+
+	feed(t, g, p, []byte("\x1b[?3h"))
+	if g.ColumnMode != 132 || g.Cols != 132 {
+		t.Fatalf("mode = %d, cols = %d, want 132/132", g.ColumnMode, g.Cols)
+	}
+	if got := p.decModeState(3); got != boolState(true) {
+		t.Errorf("DECRQM ?3 at 132 = %d, want set", got)
+	}
+
+	feed(t, g, p, []byte("\x1b[?3l"))
+	if g.ColumnMode != 80 || g.Cols != 80 {
+		t.Fatalf("mode = %d, cols = %d, want 80/80", g.ColumnMode, g.Cols)
+	}
+	// 80 is DECCOLM's reset state, so it reports reset even though pinned.
+	if got := p.decModeState(3); got != boolState(false) {
+		t.Errorf("DECRQM ?3 at 80 = %d, want reset", got)
+	}
+
+	// Revoking permission releases the pin, so a crashed app cannot strand
+	// the pane at a fixed width.
+	feed(t, g, p, []byte("\x1b[?40l"))
+	if g.AllowColumnMode || g.ColumnMode != 0 {
+		t.Fatalf("?40l left allow = %v, mode = %d", g.AllowColumnMode, g.ColumnMode)
+	}
+}
+
+// DECRQM must report DECSCNM, which is how an application discovers it is
+// running on a light background before choosing its colors.
+func TestParser_DECSCNM_Reported(t *testing.T) {
+	g, p := newParserGrid(2, 5)
+	if got := p.decModeState(5); got != boolState(false) {
+		t.Errorf("DECRQM ?5 = %d, want reset", got)
+	}
+	feed(t, g, p, []byte("\x1b[?5h"))
+	if got := p.decModeState(5); got != boolState(true) {
+		t.Errorf("DECRQM ?5 after ?5h = %d, want set", got)
+	}
+}

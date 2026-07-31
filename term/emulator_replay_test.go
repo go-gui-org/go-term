@@ -67,6 +67,90 @@ func TestEmulatorReplay(t *testing.T) {
 			wantCwd:     "file://host/tmp",
 			wantReply:   []byte(da1Reply),
 		},
+		// The next four cases are vttest "Test of cursor movements" screen 5,
+		// "cursor-control characters inside ESC sequences": a C0 control
+		// arriving mid-sequence executes immediately and the sequence resumes
+		// around it. vttest writes the same line three ways and expects them
+		// to come out identical.
+		{
+			name:        "c0_backspace_inside_csi",
+			rows:        1,
+			cols:        8,
+			input:       "A\x1b[2\x08CB\x1b[2\x08CC",
+			wantLines:   []string{"A B C   "},
+			wantCursorR: 0,
+			wantCursorC: 5,
+		},
+		{
+			name:        "c0_carriage_return_inside_csi",
+			rows:        1,
+			cols:        8,
+			input:       "AB\x1b[\r4CC",
+			wantLines:   []string{"AB  C   "},
+			wantCursorR: 0,
+			wantCursorC: 5,
+		},
+		{
+			// VT is a line feed, so VT + CUU nets to no vertical movement.
+			name:        "c0_vertical_tab_inside_csi",
+			rows:        3,
+			cols:        4,
+			input:       "A\x1b[1\x0bAB",
+			wantLines:   []string{"AB  ", "    ", "    "},
+			wantCursorR: 0,
+			wantCursorC: 2,
+		},
+		{
+			// CAN is one of the two controls that cancel rather than execute;
+			// the parameters collected so far are discarded with it.
+			name:        "can_cancels_csi",
+			rows:        1,
+			cols:        5,
+			input:       "\x1b[3\x18C X",
+			wantLines:   []string{"C X  "},
+			wantCursorR: 0,
+			wantCursorC: 3,
+		},
+		{
+			// The deferred-wrap state is encoded as CursorC == Cols. A
+			// backspace out of it must land one column left of the right
+			// margin, not on it — vttest's autowrap screens are built on
+			// exactly this and drift by a column when it is wrong.
+			name:        "backspace_from_pending_wrap",
+			rows:        1,
+			cols:        3,
+			input:       "abc\x08X",
+			wantLines:   []string{"aXc"},
+			wantCursorR: 0,
+			wantCursorC: 2,
+		},
+		{
+			name:        "decaln_fills_screen_with_e",
+			rows:        2,
+			cols:        3,
+			input:       "hi\x1b#8",
+			wantLines:   []string{"EEE", "EEE"},
+			wantCursorR: 0,
+			wantCursorC: 0,
+		},
+		{
+			// DECCOLM without ?40 is inert: an application that never asked
+			// for column switching must not be able to narrow the pane.
+			name:        "deccolm_ignored_without_mode_40",
+			rows:        1,
+			cols:        6,
+			input:       "hello\x1b[?3l",
+			wantLines:   []string{"hello "},
+			wantCursorR: 0,
+			wantCursorC: 5,
+			assert: func(t *testing.T, g *grid) {
+				t.Helper()
+				if g.ColumnMode != 0 || g.Cols != 6 {
+					t.Fatalf("width pinned without ?40: mode=%d cols=%d",
+						g.ColumnMode, g.Cols)
+				}
+			},
+		},
 		{
 			name:        "private_modes_toggle_state",
 			rows:        1,

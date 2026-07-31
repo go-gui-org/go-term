@@ -372,7 +372,7 @@ func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell cell, k runKey, 
 }
 
 func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yOff float32) {
-	if color == t.grid.Theme.DefaultBG {
+	if color == t.grid.defaultBG() {
 		return // canvas already painted with default bg.
 	}
 	x := float32(c0) * t.cellW

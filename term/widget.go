@@ -388,8 +388,10 @@ func (t *Term) View(w *gui.Window) gui.View {
 
 	// Snapshot theme default-bg under the lock so a concurrent SetTheme
 	// does not race with this read. The rest of View() is lock-free.
+	// defaultBG (not Theme.DefaultBG) so DECSCNM flips the canvas fill too —
+	// fillRun skips runs matching it, so the two must agree.
 	t.grid.Mu.Lock()
-	bgColor := t.grid.Theme.DefaultBG
+	bgColor := t.grid.defaultBG()
 	t.grid.Mu.Unlock()
 	canvas := gui.DrawCanvas(gui.DrawCanvasCfg{
 		ID:      t.canvasID,
@@ -495,6 +497,9 @@ func (t *Term) Close() error {
 	t.loopWg.Wait()
 	if t.resize.timer != nil {
 		t.resize.timer.Stop()
+	}
+	if t.resize.badgeTimer != nil {
+		t.resize.badgeTimer.Stop()
 	}
 	if t.scrollbar.timer != nil {
 		t.scrollbar.timer.Stop()

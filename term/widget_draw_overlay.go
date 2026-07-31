@@ -166,11 +166,13 @@ func (t *Term) drawIME(ds *drawState) {
 	startX := float32(g.CursorC) * t.cellW
 	rowY := float32(g.CursorR)*t.cellH + ds.renderYOff
 
-	bgCol := g.Theme.DefaultBG
+	// DECSCNM-aware: the composition strip sits on top of terminal cells, so
+	// it has to follow the same reversal they do.
+	bgCol := g.defaultBG()
 	ds.dc.FilledRect(startX, rowY, float32(totalCols)*t.cellW, t.cellH, bgCol)
 
 	cs := ds.style
-	cs.Color = g.Theme.DefaultFG
+	cs.Color = g.defaultFG()
 	cs.Underline = false
 
 	currX := startX
@@ -304,6 +306,11 @@ func (t *Term) drawOverlays(ds *drawState) {
 	// written to disk, and an unnoticed recording is a privacy problem, not
 	// just a surprise.
 	t.drawRecordIndicator(ds)
+
+	// Size readout while resizing. Without it the cell dimensions are
+	// unknowable during a drag, which makes hitting an exact geometry
+	// (80×24 for vttest, a width a tool assumes) guesswork.
+	t.drawSizeBadge(ds)
 
 	// Visual bell: a faint white wash that eases out over the flash
 	// duration rather than switching on and off, so an incidental BEL
@@ -537,6 +544,59 @@ func (t *Term) drawRecordIndicator(ds *drawState) {
 	// the terminal content matters more than the badge.
 	ds.dc.FilledRoundedRect(x, y, w, h, h/2, gui.RGBA(150, 30, 30, 210))
 	ds.dc.Text(x+recordIndicatorPad, y+recordIndicatorPad/2, label, cs)
+}
+
+// sizeBadgeDuration is how long the size readout lingers after the last
+// dimension change. Comfortably longer than resizeDebounce so the badge does
+// not blink out between drag frames, short enough that it clears itself once
+// the drag stops.
+const sizeBadgeDuration = 900 * time.Millisecond
+
+// sizeBadgePad is the padding inside the size-readout pill.
+const sizeBadgePad = 10
+
+// showSizeBadge records dims to display and (re)starts the badge's linger
+// window. Called from prepareResize on the main thread whenever the canvas
+// implies dims other than the grid's.
+func (t *Term) showSizeBadge(rows, cols int, now time.Time) {
+	t.resize.badgeRows, t.resize.badgeCols = rows, cols
+	if !t.resize.sized {
+		return // initial sizing, not a user gesture
+	}
+	t.resize.badgeUntil = now.Add(sizeBadgeDuration)
+	// Repaint once more after the linger window so the badge actually
+	// disappears when the drag stops producing frames.
+	t.scheduleDelayedUpdate(sizeBadgeDuration+time.Millisecond, &t.resize.badgeTimer)
+}
+
+// drawSizeBadge paints a centered "COLS × ROWS" pill while a resize is in
+// flight or has just finished. Called under Mu (inside onDraw).
+func (t *Term) drawSizeBadge(ds *drawState) {
+	if t.resize.badgeUntil.IsZero() || !ds.now.Before(t.resize.badgeUntil) {
+		return
+	}
+	// strconv rather than fmt, matching drawRecordIndicator: the label is
+	// rebuilt every frame of a drag.
+	label := strconv.Itoa(t.resize.badgeCols) + " × " + strconv.Itoa(t.resize.badgeRows)
+
+	cs := ds.style
+	cs.Color = gui.RGB(240, 240, 240)
+	cs.Typeface = glyph.TypefaceRegular
+	textW := ds.dc.TextWidth(label, cs)
+	if textW <= 0 || !realNumber(textW) {
+		return // metrics not ready yet; a later frame will paint it
+	}
+	w := textW + 2*sizeBadgePad
+	h := t.cellH + 2*sizeBadgePad
+	x := (ds.dc.Width - w) / 2
+	y := (ds.dc.Height - h) / 2
+	if x < 0 || y < 0 {
+		return // pane too small to hold the badge without clipping
+	}
+	// Dark and mostly opaque: this is a momentary HUD read at a glance, so
+	// legibility beats seeing the cells behind it.
+	ds.dc.FilledRoundedRect(x, y, w, h, h/4, gui.RGBA(20, 20, 20, 225))
+	ds.dc.Text(x+sizeBadgePad, y+sizeBadgePad, label, cs)
 }
 
 // copyCursorColor is the copy-mode cursor's fill. Deliberately not the theme's

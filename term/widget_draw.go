@@ -239,8 +239,18 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 // the target dimensions have been stable for resizeDebounce. Sets ds.doResize
 // so the caller can resize the pty outside the lock.
 func (t *Term) prepareResize(ds *drawState) {
+	// DECCOLM pins the width. Rows still follow the canvas — only the right
+	// margin is under the application's control — so a pinned grid narrower
+	// than the canvas simply leaves the surplus width unpainted.
+	if cm := t.grid.ColumnMode; cm > 0 {
+		ds.cols = clampDim(cm)
+	}
 	if ds.rows != t.grid.Rows || ds.cols != t.grid.Cols {
 		now := ds.now
+		// Show the size readout for the candidate dims. Driven from here, not
+		// from the applied resize below, so the number tracks the pointer
+		// through the debounce window instead of lagging it.
+		t.showSizeBadge(ds.rows, ds.cols, now)
 		if ds.rows != t.resize.pendingRows ||
 			ds.cols != t.resize.pendingCols ||
 			t.resize.pendingSince.IsZero() {
@@ -266,7 +276,7 @@ func (t *Term) prepareResize(ds *drawState) {
 				t.grid.resizeTrack = nil
 				t.applyCopyResize(track[0], track[1])
 			}
-			ds.doResize = true
+			t.resize.sized = true
 			t.resize.pendingSince = time.Time{}
 		} else {
 			t.scheduleResizeWake(resizeDebounce - elapsed)
@@ -286,6 +296,17 @@ func (t *Term) prepareResize(ds *drawState) {
 
 	// Refresh ds dims after potential Resize.
 	ds.rows, ds.cols = t.grid.Rows, t.grid.Cols
+
+	// Publish to the pty whenever the grid's dims differ from what the child
+	// was last told, rather than only on the debounced canvas path above.
+	// DECCOLM resizes the grid from the parser (reader goroutine) with no
+	// canvas change at all, so a check keyed on the canvas would leave the
+	// child believing the old width — which is precisely the geometry
+	// disagreement DECCOLM exists to prevent.
+	if ds.rows != t.resize.ptyLastRows || ds.cols != t.resize.ptyLastCols {
+		t.resize.ptyLastRows, t.resize.ptyLastCols = ds.rows, ds.cols
+		ds.doResize = true
+	}
 }
 
 // prepareFastPath computes the fast-path flag, the effective render row count
