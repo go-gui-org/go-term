@@ -214,6 +214,10 @@ type drawBufs struct {
 	bidiVisRows [][]cell        // visual-reordered rows for current frame
 	bidiV2LRows [][]int         // visual→logical column maps
 	bidiScratch []cell          // reused per-row cell buffer for BiDi pre-pass
+	// phRects accumulates the Kitty Unicode-placeholder rectangles found in
+	// the viewport (see drawPlaceholders). Kept here so a screen full of
+	// placeholder cells does not allocate every frame.
+	phRects []placeholderRect
 }
 
 // Term is a terminal-emulator widget bound to a single pty-backed shell.

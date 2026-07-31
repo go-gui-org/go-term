@@ -43,12 +43,23 @@ func (g *grid) SelectedText() string {
 
 		end := c0 - 1
 		for c := c0; c <= c1; c++ {
-			if g.ContentCellAt(r, c).Ch != ' ' {
+			// A Kitty Unicode placeholder is an image, not text. Copying it
+			// verbatim would paste a private-use character plus combining
+			// diacritics into the user's clipboard, so it counts as blank here
+			// — including for the trailing-blank trim, so selecting a line of
+			// image and nothing else copies an empty line rather than a run of
+			// spaces.
+			cell := g.ContentCellAt(r, c)
+			if cell.Ch != ' ' && !isPlaceholderCell(cell) {
 				end = c
 			}
 		}
 		for c := c0; c <= end; c++ {
 			cell := g.ContentCellAt(r, c)
+			if isPlaceholderCell(cell) {
+				b.WriteByte(' ')
+				continue
+			}
 			if cell.clusterID != 0 && int(cell.clusterID) < len(g.clusters) {
 				b.WriteString(g.clusters[cell.clusterID])
 			} else if cell.Ch != 0 {

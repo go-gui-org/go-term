@@ -103,6 +103,17 @@ func (ds *drawState) resolveCell(r, c int) cell {
 	return cell
 }
 
+// rawCell returns the cell at viewport (r, c) with no visual transforms at
+// all — no selection tint, no search inversion, no BiDi reorder. The Kitty
+// placeholder decode needs it: the image id lives in the cell's foreground
+// color, and highlightSelected rewrites exactly that.
+func (ds *drawState) rawCell(r, c int) cell {
+	if ds.live {
+		return ds.cells[r*ds.cols+c]
+	}
+	return ds.g.ViewCellAt(r, c)
+}
+
 // resolveVisual returns the cell at viewport (r, c), routing through the
 // BiDi visual-reorder map when row r contains RTL content.
 func (ds *drawState) resolveVisual(r, c int) cell {
@@ -189,6 +200,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.drawBgPass(&ds)
 	t.drawFgPass(&ds)
 	t.drawGraphics(ds.dc, ds.g, ds.renderTop, ds.renderRows, ds.renderYOff)
+	t.drawPlaceholders(&ds)
 	t.drawIME(&ds)
 	t.drawCursor(&ds)
 	t.drawOverlays(&ds)

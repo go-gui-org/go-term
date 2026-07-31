@@ -57,6 +57,20 @@ func makePNG(t *testing.T) ([]byte, string) {
 	return raw, base64.StdEncoding.EncodeToString(raw)
 }
 
+// makeSquarePNGBase64 encodes an n x n PNG and returns its base64 text.
+func makeSquarePNGBase64(t *testing.T, n int) string {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, n, n))
+	for i := range img.Pix {
+		img.Pix[i] = 0xFF
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
 // --- State machine tests ---
 
 func TestParser_APC_StateTransition(t *testing.T) {
@@ -978,5 +992,176 @@ func TestParser_APC_KittyChunked_ContinuationKeepsID(t *testing.T) {
 	}
 	if len(h.p.kittyChunks) != 0 {
 		t.Fatalf("%d pending chunk entries left behind", len(h.p.kittyChunks))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Unicode placeholder placement (U=1)
+// ---------------------------------------------------------------------------
+
+// U=1 creates a virtual placement: nothing on screen, no cells consumed, no
+// cursor movement. The image waits for placeholder cells to name it.
+func TestParser_APC_KittyVirtualPlacement(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.g.Put('X') // text the placement must not disturb
+	h.feedAPC("a=T,f=100,i=7,U=1,c=4,r=2,q=1;" + b64)
+
+	if len(h.g.Graphics) != 0 {
+		t.Fatalf("virtual placement added %d screen placements; want 0",
+			len(h.g.Graphics))
+	}
+	v, ok := h.g.virtualImages[7]
+	if !ok {
+		t.Fatal("no virtual placement recorded for image 7")
+	}
+	if v.Cols != 4 || v.Rows != 2 {
+		t.Errorf("virtual rect = %dx%d; want 4x2", v.Cols, v.Rows)
+	}
+	if v.Src == "" {
+		t.Error("virtual placement has no image file")
+	}
+	if h.g.CursorR != 0 || h.g.CursorC != 1 {
+		t.Errorf("cursor moved to (%d,%d); want (0,1)", h.g.CursorR, h.g.CursorC)
+	}
+	if got := h.g.Cells[0].Ch; got != 'X' {
+		t.Errorf("cell 0 = %q; want 'X' — virtual placement blanked cells", got)
+	}
+}
+
+// a=p,U=1 turns a previously transmitted image into a virtual placement.
+func TestParser_APC_KittyVirtualPlace(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=t,f=100,i=3,q=1;" + b64)
+	h.feedAPC("a=p,i=3,U=1,c=2,r=1,q=1;")
+
+	if len(h.g.Graphics) != 0 {
+		t.Fatalf("a=p,U=1 added %d screen placements; want 0", len(h.g.Graphics))
+	}
+	if _, ok := h.g.virtualImages[3]; !ok {
+		t.Fatal("no virtual placement recorded for image 3")
+	}
+}
+
+// A virtual placement with no i= key can never be addressed by a placeholder
+// cell, so it is refused rather than silently swallowed.
+func TestParser_APC_KittyVirtualWithoutID(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,U=1,c=2,r=2;" + b64)
+
+	if len(h.g.virtualImages) != 0 {
+		t.Fatalf("recorded %d virtual placements; want 0", len(h.g.virtualImages))
+	}
+	if len(h.replies) != 1 || !bytes.Contains(h.replies[0], []byte("EINVAL")) {
+		t.Fatalf("replies = %q; want one EINVAL", h.replies)
+	}
+}
+
+// Omitting c= and r= falls back to the pixel-derived footprint rather than
+// producing a zero-sized placement that could never be drawn.
+func TestParser_APC_KittyVirtualWithoutRect(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=9,U=1,q=1;" + b64)
+
+	v, ok := h.g.virtualImages[9]
+	if !ok {
+		t.Fatal("no virtual placement recorded")
+	}
+	if v.Cols < 1 || v.Rows < 1 {
+		t.Fatalf("virtual rect = %dx%d; want at least 1x1", v.Cols, v.Rows)
+	}
+}
+
+// d=i names one image, so its virtual placement goes with it. d=a means
+// "every placement visible on screen" — a virtual placement occupies no
+// screen rectangle, so it survives.
+func TestParser_APC_KittyDelete_VirtualPlacements(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+
+	h.feedAPC("a=T,f=100,i=4,U=1,c=2,r=2,q=1;" + b64)
+	h.feedAPC("q=2,a=d,d=a")
+	if _, ok := h.g.virtualImages[4]; !ok {
+		t.Fatal("d=a deleted a virtual placement; it owns no screen cells")
+	}
+
+	h.feedAPC("q=2,a=d,d=i,i=4")
+	if _, ok := h.g.virtualImages[4]; ok {
+		t.Fatal("d=i did not delete the named image's virtual placement")
+	}
+
+	// Uppercase frees the image data, which leaves nothing to draw.
+	h.feedAPC("a=T,f=100,i=5,U=1,c=2,r=2,q=1;" + b64)
+	h.feedAPC("q=2,a=d,d=A")
+	if len(h.g.virtualImages) != 0 {
+		t.Fatalf("d=A left %d virtual placements", len(h.g.virtualImages))
+	}
+}
+
+// Store eviction prefers images nothing is displaying. A virtual placement is
+// a display, so its PNG must not be deleted out from under the placeholder
+// cells showing it.
+func TestParser_APC_KittyStore_VirtualCountsAsInUse(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=1,U=1,c=2,r=2,q=1;" + b64)
+
+	v := h.g.virtualImages[1]
+	if !h.g.graphicsUseSrc(v.Src) {
+		t.Fatal("graphicsUseSrc does not count a virtual placement as a user")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Explicit cell footprint (c= / r=) on ordinary placements
+// ---------------------------------------------------------------------------
+
+func TestParser_APC_KittyExplicitCellRect(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,c=6,r=3,C=1,q=1;" + b64)
+
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics; want 1", len(h.g.Graphics))
+	}
+	if got := h.g.Graphics[0]; got.Cols != 6 || got.Rows != 3 {
+		t.Fatalf("footprint = %dx%d; want 6x3", got.Cols, got.Rows)
+	}
+}
+
+// c= and r= are client-supplied and feed a float64 derivation, so an absurd
+// value is clamped at parse time rather than overflowing the conversion back
+// to int.
+func TestParser_APC_KittyCellRectClamped(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=8,U=1,c=99999999999,r=99999999999,q=1;" + b64)
+
+	v, ok := h.g.virtualImages[8]
+	if !ok {
+		t.Fatal("no virtual placement recorded")
+	}
+	if v.Cols > MaxGridDim || v.Rows > MaxGridDim {
+		t.Fatalf("footprint = %dx%d; want at most %dx%d",
+			v.Cols, v.Rows, MaxGridDim, MaxGridDim)
+	}
+}
+
+// With only one of c=/r= given the other follows from the aspect ratio, so
+// the image is displayed without distortion. Cells are 8x16 here, and the
+// image is 32x32 px: 4 columns wide is 32 screen px, so 32 px tall is 2 rows.
+func TestParser_APC_KittyCellRectFromAspect(t *testing.T) {
+	h := newAPCHelper(t)
+	b64 := makeSquarePNGBase64(t, 32)
+	h.feedAPC("a=T,f=100,c=4,C=1,q=1;" + b64)
+
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("got %d graphics; want 1", len(h.g.Graphics))
+	}
+	if got := h.g.Graphics[0]; got.Cols != 4 || got.Rows != 2 {
+		t.Fatalf("footprint = %dx%d; want 4x2", got.Cols, got.Rows)
 	}
 }

@@ -582,7 +582,7 @@ func TestGrid_OccludeGraphics_KittyExempt(t *testing.T) {
 	g := newGrid(10, 40)
 	g.CellPxW, g.CellPxH = 8, 16
 	g.CursorR, g.CursorC = 3, 5
-	g.AddGraphicKitty("img.png", 16, 32, 7)
+	g.AddGraphicKitty("img.png", 16, 32, 0, 0, 7)
 	g.CursorR, g.CursorC = 3, 5
 	g.Put('x')
 	g.EraseInDisplay(2)

@@ -58,6 +58,7 @@ func runeWidth(r rune) int {
 }
 
 //go:generate go run gen_eaw.go
+//go:generate go run gen_kgpdiacritics.go
 
 // eawWide reports whether r should occupy two cells under the current Unicode
 // East Asian Width data (Wide or Fullwidth) — the up-to-date override on
@@ -428,6 +429,14 @@ type grid struct {
 	// behave: the picture disappears while the full-screen app is up and
 	// comes back when it exits.
 	Graphics []graphic
+
+	// virtualImages holds Kitty *virtual* placements (U=1), keyed by image id.
+	// Unlike Graphics these own no cells and no origin row, so they are neither
+	// per-screen nor adjusted by scroll/reflow — see grid_virtual.go. The
+	// renderer pairs them with U+10EEEE placeholder cells found in the
+	// viewport. virtualSeq orders insertions for oldest-first eviction.
+	virtualImages map[uint32]virtualImage
+	virtualSeq    uint64
 
 	// occludeMaxR is one past the highest content row covered by any
 	// occludable (non-KGP) graphic — the bound that lets the per-write
@@ -892,9 +901,12 @@ func (g *grid) AddGraphic(src string, widthPx, heightPx int) (int, int) {
 
 // AddGraphicKitty is AddGraphic for the Kitty Graphics Protocol: the
 // placement records the KGP image id so a later delete (`a=d,d=i,i=…`) can
-// find it. Caller holds Mu.
-func (g *grid) AddGraphicKitty(src string, widthPx, heightPx int, id uint32) (int, int) {
-	cols, rows := g.addGraphicCells(src, widthPx, heightPx, 0, 0)
+// find it. wantCols/wantRows carry the c=/r= cell footprint the client asked
+// for; zero means "derive it from the pixel size". Caller holds Mu.
+func (g *grid) AddGraphicKitty(
+	src string, widthPx, heightPx, wantCols, wantRows int, id uint32,
+) (int, int) {
+	cols, rows := g.addGraphicCells(src, widthPx, heightPx, wantCols, wantRows)
 	if cols <= 0 || rows <= 0 {
 		return 0, 0 // rejected: nothing was appended to tag
 	}
@@ -965,7 +977,10 @@ func (g *grid) graphicsUseSrc(src string) bool {
 			return true
 		}
 	}
-	return false
+	// Virtual placements have no rectangle but do have a file: a placeholder
+	// cell on screen draws it, so evicting it out from under them would blank
+	// a visible image.
+	return g.virtualUseSrc(src)
 }
 
 // deleteGraphicsBySrc drops every placement drawing the file at src. Used when
@@ -981,6 +996,7 @@ func (g *grid) deleteGraphicsBySrc(src string) {
 	// placement restored by ExitAlt would draw a dead path. Nothing on screen
 	// changes, so no repaint is needed for that half.
 	g.mainSaved.graphics, _ = gfxDropSrc(g.mainSaved.graphics, src)
+	g.deleteVirtualBySrc(src)
 }
 
 // deleteGraphics removes Kitty placements: every one when all is set (KGP
@@ -1014,6 +1030,18 @@ func (g *grid) deleteGraphics(id uint32, all bool) {
 	}
 }
 
+// cellsForPixels converts a pixel size to the cell footprint that covers it,
+// rounding up. Falls back to a single cell when the cell size has not been
+// measured yet (no frame drawn). Caller holds Mu.
+func (g *grid) cellsForPixels(widthPx, heightPx int) (int, int) {
+	if g.CellPxW <= 0 || g.CellPxH <= 0 {
+		return 1, 1
+	}
+	cols := int(math.Ceil(float64(widthPx) / float64(g.CellPxW)))
+	rows := int(math.Ceil(float64(heightPx) / float64(g.CellPxH)))
+	return max(cols, 1), max(rows, 1)
+}
+
 // addGraphicCells is AddGraphic with an explicit cell footprint. Non-positive
 // cols/rows mean "derive from the pixel size", which is what every caller but
 // the OSC 1337 width=/height= path wants. The clamps apply either way: an
@@ -1024,17 +1052,7 @@ func (g *grid) addGraphicCells(src string, widthPx, heightPx, cols, rows int) (i
 		return 0, 0
 	}
 	if cols <= 0 || rows <= 0 {
-		cols, rows = 1, 1
-		if g.CellPxW > 0 && g.CellPxH > 0 {
-			cols = int(math.Ceil(float64(widthPx) / float64(g.CellPxW)))
-			rows = int(math.Ceil(float64(heightPx) / float64(g.CellPxH)))
-			if cols < 1 {
-				cols = 1
-			}
-			if rows < 1 {
-				rows = 1
-			}
-		}
+		cols, rows = g.cellsForPixels(widthPx, heightPx)
 	}
 	if rows > MaxGridDim {
 		rows = MaxGridDim
