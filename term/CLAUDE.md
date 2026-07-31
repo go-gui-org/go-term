@@ -110,11 +110,19 @@ every Kitty placement and leaves sixel/iTerm2 images standing — `a=d` is a
 Kitty command, and painting over the cells is the only removal signal the
 other protocols have.
 
-Two guards keep occlusion honest. `EnterAlt` swaps `Cells` but *not*
-`Graphics`, and leaves `Scrollback` alone, so an alt-screen row maps onto the
-same content row as a main-screen image — occlusion is therefore skipped
-entirely while `AltActive`, or every full-screen app would wipe the images
-behind it. And `grid.occludeMaxR` bounds the per-glyph scan: it is one past
+Images are per-screen, exactly like `Cells`: `EnterAlt` parks the main-screen
+list (and its occlusion bound) in `mainSaved`, the alt screen starts with none,
+`ExitAlt` restores the main list and drops whatever the alt screen placed. So a
+sixel left by `chafa` vanishes when yazi takes the alt screen and returns when
+it exits, and a full-screen app can only ever occlude images it placed itself.
+`grid.mainGraphics` is how the paths that describe *main-screen* content —
+scrollback trim, reflow remap — reach the right list from either screen; the
+alt screen's own images move by the flat scrollback delta on resize, like the
+selection. Origins are absolute content rows, so a scroll that pushes rows into
+scrollback needs no adjustment at all — but one that does not (the alt screen,
+a DECSTBM region, IL/DL, `ScrollbackCap == 0`) slides text under fixed origins,
+which is what `grid.scrollGraphicsRegion` corrects: images inside the scrolled
+region move with it and those pushed out of the region are dropped. `grid.occludeMaxR` bounds the per-glyph scan: it is one past
 the highest content row any occludable image covers, so once they have all
 scrolled into scrollback the check costs one comparison instead of walking up
 to `maxGraphics` entries (measured: 81µs → 0.6µs per 80-column row). The
@@ -122,7 +130,7 @@ invariant is one-directional — the bound may be too high, never too low — so
 paths that move origins downward (`shiftGraphics`, `remapGraphics`) just set
 `occludeBoundUnknown` and let the next scan recompute it exactly.
 
-Both halves are needed for yazi, which picks its image protocol from
+All of this is needed for yazi, which picks its image protocol from
 `TERM_PROGRAM`. `startPTY` scrubs the host terminal's identity variables
 (`hostTerminalEnvKeys`) so that choice reflects go-term's own advertised
 capabilities rather than whichever emulator launched the app; `cfg.Env` is

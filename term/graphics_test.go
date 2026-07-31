@@ -601,24 +601,49 @@ func TestGrid_OccludeGraphics_EraseChars(t *testing.T) {
 	}
 }
 
-// EnterAlt swaps Cells but not Graphics, and leaves Scrollback alone, so an
-// alt-screen row shares a content row with a main-screen image. A full-screen
-// app must not silently destroy images sitting on the main screen behind it.
-func TestGrid_OccludeGraphics_AltScreenLeavesMainImages(t *testing.T) {
+// Images belong to the screen they were drawn on. Entering the alt screen
+// hides a main-screen image (yazi must not draw over a leftover `chafa`
+// picture) without destroying it, and exiting brings it back.
+func TestGrid_Graphics_AltScreenHidesAndRestores(t *testing.T) {
 	g := gridWithGraphic(t, 3, 5)
 	g.EnterAlt()
+	if len(g.Graphics) != 0 {
+		t.Fatal("main-screen image still on the active list inside alt")
+	}
 	for r := range g.Rows { // a TUI painting its whole screen
 		g.CursorR, g.CursorC = r, 0
 		for range g.Cols {
 			g.Put('x')
 		}
 	}
-	if len(g.Graphics) != 1 {
-		t.Fatal("alt-screen text destroyed a main-screen image")
-	}
 	g.ExitAlt()
 	if len(g.Graphics) != 1 {
-		t.Fatal("image lost across the alt-screen round trip")
+		t.Fatal("alt-screen text destroyed a parked main-screen image")
+	}
+}
+
+// An image the alt screen placed itself is occludable there — a previewer
+// running full-screen clears its own picture by painting over the cells — and
+// dies with the alt screen rather than leaking onto the main one.
+func TestGrid_Graphics_AltScreenOwnImages(t *testing.T) {
+	g := newGrid(10, 40)
+	g.CellPxW, g.CellPxH = 8, 16
+	g.EnterAlt()
+	g.CursorR, g.CursorC = 3, 5
+	g.AddGraphic("alt.png", 16, 32)
+	if len(g.Graphics) != 1 {
+		t.Fatal("setup: alt-screen image not registered")
+	}
+	g.CursorR, g.CursorC = 3, 5
+	g.Put('x')
+	if len(g.Graphics) != 0 {
+		t.Fatal("alt-screen image survived text painted over its cells")
+	}
+	g.CursorR, g.CursorC = 3, 5
+	g.AddGraphic("alt2.png", 16, 32)
+	g.ExitAlt()
+	if len(g.Graphics) != 0 {
+		t.Fatal("alt-screen image leaked onto the main screen")
 	}
 }
 
@@ -659,6 +684,141 @@ func TestGrid_OccludeGraphics_BoundSurvivesReflow(t *testing.T) {
 	g.Put('x')
 	if len(g.Graphics) != 0 {
 		t.Fatal("stale occlusion bound let a write miss the image under it")
+	}
+}
+
+// The alt screen never pushes rows to scrollback, so a region scroll there
+// slides the text under fixed graphic origins unless the images are moved
+// too — the picture would drift away from the cells it was placed on.
+func TestGrid_Graphics_AltScrollMovesImages(t *testing.T) {
+	g := newGrid(10, 40)
+	g.CellPxW, g.CellPxH = 8, 16
+	g.ScrollbackCap = 100
+	g.EnterAlt()
+	g.CursorR, g.CursorC = 6, 5
+	g.AddGraphic("alt.png", 16, 32) // 2x2 cells at row 6
+	g.ScrollUp(2)
+	if n := len(g.Graphics); n != 1 {
+		t.Fatalf("graphics after scroll = %d; want 1", n)
+	}
+	if got := g.Graphics[0].OriginR; got != 4 {
+		t.Fatalf("origin after 2-row scroll = %d; want 4", got)
+	}
+	g.ScrollUp(6) // pushes it off the top of the region
+	if len(g.Graphics) != 0 {
+		t.Fatal("image scrolled out of the alt screen was kept")
+	}
+}
+
+// The mirror case: on the main screen a full-screen scroll pushes rows into
+// scrollback, so the content-row space absorbs the scroll and origins must
+// stay exactly where they are.
+func TestGrid_Graphics_MainScrollKeepsOriginsWhenPushed(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.ScrollbackCap = 100
+	g.ScrollUp(2)
+	if n := g.Scrollback.Len(); n != 2 {
+		t.Fatalf("setup: scrollback = %d; want 2 rows pushed", n)
+	}
+	if got := g.Graphics[0].OriginR; got != 3 {
+		t.Fatalf("origin moved to %d; scrollback push must leave it at 3", got)
+	}
+}
+
+// IL/DL shift rows inside the region without touching scrollback, so images
+// ride along and those pushed out of the region go away.
+func TestGrid_Graphics_InsertDeleteLinesMoveImages(t *testing.T) {
+	g := gridWithGraphic(t, 5, 5)
+	g.CursorR, g.CursorC = 2, 0
+	g.InsertLines(2)
+	if got := g.Graphics[0].OriginR; got != 7 {
+		t.Fatalf("origin after IL 2 = %d; want 7", got)
+	}
+	g.DeleteLines(3)
+	if got := g.Graphics[0].OriginR; got != 4 {
+		t.Fatalf("origin after DL 3 = %d; want 4", got)
+	}
+	g.CursorR = 0
+	g.DeleteLines(g.Rows) // clears the whole region
+	if len(g.Graphics) != 0 {
+		t.Fatal("image survived a DL that deleted every row under it")
+	}
+}
+
+// ED 3 drops scrollback, which shifts the shared content-row space — both the
+// alt screen's own images and the parked main-screen list must follow it.
+func TestGrid_Graphics_AltEraseScrollbackTrimsBothLists(t *testing.T) {
+	g := gridWithGraphic(t, 8, 5)
+	g.ScrollbackCap = 100
+	for range 5 { // push 5 rows of history under the image
+		g.CursorR = g.Rows - 1
+		g.Newline()
+	}
+	if n := g.Scrollback.Len(); n != 5 {
+		t.Fatalf("setup: scrollback = %d; want 5", n)
+	}
+	g.EnterAlt()
+	g.CursorR, g.CursorC = 2, 0
+	g.AddGraphic("alt.png", 16, 32)
+	g.EraseInDisplay(3)
+	// The alt image sat in the rows ED cleared, so occlusion removed it.
+	if len(g.Graphics) != 0 {
+		t.Fatal("alt image survived the ED 2/3 flat fill over its cells")
+	}
+	if n := len(g.mainSaved.graphics); n != 1 {
+		t.Fatalf("parked graphics = %d; want 1", n)
+	}
+	if got := g.mainSaved.graphics[0].OriginR; got != 3 {
+		t.Fatalf("parked origin after dropping 5 scrollback rows = %d; want 3", got)
+	}
+}
+
+// The kitty store may evict a file while the alt screen is up. A parked
+// placement still needs its file, and if the file does go the placement must
+// go with it — ExitAlt otherwise restores an image pointing at a dead path.
+func TestGrid_Graphics_ParkedListTracksSrcLifetime(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.EnterAlt()
+	if !g.graphicsUseSrc("img.png") {
+		t.Fatal("parked placement not counted as using its file")
+	}
+	g.deleteGraphicsBySrc("img.png")
+	if g.graphicsUseSrc("img.png") {
+		t.Fatal("placement still reported after its file was dropped")
+	}
+	g.ExitAlt()
+	if len(g.Graphics) != 0 {
+		t.Fatal("ExitAlt restored a placement whose file was deleted")
+	}
+}
+
+// A resize while the alt screen is up reflows the *saved* main buffer, so the
+// parked image list must ride that reflow too — otherwise ExitAlt restores
+// origins addressing pre-resize rows.
+func TestGrid_Graphics_AltResizeRemapsParkedList(t *testing.T) {
+	g := gridWithGraphic(t, 3, 5)
+	g.EnterAlt()
+	g.Resize(10, 20) // narrower: re-wrap moves main-screen content rows
+	if n := len(g.mainSaved.graphics); n != 1 {
+		t.Fatalf("parked graphics after alt resize = %d; want 1", n)
+	}
+	g.ExitAlt()
+	if len(g.Graphics) != 1 {
+		t.Fatal("image lost across alt resize round trip")
+	}
+	// Its origin must land in the post-resize content space, and painting
+	// that cell must still reach it (the occlusion bound was invalidated).
+	gr := g.Graphics[0]
+	if gr.OriginR < 0 || gr.OriginR >= g.ContentRows() {
+		t.Fatalf("origin row %d outside content rows %d", gr.OriginR, g.ContentRows())
+	}
+	g.CursorR, g.CursorC = gr.OriginR-g.Scrollback.Len(), gr.OriginC
+	if g.CursorR < 0 || g.CursorR >= g.Rows {
+		t.Skip("graphic not on the live screen after resize")
+	}
+	g.Put('x')
+	if len(g.Graphics) != 0 {
+		t.Fatal("stale occlusion bound after alt resize let a write miss the image")
 	}
 }
 

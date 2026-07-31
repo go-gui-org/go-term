@@ -672,6 +672,9 @@ func (g *grid) InsertLines(n int) {
 	if n > height {
 		n = height
 	}
+	// Rows below the cursor slide down inside the region and none of them
+	// reach scrollback, so images travel with them.
+	g.scrollGraphicsRegion(g.CursorR, g.Bottom, n, true)
 	if n < height {
 		for r := g.Bottom; r >= g.CursorR+n; r-- {
 			copy(
@@ -707,6 +710,9 @@ func (g *grid) DeleteLines(n int) {
 	if n > height {
 		n = height
 	}
+	// Deleted rows are discarded, not pushed to scrollback, so images move
+	// up with the rows that survive and die with the ones that don't.
+	g.scrollGraphicsRegion(g.CursorR, g.Bottom, n, false)
 	if n < height {
 		copy(
 			g.Cells[g.CursorR*g.Cols:(g.Bottom+1)*g.Cols],
