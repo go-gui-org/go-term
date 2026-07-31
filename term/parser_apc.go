@@ -47,6 +47,18 @@ type kgpParams struct {
 	medium   byte   // t=: 'd' direct (default), 'f' file, 't' temp-file, 's' shared-memory
 	more     bool   // m=: true when m=1 (more chunks follow)
 	noCursor bool   // C=: true when C=1 (place without moving the cursor)
+	// cols/rows are the c=/r= cell footprint the client asked for; 0 means
+	// "unspecified, derive from the pixel size". Lowercase, and unrelated to
+	// C= above.
+	cols int
+	rows int
+	// placeID is p=, the placement id. Only meaningful for virtual placements,
+	// where the placeholder cells can name it via their underline color.
+	placeID uint32
+	// virtual is U=1: create a *virtual* placement instead of putting the
+	// image on screen. Nothing is drawn until the client writes U+10EEEE
+	// placeholder cells naming the image — see grid_virtual.go.
+	virtual bool
 }
 
 // parseIntKV parses a KGP integer key=value, logging on error.
@@ -171,6 +183,28 @@ func splitKGPPayload(payload []byte) (kgpParams, []byte) {
 			// sensitive: lowercase 'c' is the placement column count, which
 			// this parser does not implement.
 			params.noCursor = val == "1"
+		case 'U':
+			// Unicode placeholder placement. U=1 makes the placement virtual:
+			// no cells, no cursor movement, nothing on screen until the client
+			// prints U+10EEEE placeholder cells.
+			params.virtual = val == "1"
+		case 'c':
+			// Placement width in cells. Lowercase — C= above is the cursor
+			// movement policy, and the two are unrelated. Clamped here rather
+			// than downstream: kgpCellRect derives the missing dimension by
+			// multiplying this out in float64, and an unclamped c= turns that
+			// into a float too large to convert back to int.
+			if n, ok := parseIntKV(val, 'c'); ok && n >= 0 {
+				params.cols = min(n, MaxGridDim)
+			}
+		case 'r':
+			if n, ok := parseIntKV(val, 'r'); ok && n >= 0 {
+				params.rows = min(n, MaxGridDim)
+			}
+		case 'p':
+			if n, ok := parseUint32KV(val, 'p'); ok {
+				params.placeID = n
+			}
 		case 'i':
 			if n, ok := parseUint32KV(val, 'i'); ok {
 				params.imageID = n
@@ -375,25 +409,57 @@ func (p *parser) kittyFinish(params kgpParams, id uint32, assembledB64 []byte) {
 	}
 
 	if params.action == 'T' || id == 0 {
-		p.kittyDisplay(path, b.Dx(), b.Dy(), id, params.noCursor)
+		if !p.kittyDisplay(path, b.Dx(), b.Dy(), id, params) {
+			p.kittyReply(id, params.quiet, false)
+			return
+		}
 	}
 
 	p.kittyReply(id, params.quiet, true)
 }
 
-// kittyDisplay registers a placement for the image at path and advances the
-// cursor past it, one Newline per row the image covers. noCursor (C=1) skips
-// the advance, leaving the client's own positioning intact. Shared by the
-// display half of a transmission (a=T) and the place action (a=p), so the
-// cursor policy has one home rather than one per call site.
-func (p *parser) kittyDisplay(path string, widthPx, heightPx int, id uint32, noCursor bool) {
-	_, rows := p.g.AddGraphicKitty(path, widthPx, heightPx, id)
-	if noCursor {
-		return
+// kittyDisplay shows the image at path: normally by registering a placement at
+// the cursor and advancing past it (one Newline per row it covers), or — when
+// the client asked for a virtual placement (U=1) — by recording it in the
+// grid's virtual store, where it waits for placeholder cells to name it.
+// noCursor (C=1) skips the advance, leaving the client's own positioning
+// intact. Shared by the display half of a transmission (a=T) and the place
+// action (a=p), so the cursor and footprint policies have one home rather than
+// one per call site. Reports false when the request was rejected.
+func (p *parser) kittyDisplay(
+	path string, widthPx, heightPx int, id uint32, params kgpParams,
+) bool {
+	cols, rows := kgpCellRect(params.cols, params.rows,
+		widthPx, heightPx, p.g.CellPxW, p.g.CellPxH)
+
+	if params.virtual {
+		// A virtual placement is addressed only by its image id, so one
+		// without an i= key can never be displayed. Refusing tells the client
+		// something is wrong instead of silently swallowing the image.
+		if id == 0 {
+			return false
+		}
+		if cols <= 0 || rows <= 0 {
+			// Neither c= nor r= was given. The spec expects both for a virtual
+			// placement; fall back to the pixel-derived footprint so a client
+			// that omits them still gets a sensibly sized image.
+			cols, rows = p.g.cellsForPixels(widthPx, heightPx)
+		}
+		p.g.addVirtualImage(id, virtualImage{
+			Src: path, WidthPx: widthPx, HeightPx: heightPx,
+			Cols: cols, Rows: rows, PlacementID: params.placeID,
+		})
+		return true
 	}
-	for range rows {
+
+	_, placedRows := p.g.AddGraphicKitty(path, widthPx, heightPx, cols, rows, id)
+	if params.noCursor {
+		return true
+	}
+	for range placedRows {
 		p.g.Newline()
 	}
+	return true
 }
 
 // kittyStoreImage records the PNG at path in the off-screen store under id,
@@ -443,7 +509,10 @@ func (p *parser) kittyPlace(params kgpParams) {
 		p.kittyReply(id, quiet, false)
 		return
 	}
-	p.kittyDisplay(e.path, e.w, e.h, id, params.noCursor)
+	if !p.kittyDisplay(e.path, e.w, e.h, id, params) {
+		p.kittyReply(id, quiet, false)
+		return
+	}
 	p.kittyReply(id, quiet, true)
 }
 
@@ -473,7 +542,12 @@ func (p *parser) kittyDeleteID(id uint32, op string) {
 	switch sel {
 	case 'a':
 		p.g.deleteGraphics(0, true)
+		// Virtual placements are not "visible on screen" — they own no cells —
+		// so the lowercase selector leaves them alone. Only freeing the image
+		// data (uppercase) can take them, since without the file there is
+		// nothing left to draw.
 		if freeData {
+			p.g.deleteAllVirtualImages()
 			for _, e := range p.kittyStore {
 				_ = os.Remove(e.path)
 			}
@@ -481,6 +555,10 @@ func (p *parser) kittyDeleteID(id uint32, op string) {
 		}
 	case 'i':
 		p.g.deleteGraphics(id, false)
+		// d=i names one image explicitly, so its virtual placement goes too:
+		// the client asked for that image to stop being displayed, and for a
+		// virtual placement the placement *is* the display.
+		p.g.deleteVirtualImage(id)
 		if freeData {
 			if e, ok := p.kittyStore[id]; ok {
 				_ = os.Remove(e.path)

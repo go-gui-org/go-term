@@ -109,6 +109,9 @@ func (g *grid) HardReset() {
 	g.Marks = g.Marks[:0]
 	g.marksVer++
 	g.Graphics = g.Graphics[:0]
+	// Virtual placements go too: RIS wipes the screen, so every placeholder
+	// cell that could have named one is gone as well.
+	g.deleteAllVirtualImages()
 	g.ClearSelection()
 	g.ResetView()
 	g.CursorR, g.CursorC = 0, 0

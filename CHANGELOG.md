@@ -8,6 +8,19 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `term`: Kitty Graphics Protocol Unicode placeholder placement — `U=1`
+  (#118). An image sent that way creates a *virtual* placement: it consumes no
+  cells, blanks nothing, and does not move the cursor. It appears wherever the
+  application later prints U+10EEEE placeholder cells, whose foreground color
+  names the image, underline color the placement, and combining diacritics the
+  tile. That is the only mode that survives being drawn inside a scrolling or
+  layout-managed widget, because the terminal follows the cells rather than an
+  absolute rectangle — yazi, tmux passthrough and the TUI image libraries all
+  rely on it. Placeholder cells copy as blanks and never render their own
+  character. Also honors `c=`/`r=` on ordinary placements: the image is scaled
+  into the requested cell rectangle, and giving only one of the two derives the
+  other from the aspect ratio.
+
 - `term`: OSC 133 shell integration now uses the exit status shells report in
   `OSC 133;D;<exit>` (#103). `term.jump-failure` (`Cmd+Shift+E`) scrolls to the
   most recent command that exited non-zero — repeated presses walk back through

@@ -92,8 +92,45 @@ Supports a modern xterm/kitty-compatible subset:
   RGBA/RGB; chunked base64 — the opening chunk's `f=`/`s=`/`v=`/`a=`/`C=`
   govern the whole transfer, continuation chunks carry only `m=` and payload).
   `C=1` suppresses the post-placement cursor advance on both `a=T` and `a=p`.
-  Unicode placeholder placement (`U=1`) is *not* implemented — an image sent
-  that way is placed at the cursor instead of at the placeholder cells.
+  `c=`/`r=` set the placement's cell footprint; giving only one derives the
+  other from the pixel aspect ratio (`kgpCellRect`). `U=1` creates a *virtual*
+  placement — see below. Not implemented: relative placements (`P=`/`Q=`),
+  z-index (`z=`), source rectangles (`x`/`y`/`w`/`h`), pixel offsets
+  (`X=`/`Y=`).
+
+Unicode placeholders (`U=1`) are a second, cell-driven image layer and the
+only one that survives a layout-managed host (tmux, vim, yazi). A virtual
+placement owns no rectangle and moves no cursor: it records "image N fits a
+`c`×`r` rectangle" in `grid.virtualImages` (`grid_virtual.go`) and waits. The
+image appears where the application prints U+10EEEE cells whose foreground
+color carries the image id (palette index in 256-color mode, RGB in
+true-color), whose underline color carries the placement id, and whose
+combining diacritics carry row, column and the image id's high byte
+(`kgp_placeholder.go`; the 297-entry table is generated from
+`ucd/rowcolumn-diacritics.txt`). Omitted diacritics inherit from the cell to
+the left, which is why the decode carries a `placeholderCell` across the row.
+The cluster — placeholder plus diacritics — is one grapheme, so the decode
+reads the interned cluster string, not `cell.Ch`.
+
+Because of that indirection the virtual store is deliberately unlike
+`Graphics`: not per-screen (the *cells* are), and untouched by scrollback
+trim, reflow and `scrollGraphicsRegion` (there is no origin row to move — the
+cells reflow as text). `occludeGraphics` can never fire on it either, since
+placeholder cells are ordinary text and the store holds no placements. `a=d`
+splits accordingly: `d=i` drops the named image's virtual placement, `d=a`
+does not (it means "placements visible on screen", and a virtual one occupies
+none), uppercase frees the data and takes the virtual placement with it.
+
+`drawPlaceholders` (`widget_draw_graphics.go`) is the render half. It scans
+visible cells, coalesces contiguous tiles into rectangles (a full block
+collapses to one), extrapolates the placement origin backwards from a
+rectangle's first tile, and maps the whole image onto that rectangle. A
+rectangle cut off only by the viewport edge draws unclipped — the canvas
+clips — so the common path stays one `dc.Image`; a cut *inside* the viewport
+(another pane, a partial block) uses `dc.ImageClipped` so the image cannot
+spill over neighbouring text. `maskGlyph` blanks the placeholder character so
+no tofu box shows through, and `SelectedText` treats those cells as blank so
+copy never yields U+10EEEE.
 
 Image lifetime differs by protocol and this distinction is load-bearing.
 Kitty placements are their own layer: text drawn over their cells leaves them

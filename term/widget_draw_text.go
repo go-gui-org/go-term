@@ -194,14 +194,22 @@ func textBlinkOff(now time.Time) bool {
 	return (now.UnixNano()/int64(cursorBlinkPeriod))%2 == 1
 }
 
-// maskGlyph blanks a cell's glyph when SGR 8 (conceal) is set, or when SGR 5/6
-// (blink) is set and the cycle is currently in its hidden half. Background,
-// selection inversion and underline decoration are untouched — only the glyph
-// disappears, matching xterm. Conceal must be honored: ncurses maps A_INVIS to
-// SGR 8 and password prompts rely on it, so ignoring the attribute would show
-// the typed secret.
+// maskGlyph blanks a cell's glyph when SGR 8 (conceal) is set, when SGR 5/6
+// (blink) is set and the cycle is currently in its hidden half, or when the
+// cell is a Kitty Unicode placeholder. Background, selection inversion and
+// underline decoration are untouched — only the glyph disappears, matching
+// xterm.
+//
+// Conceal must be honored: ncurses maps A_INVIS to SGR 8 and password prompts
+// rely on it, so ignoring the attribute would show the typed secret. A
+// placeholder is a graphics instruction wearing text's clothes — the cell says
+// "show tile (row, col) of image N here" and drawPlaceholders paints it, so
+// rendering the character itself would put a private-use tofu box under every
+// image. The background still paints, which is what the protocol wants: it
+// shows through a transparent image.
 func maskGlyph(c cell, blinkOff bool) cell {
-	if c.Attrs&attrConceal != 0 || (blinkOff && c.Attrs&attrBlink != 0) {
+	if c.Attrs&attrConceal != 0 || (blinkOff && c.Attrs&attrBlink != 0) ||
+		c.Ch == kgpPlaceholderRune {
 		c.Ch = ' '
 		c.clusterID = 0
 	}
