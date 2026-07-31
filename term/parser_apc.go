@@ -20,8 +20,9 @@ type kittyEntry struct {
 // opening params have to be remembered here or the final chunk decodes with
 // protocol defaults (f=32, s=0, v=0) and the image is silently dropped.
 type kittyPending struct {
-	params kgpParams
-	b64    []byte
+	params    kgpParams
+	b64       []byte
+	truncated bool // maxKittyImageBytes was hit; suppresses repeat logging
 }
 
 // dispatchAPC processes a completed APC sequence (ESC _ payload ESC \).
@@ -197,6 +198,18 @@ func (p *parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 	if id == 0 && p.kittyOpenID != 0 {
 		id = p.kittyOpenID
 	}
+	// A transmission refused at its opening chunk keeps its slot in kittyOpenID
+	// so that its payload-only continuations are dropped here. Without this they
+	// route to the *previous* open id and either resurrect the refused image
+	// under anonymous id 0 or corrupt an unrelated in-flight transfer.
+	if p.kittyOpenDropped && id == p.kittyOpenID {
+		if !params.more {
+			p.kittyOpenID = 0
+			p.kittyOpenDropped = false
+		}
+		return
+	}
+
 	pend, known := p.kittyChunks[id]
 
 	// A self-contained transmission — no m=1 opened this id and none opens it
@@ -209,43 +222,120 @@ func (p *parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 		return
 	}
 
-	if len(rawB64) > 0 {
+	if !known {
+		// Opening chunk: its control data governs the whole transmission, so
+		// record it *before* looking at the payload. The spec allows an opener
+		// that carries control data only — no ';' section at all — and chafa
+		// sends exactly that (`a=T,f=32,s=…,v=…,m=1,q=2` then payload-only
+		// continuations). Deferring the record until a chunk had payload lost
+		// the opener's f=/s=/v=/q=, so the final decode saw width 0, returned
+		// nil, and the whole image came back EINVAL.
 		if p.kittyChunks == nil {
 			p.kittyChunks = make(map[uint32]kittyPending)
 		}
 		// Refuse new IDs when the pending-chunk table is full to prevent a
 		// DoS where a malicious server opens many IDs with m=1 and never
 		// finalises them. Reply so the client doesn't wait on a dead transfer.
-		if !known && len(p.kittyChunks) >= maxKittyPendingChunks {
-			p.kittyReply(id, params.quiet, false)
+		if len(p.kittyChunks) >= maxKittyPendingChunks {
+			p.kittyRefuse(id, params)
 			return
 		}
-		if !known {
-			// First chunk: its control data governs the whole transmission.
-			pend.params = params
+		// A raw transmission states its pixel dimensions up front. Reject an
+		// oversize one here rather than buffering tens of MB of base64 that
+		// kittyRawToNRGBA is going to refuse anyway.
+		if (params.format == 32 || params.format == 24) &&
+			(params.widthPx > maxSixelWidth || params.heightPx > maxSixelHeight) {
+			log.Printf("term: KGP image %d×%d exceeds %d×%d, rejected",
+				params.widthPx, params.heightPx, maxSixelWidth, maxSixelHeight)
+			p.kittyRefuse(id, params)
+			return
 		}
-		if len(pend.b64)+len(rawB64) <= maxKittyImageBytes {
+		pend.params = params
+		p.putKittyPending(id, pend)
+	}
+	if len(rawB64) > 0 {
+		// Two ceilings: one transmission may not exceed maxKittyImageBytes, and
+		// all in-flight transmissions together may not exceed
+		// maxKittyPendingBytes — otherwise maxKittyPendingChunks abandoned
+		// transfers could each sit on a full-size buffer.
+		if len(pend.b64)+len(rawB64) > maxKittyImageBytes ||
+			p.kittyPendingBytes+len(rawB64) > maxKittyPendingBytes {
+			// Silently truncating leaves the client staring at nothing when it
+			// asked for quiet (q=2), so leave a trace for whoever debugs it —
+			// once per transmission, not once per dropped chunk.
+			if !pend.truncated {
+				log.Printf("term: KGP transmission %d exceeds the %d-byte per-image "+
+					"or %d-byte total base64 budget, truncated",
+					id, maxKittyImageBytes, maxKittyPendingBytes)
+				pend.truncated = true
+				p.putKittyPending(id, pend)
+			}
+		} else {
 			pend.b64 = append(pend.b64, rawB64...)
-			p.kittyChunks[id] = pend
-			known = true
+			p.putKittyPending(id, pend)
 		}
 	}
+	// Reaching here means this id is being accepted, so it owns the open slot
+	// outright — any earlier refusal it might have inherited is over.
+	p.kittyOpenDropped = false
 	if params.more {
-		if known {
-			p.kittyOpenID = id
-		}
+		p.kittyOpenID = id
 		return
 	}
 	p.kittyOpenID = 0
-	delete(p.kittyChunks, id)
+	p.dropKittyPending(id)
 
-	// Decode with the opening chunk's format and dimensions; only q= (whether
-	// to reply) is taken from the chunk in hand.
-	quiet := params.quiet
+	// Decode with the opening chunk's control data — q= included, since
+	// continuation chunks do not repeat it and a client that opened with q=2
+	// expects silence. A closing chunk that states its own non-zero q= still
+	// wins; 0 is indistinguishable from absent, so it cannot un-quiet.
+	quiet := pend.params.quiet
+	if params.quiet != 0 {
+		quiet = params.quiet
+	}
 	params = pend.params
 	params.quiet = quiet
 	params.imageID = id
+	if pend.truncated {
+		// A truncated buffer cannot decode to anything but garbage, so skip the
+		// decode rather than spend a second full-size allocation and an image
+		// decode on it. The client still gets its answer.
+		p.kittyReply(id, params.quiet, false)
+		return
+	}
 	p.kittyFinish(params, id, pend.b64)
+}
+
+// putKittyPending stores pend under id, keeping kittyPendingBytes in step with
+// the table. Every write to kittyChunks outside the tests goes through here (or
+// dropKittyPending) so the aggregate byte count cannot drift from the map.
+func (p *parser) putKittyPending(id uint32, pend kittyPending) {
+	p.kittyPendingBytes += len(pend.b64) - len(p.kittyChunks[id].b64)
+	p.kittyChunks[id] = pend
+}
+
+// dropKittyPending removes id's pending state and returns its bytes to the
+// shared budget.
+func (p *parser) dropKittyPending(id uint32) {
+	p.kittyPendingBytes -= len(p.kittyChunks[id].b64)
+	if p.kittyPendingBytes < 0 {
+		// Only reachable if something bypassed putKittyPending; clamp rather
+		// than let a negative count hand out unbounded headroom.
+		p.kittyPendingBytes = 0
+	}
+	delete(p.kittyChunks, id)
+}
+
+// kittyRefuse rejects a transmission at its opening chunk: it answers the
+// client so it doesn't wait on a dead transfer, and — when the chunk left the
+// transfer open (m=1) — marks the id so the payload-only continuations still
+// coming are discarded instead of being attributed to another transmission.
+func (p *parser) kittyRefuse(id uint32, params kgpParams) {
+	p.kittyReply(id, params.quiet, false)
+	if params.more {
+		p.kittyOpenID = id
+		p.kittyOpenDropped = true
+	}
 }
 
 // kittyFinish decodes one complete transmission's base64 text, stores the

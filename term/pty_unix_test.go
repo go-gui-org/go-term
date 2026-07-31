@@ -146,10 +146,17 @@ func TestStartPTY_ScrubsHostTerminalIdentity(t *testing.T) {
 		t.Skipf("startPTY: %v", err)
 	}
 	defer func() { _ = p.Close() }()
-	for _, k := range hostTerminalEnvKeys {
-		if v := envValue(p.cmd.Env, k); v != "" {
-			t.Errorf("%s leaked to child as %q", k, v)
-		}
+	if got := envValue(p.cmd.Env, "ITERM_SESSION_ID"); got != "" {
+		t.Errorf("ITERM_SESSION_ID leaked to child as %q", got)
+	}
+	// The host's name is replaced by this terminal's own, not merely removed:
+	// an unset TERM_PROGRAM reads as "no information" rather than "not the
+	// terminal that launched me".
+	if got := envValue(p.cmd.Env, "TERM_PROGRAM"); got != "go-term" {
+		t.Errorf("TERM_PROGRAM = %q; want go-term", got)
+	}
+	if got := envValue(p.cmd.Env, "TERM_PROGRAM_VERSION"); got != termVersion {
+		t.Errorf("TERM_PROGRAM_VERSION = %q; want %q", got, termVersion)
 	}
 }
 

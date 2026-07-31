@@ -116,9 +116,10 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 
 	// COLORTERM advertises the widget's 24-bit rendering; TERM alone only
 	// promises the 256-color palette, so TUI toolkits quantize without it.
-	// The host terminal's identity is scrubbed first (see hostTerminalEnvKeys)
-	// so the child probes this terminal instead of trusting the parent's.
-	env := dropEnv(os.Environ(), hostTerminalEnvKeys[:])
+	// The host terminal's identity is replaced by this one's first (see
+	// setTerminalIdentity) so the child probes this terminal instead of
+	// trusting the parent's.
+	env := setTerminalIdentity(os.Environ())
 	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
 	env = append(env, cfg.Env...)
 	envBlock, err := createEnvBlock(env)

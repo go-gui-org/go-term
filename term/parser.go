@@ -21,7 +21,13 @@ type parser struct {
 	kittyStore  map[uint32]kittyEntry   // off-screen cache: image id → entry
 	// kittyOpenID is the id of the transmission an m=1 chunk left open, so the
 	// continuation chunks — which carry no i= key — land in the right entry.
-	kittyOpenID uint32
+	// kittyOpenDropped marks that transmission as refused (oversize, or the
+	// pending table was full): its continuations must be discarded rather than
+	// routed to whatever id was open before it. kittyPendingBytes is the total
+	// base64 buffered across kittyChunks, bounded by maxKittyPendingBytes.
+	kittyOpenID       uint32
+	kittyOpenDropped  bool
+	kittyPendingBytes int
 
 	// onTitle, if non-nil, is invoked for OSC 0/1/2 (window title).
 	// onReply, if non-nil, is invoked when the parser needs to write
