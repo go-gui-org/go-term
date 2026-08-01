@@ -503,6 +503,37 @@ func (g *grid) defaultBG() gui.Color {
 	return g.Theme.DefaultBG
 }
 
+// themeIsDark reports whether a background color reads as dark, using integer
+// Rec.601 luma (299R + 587G + 114B, scaled by 1000). Float-free to match the
+// rest of the color math here; the threshold is the midpoint, which is what
+// kitty and Ghostty use for the same question.
+func themeIsDark(c gui.Color) bool {
+	return 299*int(c.R)+587*int(c.G)+114*int(c.B) < 128*1000
+}
+
+// colorSchemeDark is the single source of truth for what DSR ?996 reports and
+// what the mode-2031 notification announces.
+//
+// It reads Theme.DefaultBG, which OSC 11 writes through (see SetDynColor), so a
+// child that repainted the background is answered about the background it
+// actually set. It deliberately does *not* go through defaultBG: that folds in
+// DECSCNM, and reverse video is a transient render toggle, not a change of
+// color scheme — reporting a flip for it would have every subscribed app
+// re-theme itself twice per `tput flash`.
+func (g *grid) colorSchemeDark() bool {
+	return themeIsDark(g.Theme.DefaultBG)
+}
+
+// colorSchemeReport builds the CSI ? 997 ; Ps n report: 1 = dark, 2 = light.
+// Shared by the DSR ?996 answer and the unsolicited mode-2031 notification so
+// the two can never disagree about the encoding.
+func colorSchemeReport(dark bool) []byte {
+	if dark {
+		return []byte("\x1b[?997;1n")
+	}
+	return []byte("\x1b[?997;2n")
+}
+
 // Selection highlight tint. Terminal.app-style: a selected cell keeps its own
 // foreground color and its background is blended a fixed fraction toward one
 // of the theme's default colors. Blending toward a theme color (rather than a

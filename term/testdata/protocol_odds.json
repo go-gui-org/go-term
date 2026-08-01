@@ -1,0 +1,13 @@
+{
+  "name": "protocol_odds",
+  "input_b64": "YmVmb3JlG1s/MjAzMWgbXTIyO2Nyb3NzaGFpcgcbXTk7NDsxOzUwBw0KYWZ0ZXI=",
+  "want_lines": [
+    "before              ",
+    "after               ",
+    "                    "
+  ],
+  "rows": 3,
+  "cols": 20,
+  "want_row": 1,
+  "want_col": 5
+}

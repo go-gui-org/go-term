@@ -1,8 +1,8 @@
 # go-term: Roadmap
 
 `go-term` is a full-featured terminal-emulator widget for
-[go-gui](https://github.com/go-gui-org/go-gui). 49 of 56 phases shipped;
-work remaining: 49–51 (competitive feature parity) then 52–54 (API
+[go-gui](https://github.com/go-gui-org/go-gui). 50 of 56 phases shipped;
+work remaining: 50–51 (competitive feature parity) then 52–54 (API
 stabilisation, which runs last so it audits the final surface). Phase 55
 (v1.0.0) blocked on go-gui v1.0.
 
@@ -57,20 +57,6 @@ shortcuts), `SetTextStyle`/`SetScrollbackRows`/`SetBellMode`/`SetScrollbarWidth`
 
 Unshipped work only. A phase that lands is deleted from here and recorded as
 one row in [Completed](#completed).
-
-### Phase 49 — Protocol odds and ends (issue #131)
-
-Four small gaps, batched because each is 30–60 lines of parser plus a fixture;
-separate issues would cost more ceremony than code.
-
-- [ ] Mode 2031 + DSR ?996 — color-scheme-change notification, emitted on
-      `setTheme` so neovim/delta follow a runtime theme switch
-- [ ] OSC 22 — mouse cursor shape (hover plumbing already exists)
-- [ ] OSC 9;4 — ConEmu progress reporting; render in the scrollbar track
-      alongside the Phase 47 failure ticks
-- [ ] XTSMGRAPHICS — sixel geometry / color-register queries, which
-      `img2sixel` issues before emitting
-- [ ] Conformance fixtures for each
 
 ### Phase 50 — Shell integration, completed (issue #132)
 
@@ -214,6 +200,7 @@ When go-gui ships v1.0.0:
 | 46  | Copy mode                               | `Cmd+Shift+Space`, vim keys, `y`              |
 | 47  | OSC 133 failures + output selection     | `Cmd+Shift+E`, `Cmd+Shift+O`, scrollbar ticks |
 | 48  | Mouse selection semantics               | Double/triple click, Alt+drag block, middle-click paste, alt-screen wheel |
+| 49  | Protocol odds and ends                  | Mode 2031/DSR ?996, OSC 22, OSC 9;4 progress, XTSMGRAPHICS |
 
 ## Commands
 

@@ -527,6 +527,34 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	t.updateHover(r, c, w)
 }
 
+// applyPointerShape maps an OSC 22 shape onto go-gui's window cursor calls.
+// The only place in the widget that knows both vocabularies; pointer.go owns
+// the grid-side enum and stays free of go-gui.
+func applyPointerShape(w *gui.Window, s pointerShape) {
+	switch s {
+	case pointerIBeam:
+		w.SetMouseCursorIBeam()
+	case pointerPointingHand:
+		w.SetMouseCursorPointingHand()
+	case pointerCrosshair:
+		w.SetMouseCursorCrosshair()
+	case pointerArrow:
+		w.SetMouseCursorArrow()
+	case pointerAll:
+		w.SetMouseCursorAll()
+	case pointerNS:
+		w.SetMouseCursorNS()
+	case pointerEW:
+		w.SetMouseCursorEW()
+	case pointerNESW:
+		w.SetMouseCursorResizeNESW()
+	case pointerNWSE:
+		w.SetMouseCursorResizeNWSE()
+	case pointerNotAllowed:
+		w.SetMouseCursorNotAllowed()
+	}
+}
+
 // updateHover updates t.hoverR/C, requests a redraw when entering or leaving
 // a hyperlinked cell run, and sets the cursor to a pointing hand when Cmd is
 // held over a link.
@@ -541,6 +569,7 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 	var prevLink, curLink uint16
 	var url string
 	var spans []urlSpan
+	var shape pointerShape
 	func() {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
@@ -552,13 +581,21 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 			cp := contentPos{Row: t.grid.viewportToContent(r), Col: c}
 			url, spans, _ = t.grid.detectURLAt(cp)
 		}
+		shape = t.grid.PointerShape
 	}()
 
 	// Pointing-hand cursor over any actionable link — explicit or detected.
 	// go-gui resets the cursor to Arrow at the top of every mouse-move event,
 	// so re-apply on every call, even when the coords haven't changed.
-	if cmd && (curLink != 0 || url != "") {
+	//
+	// A hovered link outranks OSC 22: the link is a property of the cell under
+	// the pointer *right now*, while the OSC 22 shape is a pane-wide default the
+	// application set at some earlier point.
+	switch {
+	case cmd && (curLink != 0 || url != ""):
 		w.SetMouseCursorPointingHand()
+	case shape != pointerDefault:
+		applyPointerShape(w, shape)
 	}
 
 	prevURL := t.mouse.hoverURL

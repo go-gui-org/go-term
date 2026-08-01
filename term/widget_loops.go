@@ -160,17 +160,36 @@ func (t *Term) enqueueReplies() {
 	for _, b := range t.pendingReplies {
 		n += len(b)
 	}
+	t.appendReplies(t.pendingReplies, n)
+	t.pendingReplies = nil
+}
+
+// queueReply hands one reply to writeLoop. Unlike enqueueReplies it is safe
+// from any goroutine including the main thread, because it only appends under
+// replyMu — writeRaw would block the UI thread whenever the child's input
+// buffer is full. Used by the emitters that originate outside parser.Feed:
+// SetTheme's mode-2031 color-scheme notification.
+func (t *Term) queueReply(b []byte) {
+	if len(b) == 0 {
+		return
+	}
+	t.appendReplies([][]byte{b}, len(b))
+}
+
+// appendReplies is the shared tail of both queueing paths: one lock, one
+// append, one signal, and the same maxReplyQueueBytes drop rule — a child that
+// has stopped reading must not be able to grow this queue without bound.
+func (t *Term) appendReplies(batch [][]byte, n int) {
 	t.replyMu.Lock()
 	queued := t.replyBytes < maxReplyQueueBytes
 	if queued {
-		t.replyQueue = append(t.replyQueue, t.pendingReplies...)
+		t.replyQueue = append(t.replyQueue, batch...)
 		t.replyBytes += n
 	}
 	t.replyMu.Unlock()
 	if queued {
 		t.replyCond.Signal()
 	}
-	t.pendingReplies = nil
 }
 
 // writeLoop is the dedicated reply-writer goroutine: it drains replyQueue and
@@ -270,6 +289,7 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 		t.parser.feedChunk(data)
 	}
 	bellCount := t.grid.BellCount
+	overlayVer := t.grid.OverlayVersion
 	// A block still open at the end of this chunk normally suppresses the
 	// repaint, since the grid may hold a half-written frame. But applications
 	// commonly close one frame and open the next back to back (BSU … ESU BSU),
@@ -278,13 +298,18 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 	// exactly that case, so the frame goes up now instead of waiting on the
 	// next read or the 500 ms watchdog.
 	redraw := !t.grid.SyncOutput || !t.grid.SyncActive || t.grid.SyncFrameQuiescent()
-	dirty := t.grid.HasDirtyRows() || bellCount != t.bell.readCount
+	// OverlayVersion covers state that repaints an overlay but marks no row
+	// dirty (OSC 9;4 progress) — without it the frame is never scheduled and
+	// the change sits in the grid unseen.
+	dirty := t.grid.HasDirtyRows() || bellCount != t.bell.readCount ||
+		overlayVer != t.overlayVersion
 	needUpdate := false
 	if redraw {
 		t.grid.SyncFrameReady = false
 	}
 	if redraw && dirty {
 		t.bell.readCount = bellCount
+		t.overlayVersion = overlayVer
 		t.bumpVersion()
 		needUpdate = true
 	}

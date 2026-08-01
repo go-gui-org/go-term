@@ -329,6 +329,11 @@ type Term struct {
 	bell   bellState
 	sync   syncState
 
+	// overlayVersion mirrors grid.OverlayVersion as applyChunk last saw it, so
+	// overlay-only changes (OSC 9;4 progress) schedule exactly one frame.
+	// Reader-goroutine local, like bell.readCount.
+	overlayVersion uint64
+
 	// pendingReplies buffers parser-originated reply bytes (DA, DECRQSS,
 	// XTGETTCAP, ...) emitted during parser.Feed. Reader-goroutine local:
 	// onParserReply appends during Feed, applyChunk hands the batch to the

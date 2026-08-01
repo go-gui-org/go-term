@@ -139,8 +139,16 @@ func (g *grid) HardReset() {
 	g.MouseSGR, g.MouseSGRPixels = false, false
 	g.BracketedPaste = false
 	g.FocusReporting = false
+	g.ColorSchemeUpdates = false
 	g.KittyKeyFlags = 0
 	g.kittyFlagStack = g.kittyFlagStack[:0]
+
+	// OSC 22 pointer shape and OSC 9;4 progress. Both are child-set decorations
+	// with no reset sequence of their own, so `reset` is the only way out of a
+	// pane left showing a crosshair or a stuck progress bar by a killed job.
+	g.PointerShape = pointerDefault
+	g.ProgressState, g.ProgressValue = 0, 0
+	g.OverlayVersion++
 
 	// DECSACE back to the power-on stream extent. DECSTR leaves it alone —
 	// VT510's soft-reset table does not list it.

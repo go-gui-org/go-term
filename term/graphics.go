@@ -53,6 +53,11 @@ const (
 	// caps a single decode at ~64 MB of intermediate NRGBA buffer.
 	maxSixelWidth  = 4096
 	maxSixelHeight = 4096
+	// sixelColorRegisters is the number of color registers decodeSixel offers,
+	// fixed by its `pal [256]color.NRGBA`. Reported by XTSMGRAPHICS (Pi=1) so
+	// img2sixel quantizes to a palette this decoder can actually hold — change
+	// the array and this constant together.
+	sixelColorRegisters = 256
 	// Cap on Graphics retained by a grid. Oldest are evicted first.
 	maxGraphics = 256
 
