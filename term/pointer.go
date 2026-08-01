@@ -74,6 +74,12 @@ var pointerNames = map[string]pointerShape{
 	"pirate":            pointerNotAllowed,
 }
 
+// maxPointerNameLen is the length of the longest key in pointerNames
+// ("sb_v_double_arrow"). OSC payloads run up to maxOSCBytes, and asciiLower
+// would copy the whole 4 KB before a map lookup that cannot possibly match —
+// so reject on length first and keep a junk payload allocation-free.
+const maxPointerNameLen = 17
+
 // parsePointerShape resolves an OSC 22 payload. An empty payload clears the
 // request (xterm's documented "reset to default"). An unrecognized name
 // returns ok=false and the caller leaves the current shape alone: an app
@@ -83,14 +89,18 @@ func parsePointerShape(name string) (pointerShape, bool) {
 	if name == "" {
 		return pointerDefault, true
 	}
+	if len(name) > maxPointerNameLen {
+		return pointerDefault, false
+	}
 	s, ok := pointerNames[asciiLower(name)]
 	return s, ok
 }
 
-// asciiLower lowercases ASCII in place-free fashion, returning the input
-// unchanged when it already is. OSC 22 names are ASCII by definition, so this
-// avoids pulling strings.ToLower's Unicode path — and its allocation — into a
-// sequence that arrives on every mouse-mode change some TUIs make.
+// asciiLower lowercases ASCII, returning the input unchanged — and allocating
+// nothing — when it is already lowercase, which is the case for every name a
+// real application sends. OSC 22 names are ASCII by definition, so this avoids
+// pulling strings.ToLower's Unicode path into a sequence that arrives on every
+// mouse-mode change some TUIs make.
 func asciiLower(s string) string {
 	needs := false
 	for i := 0; i < len(s); i++ {

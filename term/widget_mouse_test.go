@@ -1421,6 +1421,33 @@ func TestOnMouseScroll_MainScreenDoesNotSynthesize(t *testing.T) {
 // TestOSC22AppliesCursor covers the widget half of OSC 22: the shape the
 // application asked for is applied on every hover update, and a hovered
 // hyperlink still outranks it.
+// An application in a mouse-reporting mode is the main consumer of OSC 22,
+// and onMouseMove returns from the reporting branches without ever reaching
+// updateHover. Since go-gui resets the cursor to Arrow at the top of every
+// move, the shape has to be applied before those returns or it never shows.
+func TestOSC22AppliesCursorInMouseReportingMode(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrackAny = true
+	tm.grid.MouseSGR = true
+	tm.grid.PointerShape = pointerCrosshair
+	tm.grid.Mu.Unlock()
+
+	w := &gui.Window{}
+	tm.onMouseMove(nil, &gui.Event{MouseX: 35, MouseY: 45}, w)
+	if got := w.MouseCursorState(); got != gui.CursorCrosshair {
+		t.Fatalf("cursor = %v, want CursorCrosshair", got)
+	}
+
+	// Second move onto the same cell takes the dedupe early return; the
+	// shape must survive go-gui's per-event reset there too.
+	w.SetMouseCursorArrow()
+	tm.onMouseMove(nil, &gui.Event{MouseX: 35, MouseY: 45}, w)
+	if got := w.MouseCursorState(); got != gui.CursorCrosshair {
+		t.Fatalf("cursor after same-cell move = %v, want CursorCrosshair", got)
+	}
+}
+
 func TestOSC22AppliesCursor(t *testing.T) {
 	tm, _ := newDrawTerm(4, 8, 10, 20)
 	w := &gui.Window{}

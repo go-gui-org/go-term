@@ -1,6 +1,7 @@
 package term
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -176,6 +177,18 @@ func TestOSC22PointerShape(t *testing.T) {
 	if g.PointerShape != pointerDefault {
 		t.Fatalf("RIS left shape = %d", g.PointerShape)
 	}
+
+	// A payload longer than the longest known name is rejected on length,
+	// before asciiLower can copy up to maxOSCBytes of junk. The previous
+	// shape survives, same as any other unknown name.
+	long := strings.Repeat("A", maxOSCBytes)
+	_, g = replyTo(t, 4, 8, "\x1b]22;crosshair\x07\x1b]22;"+long+"\x07", nil)
+	if g.PointerShape != pointerCrosshair {
+		t.Fatalf("overlong name clobbered shape: got %d", g.PointerShape)
+	}
+	if _, ok := parsePointerShape(long); ok {
+		t.Fatal("overlong name accepted")
+	}
 }
 
 // --- OSC 9;4 ---------------------------------------------------------------
@@ -248,6 +261,21 @@ func TestOSC9NotificationSplit(t *testing.T) {
 
 	if len(bodies) != 1 || bodies[0] != "build done" {
 		t.Fatalf("notifications = %q, want exactly [\"build done\"]", bodies)
+	}
+
+	// A bare "9;4" — the progress subtype with every field omitted — is a
+	// clear, not a notification whose body is the digit 4.
+	bodies = nil
+	g = newGrid(4, 8)
+	p = newParser(g)
+	p.SetNotifyHandler(func(_, body string) { bodies = append(bodies, body) })
+	feed(t, g, p, []byte("\x1b]9;4;1;50\x07\x1b]9;4\x07"))
+	if len(bodies) != 0 {
+		t.Fatalf("bare 9;4 raised notifications %q", bodies)
+	}
+	if g.ProgressState != 0 || g.ProgressValue != 0 {
+		t.Fatalf("bare 9;4 left progress state=%d value=%d",
+			g.ProgressState, g.ProgressValue)
 	}
 }
 

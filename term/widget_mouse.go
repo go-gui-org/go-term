@@ -459,6 +459,19 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if coasting {
 		t.cancelMomentum()
 	}
+
+	// go-gui resets the cursor to Arrow at the top of every mouse-move event,
+	// so an OSC 22 shape has to be re-applied on every move. It happens here
+	// and not only in updateHover because the mouse-reporting branches below
+	// return before updateHover is ever reached — and an application driving
+	// ?1002/?1003 is precisely the kind that sets OSC 22, so gating the shape
+	// on the non-reporting path would leave it unreachable in practice.
+	// updateHover re-applies it afterwards on the paths that do reach it,
+	// which is what lets a hovered link outrank the shape.
+	if shape := t.pointerShapeSnap(); shape != pointerDefault {
+		applyPointerShape(w, shape)
+	}
+
 	r, c := t.posToCell(e.MouseX, e.MouseY)
 	snap := t.mouseSnap()
 	if snap.sgr && snap.live {
@@ -525,6 +538,15 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	t.bumpVersion()
 	w.UpdateWindow()
 	t.updateHover(r, c, w)
+}
+
+// pointerShapeSnap copies the OSC 22 shape out from under g.Mu so the caller
+// can hand it to go-gui with the lock released — grid.Mu is never held across
+// a call into another subsystem.
+func (t *Term) pointerShapeSnap() pointerShape {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	return t.grid.PointerShape
 }
 
 // applyPointerShape maps an OSC 22 shape onto go-gui's window cursor calls.

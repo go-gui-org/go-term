@@ -200,6 +200,14 @@ func (p *parser) dispatchOSC() {
 			p.handleOSC94(rest)
 			return
 		}
+		// A bare "9;4" carries no state. It is still a progress report — the
+		// trailing fields are optional in ConEmu's own description — and
+		// handleOSC94 reads the missing state as 0, the clear. Falling through
+		// would pop a desktop notification whose body is the digit 4.
+		if pt == "4" {
+			p.handleOSC94("")
+			return
+		}
 		// iTerm2-style notification: OSC 9 ; message BEL — body only, no title.
 		if p.onNotify != nil {
 			p.onNotify("", truncatePaste(pt, notifyMax))
