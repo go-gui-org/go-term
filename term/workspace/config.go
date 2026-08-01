@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,10 +34,13 @@ type workspaceConfig struct {
 	scrollback int           // [general] scrollback rows (negative disables)
 	bell       term.BellMode // [general] bell
 
-	hasFontSize   bool
-	hasScrollback bool
-	hasScrollbar  bool
-	hasBell       bool
+	middleClickPaste bool // [general] middle-click-paste
+
+	hasFontSize         bool
+	hasScrollback       bool
+	hasScrollbar        bool
+	hasBell             bool
+	hasMiddleClickPaste bool
 }
 
 const (
@@ -175,8 +179,28 @@ func (c *workspaceConfig) setGeneral(key, val string) error {
 			return fmt.Errorf("bell %q: want auto|audible|visual|both|none", val)
 		}
 		c.bell, c.hasBell = m, true
+	case "middle-click-paste":
+		b, ok := parseConfigBool(val)
+		if !ok {
+			return fmt.Errorf("middle-click-paste %q: want true|false", val)
+		}
+		c.middleClickPaste, c.hasMiddleClickPaste = b, true
 	}
 	return nil
+}
+
+// parseConfigBool accepts the spellings users actually write in an INI file.
+// strconv.ParseBool covers 1/t/T/TRUE/true/True and their false counterparts
+// but rejects yes/no/on/off, which read naturally for a toggle.
+func parseConfigBool(s string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "yes", "on":
+		return true, true
+	case "no", "off":
+		return false, true
+	}
+	b, err := strconv.ParseBool(s)
+	return b, err == nil
 }
 
 // maxScrollbarPx bounds a [general] scrollbar entry. A thumb wider than this
@@ -351,7 +375,18 @@ type termOpts struct {
 	scrollback int
 	scrollbar  float32
 	bell       term.BellMode
+
+	// middleClickPaste defaults to the platform convention rather than to
+	// false, so it is always set explicitly by applySettings.
+	middleClickPaste bool
 }
+
+// defaultMiddleClickPaste is the middle-click-paste default when the config
+// file says nothing. Unix has the PRIMARY selection and the muscle memory that
+// goes with it; macOS and Windows have neither, and a stray middle click there
+// pasting into a shell would be a surprise. This is the only place the policy
+// lives — term/ itself just honors Cfg.MiddleClickPaste.
+func defaultMiddleClickPaste() bool { return runtime.GOOS == "linux" }
 
 // applySettings returns base with the config file's [font] and [general]
 // values layered on top, plus the resolved term.* keybindings.
@@ -376,6 +411,10 @@ func applySettings(base Cfg, fc workspaceConfig, keys term.KeyMap) Cfg {
 	}
 	if fc.hasBell {
 		out.opts.bell = fc.bell
+	}
+	out.opts.middleClickPaste = defaultMiddleClickPaste()
+	if fc.hasMiddleClickPaste {
+		out.opts.middleClickPaste = fc.middleClickPaste
 	}
 	if fc.theme != "" {
 		if th, ok := findTheme(base.Themes, fc.theme); ok {

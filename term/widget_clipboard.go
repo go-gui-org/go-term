@@ -121,5 +121,34 @@ func (t *Term) copySelection(w *gui.Window) bool {
 		return false
 	}
 	w.SetClipboard(text)
+	// PRIMARY is the X11 select-to-copy buffer that middle-click pastes. It is
+	// independent of CLIPBOARD, so writing it here costs the user nothing —
+	// their explicit Cmd+C value stays put — and a no-op everywhere without
+	// PRIMARY (macOS, Windows, web).
+	w.SetPrimary(text)
+	return true
+}
+
+// pasteFromPrimary pastes the X11 PRIMARY selection — the middle-click
+// gesture. Falls back to the clipboard when PRIMARY is empty or unsupported,
+// which is what makes the gesture useful on platforms that have no PRIMARY at
+// all. Returns false when there was nothing to paste.
+func (t *Term) pasteFromPrimary(w *gui.Window) bool {
+	if w == nil {
+		return false
+	}
+	clean := cleanPaste(w.GetPrimary())
+	if clean == "" {
+		clean = cleanPaste(w.GetClipboard())
+	}
+	if clean == "" {
+		return false
+	}
+	t.pasteText(clean)
+	// Same contract as pasteFromClipboard: the tap gets unwrapped text so a
+	// receiving pane applies its own ?2004 state.
+	if t.cfg.OnInput != nil {
+		t.cfg.OnInput([]byte(clean), InputPaste)
+	}
 	return true
 }

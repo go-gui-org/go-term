@@ -936,3 +936,40 @@ func TestResolveCell_SearchMatchThenSelectionStillTints(t *testing.T) {
 		t.Errorf("selected search match fg: got %+v, want %+v", got, want)
 	}
 }
+
+// A block selection highlights the same column band on every row it spans.
+// prepareSelection and SelectedText share selRowSpan precisely so the two can
+// never disagree about which cells are selected.
+func TestPrepareSelection_BlockBand(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.SelActive = true
+	g.SelMode = selBlock
+	g.SelAnchor = contentPos{Row: 0, Col: 2}
+	g.SelHead = contentPos{Row: 2, Col: 5} // band: cells 2..4, all rows
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	tm.prepareSelection(ds)
+	for r := range 3 {
+		rb := ds.rowSel[r]
+		if !rb.active || rb.c0 != 2 || rb.c1 != 4 {
+			t.Errorf("row %d: got %+v, want {c0:2 c1:4 active:true}", r, rb)
+		}
+	}
+}
+
+// A block dragged up-left produces the same band as one dragged down-right.
+func TestPrepareSelection_BlockReversed(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.SelActive = true
+	g.SelMode = selBlock
+	g.SelAnchor = contentPos{Row: 2, Col: 5}
+	g.SelHead = contentPos{Row: 0, Col: 2}
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	tm.prepareSelection(ds)
+	for r := range 3 {
+		if rb := ds.rowSel[r]; !rb.active || rb.c0 != 2 || rb.c1 != 4 {
+			t.Errorf("row %d: got %+v, want {c0:2 c1:4 active:true}", r, rb)
+		}
+	}
+}

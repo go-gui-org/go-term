@@ -66,20 +66,24 @@ Mono appears as `JetBrainsMono NFM`.
 
 ## `[general]`
 
-| Key          | Type    | Default                | Meaning                                                                         |
-| ------------ | ------- | ---------------------- | ------------------------------------------------------------------------------- |
-| `theme`      | string  | embedder's first theme | Color theme, by display name (case-insensitive)                                 |
-| `scrollback` | integer | `5000`                 | Scrollback rows. `0` restores the default; a negative value disables scrollback |
-| `bell`       | enum    | `auto`                 | `auto`, `audible`, `visual`, `both`, `none`                                     |
-| `scrollbar`  | number  | `4`                    | Scrollbar thumb width in px. Negative hides the scrollbar                       |
+| Key                  | Type    | Default                | Meaning                                                                         |
+| -------------------- | ------- | ---------------------- | ------------------------------------------------------------------------------- |
+| `theme`              | string  | embedder's first theme | Color theme, by display name (case-insensitive)                                 |
+| `scrollback`         | integer | `5000`                 | Scrollback rows. `0` restores the default; a negative value disables scrollback |
+| `bell`               | enum    | `auto`                 | `auto`, `audible`, `visual`, `both`, `none`                                     |
+| `scrollbar`          | number  | `4`                    | Scrollbar thumb width in px. Negative hides the scrollbar                       |
+| `middle-click-paste` | boolean | on for Linux, else off | Paste with the middle mouse button — see [Selection and mouse](#selection-and-mouse) |
 
 ```ini
 [general]
-theme      = Dracula
-scrollback = 5000
-bell       = auto
-scrollbar  = 4
+theme              = Dracula
+scrollback         = 5000
+bell               = auto
+scrollbar          = 4
+middle-click-paste = true
 ```
+
+Booleans accept `true`/`false`, `yes`/`no`, `on`/`off`, and `1`/`0`.
 
 `theme` is matched by name against the themes the embedder registered; an
 unknown name is logged and the default is kept. Only names are accepted —
@@ -92,6 +96,61 @@ flash where the platform has none; `audible` never flashes; `visual` never
 beeps; `both` does both; `none` ignores BEL entirely.
 
 Scrollback is clamped to at most 100000 rows.
+
+## Selection and mouse
+
+Mouse gestures are fixed, not rebindable — they are pointer behavior rather
+than commands, and every terminal spells them the same way.
+
+| Gesture              | Effect                                                                    |
+| -------------------- | ------------------------------------------------------------------------- |
+| Drag                 | Select by character                                                       |
+| Double click         | Select the word under the pointer; drag to extend word by word            |
+| Triple click         | Select the whole logical line; drag to extend line by line                |
+| <kbd>Alt</kbd>+drag  | Rectangular (block) selection — one column band across every row it spans |
+| <kbd>Shift</kbd>+click | Extend the existing selection to the click point                        |
+| Middle click         | Paste (see `middle-click-paste` above)                                    |
+| <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+click | Open the URL under the pointer                            |
+
+Releasing a selection copies it, so there is no separate copy step for the
+mouse. On X11 the selection is also published as PRIMARY, the buffer
+middle-click pastes — independent of the clipboard, so <kbd>Cmd</kbd>+C and a
+mouse selection can hold two different values at once.
+
+A word is a run of non-blank characters with no punctuation class, so
+double-clicking grabs a whole path, URL, or `--flag=value` rather than
+stopping at every `/` or `-`. Double-clicking whitespace selects the
+whitespace run. A logical line follows soft wraps, so triple-clicking one row
+of a wrapped paragraph selects all of it.
+
+Clicking a fourth time returns to character selection, cycling the
+granularities. Two clicks count as a double only when the second lands within
+500 ms and within half a cell of the first.
+
+### Middle-click paste
+
+`middle-click-paste` defaults on for Linux, which has the PRIMARY selection
+and the muscle memory that goes with it, and off for macOS and Windows, where
+neither exists and a stray middle click pasting into a shell would surprise.
+Set it explicitly to override in either direction:
+
+```ini
+[general]
+middle-click-paste = true
+```
+
+Where there is no PRIMARY, the gesture pastes the clipboard instead. An
+application that has enabled mouse reporting always receives the middle button
+itself — no paste is injected behind its back.
+
+### The wheel on the alt screen
+
+Pagers such as `less` and `man` take the alternate screen but never enable
+mouse reporting, so there is nothing to scroll and nothing to report. The
+wheel there sends <kbd>↑</kbd>/<kbd>↓</kbd> instead, one key per row of
+scroll distance, matching kitty, iTerm2, and Ghostty. Full-screen applications
+that *do* enable mouse reporting (vim with `mouse=a`, tmux) receive real wheel
+events unchanged.
 
 ## `[keybindings]`
 
@@ -332,10 +391,11 @@ family = JetBrainsMono NFM
 size   = 13
 
 [general]
-theme      = Tokyo Night
-scrollback = 20000
-bell       = visual
-scrollbar  = 6
+theme              = Tokyo Night
+scrollback         = 20000
+bell               = visual
+scrollbar          = 6
+middle-click-paste = true
 
 [keybindings]
 workspace.splitVertical   = Cmd+D

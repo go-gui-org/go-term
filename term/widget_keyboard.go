@@ -26,6 +26,18 @@ func (t *Term) keyModes() keyModes {
 	}
 }
 
+// arrowSeq returns the unmodified cursor-key sequence for final byte
+// 'A'..'D', in SS3 form under DECCKM (application cursor keys) and CSI form
+// otherwise. Shared by the keyboard path and the alt-screen wheel, which
+// synthesizes the same keys — an app that switched to DECCKM must see the
+// form it asked for from both.
+func arrowSeq(final byte, appCursor bool) []byte {
+	if appCursor {
+		return []byte{0x1B, 'O', final}
+	}
+	return []byte{0x1B, '[', final}
+}
+
 // isAltActive reports whether the alt screen is active, acquiring grid.Mu
 // briefly. Used by scrollback handling in encodeKeyEvent.
 func (t *Term) isAltActive() bool {
@@ -647,18 +659,14 @@ func (t *Term) encodeKeyEvent(e *gui.Event, w *gui.Window, shift, ctrl bool) []b
 	case gui.KeyUp:
 		if mod := modParam(shift, false, ctrl); mod != 0 {
 			out = modSS3('A', mod)
-		} else if modes.appCursor {
-			out = []byte("\x1bOA")
 		} else {
-			out = []byte("\x1b[A")
+			out = arrowSeq('A', modes.appCursor)
 		}
 	case gui.KeyDown:
 		if mod := modParam(shift, false, ctrl); mod != 0 {
 			out = modSS3('B', mod)
-		} else if modes.appCursor {
-			out = []byte("\x1bOB")
 		} else {
-			out = []byte("\x1b[B")
+			out = arrowSeq('B', modes.appCursor)
 		}
 	case gui.KeyRight:
 		if mod := modParam(shift, false, ctrl); mod != 0 {

@@ -389,21 +389,24 @@ func (t *Term) prepareSelection(ds *drawState) {
 	}
 	ds.rowSel = t.draw.selBuf
 	s, e := g.selOrder()
+	total := g.Scrollback.Len() + g.Rows
+	s.Row, s.Col = clamp(s.Row, 0, total-1), clamp(s.Col, 0, g.Cols)
+	e.Row, e.Col = clamp(e.Row, 0, total-1), clamp(e.Col, 0, g.Cols)
 	for r := range rows {
 		cr := g.viewportToContent(r)
 		if cr < s.Row || cr > e.Row {
 			continue
 		}
-		// Columns are cell boundaries; the span is half-open [s.Col, e.Col).
-		// c1 is the last selected cell index, so the end row stops one cell
-		// short of the boundary. Rows whose span collapses (c1 < c0) are not
-		// highlighted.
-		c0, c1 := 0, cols-1
-		if cr == s.Row {
-			c0 = s.Col
+		// Geometry (linear vs. block band) comes from selRowSpan, shared with
+		// SelectedText so the highlight matches what a copy would yield.
+		c0, c1, ok := g.selRowSpan(cr, s, e)
+		if !ok {
+			continue
 		}
-		if cr == e.Row {
-			c1 = e.Col - 1
+		// The grid may be wider than the viewport being drawn; clamp so a
+		// stale span cannot index past the row buffer.
+		if c1 > cols-1 {
+			c1 = cols - 1
 		}
 		if c1 < c0 {
 			continue

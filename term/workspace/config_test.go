@@ -691,3 +691,64 @@ func TestApplyKeybindingOverrides_CopyModeActions(t *testing.T) {
 		t.Errorf("term.copy-mode.down = %+v, want %+v", km[term.ActionCopyModeDown], wantDown)
 	}
 }
+
+// middle-click-paste accepts the spellings people actually write in an INI
+// file, not just Go's bool syntax.
+func TestSetGeneral_MiddleClickPaste(t *testing.T) {
+	cases := []struct {
+		val     string
+		want    bool
+		wantErr bool
+	}{
+		{"true", true, false},
+		{"false", false, false},
+		{"yes", true, false},
+		{"no", false, false},
+		{"on", true, false},
+		{"off", false, false},
+		{"1", true, false},
+		{"0", false, false},
+		{"maybe", false, true},
+	}
+	for _, tc := range cases {
+		var c workspaceConfig
+		err := c.setGeneral("middle-click-paste", tc.val)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("%q: want an error", tc.val)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%q: %v", tc.val, err)
+			continue
+		}
+		if !c.hasMiddleClickPaste || c.middleClickPaste != tc.want {
+			t.Errorf("%q: got %v (set=%v), want %v",
+				tc.val, c.middleClickPaste, c.hasMiddleClickPaste, tc.want)
+		}
+	}
+}
+
+// With no key in the file the platform convention decides: on for Linux
+// (which has PRIMARY), off elsewhere. This is the only place that policy
+// lives — term/ just honors Cfg.MiddleClickPaste.
+func TestApplySettings_MiddleClickPasteDefault(t *testing.T) {
+	got := applySettings(Cfg{Themes: testThemes()}, workspaceConfig{}, nil)
+	if got.opts.middleClickPaste != defaultMiddleClickPaste() {
+		t.Errorf("middleClickPaste = %v, want the platform default %v",
+			got.opts.middleClickPaste, defaultMiddleClickPaste())
+	}
+}
+
+// An explicit key overrides the platform default in both directions, so a
+// Linux user can turn it off and a macOS user can turn it on.
+func TestApplySettings_MiddleClickPasteExplicit(t *testing.T) {
+	for _, want := range []bool{true, false} {
+		fc := workspaceConfig{middleClickPaste: want, hasMiddleClickPaste: true}
+		got := applySettings(Cfg{Themes: testThemes()}, fc, nil)
+		if got.opts.middleClickPaste != want {
+			t.Errorf("middleClickPaste = %v, want %v", got.opts.middleClickPaste, want)
+		}
+	}
+}

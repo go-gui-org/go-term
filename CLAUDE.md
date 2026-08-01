@@ -88,6 +88,7 @@ input) lives in `term/CLAUDE.md`, loaded when working under `term/`.
   `Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings`/`ParseAction` (rebindable
   Term-level shortcuts), and the live setters a config reload needs —
   `SetTextStyle`, `SetScrollbackRows`, `SetBellMode`, `SetScrollbarWidth`,
+  `SetMiddleClickPaste`,
   plus `InputKind`/`Cfg.OnInput`/`SendInput` — the symmetric input tap and
   injection pair a pane manager needs to mirror keys and pastes to sibling
   panes (`term/workspace` broadcast mode). What the tap hands out, `SendInput`

@@ -190,6 +190,13 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 		t.autoScrollDir.Store(0)
 		t.unlockMouse(t.win)
 	}
+	// A release the widget never saw also ends the multi-click run, so the
+	// next press starts a fresh gesture rather than reading as a double click
+	// on whatever the pointer has since moved over. Same for a resize, which
+	// reflows content out from under the recorded unit bounds.
+	if e.Type == gui.EventMouseUp || e.Type == gui.EventResized {
+		t.resetClickCount()
+	}
 	var report []byte
 	t.grid.Mu.Lock()
 	focus := t.grid.FocusReporting

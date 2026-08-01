@@ -83,6 +83,8 @@ func (t *Tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHoo
 		ScrollbarWidth:  cfg.opts.scrollbar,
 		BellMode:        cfg.opts.bell,
 		KeyBindings:     cfg.opts.keys,
+
+		MiddleClickPaste: cfg.opts.middleClickPaste,
 		OnTitle: func(title string) {
 			w.QueueCommand(func(w *gui.Window) {
 				t.titles[panelID] = title

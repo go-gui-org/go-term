@@ -689,7 +689,29 @@ type grid struct {
 	// swap, reflow) forces the next Shift+click to start a fresh anchor rather
 	// than extend from a now-meaningless content position.
 	hasSelAnchor bool
+
+	// SelMode is the shape of the current selection: how anchor and head are
+	// turned into per-row column spans. selChar (the default) is the linear
+	// stream everything used to assume; selWord/selLine are linear too but
+	// were snapped to unit boundaries when they were made; selBlock is the
+	// rectangle Alt+drag produces. Only selBlock changes the span geometry —
+	// see selRowSpan, which is the single place the distinction is applied.
+	SelMode selMode
 }
+
+// selMode is the geometry of a selection. Distinct from copySelMode
+// (widget_state.go), which is copy mode's keyboard-driven notion of whether
+// a selection is being built at all; this one describes the shape of the
+// span that both mouse and copy mode ultimately produce.
+type selMode uint8
+
+// selMode values.
+const (
+	selChar  selMode = iota // linear, cell-granular
+	selWord                 // linear, snapped to word bounds
+	selLine                 // linear, whole logical lines
+	selBlock                // rectangular column band
+)
 
 // PushKittyKeyFlags saves the current KittyKeyFlags on the stack and ORs in
 // the new flags. Called by CSI > flags u. The stack is capped at 8 entries

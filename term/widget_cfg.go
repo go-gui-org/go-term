@@ -144,6 +144,16 @@ type Cfg struct {
 	// Zero (default) uses the built-in 4 px. Negative hides the scrollbar.
 	ScrollbarWidth float32
 
+	// MiddleClickPaste enables pasting with the middle mouse button: the X11
+	// PRIMARY selection where one exists, the clipboard otherwise. Off by
+	// default because it is a Unix convention rather than a universal one —
+	// term/workspace turns it on for Linux when the config file says nothing,
+	// keeping the platform policy out of the widget.
+	//
+	// Only consulted when the application has not enabled mouse reporting; a
+	// child that asked for mouse events always receives the middle button.
+	MiddleClickPaste bool
+
 	// AllowOSC52Write permits host applications to write the system clipboard
 	// via OSC 52. Disabled by default so untrusted terminal output cannot
 	// silently replace the user's clipboard.
