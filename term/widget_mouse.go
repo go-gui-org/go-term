@@ -81,6 +81,7 @@ type mouseSnap struct {
 	sgr    bool // ?1006
 	pixels bool // ?1016 — pixel-precise SGR coordinates
 	live   bool // ViewOffset == 0 && ViewSubPx == 0
+	alt    bool // alt screen active — the wheel drives arrow keys instead
 }
 
 func (t *Term) mouseSnap() mouseSnap {
@@ -93,6 +94,7 @@ func (t *Term) mouseSnap() mouseSnap {
 		sgr:    t.grid.MouseSGR,
 		pixels: t.grid.MouseSGRPixels,
 		live:   t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0,
+		alt:    t.grid.AltActive,
 	}
 }
 
@@ -229,6 +231,93 @@ func (t *Term) toCanvasRel(e *gui.Event) {
 	e.MouseY -= t.ime.layoutY
 }
 
+// multiClickInterval is how long after a click a second one still counts as a
+// double. 500 ms is the common platform default (macOS ships 500 ms, Windows
+// 500 ms) and is what kitty and iTerm2 use.
+const multiClickInterval = 500 * time.Millisecond
+
+// nextClickCount advances the multi-click counter for a click at (x, y) and
+// returns it: 1 plain, 2 double, 3 triple, wrapping back to 1 on a fourth so
+// continued clicking cycles the granularities rather than sticking on
+// line-wise. A click only counts as a repeat when it lands both soon enough
+// and close enough to the previous one — without the position test, clicking
+// two different words in quick succession would word-extend across both.
+// Main-thread only.
+func (t *Term) nextClickCount(x, y float32) int {
+	now := time.Now()
+	near := realNumber(x) && realNumber(y) &&
+		realNumber(t.mouse.lastClickX) && realNumber(t.mouse.lastClickY) &&
+		math.Abs(float64(x-t.mouse.lastClickX)) <= float64(t.cellW)/2 &&
+		math.Abs(float64(y-t.mouse.lastClickY)) <= float64(t.cellH)/2
+	count := 1
+	if t.mouse.clickCount > 0 && near &&
+		now.Sub(t.mouse.lastClickAt) <= multiClickInterval {
+		count = t.mouse.clickCount%3 + 1
+	}
+	t.mouse.clickCount = count
+	t.mouse.lastClickAt = now
+	t.mouse.lastClickX, t.mouse.lastClickY = x, y
+	return count
+}
+
+// resetClickCount forgets the multi-click run, so the next click starts a
+// fresh gesture. Called by gestures that are not clicks (Shift+click) and by
+// the stuck-drag safety nets.
+func (t *Term) resetClickCount() {
+	t.mouse.clickCount = 0
+	t.mouse.lastClickAt = time.Time{}
+}
+
+// selectUnitAt selects the whole word or logical line containing cp, per the
+// grid's current SelMode, and records the unit's bounds so a following drag
+// can pivot around it. Boundary columns are half-open, hence the +1 on the
+// inclusive end cell — the same conversion syncSelection does for copy mode.
+// Caller holds Mu; SelMode must already be selWord or selLine.
+func (t *Term) selectUnitAt(cp contentPos) {
+	g := t.grid
+	var start, end contentPos // inclusive cells
+	if g.SelMode == selLine {
+		sRow, eRow := g.lineBoundsAt(cp.Row)
+		start, end = contentPos{Row: sRow}, contentPos{Row: eRow, Col: g.Cols - 1}
+	} else {
+		start, end = g.wordBoundsAt(cp)
+	}
+	t.mouse.selUnitStart, t.mouse.selUnitEnd = start, end
+	g.SelAnchor = start
+	g.SelHead = contentPos{Row: end.Row, Col: end.Col + 1}
+	g.SelActive = g.SelHead != g.SelAnchor
+}
+
+// extendUnitSelection re-derives the selection for a word- or line-wise drag
+// so it always covers whole units, pivoting around the unit the gesture
+// started on: dragging past the origin in either direction grows from the
+// far edge of the origin, and dragging back onto the origin collapses to it.
+// Caller holds Mu. No-op in char and block modes.
+func (t *Term) extendUnitSelection(cp contentPos) {
+	g := t.grid
+	var us, ue contentPos // unit under the pointer, inclusive cells
+	switch g.SelMode {
+	case selWord:
+		us, ue = g.wordBoundsAt(cp)
+	case selLine:
+		sRow, eRow := g.lineBoundsAt(cp.Row)
+		us, ue = contentPos{Row: sRow}, contentPos{Row: eRow, Col: g.Cols - 1}
+	default:
+		return
+	}
+	os, oe := t.mouse.selUnitStart, t.mouse.selUnitEnd
+	oeBound := contentPos{Row: oe.Row, Col: oe.Col + 1}
+	switch {
+	case posLess(oe, us): // pointer unit lies wholly after the origin
+		g.SelAnchor, g.SelHead = os, contentPos{Row: ue.Row, Col: ue.Col + 1}
+	case posLess(ue, os): // wholly before: anchor flips to the origin's far edge
+		g.SelAnchor, g.SelHead = oeBound, us
+	default: // overlapping the origin unit
+		g.SelAnchor, g.SelHead = os, oeBound
+	}
+	g.SelActive = g.SelHead != g.SelAnchor
+}
+
 // onClick handles a button-down event. Under mouse reporting, encodes
 // a press report for any supported button and arms drag tracking.
 // Otherwise (the default) starts a left-button selection anchor.
@@ -265,6 +354,14 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		e.IsHandled = true
 		return
 	}
+	// Middle-click paste. Below shouldReport(), so a child that enabled mouse
+	// reporting still gets the button rather than having pastes injected.
+	if e.MouseButton == gui.MouseMiddle {
+		if t.cfg.MiddleClickPaste && t.pasteFromPrimary(w) {
+			e.IsHandled = true
+		}
+		return
+	}
 	if e.MouseButton != gui.MouseLeft {
 		return
 	}
@@ -274,17 +371,41 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// prior anchor exists (hasSelAnchor); a Shift+click with no prior selection
 	// falls through to the normal re-anchor below.
 	shiftExtend := e.Modifiers.Has(gui.ModShift)
+	// Shift+click is an extend gesture, not a repeat of the previous click, so
+	// it neither advances nor inherits the click count.
+	count := 1
+	if !shiftExtend {
+		count = t.nextClickCount(e.MouseX, e.MouseY)
+	} else {
+		t.resetClickCount()
+	}
+	// Alt+drag selects a rectangle. Only reachable here, past the
+	// shouldReport() return above, so an app that asked for mouse events
+	// still receives Alt+drag as ordinary reports.
+	block := e.Modifiers.Has(gui.ModAlt)
 	func() {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
 		contentR := t.grid.viewportToContent(r)
 		head := contentPos{Row: contentR, Col: selCol}
-		if shiftExtend && t.grid.hasSelAnchor {
+		switch {
+		case shiftExtend && t.grid.hasSelAnchor:
 			// Keep SelAnchor; move only the head to the click point. A one-cell
 			// span (head == anchor) is not a real selection, so leave inactive.
 			t.grid.SelHead = head
 			t.grid.SelActive = head != t.grid.SelAnchor
-		} else {
+		case count == 2:
+			// Double click: the word under the *cell*, not the boundary.
+			t.grid.SelMode = selWord
+			t.selectUnitAt(contentPos{Row: contentR, Col: c})
+		case count == 3:
+			t.grid.SelMode = selLine
+			t.selectUnitAt(contentPos{Row: contentR, Col: c})
+		default:
+			t.grid.SelMode = selChar
+			if block {
+				t.grid.SelMode = selBlock
+			}
 			t.grid.SelAnchor = head
 			t.grid.SelHead = head
 			t.grid.SelActive = false
@@ -390,6 +511,12 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 			}
 		}
 		contentR := t.grid.viewportToContent(r)
+		// A drag begun with a double or triple click keeps that granularity:
+		// the selection snaps to whole words / lines as the pointer moves.
+		if t.grid.SelMode == selWord || t.grid.SelMode == selLine {
+			t.extendUnitSelection(contentPos{Row: contentR, Col: c})
+			return
+		}
 		t.grid.SelHead = contentPos{Row: contentR, Col: selCol}
 		if t.grid.SelHead != t.grid.SelAnchor {
 			t.grid.SelActive = true
@@ -620,6 +747,31 @@ func (t *Term) wheelReportTicks(scrollY float32, precise bool) int {
 	return ticks
 }
 
+// wheelArrows sends one Up/Down cursor key per row of scroll distance,
+// standing in for a wheel the application cannot see. Reuses
+// wheelReportTicks so the trackpad residual and the maxWheelTicks flood cap
+// behave exactly as they do for real wheel reports.
+//
+// Goes through writeRaw, not writeBytes: like a mouse report this describes
+// this pane's viewport, so a workspace broadcasting input to sibling panes
+// must not mirror it — scrolling one pager would otherwise scroll them all.
+func (t *Term) wheelArrows(scrollY float32, precise bool) {
+	final := byte('A') // wheel up → cursor up
+	if scrollY < 0 {
+		final = 'B'
+	}
+	seq := arrowSeq(final, t.keyModes().appCursor)
+	ticks := t.wheelReportTicks(scrollY, precise)
+	// Both arrow forms are 3 bytes and ticks is capped at maxWheelTicks, so
+	// the whole burst fits a stack buffer — no allocation per wheel event.
+	var buf [maxWheelTicks * 3]byte
+	out := buf[:0]
+	for range ticks {
+		out = append(out, seq...)
+	}
+	t.writeRaw(out)
+}
+
 // onMouseScroll forwards wheel events to the application as SGR mouse
 // reports when reporting + SGR are active and the viewport is live;
 // otherwise moves the local scrollback viewport. Positive ScrollY
@@ -648,6 +800,18 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		return
 	}
 	if !realNumber(e.ScrollY) || !finite(t.cellH) {
+		return
+	}
+
+	// Alt screen without mouse reporting: `less`, `man`, and friends take the
+	// alt screen but never enable ?1000, and the local scroll path is a no-op
+	// there because the alt buffer contributes nothing to scrollback — so the
+	// wheel is simply dead. Synthesize cursor keys instead, which is what
+	// kitty, iTerm2, and Ghostty do. Gated on the literal alt screen rather
+	// than on viewport state, so a scrolled-back main screen still scrolls.
+	if snap.alt && !snap.report {
+		t.wheelArrows(e.ScrollY, e.ScrollPrecise)
+		e.IsHandled = true
 		return
 	}
 

@@ -2,13 +2,58 @@ package term
 
 import "strings"
 
+// posLess reports whether a comes before b in content order (row, then column).
+func posLess(a, b contentPos) bool {
+	return a.Row < b.Row || (a.Row == b.Row && a.Col < b.Col)
+}
+
 // selOrder returns the selection bounds in forward order (start <= end).
 func (g *grid) selOrder() (start, end contentPos) {
 	a, b := g.SelAnchor, g.SelHead
-	if b.Row < a.Row || (b.Row == a.Row && b.Col < a.Col) {
+	if posLess(b, a) {
 		a, b = b, a
 	}
 	return a, b
+}
+
+// selRowSpan returns the inclusive cell span [c0, c1] selected on content row
+// r, given the already-normalized bounds s and e from selOrder. ok is false
+// when the row carries no selected cell, which happens when a block band
+// collapses to zero width.
+//
+// This is the single place selection geometry is decided. Both the copy path
+// (SelectedText) and the render path (prepareSelection) call it, so the
+// highlight can never disagree with what actually lands on the clipboard —
+// they used to hold two independent copies of this arithmetic. Caller
+// guarantees s.Row <= r <= e.Row and that columns are already clamped to
+// [0, Cols].
+func (g *grid) selRowSpan(r int, s, e contentPos) (c0, c1 int, ok bool) {
+	if g.SelMode == selBlock {
+		// A rectangle: every row gets the same column band, taken from the
+		// two boundary columns rather than from first/last-row positions.
+		// Boundaries are half-open, so the right edge loses one cell.
+		c0, c1 = s.Col, e.Col-1
+		if s.Col > e.Col {
+			c0, c1 = e.Col, s.Col-1
+		}
+	} else {
+		// Linear: the first row starts at the anchor, the last row stops at
+		// the head, and every row between is full width.
+		c0, c1 = 0, g.Cols-1
+		if r == s.Row {
+			c0 = s.Col
+		}
+		if r == e.Row {
+			c1 = e.Col - 1
+		}
+	}
+	if c0 < 0 {
+		c0 = 0
+	}
+	if c1 > g.Cols-1 {
+		c1 = g.Cols - 1
+	}
+	return c0, c1, c1 >= c0
 }
 
 // SelectedText extracts the selection as a UTF-8 string. Trailing
@@ -28,17 +73,21 @@ func (g *grid) SelectedText() string {
 	if s == e {
 		return ""
 	}
+	// A block whose band is empty selects nothing on every row, so bail out
+	// rather than emitting one blank line per row it spans.
+	if _, _, ok := g.selRowSpan(s.Row, s, e); g.SelMode == selBlock && !ok {
+		return ""
+	}
 	var b strings.Builder
 	b.Grow((e.Row-s.Row+1)*g.Cols + (e.Row - s.Row))
 	for r := s.Row; r <= e.Row; r++ {
-		// Half-open: c1 is the last cell index (boundary e.Col minus 1) on the
-		// end row; full row width otherwise.
-		c0, c1 := 0, g.Cols-1
-		if r == s.Row {
-			c0 = s.Col
-		}
-		if r == e.Row {
-			c1 = e.Col - 1
+		c0, c1, ok := g.selRowSpan(r, s, e)
+		if !ok {
+			// No cell selected on this row; still a line of its own.
+			if r < e.Row {
+				b.WriteByte('\n')
+			}
+			continue
 		}
 
 		end := c0 - 1
@@ -79,4 +128,5 @@ func (g *grid) ClearSelection() {
 	g.SelAnchor = contentPos{}
 	g.SelHead = contentPos{}
 	g.hasSelAnchor = false
+	g.SelMode = selChar
 }

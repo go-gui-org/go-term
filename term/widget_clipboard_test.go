@@ -328,3 +328,107 @@ func TestPasteFromClipboard_TapsUnwrappedText(t *testing.T) {
 		t.Errorf("local write = %q, want %q", buf, want)
 	}
 }
+
+// newPrimaryWindow returns a window whose PRIMARY and CLIPBOARD hold the
+// given values, for exercising the middle-click paste path.
+func newPrimaryWindow(primary, clipboard string) *gui.Window {
+	w := &gui.Window{}
+	w.SetPrimaryGetFn(func() string { return primary })
+	w.SetClipboardGetFn(func() string { return clipboard })
+	return w
+}
+
+// Middle-click pastes PRIMARY — the X11 select-to-copy buffer — in preference
+// to the clipboard, which is the whole point of the gesture: the two hold
+// different things.
+func TestPasteFromPrimary_PrefersPrimary(t *testing.T) {
+	tm, buf := newMouseTerm(4, 20)
+	if !tm.pasteFromPrimary(newPrimaryWindow("from-primary", "from-clipboard")) {
+		t.Fatal("pasteFromPrimary reported nothing pasted")
+	}
+	if got := string(*buf); got != "from-primary" {
+		t.Errorf("pasted %q, want %q", got, "from-primary")
+	}
+}
+
+// Platforms without PRIMARY return "" from GetPrimary, so the gesture falls
+// back to the clipboard rather than doing nothing.
+func TestPasteFromPrimary_FallsBackToClipboard(t *testing.T) {
+	tm, buf := newMouseTerm(4, 20)
+	if !tm.pasteFromPrimary(newPrimaryWindow("", "from-clipboard")) {
+		t.Fatal("pasteFromPrimary reported nothing pasted")
+	}
+	if got := string(*buf); got != "from-clipboard" {
+		t.Errorf("pasted %q, want %q", got, "from-clipboard")
+	}
+}
+
+func TestPasteFromPrimary_BothEmpty(t *testing.T) {
+	tm, buf := newMouseTerm(4, 20)
+	if tm.pasteFromPrimary(newPrimaryWindow("", "")) {
+		t.Error("pasteFromPrimary reported a paste with nothing to paste")
+	}
+	if got := string(*buf); got != "" {
+		t.Errorf("wrote %q, want nothing", got)
+	}
+}
+
+// The middle button only pastes when the embedder enabled it; off by default
+// so a stray click on macOS/Windows cannot inject into a shell.
+func TestOnClick_MiddleClickGatedOnConfig(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		tm, buf := newMouseTerm(4, 20)
+		tm.cfg.MiddleClickPaste = on
+		tm.onClick(nil, &gui.Event{
+			MouseX: 15, MouseY: 10, MouseButton: gui.MouseMiddle,
+		}, newPrimaryWindow("pasted", ""))
+		got := string(*buf)
+		if on && got != "pasted" {
+			t.Errorf("enabled: pasted %q, want %q", got, "pasted")
+		}
+		if !on && got != "" {
+			t.Errorf("disabled: pasted %q, want nothing", got)
+		}
+	}
+}
+
+// A child that asked for mouse reporting receives the middle button as a
+// report; it must not have a paste injected behind its back.
+func TestOnClick_MiddleClickReportsWhenTracking(t *testing.T) {
+	tm, buf := newMouseTerm(4, 20)
+	tm.cfg.MiddleClickPaste = true
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.onClick(nil, &gui.Event{
+		MouseX: 15, MouseY: 10, MouseButton: gui.MouseMiddle,
+	}, newPrimaryWindow("pasted", ""))
+	got := string(*buf)
+	if strings.Contains(got, "pasted") {
+		t.Errorf("pasted %q while mouse reporting is on", got)
+	}
+	if !strings.HasPrefix(got, "\x1b[<1;") {
+		t.Errorf("wrote %q, want an SGR middle-button report", got)
+	}
+}
+
+// copySelection publishes to PRIMARY as well as the clipboard, so a mouse
+// selection is immediately middle-clickable in other apps.
+func TestCopySelection_SetsPrimary(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	writeRowText(tm.grid, 0, "hello")
+	tm.grid.SelAnchor = contentPos{Row: 0, Col: 0}
+	tm.grid.SelHead = contentPos{Row: 0, Col: 5}
+	tm.grid.SelActive = true
+
+	var clip, prim string
+	w := &gui.Window{}
+	w.SetClipboardFn(func(s string) { clip = s })
+	w.SetPrimaryFn(func(s string) { prim = s })
+
+	if !tm.copySelection(w) {
+		t.Fatal("copySelection reported nothing copied")
+	}
+	if clip != "hello" || prim != "hello" {
+		t.Errorf("clipboard = %q, primary = %q, want both %q", clip, prim, "hello")
+	}
+}

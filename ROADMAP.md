@@ -1,8 +1,8 @@
 # go-term: Roadmap
 
 `go-term` is a full-featured terminal-emulator widget for
-[go-gui](https://github.com/go-gui-org/go-gui). 48 of 56 phases shipped;
-work remaining: 48–51 (competitive feature parity) then 52–54 (API
+[go-gui](https://github.com/go-gui-org/go-gui). 49 of 56 phases shipped;
+work remaining: 49–51 (competitive feature parity) then 52–54 (API
 stabilisation, which runs last so it audits the final surface). Phase 55
 (v1.0.0) blocked on go-gui v1.0.
 
@@ -49,37 +49,14 @@ Public API: `Cfg`, `Term`, `Theme`, `NamedTheme`, `New`, `View`, `Close`, `Cwd`,
 `SetTheme`, `Rows`, `Cols`, `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`,
 `ShortcutInfo`/`Shortcuts` (help overlay), `ThemeMenuItems`,
 `Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings`/`ParseAction` (rebindable
-shortcuts), `SetTextStyle`/`SetScrollbackRows`/`SetBellMode`/`SetScrollbarWidth`
-(live settings),
+shortcuts), `SetTextStyle`/`SetScrollbackRows`/`SetBellMode`/`SetScrollbarWidth`/
+`SetMiddleClickPaste` (live settings),
 `StartRecording`/`StopRecording`/`Recording`, `NewReplay`/`ReplayCfg`.
 
 ## Upcoming
 
 Unshipped work only. A phase that lands is deleted from here and recorded as
 one row in [Completed](#completed).
-
-### Phase 48 — Mouse selection semantics (issue #130)
-
-Mouse-driven selection stops at click-and-drag: `widget_mouse.go` has no
-click-count path, so double-click-a-word, triple-click-a-line and Alt+drag —
-default gestures in every competitor — do nothing. The alt screen has a
-related hole: the wheel is dead under pagers that don't enable mouse
-reporting.
-
-One phase because all four items land on the same click-count and
-selection-mode state; split up, each would rewrite the others' lines.
-`grid_word.go` already has `wordFwd`/`wordBack` (copy mode uses them) — share
-that logic, don't duplicate it.
-
-- [ ] Click-count tracking (timing + movement threshold) in the mouse state
-- [ ] Double-click selects a word, triple-click a logical line (wrapped rows
-      included, matching selection's content-row model)
-- [ ] Drag after a double/triple click extends by word / by line
-- [ ] Alt+drag rectangular (block) selection, including copy serialization
-- [ ] Alt-screen wheel with no mouse reporting synthesizes Up/Down, gated on
-      the literal alt screen
-- [ ] Middle-click paste + PRIMARY selection on Linux
-- [ ] `docs/config.md` selection section
 
 ### Phase 49 — Protocol odds and ends (issue #131)
 
@@ -128,8 +105,9 @@ detection and the `Shortcuts()`/`KeyMap` metadata.
 ### Post-1.0 backlog
 
 Tracked as issues without a phase number: smart selection (regex-driven
-semantic units, depends on Phase 48), quake/dropdown window (needs go-gui
-support), pipe-scrollback / open-in-`$EDITOR`, named profiles.
+semantic units, now unblocked by Phase 48's click-count and selection-mode
+state), quake/dropdown window (needs go-gui support), pipe-scrollback /
+open-in-`$EDITOR`, named profiles.
 
 IME preedit (issue #134) is a correctness gap rather than a feature and should
 block Phase 55 independently: nothing in `term/` handles composition, so CJK
@@ -137,7 +115,7 @@ input may be impossible today.
 
 ### Phase 52 — Export audit + Godoc pass
 
-Runs _after_ 48–51. Each of those phases adds public surface (new Actions,
+Runs _after_ 49–51. Each of those phases adds public surface (new Actions,
 config keys), so auditing first means auditing twice.
 
 Every exported symbol gets a deliberate reason and complete doc comment.
@@ -235,6 +213,7 @@ When go-gui ships v1.0.0:
 | 45  | User config file (INI, live reload)     | `~/.config/go-term/config`, `Cmd+Shift+,`     |
 | 46  | Copy mode                               | `Cmd+Shift+Space`, vim keys, `y`              |
 | 47  | OSC 133 failures + output selection     | `Cmd+Shift+E`, `Cmd+Shift+O`, scrollbar ticks |
+| 48  | Mouse selection semantics               | Double/triple click, Alt+drag block, middle-click paste, alt-screen wheel |
 
 ## Commands
 

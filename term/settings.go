@@ -94,6 +94,11 @@ func (t *Term) resizeScrollback(capRows int) bool {
 // from the main thread at any time; the reader goroutine reads it atomically.
 func (t *Term) SetBellMode(m BellMode) { t.bellMode.Store(int32(m)) }
 
+// SetMiddleClickPaste enables or disables middle-click paste on a live
+// terminal, mirroring Cfg.MiddleClickPaste. Main-thread only; takes effect on
+// the next click, so a config reload needs no redraw.
+func (t *Term) SetMiddleClickPaste(on bool) { t.cfg.MiddleClickPaste = on }
+
 // SetScrollbarWidth changes the scrollbar thumb width in pixels. Mirrors
 // Cfg.ScrollbarWidth: zero restores the built-in default, negative hides the
 // scrollbar. A non-finite value is ignored. Main-thread only.

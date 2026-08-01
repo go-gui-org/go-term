@@ -1101,3 +1101,319 @@ func TestUpdateHover_CmdReleasedClearsURLHighlight(t *testing.T) {
 		t.Error("Cmd released: version should bump to clear the highlight")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Multi-click gestures (Phase 48)
+// ---------------------------------------------------------------------------
+
+// writeRowText writes s into row r of an existing grid, one rune per cell.
+// Distinct from fillRow (floods a row with one marker rune) and putRow
+// (writes at the cursor), both in grid_test.go.
+func writeRowText(g *grid, r int, s string) {
+	for c, ch := range s {
+		if c >= g.Cols {
+			break
+		}
+		g.At(r, c).Ch = ch
+	}
+}
+
+// clickAt presses the left button at the given pixel position. Cells are
+// 10x20 in newMouseTerm, so column n spans x = [10n, 10n+10).
+func clickAt(tm *Term, x, y float32, mods gui.Modifier) {
+	tm.onClick(nil, &gui.Event{
+		MouseX: x, MouseY: y,
+		MouseButton: gui.MouseLeft,
+		Modifiers:   mods,
+	}, &gui.Window{})
+}
+
+func TestNextClickCount_Cycles(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	want := []int{1, 2, 3, 1, 2}
+	for i, w := range want {
+		if got := tm.nextClickCount(15, 25); got != w {
+			t.Errorf("click %d: count = %d, want %d", i+1, got, w)
+		}
+	}
+}
+
+// A click that arrives after the interval starts a fresh gesture. Driven by
+// back-dating lastClickAt rather than sleeping.
+func TestNextClickCount_TimeoutResets(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	if got := tm.nextClickCount(15, 25); got != 1 {
+		t.Fatalf("first click = %d, want 1", got)
+	}
+	tm.mouse.lastClickAt = tm.mouse.lastClickAt.Add(-2 * multiClickInterval)
+	if got := tm.nextClickCount(15, 25); got != 1 {
+		t.Errorf("click after the interval = %d, want 1", got)
+	}
+}
+
+// Two fast clicks on different words are two separate clicks, not a double.
+func TestNextClickCount_MovementResets(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	tm.nextClickCount(15, 25)
+	if got := tm.nextClickCount(95, 25); got != 1 {
+		t.Errorf("click a cell away = %d, want 1", got)
+	}
+	// Within half a cell still counts as the same spot.
+	tm.resetClickCount()
+	tm.nextClickCount(15, 25)
+	if got := tm.nextClickCount(18, 27); got != 2 {
+		t.Errorf("click within the slop = %d, want 2", got)
+	}
+}
+
+func TestOnClick_DoubleClickSelectsWord(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	writeRowText(tm.grid, 0, "ls /usr/local/bin --all")
+
+	// Two clicks inside the path (column 8 → x = 85).
+	clickAt(tm, 85, 10, 0)
+	clickAt(tm, 85, 10, 0)
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelMode != selWord {
+		t.Errorf("SelMode = %v, want selWord", tm.grid.SelMode)
+	}
+	if got, want := tm.grid.SelectedText(), "/usr/local/bin"; got != want {
+		t.Errorf("double-click selected %q, want %q", got, want)
+	}
+}
+
+func TestOnClick_TripleClickSelectsLine(t *testing.T) {
+	tm, _ := newMouseTerm(4, 10)
+	writeRowText(tm.grid, 0, "first")
+	writeRowText(tm.grid, 1, "second")
+
+	clickAt(tm, 15, 30, 0) // row 1
+	clickAt(tm, 15, 30, 0)
+	clickAt(tm, 15, 30, 0)
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelMode != selLine {
+		t.Errorf("SelMode = %v, want selLine", tm.grid.SelMode)
+	}
+	if got, want := tm.grid.SelectedText(), "second"; got != want {
+		t.Errorf("triple-click selected %q, want %q", got, want)
+	}
+}
+
+// A triple-click on a soft-wrapped logical line selects all of it, not just
+// the screen row under the pointer.
+func TestOnClick_TripleClickSpansWrappedRows(t *testing.T) {
+	tm, _ := newMouseTerm(4, 5)
+	writeRowText(tm.grid, 0, "abcde")
+	writeRowText(tm.grid, 1, "fghij")
+	tm.grid.RowWrapped[0] = true
+
+	clickAt(tm, 15, 30, 0) // row 1, the continuation
+	clickAt(tm, 15, 30, 0)
+	clickAt(tm, 15, 30, 0)
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "abcde\nfghij"; got != want {
+		t.Errorf("triple-click on a wrapped line selected %q, want %q", got, want)
+	}
+}
+
+// Dragging after a double click extends by whole words in both directions.
+func TestOnMouseMove_WordDragExtends(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	writeRowText(tm.grid, 0, "alpha beta gamma delta")
+
+	clickAt(tm, 15, 10, 0) // inside "alpha"
+	clickAt(tm, 15, 10, 0)
+	tm.onMouseMove(nil, &gui.Event{MouseX: 125, MouseY: 10}, &gui.Window{}) // "gamma"
+
+	tm.grid.Mu.Lock()
+	if got, want := tm.grid.SelectedText(), "alpha beta gamma"; got != want {
+		t.Errorf("forward word drag selected %q, want %q", got, want)
+	}
+	tm.grid.Mu.Unlock()
+
+	// Drag back onto the origin word: the selection collapses to it rather
+	// than inverting.
+	tm.onMouseMove(nil, &gui.Event{MouseX: 15, MouseY: 10}, &gui.Window{})
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "alpha"; got != want {
+		t.Errorf("drag back to the origin selected %q, want %q", got, want)
+	}
+}
+
+// Dragging left of the origin word pivots the anchor to the origin's far
+// edge, so the selection still covers whole words.
+func TestOnMouseMove_WordDragBackwards(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	writeRowText(tm.grid, 0, "alpha beta gamma")
+
+	clickAt(tm, 125, 10, 0) // inside "gamma"
+	clickAt(tm, 125, 10, 0)
+	tm.onMouseMove(nil, &gui.Event{MouseX: 15, MouseY: 10}, &gui.Window{}) // "alpha"
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "alpha beta gamma"; got != want {
+		t.Errorf("backward word drag selected %q, want %q", got, want)
+	}
+}
+
+// Dragging after a triple click extends by whole lines in both directions,
+// mirroring the word-pivot logic with lineBoundsAt instead of wordBoundsAt.
+func TestOnMouseMove_LineDragExtends(t *testing.T) {
+	tm, _ := newMouseTerm(4, 10)
+	writeRowText(tm.grid, 0, "line one")
+	writeRowText(tm.grid, 1, "line two")
+	writeRowText(tm.grid, 2, "line three")
+	writeRowText(tm.grid, 3, "line four")
+
+	// Triple-click on row 1 ("line two"), then drag down to row 3.
+	clickAt(tm, 15, 30, 0) // row 1, inside "line two"
+	clickAt(tm, 15, 30, 0)
+	clickAt(tm, 15, 30, 0)
+	tm.onMouseMove(nil, &gui.Event{MouseX: 15, MouseY: 70}, &gui.Window{}) // row 3
+
+	tm.grid.Mu.Lock()
+	if got, want := tm.grid.SelectedText(), "line two\nline three\nline four"; got != want {
+		t.Errorf("forward line drag selected %q, want %q", got, want)
+	}
+	tm.grid.Mu.Unlock()
+
+	// Drag back to the origin line: collapses to the origin line alone.
+	tm.onMouseMove(nil, &gui.Event{MouseX: 15, MouseY: 30}, &gui.Window{})
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "line two"; got != want {
+		t.Errorf("drag back to the origin line selected %q, want %q", got, want)
+	}
+}
+
+// Dragging left of the origin line pivots the anchor to the origin's far
+// edge, so the selection still covers whole lines.
+func TestOnMouseMove_LineDragBackwards(t *testing.T) {
+	tm, _ := newMouseTerm(4, 10)
+	writeRowText(tm.grid, 0, "line one")
+	writeRowText(tm.grid, 1, "line two")
+	writeRowText(tm.grid, 2, "line three")
+	writeRowText(tm.grid, 3, "line four")
+
+	clickAt(tm, 15, 70, 0) // inside "line four" (row 3)
+	clickAt(tm, 15, 70, 0)
+	clickAt(tm, 15, 70, 0)
+	tm.onMouseMove(nil, &gui.Event{MouseX: 15, MouseY: 30}, &gui.Window{}) // row 1
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "line two\nline three\nline four"; got != want {
+		t.Errorf("backward line drag selected %q, want %q", got, want)
+	}
+}
+
+func TestOnClick_AltDragSelectsBlock(t *testing.T) {
+	tm, _ := newMouseTerm(4, 10)
+	writeRowText(tm.grid, 0, "abcdefghij")
+	writeRowText(tm.grid, 1, "klmnopqrst")
+	writeRowText(tm.grid, 2, "uvwxyzABCD")
+
+	clickAt(tm, 20, 10, gui.ModAlt) // boundary col 2, row 0
+	tm.onMouseMove(nil, &gui.Event{MouseX: 50, MouseY: 50}, &gui.Window{})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelMode != selBlock {
+		t.Fatalf("SelMode = %v, want selBlock", tm.grid.SelMode)
+	}
+	if got, want := tm.grid.SelectedText(), "cde\nmno\nwxy"; got != want {
+		t.Errorf("Alt+drag selected %q, want %q", got, want)
+	}
+}
+
+// Shift+click extends the previous selection; it must not be read as the
+// second click of a double.
+func TestOnClick_ShiftClickIsNotADouble(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	writeRowText(tm.grid, 0, "alpha beta")
+
+	clickAt(tm, 15, 10, 0)
+	clickAt(tm, 15, 10, gui.ModShift)
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelMode == selWord {
+		t.Error("Shift+click was treated as a double click")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Alt-screen wheel (Phase 48)
+// ---------------------------------------------------------------------------
+
+// On the alt screen with no mouse reporting the wheel is otherwise dead, so
+// it synthesizes cursor keys — the pager behavior kitty/iTerm2/Ghostty have.
+func TestOnMouseScroll_AltScreenSynthesizesArrows(t *testing.T) {
+	cases := []struct {
+		name    string
+		scrollY float32
+		want    string
+	}{
+		{"wheel up sends Up", 4, "\x1b[A"},
+		{"wheel down sends Down", -4, "\x1b[B"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tm, buf := newMouseTerm(24, 80)
+			tm.grid.AltActive = true
+			tm.onMouseScroll(nil, &gui.Event{ScrollY: tc.scrollY}, &gui.Window{})
+			if got := string(*buf); !strings.HasPrefix(got, tc.want) {
+				t.Errorf("wrote %q, want a prefix of %q", got, tc.want)
+			}
+			if n := countReports(*buf, tc.want); n < 1 {
+				t.Errorf("emitted %d arrows, want at least 1", n)
+			}
+		})
+	}
+}
+
+// Under DECCKM the synthesized keys must use the SS3 form the application
+// asked for, exactly as a real arrow keypress would.
+func TestOnMouseScroll_AltScreenAppCursorKeys(t *testing.T) {
+	tm, buf := newMouseTerm(24, 80)
+	tm.grid.AltActive = true
+	tm.grid.AppCursorKeys = true
+	tm.onMouseScroll(nil, &gui.Event{ScrollY: -4}, &gui.Window{})
+	if got := string(*buf); !strings.HasPrefix(got, "\x1bOB") {
+		t.Errorf("wrote %q, want the SS3 form \\x1bOB", got)
+	}
+}
+
+// An app that enabled mouse reporting gets real wheel reports, not arrows.
+func TestOnMouseScroll_AltScreenReportingWins(t *testing.T) {
+	tm, buf := newMouseTerm(24, 80)
+	tm.grid.AltActive = true
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.onMouseScroll(nil, &gui.Event{ScrollY: -4}, &gui.Window{})
+	got := string(*buf)
+	if strings.Contains(got, "\x1b[B") || strings.Contains(got, "\x1bOB") {
+		t.Errorf("wrote arrows %q while mouse reporting is on", got)
+	}
+	if !strings.Contains(got, "\x1b[<65") {
+		t.Errorf("wrote %q, want an SGR wheel-down report", got)
+	}
+}
+
+// The main screen keeps local scrollback scrolling; arrows there would be
+// sent to a shell that never asked for them.
+func TestOnMouseScroll_MainScreenDoesNotSynthesize(t *testing.T) {
+	tm, buf := newMouseTerm(24, 80)
+	tm.onMouseScroll(nil, &gui.Event{ScrollY: -4}, &gui.Window{})
+	if got := string(*buf); got != "" {
+		t.Errorf("main screen wrote %q, want nothing", got)
+	}
+}

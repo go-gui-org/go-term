@@ -221,6 +221,26 @@ type mouseState struct {
 	// (+1 up / -1 down / 0 initial) it was accumulated in.
 	wheelResidual float32
 	wheelDir      int
+
+	// Multi-click gesture state. clickCount is 1 for a plain click, 2 for a
+	// double, 3 for a triple, wrapping back to 1 on a fourth so a user who
+	// keeps clicking cycles through the granularities rather than sticking
+	// at line-wise. A click counts as a repeat only when it lands within
+	// multiClickInterval of the previous one *and* within multiClickSlop of
+	// its position — the position test is what stops a fast typist clicking
+	// two different words from getting one word-extended selection.
+	clickCount  int
+	lastClickAt time.Time
+	lastClickX  float32
+	lastClickY  float32
+
+	// Bounds of the unit (word or line) the current gesture anchored on,
+	// in content coordinates with selUnitEnd being an inclusive cell. A
+	// word/line drag pivots around this so dragging back past the origin
+	// extends the other way instead of collapsing. Meaningless unless the
+	// grid's SelMode is selWord or selLine.
+	selUnitStart contentPos
+	selUnitEnd   contentPos
 }
 
 // drawBufs holds per-frame scratch buffers reused across onDraw calls.

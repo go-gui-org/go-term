@@ -21,6 +21,14 @@ package term
 // where it got to, which is still a valid, clamped position.
 const maxWordScan = 1 << 16
 
+// maxLineScanRows bounds how far lineBoundsAt follows autowrap flags in each
+// direction. Deliberately far larger than maxURLScanRows (which only has to
+// cover a URL): a triple-click should select a whole pasted paragraph, and at
+// 80 columns 1024 rows is ~80 KB of one logical line. The cap exists only so a
+// buffer of rows all flagged wrapped cannot walk the entire scrollback under
+// Mu on the GUI thread.
+const maxLineScanRows = 1024
+
 // blankCellAt reports whether the cell at (row, col) counts as whitespace for
 // word motion. Cells never written hold Ch == 0; erased ones hold ' '. Both are
 // blanks. Caller holds Mu.
@@ -107,6 +115,79 @@ func (g *grid) wordFwd(p contentPos) contentPos {
 		}
 	}
 	return cur // scan budget exhausted; see maxWordScan
+}
+
+// wordBoundsAt returns the inclusive cell bounds of the run containing p — the
+// unit a double-click selects. Uses the same blank/non-blank split and the same
+// wrap-following as wordFwd/wordBack, so a path broken at the right margin is
+// one word and double-clicking a URL or a --flag=value grabs all of it.
+//
+// When p sits on a blank the blank run is returned instead, which keeps the
+// gesture symmetric: a double-click in the gutter selects the gutter rather
+// than silently jumping to a neighbouring word. Caller holds Mu.
+func (g *grid) wordBoundsAt(p contentPos) (start, end contentPos) {
+	if g.Cols <= 0 || g.ContentRows() <= 0 {
+		return p, p
+	}
+	// Pick the predicate from the cell under the pointer, then expand while
+	// neighbours agree with it.
+	blank := g.blankCellAt(p.Row, p.Col)
+	start, end = p, p
+
+	budget := maxWordScan
+	for budget > 0 {
+		prev, ok := g.stepBack(start)
+		if !ok || g.blankCellAt(prev.Row, prev.Col) != blank {
+			break
+		}
+		// Crossing back into a row that did not soft-wrap ends the unit: the
+		// rows are separate logical lines that happen to be adjacent.
+		if prev.Row != start.Row && !g.rowWrapped(prev.Row) {
+			break
+		}
+		start = prev
+		budget--
+	}
+	for budget > 0 {
+		if g.rowBreakFwd(end) {
+			break
+		}
+		next, ok := g.stepFwd(end)
+		if !ok || g.blankCellAt(next.Row, next.Col) != blank {
+			break
+		}
+		end = next
+		budget--
+	}
+	return start, end
+}
+
+// lineBoundsAt returns the first and last content rows of the logical line
+// containing row — the unit a triple-click selects. Soft-wrapped rows are
+// followed in both directions, so one logical line is selected whole however
+// many screen rows it occupies.
+//
+// On the alt screen the walk will not cross into scrollback: the alt buffer
+// keeps its own wrap flags and the main-screen history sitting below it is
+// unrelated content. Same rule detectURLAt follows. Caller holds Mu.
+func (g *grid) lineBoundsAt(row int) (startRow, endRow int) {
+	total := g.ContentRows()
+	if total <= 0 {
+		return 0, 0
+	}
+	row = clamp(row, 0, total-1)
+	lo := 0
+	if g.AltActive {
+		lo = g.Scrollback.Len()
+	}
+	startRow, endRow = row, row
+	for startRow > lo && startRow > row-maxLineScanRows && g.rowWrapped(startRow-1) {
+		startRow--
+	}
+	for endRow < total-1 && endRow < row+maxLineScanRows && g.rowWrapped(endRow) {
+		endRow++
+	}
+	return startRow, endRow
 }
 
 // wordBack returns the position of the start of the word at or before p, vim
