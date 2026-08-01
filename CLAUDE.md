@@ -5,6 +5,18 @@
 Post-MVP feature plan with progress checkboxes lives in `ROADMAP.md`
 at the repo root. Tick boxes there as work lands.
 
+**When a phase completes, delete its section from `Upcoming` and add one
+table row to `Completed`** — number, short description, what it unlocked.
+`Upcoming` is only unshipped work; the table is the history. Keeping a
+finished phase's checklist around buries the four things still to do under
+hundreds of lines of things already done, which is exactly what makes the
+file unreadable to a human skimming it.
+
+Phase numbers are assigned in ship order and must stay unique across both
+sections. They exist nowhere but `ROADMAP.md`, so renumber freely to keep
+the sequence contiguous — but update the issue titles that mirror them
+(`Phase N — <title>`) and the prose cross-references in the same pass.
+
 ## Common commands
 
 Standard `go build`/`test`/`vet`/`mod tidy` apply. The non-obvious ones:

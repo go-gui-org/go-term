@@ -1,9 +1,10 @@
 # go-term: Roadmap
 
 `go-term` is a full-featured terminal-emulator widget for
-[go-gui](https://github.com/go-gui-org/go-gui). 40 of 43 phases shipped;
-work remaining: 40–43 (API stabilisation). Phase 44 (v1.0.0) blocked on
-go-gui v1.0.
+[go-gui](https://github.com/go-gui-org/go-gui). 48 of 56 phases shipped;
+work remaining: 48–51 (competitive feature parity) then 52–54 (API
+stabilisation, which runs last so it audits the final surface). Phase 55
+(v1.0.0) blocked on go-gui v1.0.
 
 Platforms: macOS, Linux, and Windows all supported. The Windows/ConPTY
 backend (issue #15) shipped — including native toast notifications — so the
@@ -54,99 +55,95 @@ shortcuts), `SetTextStyle`/`SetScrollbackRows`/`SetBellMode`/`SetScrollbarWidth`
 
 ## Upcoming
 
-### Phase 45 — Session recording and replay (issue #74)
+Unshipped work only. A phase that lands is deleted from here and recorded as
+one row in [Completed](#completed).
 
-Record the pty stream with timing to a `.gtr` file; replay it back through a
-real `Term`. Duplicate issue #76 covers the same work.
+### Phase 48 — Mouse selection semantics (issue #130)
 
-- [x] `internal/recfmt`: lossless container (JSON header + varint frames),
-      Recorder (zero-alloc per frame) and Reader (bounded, fuzzed)
-- [x] `term`: `Cfg.RecordPath`/`RecordInput`, `StartRecording`/`StopRecording`/
-      `Recording`; `GOTERM_CAPTURE` folded onto the same Recorder in raw mode
-- [x] `term`: `replayPTY` as a `ptyIO`, `NewReplay` + `ReplayCfg`, playback
-      controls routed through the pty write path
-- [x] `term/gotermrec`: info / cat / play / fixture / export -cast
-- [x] falcon `--record` / `--replay`, workspace `Cmd+Shift+R`, `● REC` pill
+Mouse-driven selection stops at click-and-drag: `widget_mouse.go` has no
+click-count path, so double-click-a-word, triple-click-a-line and Alt+drag —
+default gestures in every competitor — do nothing. The alt screen has a
+related hole: the wheel is dead under pagers that don't enable mouse
+reporting.
 
-### Phase 46 — User config file (issue #94)
+One phase because all four items land on the same click-count and
+selection-mode state; split up, each would rewrite the others' lines.
+`grid_word.go` already has `wordFwd`/`wordBack` (copy mode uses them) — share
+that logic, don't duplicate it.
 
-Extend the existing `~/.config/go-term/config` INI — which already carried
-`[keybindings]` — to cover fonts, theme, and terminal settings, and make
-everything it sets reloadable at runtime. Follow-up to #79/#93, which made
-Term-level shortcuts rebindable but left serialization out of `term.Cfg`.
+- [ ] Click-count tracking (timing + movement threshold) in the mouse state
+- [ ] Double-click selects a word, triple-click a logical line (wrapped rows
+      included, matching selection's content-row model)
+- [ ] Drag after a double/triple click extends by word / by line
+- [ ] Alt+drag rectangular (block) selection, including copy serialization
+- [ ] Alt-screen wheel with no mouse reporting synthesizes Up/Down, gated on
+      the literal alt screen
+- [ ] Middle-click paste + PRIMARY selection on Linux
+- [ ] `docs/config.md` selection section
 
-- [x] Parser: `[font]` / `[general]` sections, typed values, forgiving posture
-      (unknown sections/keys ignored, malformed values logged, valid lines kept)
-- [x] Keybinding routing: `term.*` vs `workspace.*` namespaces, bare key still
-      means `workspace.*`, `none` unbinds, collision detection across both
-- [x] `term`: `SetTextStyle` (clears the zoom override), `SetScrollbackRows`
-      (trims existing rows), `SetBellMode`, `SetScrollbarWidth`, `ParseAction`
-- [x] Settings applied when building each pane; theme resolved by name
-- [x] `workspace.reloadConfig` (`Cmd+Shift+,`) + `Workspace.ReloadConfig`
-- [x] `docs/config.md`, linked from README
+### Phase 49 — Protocol odds and ends (issue #131)
 
-### Phase 40 — Tab reordering
+Four small gaps, batched because each is 30–60 lines of parser plus a fixture;
+separate issues would cost more ceremony than code.
 
-Tabs are created/closed in insertion order; no reorder. Keyboard approach:
-`Cmd+Alt+[` / `]` to swap current tab left/right (simple slice swap).
-Drag-to-reorder depends on go-gui container support — investigate; ship
-keyboard-only if upstream work is non-trivial.
+- [ ] Mode 2031 + DSR ?996 — color-scheme-change notification, emitted on
+      `setTheme` so neovim/delta follow a runtime theme switch
+- [ ] OSC 22 — mouse cursor shape (hover plumbing already exists)
+- [ ] OSC 9;4 — ConEmu progress reporting; render in the scrollbar track
+      alongside the Phase 47 failure ticks
+- [ ] XTSMGRAPHICS — sixel geometry / color-register queries, which
+      `img2sixel` issues before emitting
+- [ ] Conformance fixtures for each
 
-- [x] go-gui: does the container system support drag reorder? Yes, via TabControl with Reorderable+OnReorder; deferred in favor of keyboard swap to preserve per-tab close buttons.
-- [x] Keyboard move: `Cmd+Alt+[` / `Cmd+Alt+]`
-- [x] Persistence: already correct (tab order is JSON array order)
+### Phase 50 — Shell integration, completed (issue #132)
 
-### Phase 47 — Copy mode (issue #102)
+Phase 26 records OSC 133 marks and Phase 47 built jumping and output selection
+on them — but nothing fires until the user hand-writes shell hooks this repo
+never shipped. Three snippets turn on a feature set already paid for.
 
-Keyboard-only selection: no mouse path existed for scrolling the buffer,
-anchoring a selection, and copying, so keyboard-only and ssh workflows could
-not get text out at all. A modal vim keymap plus one overlay on top of the
-existing selection / search / mark / viewport machinery — widget-level only,
-no parser changes, no new lock.
+- [ ] `scripts/shell-integration/` — bash, zsh, fish emitting OSC 133 A/B/C/D
+      with exit status plus OSC 7 CWD; idempotent, no clobbering an existing
+      hook chain
+- [ ] `docs/config.md` install section + README pointer
+- [ ] Notify on long-running command completion, derived from `commandSpan`:
+      duration over threshold and the window unfocused
+- [ ] `[general] notify-after` config key (0 disables), live-reloadable
+- [ ] Tab activity / bell / silence indicators in `term/workspace`
 
-- [x] `term.copy-mode` entry chord (`Cmd+Shift+Space` / `Ctrl+Shift+Space`),
-      in-mode keys as a copy-mode group in the same `defaultBindings` table
-- [x] Motion: `hjkl` + arrows, `w`/`b`, `0`/`$`, `g`/`G`, `Ctrl+U`/`Ctrl+D`,
-      PageUp/PageDown, all clamped to the buffer
-- [x] Selection `v` / `V`, yank `y` (falls back to the cell under the cursor)
-- [x] Viewport freeze (`grid.ViewFrozen`) + "output paused" indicator bar
-- [x] Search `/` `?` `n` `N` reusing `grid_search.go` via `findMatch`
-- [x] Prompt marks `[` / `]` reusing `grid_mark.go`
-- [x] `docs/config.md` copy-mode section; help overlay lists only the entry chord
+### Phase 51 — Keyboard-driven discovery (issue #133)
 
-### Phase 48 — OSC 133 failures + output selection (issue #103)
+Copy mode removed the mouse requirement for selection. Opening a URL still
+needs Cmd+click, and the ~60 rebindable actions are discoverable only through
+the help overlay. Both are overlays over existing machinery — `grid_urls.go`
+detection and the `Shortcuts()`/`KeyMap` metadata.
 
-The OSC 133 marks recorded since Phase 26 carried more structure than the
-prompt-jump chords used. Exit status was parsed off the wire and discarded, so
-a failed command buried in a long build log was findable only by reading. This
-phase consumes the exit status and the command regions the marks imply.
+- [ ] `term.hints` — label visible URLs, press a letter to open; open vs.
+      copy-to-clipboard variants
+- [ ] Command palette: fuzzy search over `actionOrder` + `copyActionOrder`,
+      reading chords from `defaultBindings` rather than a second list
+- [ ] Both registered as Actions so they are rebindable and appear in the
+      overlay
+- [ ] `docs/config.md` sections
 
-Fold — collapsing a command's output to a placeholder row — is **deferred to
-its own issue**. Every subsystem in the widget assumes viewport row `r` is
-content row `sb-off+r`, and that invariant is inlined rather than abstracted
-(`ViewCellAt`, `grid_search.go`, graphics origins, scrollbar geometry, mouse
-hit-testing, momentum, sub-pixel scroll). Collapsing rows breaks it everywhere
-and needs a visual-row coordinate layer, which is a project on its own.
+### Post-1.0 backlog
 
-- [x] Parse exit status from `OSC 133;D;<exit>` into `mark.Exit`; a missing or
-      unparsable status stays `markExitUnknown` and never reads as success
-- [x] Re-map marks, selection and graphics through reflow (`trackRows` on
-      `reflowConfig`) — the flat scrollback delta drifted every row below a
-      line that re-wrapped to a different physical row count
-- [x] `commandSpan` model derived from the mark stream, tolerating the
-      incomplete A/B/C/D sequences real shells emit
-- [x] `term.jump-failure` (`Cmd+Shift+E`) — newest failure above the cursor,
-      wrapping; works in copy mode too
-- [x] `term.select-output` (`Cmd+Shift+O`) — selects a command's output region
-      and enters copy mode with it live, ready for `y` / `Cmd+C`
-- [x] Red failure ticks in the scrollbar track, cached against the mark version
-- [x] `docs/config.md` shell-integration section
+Tracked as issues without a phase number: smart selection (regex-driven
+semantic units, depends on Phase 48), quake/dropdown window (needs go-gui
+support), pipe-scrollback / open-in-`$EDITOR`, named profiles.
 
-### Phase 41 — Export audit + Godoc pass
+IME preedit (issue #134) is a correctness gap rather than a feature and should
+block Phase 55 independently: nothing in `term/` handles composition, so CJK
+input may be impossible today.
+
+### Phase 52 — Export audit + Godoc pass
+
+Runs _after_ 48–51. Each of those phases adds public surface (new Actions,
+config keys), so auditing first means auditing twice.
 
 Every exported symbol gets a deliberate reason and complete doc comment.
 
 **term:**
+
 - `Cfg`, `New`, `Term`, `Theme`, `NamedTheme`, predef themes, `ShortcutInfo`, `Shortcuts`, `ThemeMenuItems` — keep
 - `Action` + action constants, `KeyMap`, `Cfg.KeyBindings`, `Term.SetKeyBindings`, `Term.KeyBindings`, `Term.Shortcuts` — keep
 - `MaxGridDim`, `MaxScrollbackCap` — keep
@@ -155,6 +152,7 @@ Every exported symbol gets a deliberate reason and complete doc comment.
 - `FocusID()` — keep, document multi-Term contract
 
 **workspace:**
+
 - `Workspace`, `New`, `Restore`, `Close`, `View`, `Cfg`, `Save`, `DefaultWorkspacePath` — keep
 - `Tab` — exported with no methods → unexport
 - `SplitDir`, `SplitVertical`, `SplitHorizontal` — no public consumer → unexport
@@ -163,78 +161,80 @@ Every exported symbol gets a deliberate reason and complete doc comment.
 - [ ] term: export audit + Godoc pass
 - [ ] workspace: export audit + Godoc pass
 
-### Phase 42 — Deprecation shims + deferred items
+### Phase 53 — Deprecation shims + deferred items
 
 - [ ] If `Fixture`/`CaptureFixture` moved, add `// Deprecated:` forwarding re-exports
 - [ ] Document `FocusID` multi-Term contract (if kept public)
 - [ ] Resolve: auto-load/auto-save — keep explicit `--workspace`/`--save-workspace` flags; no implicit auto-load
 - [ ] Implement `Cmd+S` workspace save command (deferred from 39e-5)
 
-### Phase 43 — Changelog + ROADMAP finalisation
+### Phase 54 — Changelog + ROADMAP finalisation
 
 - [ ] Write `CHANGELOG.md` — narrative by theme (rendering, input, clipboard, graphics, workspace)
 - [ ] Archive: `ROADMAP.md` → `ROADMAP-v0.md`; new thin `ROADMAP.md` for v1.0+ items
 - [ ] Update README with v1.0 API examples
 
-### Phase 44 — Tag v1.0.0 (blocked on go-gui v1.0)
+### Phase 55 — Tag v1.0.0 (blocked on go-gui v1.0)
 
 When go-gui ships v1.0.0:
+
 - Bump go-gui and go-glyph to v1.0.0 final
-- Remove Phase 42 deprecation shims
+- Remove Phase 53 deprecation shims
 - `git tag v1.0.0` with release notes from CHANGELOG.md
 - CI: add `apidiff` check against v1.0.0 baseline
 
-## Completed (0–39)
+## Completed
 
-| # | Description | Unlocked |
-|---|-------------|----------|
-| 0 | Roadmap | Planning |
-| 1 | 256-color + 24-bit truecolor | `ls --color`, vim themes |
-| 2 | Cursor save/restore + show/hide | `tput civis`/`cnorm` |
-| 3 | Scrollback + wheel + PgUp/PgDn | `seq 1 5000` |
-| 4 | Text selection + copy | Drag-select, Cmd+C |
-| 5 | Paste + bracketed paste | Cmd+V, no auto-execute |
-| 6 | Scroll regions + IL/DL/ICH/DCH + IND/RI | vim, `less` |
-| 7 | Alt screen (1049/47/1047) | vim, `htop` |
-| 8 | OSC title + CWD | `printf '\x1b]0;hello\x07'` |
-| 9 | Mouse reporting (X10 + SGR 1006) | tmux, vim `mouse=a` |
-| 10 | Cursor style (DECSCUSR) + blink | bar/underline/block cursors |
-| 11 | Wide chars + emoji | CJK, `🍣` |
-| 12 | Italic, Dim, Strikethrough | Rich text formatting |
-| 13 | Logical reflow on resize | Window resize reflows text |
-| 14 | OSC 52 clipboard + OSC 8 hyperlinks | Remote clipboard, `ls --hyperlink` |
-| 15 | Search in scrollback | Cmd+F "error" |
-| 16 | Coalesced text + caching | 37µs foreground pass, 0 allocs |
-| 17 | Persistent selection | Survives scroll/resize |
-| 18 | Visual bell | `printf '\a'` flash |
-| 19 | Scrollbar indicator | Right-edge position thumb |
-| 20 | Extended underlines + colors | Curly, dotted, dashed |
-| 21 | Customizable tab stops (HTS/TBC) | Legacy CLI tab layouts |
-| 22 | Meta/Alt key encoding | Alt+F word-forward |
-| 23 | Enhanced keypad + F-keys | `mc`, `htop` |
-| 24 | Color themes + palette API | Runtime theme switching |
-| 25 | Dirty row tracking | `top`/`htop` lower CPU |
-| 26 | Semantic shell marks (OSC 133) | Cmd+Up/Down prompt jumping |
-| 27 | Kitty Keyboard Protocol | Neovim distinct Tab/Ctrl+I |
-| 28 | SGR-Pixels mouse (1016) | Pixel-precise coords |
-| 29 | Regex search | `[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+` |
-| 30 | OSC 10/11/12 dynamic colors | `printf '\x1b]11;rgb:ff/00/00\x07'` |
-| 31 | Disk-backed scrollback | **SKIPPED** |
-| 32 | Sixel graphics | `img2sixel` |
-| 33 | OS notifications (OSC 9/777) | Desktop notify |
-| 34 | iTerm2 inline images (OSC 1337) | `imgcat image.png` |
-| 35 | Pixel-perfect scrolling | Sub-cell delta, momentum |
-| 36 | Kitty Graphics Protocol | `kitten icat` |
-| 37 | Font ligatures | Fira Code `!=` → single glyph |
-| 38 | BiDi / RTL text | `echo "שלום"` |
-| 39 | Splits, panes, tabs, persistence | Built-in multiplexing; workspace save/restore |
-| 40 | Tab reordering | Cmd+Alt+[/] move tab left/right |
-| 41 | OSC 4 palette modification | `printf '\x1b]4;1;#00ff00\a'` |
-| 42 | DECSCA + VT420 rectangular areas | DEC forms apps, vttest menu 8 |
-| 45 | Session recording and replay | `falcon --record` / `--replay`, `gotermrec` |
-| 46 | OSC 1337 file download + sizing keys | `imgcat -d file`, `imgcat -W 40` |
-| 47 | Copy mode | `Cmd+Shift+Space`, vim keys, `y` |
-| 48 | OSC 133 failures + output selection | `Cmd+Shift+E`, `Cmd+Shift+O`, scrollbar ticks |
+| #   | Description                             | Unlocked                                      |
+| --- | --------------------------------------- | --------------------------------------------- |
+| 0   | Roadmap                                 | Planning                                      |
+| 1   | 256-color + 24-bit truecolor            | `ls --color`, vim themes                      |
+| 2   | Cursor save/restore + show/hide         | `tput civis`/`cnorm`                          |
+| 3   | Scrollback + wheel + PgUp/PgDn          | `seq 1 5000`                                  |
+| 4   | Text selection + copy                   | Drag-select, Cmd+C                            |
+| 5   | Paste + bracketed paste                 | Cmd+V, no auto-execute                        |
+| 6   | Scroll regions + IL/DL/ICH/DCH + IND/RI | vim, `less`                                   |
+| 7   | Alt screen (1049/47/1047)               | vim, `htop`                                   |
+| 8   | OSC title + CWD                         | `printf '\x1b]0;hello\x07'`                   |
+| 9   | Mouse reporting (X10 + SGR 1006)        | tmux, vim `mouse=a`                           |
+| 10  | Cursor style (DECSCUSR) + blink         | bar/underline/block cursors                   |
+| 11  | Wide chars + emoji                      | CJK, `🍣`                                     |
+| 12  | Italic, Dim, Strikethrough              | Rich text formatting                          |
+| 13  | Logical reflow on resize                | Window resize reflows text                    |
+| 14  | OSC 52 clipboard + OSC 8 hyperlinks     | Remote clipboard, `ls --hyperlink`            |
+| 15  | Search in scrollback                    | Cmd+F "error"                                 |
+| 16  | Coalesced text + caching                | 37µs foreground pass, 0 allocs                |
+| 17  | Persistent selection                    | Survives scroll/resize                        |
+| 18  | Visual bell                             | `printf '\a'` flash                           |
+| 19  | Scrollbar indicator                     | Right-edge position thumb                     |
+| 20  | Extended underlines + colors            | Curly, dotted, dashed                         |
+| 21  | Customizable tab stops (HTS/TBC)        | Legacy CLI tab layouts                        |
+| 22  | Meta/Alt key encoding                   | Alt+F word-forward                            |
+| 23  | Enhanced keypad + F-keys                | `mc`, `htop`                                  |
+| 24  | Color themes + palette API              | Runtime theme switching                       |
+| 25  | Dirty row tracking                      | `top`/`htop` lower CPU                        |
+| 26  | Semantic shell marks (OSC 133)          | Cmd+Up/Down prompt jumping                    |
+| 27  | Kitty Keyboard Protocol                 | Neovim distinct Tab/Ctrl+I                    |
+| 28  | SGR-Pixels mouse (1016)                 | Pixel-precise coords                          |
+| 29  | Regex search                            | `[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+`              |
+| 30  | OSC 10/11/12 dynamic colors             | `printf '\x1b]11;rgb:ff/00/00\x07'`           |
+| 31  | Disk-backed scrollback                  | **SKIPPED**                                   |
+| 32  | Sixel graphics                          | `img2sixel`                                   |
+| 33  | OS notifications (OSC 9/777)            | Desktop notify                                |
+| 34  | iTerm2 inline images (OSC 1337)         | `imgcat image.png`                            |
+| 35  | Pixel-perfect scrolling                 | Sub-cell delta, momentum                      |
+| 36  | Kitty Graphics Protocol                 | `kitten icat`                                 |
+| 37  | Font ligatures                          | Fira Code `!=` → single glyph                 |
+| 38  | BiDi / RTL text                         | `echo "שלום"`                                 |
+| 39  | Splits, panes, tabs, persistence        | Built-in multiplexing; workspace save/restore |
+| 40  | Tab reordering                          | Cmd+Alt+[/] move tab left/right               |
+| 41  | OSC 4 palette modification              | `printf '\x1b]4;1;#00ff00\a'`                 |
+| 42  | DECSCA + VT420 rectangular areas        | DEC forms apps, vttest menu 8                 |
+| 43  | Session recording and replay            | `falcon --record` / `--replay`, `gotermrec`   |
+| 44  | OSC 1337 file download + sizing keys    | `imgcat -d file`, `imgcat -W 40`              |
+| 45  | User config file (INI, live reload)     | `~/.config/go-term/config`, `Cmd+Shift+,`     |
+| 46  | Copy mode                               | `Cmd+Shift+Space`, vim keys, `y`              |
+| 47  | OSC 133 failures + output selection     | `Cmd+Shift+E`, `Cmd+Shift+O`, scrollbar ticks |
 
 ## Commands
 
