@@ -1417,3 +1417,36 @@ func TestOnMouseScroll_MainScreenDoesNotSynthesize(t *testing.T) {
 		t.Errorf("main screen wrote %q, want nothing", got)
 	}
 }
+
+// TestOSC22AppliesCursor covers the widget half of OSC 22: the shape the
+// application asked for is applied on every hover update, and a hovered
+// hyperlink still outranks it.
+func TestOSC22AppliesCursor(t *testing.T) {
+	tm, _ := newDrawTerm(4, 8, 10, 20)
+	w := &gui.Window{}
+
+	tm.grid.PointerShape = pointerIBeam
+	tm.updateHover(1, 1, w)
+	if got := w.MouseCursorState(); got != gui.CursorIBeam {
+		t.Fatalf("cursor = %v, want CursorIBeam", got)
+	}
+
+	// go-gui resets the cursor to Arrow at the top of every mouse-move event,
+	// so a shape held across a motion that changes no cell must be re-applied
+	// rather than assumed sticky.
+	w.SetMouseCursorArrow()
+	tm.updateHover(1, 1, w)
+	if got := w.MouseCursorState(); got != gui.CursorIBeam {
+		t.Fatalf("shape not re-applied on a same-cell move: %v", got)
+	}
+
+	// A hyperlink under the pointer wins: it describes the cell the user is
+	// actually on, while OSC 22 is a pane-wide default set at some earlier time.
+	tm.grid.CurLinkID = tm.grid.internLink("https://example.com")
+	tm.grid.At(2, 2).LinkID = tm.grid.CurLinkID
+	tm.mouse.cmdHeld.Store(true)
+	tm.updateHover(2, 2, w)
+	if got := w.MouseCursorState(); got != gui.CursorPointingHand {
+		t.Fatalf("link hover cursor = %v, want CursorPointingHand", got)
+	}
+}

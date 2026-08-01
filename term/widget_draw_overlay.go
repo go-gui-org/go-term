@@ -137,6 +137,52 @@ func (t *Term) drawScrollbarFailures(ds *drawState, sw, inset float32, thumbVisi
 	}
 }
 
+// OSC 9;4 progress fill. Shares the scrollbar lane with the failure ticks
+// rather than claiming new chrome: the track is already the pane's "status of
+// the whole buffer" column, and a build's progress belongs to the same axis.
+var (
+	scrollbarProgressColor = gui.RGB(64, 132, 214)  // normal
+	scrollbarPausedColor   = gui.RGB(214, 158, 66)  // paused / warning
+	scrollbarIndetColor    = gui.RGB(128, 128, 128) // indeterminate
+)
+
+// drawScrollbarProgress paints the OSC 9;4 progress state as a fill running
+// down from the top of the scrollbar track.
+//
+// The indeterminate state fills the whole track at the idle alpha instead of
+// animating. An animated pulse would need a version bump every frame, which
+// defeats go-gui's tessellation cache for the entire pane — a busy spinner is
+// not worth repainting the terminal at display refresh for.
+func (t *Term) drawScrollbarProgress(ds *drawState, sw, inset float32, thumbVisible bool) {
+	g := ds.g
+	var c gui.Color
+	frac := float32(g.ProgressValue) / 100
+	switch g.ProgressState {
+	case 1:
+		c = scrollbarProgressColor
+	case 2:
+		c = scrollbarFailColor
+	case 3:
+		c, frac = scrollbarIndetColor, 1
+	case 4:
+		c = scrollbarPausedColor
+	default:
+		return // state 0 — nothing to show
+	}
+	c.A = scrollbarTickIdleAlpha
+	if thumbVisible || t.scrollbar.hovered {
+		c.A = scrollbarTickActiveAlpha
+	}
+
+	h := frac * ds.dc.Height
+	if h < scrollbarTickH {
+		// A report of 0% (or 1% in a tall window) still means "something is
+		// running" — round up to a visible sliver rather than drawing nothing.
+		h = scrollbarTickH
+	}
+	ds.dc.FilledRect(ds.dc.Width-sw-inset, 0, sw, h, c)
+}
+
 // drawIME renders the IME composition string at the cursor position. Fills
 // the background under the composition, draws each rune, and underlines the
 // full span. Populates ds.ime* fields for consumption by drawCursor.
@@ -263,8 +309,16 @@ func (t *Term) drawOverlays(ds *drawState) {
 	// above the active check because the failure ticks share it.
 	inset := t.scrollbarEdgeInset(ds.dc.Width)
 
-	// Failure ticks go under the thumb: the thumb is only alpha 120, so a
-	// tick beneath it tints through instead of disappearing.
+	// Progress fill first, failure ticks over it, thumb over both — each is
+	// more specific than the last, and the thumb's alpha 120 lets everything
+	// beneath it tint through rather than disappear.
+	//
+	// Progress is deliberately not gated on scrollback length or the alt
+	// screen: a job reporting progress commonly runs under a full-screen TUI,
+	// and a pane with no scrollback yet still has a track to draw in.
+	if sw > 0 && ds.dc.Width >= sw {
+		t.drawScrollbarProgress(ds, sw, inset, active)
+	}
 	if sb > 0 && sw > 0 && ds.dc.Width >= sw && !g.AltActive {
 		t.drawScrollbarFailures(ds, sw, inset, active)
 	}

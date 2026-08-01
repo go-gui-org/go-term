@@ -185,7 +185,21 @@ func (p *parser) dispatchOSC() {
 		case 'D':
 			p.g.AddCommandEnd(oscExitStatus(pt))
 		}
+	case 22:
+		// OSC 22 — mouse cursor shape. sanitizeOSCString strips the control
+		// characters; the name table rejects everything it does not know, so a
+		// hostile payload can only ever be ignored.
+		if s, ok := parsePointerShape(sanitizeOSCString(pt)); ok {
+			p.g.PointerShape = s
+		}
 	case 9:
+		// OSC 9 is two unrelated commands sharing a number. ConEmu's progress
+		// report (9;4;state;value) must be split off *before* the notification
+		// path, or `cargo build` pops a desktop notification reading "4;1;50".
+		if rest, ok := strings.CutPrefix(pt, "4;"); ok {
+			p.handleOSC94(rest)
+			return
+		}
 		// iTerm2-style notification: OSC 9 ; message BEL — body only, no title.
 		if p.onNotify != nil {
 			p.onNotify("", truncatePaste(pt, notifyMax))
@@ -223,6 +237,39 @@ func (p *parser) dispatchOSC() {
 	case 1337:
 		p.handleOSC1337(pt)
 	}
+}
+
+// handleOSC94 implements OSC 9;4 — ConEmu-style progress reporting. pt is the
+// payload *after* the "4;" subtype, i.e. "state" or "state;value".
+//
+// States: 0 remove, 1 normal (value 0..100), 2 error, 3 indeterminate,
+// 4 paused. A value is only meaningful in states 1/2/4; state 0 clears both so
+// a stale percentage cannot resurface with the next state change.
+//
+// Malformed input clears rather than being ignored: the alternative is a
+// progress bar stuck at whatever the last parseable report said, which is
+// worse than none. Called with g.Mu held.
+func (p *parser) handleOSC94(pt string) {
+	stateStr, valStr, _ := strings.Cut(pt, ";")
+	state, err := strconv.Atoi(stateStr)
+	if err != nil || state < 0 || state > 4 {
+		state = 0
+	}
+	val := 0
+	if state != 0 && state != 3 {
+		// An unparseable or absent value is 0, not a reason to drop the state:
+		// "9;4;2" (error, no percentage) is a report real tools send.
+		if v, err := strconv.Atoi(valStr); err == nil && v > 0 {
+			val = min(v, 100)
+		}
+	}
+	if p.g.ProgressState == uint8(state) && p.g.ProgressValue == uint8(val) {
+		return // no visual change; don't invalidate the tessellation cache
+	}
+	p.g.ProgressState, p.g.ProgressValue = uint8(state), uint8(val)
+	// Progress dirties no row, so this is the only thing that gets the frame
+	// repainted — see grid.OverlayVersion.
+	p.g.OverlayVersion++
 }
 
 // handleOSC4 implements OSC 4 — palette set and query. The payload is a

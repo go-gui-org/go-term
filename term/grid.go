@@ -518,6 +518,25 @@ type grid struct {
 	// The widget watches for changes to trigger a visual flash.
 	BellCount uint64
 
+	// OverlayVersion is bumped by parser state that repaints an overlay but
+	// dirties no row (OSC 9;4 progress today). Without it the readLoop's
+	// HasDirtyRows test would swallow the change and go-gui's tessellation
+	// cache would skip OnDraw entirely — the state would land in the grid and
+	// never reach the screen. The widget mirrors the value the way it mirrors
+	// BellCount.
+	OverlayVersion uint64
+
+	// ProgressState / ProgressValue are OSC 9;4 (ConEmu progress), rendered as
+	// a fill in the scrollbar track. State: 0 none, 1 normal, 2 error,
+	// 3 indeterminate, 4 paused. ProgressValue is 0..100 and meaningless in
+	// states 0 and 3.
+	ProgressState uint8
+	ProgressValue uint8
+
+	// PointerShape is OSC 22 — the mouse cursor an application asked for over
+	// this pane. A hovered hyperlink outranks it (see updateHover).
+	PointerShape pointerShape
+
 	// Top, Bottom define the scroll region (inclusive, 0-based).
 	// Default 0..Rows-1 (full screen). Set via DECSTBM (CSI Pt;Pb r).
 	// scrollUpRegion / scrollDownRegion / IND / RI / IL / DL all
@@ -620,6 +639,14 @@ type grid struct {
 	SyncActive     bool  // currently inside a synchronized update block (DECRQM-reported)
 	AppCursorKeys  bool  // DEC ?1 — application cursor key mode
 	AppKeypad      bool  // DECNKM — application keypad mode
+
+	// ColorSchemeUpdates is DEC ?2031. When set, the widget pushes an
+	// unsolicited CSI ? 997 ; Ps n at the child whenever the light/dark
+	// character of the theme flips, so a running neovim/delta/bat can
+	// re-pick its syntax palette without being restarted. Off by default:
+	// an unsolicited report to an app that never asked for one lands in
+	// its input stream as garbage.
+	ColorSchemeUpdates bool
 
 	// ReverseScreen is DECSCNM (DEC ?5) — reverse video applied to the whole
 	// screen. Purely a rendering flag: the cells keep their real colors, so

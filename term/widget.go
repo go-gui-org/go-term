@@ -326,11 +326,28 @@ func (t *Term) Theme() Theme {
 
 // SetTheme replaces the active color theme and schedules a redraw.
 // Safe to call from the main thread at any time.
+//
+// A child that subscribed with DECSET ?2031 is told when the theme's light/dark
+// character flips, which is what lets a running neovim or delta re-pick its
+// syntax palette instead of staying unreadable until it is restarted. Only on a
+// flip: cycling between two dark themes changes nothing the notification can
+// describe, and one report per keystroke of Cmd+Shift+T is noise in the child's
+// input stream.
 func (t *Term) SetTheme(th Theme) {
-	t.grid.Mu.Lock()
-	defer t.grid.Mu.Unlock()
-	t.grid.setTheme(th)
-	t.bumpVersion()
+	var report []byte
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		was := t.grid.colorSchemeDark()
+		t.grid.setTheme(th)
+		if now := t.grid.colorSchemeDark(); now != was && t.grid.ColorSchemeUpdates {
+			report = colorSchemeReport(now)
+		}
+		t.bumpVersion()
+	}()
+	// Queued outside the lock: appendReplies takes replyMu, and grid.Mu is the
+	// single lock this widget holds across subsystems.
+	t.queueReply(report)
 }
 
 // SetFocused sets whether this terminal has pane focus. The pane

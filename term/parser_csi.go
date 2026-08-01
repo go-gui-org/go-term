@@ -21,14 +21,26 @@ func (p *parser) dispatchCSI(final byte) {
 					p.onReply(b)
 				}
 			case 'n':
-				// DECXCPR (CSI ? 6 n) — extended cursor position report. The
-				// reply carries the private marker and, on a real VT, a page
-				// number; xterm omits the page and clients accept that.
-				if p.param(0, 0) == 6 && p.onReply != nil {
+				if p.onReply == nil {
+					break
+				}
+				switch p.param(0, 0) {
+				case 6:
+					// DECXCPR (CSI ? 6 n) — extended cursor position report.
+					// The reply carries the private marker and, on a real VT, a
+					// page number; xterm omits the page and clients accept that.
 					row, col := p.g.CursorR+1, p.g.settledCol()+1
 					p.onReply([]byte("\x1b[?" + strconv.Itoa(row) + ";" +
 						strconv.Itoa(col) + "R"))
+				case 996:
+					// DSR ?996 — report the current color scheme. Same reply
+					// shape as the unsolicited mode-2031 notification, so a
+					// client parses one code path either way.
+					p.onReply(colorSchemeReport(p.g.colorSchemeDark()))
 				}
+			case 'S':
+				// XTSMGRAPHICS — sixel geometry / color-register queries.
+				p.replyXTSMGRAPHICS()
 			case 'J':
 				// DECSED — selective erase in display (protection honored).
 				p.g.SelectiveEraseInDisplay(p.param(0, 0))
@@ -278,6 +290,11 @@ func (p *parser) applyDECMode(set bool) {
 			}
 		case 2004:
 			p.g.BracketedPaste = set
+		case 2031:
+			// Subscribe to color-scheme change notifications. Setting the mode
+			// does not itself emit a report — the client is expected to prime
+			// its state with DSR ?996, exactly as kitty/Ghostty/WezTerm do.
+			p.g.ColorSchemeUpdates = set
 		case 1004:
 			p.g.FocusReporting = set
 		case 2026:
@@ -390,6 +407,88 @@ func (p *parser) replyANSIDECRQM() {
 	p.onReply(b)
 }
 
+// XTSMGRAPHICS status codes (the Ps field of the reply).
+const (
+	xtsmOK      = 0 // success
+	xtsmBadItem = 1 // unrecognized Pi
+	xtsmBadAct  = 2 // unrecognized Pa
+	xtsmFailure = 3 // recognized, but the request cannot be carried out
+)
+
+// replyXTSMGRAPHICS answers XTSMGRAPHICS (CSI ? Pi ; Pa ; Pv S) — the query
+// img2sixel, chafa and lsix issue before deciding whether to emit sixel and at
+// what resolution. Sixel has been implemented since Phase 32, but without this
+// reply those tools cannot discover it and fall back to half-resolution or
+// ASCII art.
+//
+// Reply shape: CSI ? Pi ; Ps ; Pv S, with a second Pv for geometry items.
+//
+// Pi 1 = color registers, 2 = sixel geometry, 3 = ReGIS geometry (not
+// implemented). Pa 1 = read current, 2 = reset to default, 3 = set, 4 = read
+// maximum.
+//
+// Setting always reports failure: both limits are compile-time constants of the
+// decoder (see sixelColorRegisters, maxSixelWidth), so claiming success would
+// be a lie the next image would expose. Clients handle a failed set by reading
+// instead, which is the path this steers them onto. Reset is a no-op that
+// succeeds — the values already are the defaults.
+func (p *parser) replyXTSMGRAPHICS() {
+	if p.onReply == nil {
+		return
+	}
+	item, action := p.param(0, 0), p.param(1, 0)
+
+	emit := func(status int, vals ...int) {
+		b := make([]byte, 0, 32)
+		b = append(b, "\x1b[?"...)
+		b = strconv.AppendInt(b, int64(item), 10)
+		b = append(b, ';')
+		b = strconv.AppendInt(b, int64(status), 10)
+		for _, v := range vals {
+			b = append(b, ';')
+			b = strconv.AppendInt(b, int64(v), 10)
+		}
+		b = append(b, 'S')
+		p.onReply(b)
+	}
+
+	switch action {
+	case 1, 2, 4: // read current / reset to default / read maximum
+	case 3: // set — cannot be honored, see the doc comment
+		if item < 1 || item > 3 {
+			emit(xtsmBadItem)
+			return
+		}
+		emit(xtsmFailure)
+		return
+	default:
+		emit(xtsmBadAct)
+		return
+	}
+
+	switch item {
+	case 1: // color registers
+		emit(xtsmOK, sixelColorRegisters)
+	case 2: // sixel geometry, reported as width then height
+		if action == 4 {
+			emit(xtsmOK, maxSixelWidth, maxSixelHeight)
+			return
+		}
+		// Current geometry is the text area: an image larger than the pane
+		// cannot be shown in full, so that — not the decoder cap — is the size
+		// a client should scale to. CellPxW/H are 0 until the widget's first
+		// frame measures them; a 0 reply is valid and clients fall back, the
+		// same contract XTWINOPS 14t documents above.
+		w := min(int(float32(p.g.Cols)*p.g.CellPxW+0.5), maxSixelWidth)
+		h := min(int(float32(p.g.Rows)*p.g.CellPxH+0.5), maxSixelHeight)
+		emit(xtsmOK, w, h)
+	case 3: // ReGIS — not implemented
+		emit(xtsmBadItem)
+	default:
+		emit(xtsmBadItem)
+	}
+}
+
 // decModeState returns the current state of a DEC private mode:
 // 1 = set, 2 = reset, 0 = unrecognized. Used for DECRQM replies.
 func (p *parser) decModeState(n int) int {
@@ -429,6 +528,8 @@ func (p *parser) decModeState(n int) int {
 		return boolState(p.g.MouseSGRPixels)
 	case 2004:
 		return boolState(p.g.BracketedPaste)
+	case 2031:
+		return boolState(p.g.ColorSchemeUpdates)
 	case 2026:
 		// Report whether a synchronized-update block is currently open —
 		// per the mode-2026 spec ("currently in synchronized output

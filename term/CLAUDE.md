@@ -86,7 +86,11 @@ Supports a modern xterm/kitty-compatible subset:
   on `CSI ?64…` will not emit them.
 - Reports: DSR 5 (`CSI 5 n` → `CSI 0 n`), CPR (`CSI 6 n`), DECXCPR
   (`CSI ? 6 n`), DECRQM in both the private (`CSI ? Ps $ p`) and ANSI
-  (`CSI Ps $ p`) forms.
+  (`CSI Ps $ p`) forms, color scheme (`CSI ? 996 n` → `CSI ? 997 ; 1 n` dark /
+  `; 2 n` light), and XTSMGRAPHICS (`CSI ? Pi ; Pa ; Pv S`) for sixel color
+  registers (256) and geometry — current geometry is the text area, maximum is
+  the decoder cap; setting always reports failure because both limits are
+  compile-time constants. `img2sixel` and chafa issue it before emitting.
 - Reset: RIS (`ESC c`, terminfo rs1) clears screen + scrollback, leaves
   alt screen, and drops every host-set mode; DECSTR (`CSI ! p`, in rs2
   and is2) resets modes/SGR without touching the screen. Both live in
@@ -97,13 +101,21 @@ Supports a modern xterm/kitty-compatible subset:
   (2026 — DECSET begins a block, DECRST ends + flushes; a 500 ms watchdog
   in the widget force-ends a block whose end never arrives),
   grapheme clustering (2027 — always on; DECRQM reports it
-  permanently set, DECSET/DECRST are no-ops).
+  permanently set, DECSET/DECRST are no-ops), color-scheme change
+  notification (2031 — `Term.SetTheme` pushes `CSI ? 997` at a subscribed
+  child, but only when the theme's light/dark character actually flips;
+  light vs. dark is the Rec.601 luma of `Theme.DefaultBG`, which OSC 11
+  writes through, and deliberately ignores DECSCNM).
 - Kitty Keyboard Protocol: `CSI > u` / `< u` / `= u` / `? u` (push/pop/
   set/query); key-release events; left/right modifier distinction.
 - DEC Special Graphics: `SI`/`SO`, `ESC (0` / `ESC (B`.
 - OSC: window title (0/1/2), palette set/query (4) and reset (104 —
   one index, or all with a bare `OSC 104`), CWD (7), hyperlinks (8),
-  desktop notifications (9/777), dynamic colors (10/11/12),
+  desktop notifications (9/777) — `OSC 9 ; 4 ; …` splits off *before* the
+  notification path as ConEmu progress, rendered as a fill in the scrollbar
+  track — mouse cursor shape (22, mapped onto go-gui's ten cursors by
+  `pointer.go`; unknown names leave the shape alone),
+  dynamic colors (10/11/12),
   clipboard (52), semantic shell marks (133), iTerm2 `File=` (1337 — both
   `inline=1` images and `inline=0` file transfers). The 1337 key list is
   parsed for real: `name` (base64, sanitized to a bare filename), `size`,
