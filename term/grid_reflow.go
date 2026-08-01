@@ -51,13 +51,17 @@ func isDefaultBlank(c cell) bool {
 }
 
 // rowArena carves fixed-width row slices from lazy-allocated flat blocks
-// so reflow does not pay one heap allocation per physical row. Blocks are
-// 256 rows each; growth never copies, so rows carved from earlier blocks
-// remain valid after the arena grows.
+// so reflow does not pay one heap allocation per physical row. Blocks start
+// at 8 rows and double up to 256, so a screen-sized reflow allocates in
+// proportion to what it produces while a deep-scrollback one still amortises
+// to no per-row allocation. Growth never copies — a full block is simply
+// abandoned by the arena and kept alive by the rows carved out of it — so
+// rows carved from earlier blocks remain valid after the arena grows.
 type rowArena struct {
 	buf  []cell
 	off  int
 	rowW int
+	blk  int // rows in the current block; 0 before the first allocation
 }
 
 // next returns a zero-length row slice whose capacity is exactly rowW
@@ -69,7 +73,12 @@ func (a *rowArena) next() []cell {
 		return nil
 	}
 	if a.off+a.rowW > len(a.buf) {
-		a.buf = make([]cell, a.rowW*256)
+		// Grow the block geometrically rather than jumping straight to 256:
+		// a 24-row reflow must not pay for a 256-row block. The floor sets
+		// the first block (blk is 0 then); the ceiling keeps deep-scrollback
+		// reflow at one allocation per 256 rows.
+		a.blk = clamp(a.blk*2, 8, 256)
+		a.buf = make([]cell, a.rowW*a.blk)
 		a.off = 0
 	}
 	row := a.buf[a.off : a.off : a.off+a.rowW]
@@ -193,20 +202,23 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 	cursorR, cursorC := cfg.cursorR, cfg.cursorC
 	scrollbackCap := cfg.scrollbackCap
 
-	// Defensive: clamp dims to >=1 so division and allocation
-	// arithmetic never hits zero or negative. Callers already clamp
-	// via clampDim; this is defense-in-depth for the struct-param path.
-	if newCols < 1 {
-		newCols = 1
-	}
-	if newRows < 1 {
-		newRows = 1
-	}
-	if oldCols < 1 {
-		oldCols = 1
-	}
+	// Defensive: clamp dims to [1, MaxGridDim] so division and allocation
+	// arithmetic never hits zero or negative, and so the dimension-scaled
+	// products below (rowArena's rowW*blk block, newRows*newCols,
+	// oldRows*oldCols) cannot overflow int and hand make() a negative length.
+	// Callers already clamp; this is defense-in-depth for the struct-param path.
+	newCols = clampDim(newCols)
+	newRows = clampDim(newRows)
+	oldCols = clampDim(oldCols)
 	if oldRows < 0 {
 		oldRows = 0
+	}
+	// The live buffer must hold oldRows×oldCols cells. Trust the buffer over
+	// the claimed row count so a short or nil one truncates rather than
+	// panicking when rows are sliced out of it below — the wrap-flag slices
+	// are already treated that way.
+	if n := len(cells) / oldCols; oldRows > n {
+		oldRows = n
 	}
 
 	var (

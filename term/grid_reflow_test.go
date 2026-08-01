@@ -1,6 +1,9 @@
 package term
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestGrid_Resize_Shrink(t *testing.T) {
 	g := newGrid(3, 3)
@@ -277,6 +280,80 @@ func TestGrid_Resize_ZerosViewSubPx(t *testing.T) {
 	}
 }
 
+// TestRowArena_GrowthPreservesEarlierRows carves enough rows to cross several
+// block boundaries (blocks are 8, 16, 32 … rows) and checks the invariant the
+// geometric growth rests on: abandoning a full block must not invalidate the
+// rows already carved from it, and a row must never bleed into its neighbour.
+func TestRowArena_GrowthPreservesEarlierRows(t *testing.T) {
+	const rowW, rows = 5, 40 // spans the 8, 16 and 32-row blocks
+
+	a := rowArena{rowW: rowW}
+	carved := make([][]cell, rows)
+	for i := range carved {
+		row := a.next()
+		if cap(row) != rowW {
+			t.Fatalf("row %d: cap = %d, want %d", i, cap(row), rowW)
+		}
+		if len(row) != 0 {
+			t.Fatalf("row %d: len = %d, want 0", i, len(row))
+		}
+		// Fill the row to capacity with a value unique to this row, so a
+		// row whose backing store was reused shows up as a wrong sentinel.
+		for range rowW {
+			row = append(row, cell{Ch: rune('A' + i)})
+		}
+		carved[i] = row
+	}
+
+	for i, row := range carved {
+		want := rune('A' + i)
+		for j, c := range row {
+			if c.Ch != want {
+				t.Fatalf("row %d cell %d: Ch = %q, want %q", i, j, c.Ch, want)
+			}
+		}
+	}
+}
+
+// TestRowArena_BlockSizeCapsAt256 pins the other end of the growth curve.
+// The doubling must saturate at 256 rows: without the cap a deep-scrollback
+// reflow would keep doubling into ever-larger blocks, and with the cap set
+// too low it would fall back toward per-row allocation.
+func TestRowArena_BlockSizeCapsAt256(t *testing.T) {
+	// Cumulative rows at each block boundary are 8, 24, 56, 120, 248, 504 —
+	// so 600 rows lands well past the first capped block.
+	const rowW, rows = 4, 600
+
+	a := rowArena{rowW: rowW}
+	for range rows {
+		if row := a.next(); cap(row) != rowW {
+			t.Fatalf("cap = %d, want %d", cap(row), rowW)
+		}
+	}
+	if a.blk != 256 {
+		t.Errorf("block size = %d after %d rows, want 256", a.blk, rows)
+	}
+	if len(a.buf) != rowW*256 {
+		t.Errorf("buf len = %d, want %d", len(a.buf), rowW*256)
+	}
+}
+
+// TestRowArena_NonPositiveWidth checks the defensive path: a non-positive
+// rowW must yield nil rather than allocating or panicking on a zero-size or
+// negative-size block.
+func TestRowArena_NonPositiveWidth(t *testing.T) {
+	for _, rowW := range []int{0, -1, math.MinInt} {
+		a := rowArena{rowW: rowW}
+		if row := a.next(); row != nil {
+			t.Errorf("rowW %d: next() = %v, want nil", rowW, row)
+		}
+		if a.buf != nil {
+			t.Errorf("rowW %d: allocated a block of %d cells, want none",
+				rowW, len(a.buf))
+		}
+	}
+}
+
 // --- benchmarks ---
 
 func BenchmarkResize_Reflow_DeepScrollback(b *testing.B) {
@@ -296,6 +373,23 @@ func BenchmarkResize_Reflow_DeepScrollback(b *testing.B) {
 	for b.Loop() {
 		g.Resize(30, 100) // grow
 		g.Resize(24, 80)  // shrink back
+	}
+}
+
+// BenchmarkResize_Reflow_Empty measures the floor: a reflow that produces
+// only a screenful of rows. The arena's block size must scale down with the
+// row count, so this should cost far less than the deep-scrollback case.
+// The widths alternate 132/80 because that is what DECCOLM drives, and the
+// scrollback cap is the real default so the ring's steady-state reslicing
+// (rather than a fresh allocation per resize) is part of the measurement.
+func BenchmarkResize_Reflow_Empty(b *testing.B) {
+	g := newGrid(24, 100)
+	g.ScrollbackCap = defaultScrollbackRows
+
+	b.ResetTimer()
+	for b.Loop() {
+		g.Resize(24, 132)
+		g.Resize(24, 80)
 	}
 }
 
@@ -355,6 +449,59 @@ func TestLogicalReflow_ZeroDimsClamped(t *testing.T) {
 	}
 	if res.cursorR != 0 || res.cursorC != 0 {
 		t.Errorf("zero dims cursor: (%d,%d), want (0,0)", res.cursorR, res.cursorC)
+	}
+}
+
+func TestLogicalReflow_HugeDimsClamped(t *testing.T) {
+	// Mirror of the zero-dim guard at the other end. Unclamped, newCols
+	// this large overflows the rowArena block product (rowW*blk) and the
+	// newRows*newCols buffer, handing make() a negative length and
+	// panicking. Callers clamp via clampDim; this covers the struct-param
+	// path, which nothing outside the package constrains.
+	cfg := reflowConfig{
+		oldRows: 1,
+		oldCols: math.MaxInt,
+		newRows: math.MaxInt,
+		newCols: math.MaxInt,
+	}
+	// Must not panic.
+	res := logicalReflow(cfg)
+	if len(res.cells) != MaxGridDim*MaxGridDim {
+		t.Fatalf("huge dims: got %d cells, want %d",
+			len(res.cells), MaxGridDim*MaxGridDim)
+	}
+	if len(res.rowWrapped) != MaxGridDim {
+		t.Fatalf("huge dims: got %d rowWrapped, want %d",
+			len(res.rowWrapped), MaxGridDim)
+	}
+}
+
+func TestLogicalReflow_ShortCellBufferTruncates(t *testing.T) {
+	// oldRows claims 4 rows but the buffer holds only 2. Slicing row 2 out
+	// of it would panic, so the reflow must believe the buffer: keep the
+	// rows that are really there and drop the phantom ones.
+	cells := make([]cell, 10) // 2 rows of 5
+	for i, r := range "helloworld" {
+		cells[i] = cell{Ch: r, Width: 1, FG: DefaultColor, BG: DefaultColor}
+	}
+	cfg := reflowConfig{
+		cells:      cells,
+		rowWrapped: []bool{true, false},
+		oldRows:    4, // lies: only 2 rows of cells exist
+		oldCols:    5,
+		newRows:    4,
+		newCols:    10,
+	}
+	// Must not panic.
+	res := logicalReflow(cfg)
+	if len(res.cells) != 4*10 {
+		t.Fatalf("got %d cells, want %d", len(res.cells), 4*10)
+	}
+	// The two real rows were soft-wrapped, so they rejoin into one row of 10.
+	for i, want := range "helloworld" {
+		if got := res.cells[i].Ch; got != want {
+			t.Errorf("col %d: got %q, want %q", i, got, want)
+		}
 	}
 }
 
