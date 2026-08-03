@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-term/term"
@@ -35,6 +36,10 @@ type workspaceConfig struct {
 	scrollback  int           // [general] scrollback rows (negative disables)
 	bell        term.BellMode // [general] bell
 
+	// notifyAfter is [general] notify-after: how long a command must run
+	// before its completion is worth a desktop notification. Zero disables.
+	notifyAfter time.Duration
+
 	middleClickPaste bool // [general] middle-click-paste
 
 	hasFontSize         bool
@@ -43,6 +48,7 @@ type workspaceConfig struct {
 	hasScrollbar        bool
 	hasBell             bool
 	hasMiddleClickPaste bool
+	hasNotifyAfter      bool
 }
 
 const (
@@ -200,8 +206,45 @@ func (c *workspaceConfig) setGeneral(key, val string) error {
 			return fmt.Errorf("middle-click-paste %q: want true|false", val)
 		}
 		c.middleClickPaste, c.hasMiddleClickPaste = b, true
+	case "notify-after":
+		d, ok := parseNotifyAfter(val)
+		if !ok {
+			return fmt.Errorf("notify-after %q: want seconds or a duration like 30s", val)
+		}
+		c.notifyAfter, c.hasNotifyAfter = d, true
 	}
 	return nil
+}
+
+// maxNotifyAfter bounds a [general] notify-after entry. Past an hour the
+// setting has stopped meaning "tell me when this finishes" and is almost
+// certainly a unit mix-up (milliseconds written as a bare number).
+const maxNotifyAfter = time.Hour
+
+// parseNotifyAfter accepts either a bare number of seconds ("30") or a Go
+// duration ("30s", "2m"). Both spellings appear in terminal config files and
+// neither is more obviously correct, so both are read rather than making the
+// user guess. Negative values are rejected; 0 is valid and means off.
+func parseNotifyAfter(s string) (time.Duration, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	if n, err := strconv.Atoi(s); err == nil {
+		// Bound n *before* scaling it: Atoi accepts up to the int range, and
+		// multiplying that by time.Second overflows int64 and wraps — a huge
+		// number would come back out as a small or negative duration that
+		// passes the range check.
+		if n < 0 || n > int(maxNotifyAfter/time.Second) {
+			return 0, false
+		}
+		return time.Duration(n) * time.Second, true
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d < 0 || d > maxNotifyAfter {
+		return 0, false
+	}
+	return d, true
 }
 
 // parseConfigBool accepts the spellings users actually write in an INI file.
@@ -400,6 +443,7 @@ type termOpts struct {
 	scrollbar   float32
 	minContrast float64
 	bell        term.BellMode
+	notifyAfter time.Duration
 
 	// middleClickPaste defaults to the platform convention rather than to
 	// false, so it is always set explicitly by applySettings.
@@ -448,6 +492,9 @@ func applySettings(base Cfg, fc workspaceConfig, keys term.KeyMap) Cfg {
 	}
 	if fc.hasBell {
 		out.opts.bell = fc.bell
+	}
+	if fc.hasNotifyAfter {
+		out.opts.notifyAfter = fc.notifyAfter
 	}
 	out.opts.middleClickPaste = defaultMiddleClickPaste()
 	if fc.hasMiddleClickPaste {

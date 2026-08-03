@@ -3,6 +3,7 @@ package workspace
 import (
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-term/term"
@@ -17,6 +18,15 @@ type Tab struct {
 	focused string                // leafID of focused pane
 	nextID  int                   // monotonic leaf ID counter
 
+	// lastActivity is when any pane in this tab last produced output, and
+	// bell whether one rang the bell. Both accumulate only while the tab is
+	// in the background and are cleared when it becomes active — an
+	// indicator on the tab you are already reading has nothing to tell you.
+	// The silence indicator is derived from lastActivity rather than stored;
+	// see tabIndicator.
+	lastActivity time.Time
+	bell         bool
+
 	// broadcast mirrors user input from the focused pane to every other
 	// live pane in *this* tab. Toggled unconditionally, including on a
 	// single-pane tab — the status pill, not a pane-count rule, is what
@@ -30,10 +40,11 @@ type Tab struct {
 // (new tab, split, restore) needs the whole set, and threading them one at a
 // time grew each signature with the feature list.
 type paneHooks struct {
-	onExit  func(leafID string)
-	onFocus func(leafID string)
-	onTitle func(leafID, title string)
-	onInput func(leafID string, p []byte, kind term.InputKind)
+	onExit     func(leafID string)
+	onFocus    func(leafID string)
+	onTitle    func(leafID, title string)
+	onInput    func(leafID string, p []byte, kind term.InputKind)
+	onActivity func(leafID string, kind term.ActivityKind)
 }
 
 // newTab creates a Tab with a single leaf running a shell. dir sets the
@@ -83,6 +94,7 @@ func (t *Tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHoo
 		ScrollbarWidth:  cfg.opts.scrollbar,
 		MinimumContrast: cfg.opts.minContrast,
 		BellMode:        cfg.opts.bell,
+		NotifyAfter:     cfg.opts.notifyAfter,
 		KeyBindings:     cfg.opts.keys,
 
 		MiddleClickPaste: cfg.opts.middleClickPaste,
@@ -105,6 +117,11 @@ func (t *Tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHoo
 		// tab is broadcasting.
 		OnInput: func(p []byte, kind term.InputKind) {
 			hooks.onInput(panelID, p, kind)
+		},
+		// Already on the main thread (Term dispatches it through its own
+		// queueCommand), so no further hop is needed here.
+		OnActivity: func(kind term.ActivityKind) {
+			hooks.onActivity(panelID, kind)
 		},
 	}
 }

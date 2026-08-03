@@ -309,6 +309,9 @@ func (ws *Workspace) applyTermSettings(prev Cfg) {
 			if prev.opts.middleClickPaste != cur.opts.middleClickPaste {
 				tm.SetMiddleClickPaste(cur.opts.middleClickPaste)
 			}
+			if prev.opts.notifyAfter != cur.opts.notifyAfter {
+				tm.SetNotifyAfter(cur.opts.notifyAfter)
+			}
 			// KeyMap is a map, so it can't be compared for equality cheaply;
 			// re-seeding is idempotent (mergeBindings rebuilds from the
 			// defaults each time) and costs one small map per pane.

@@ -400,6 +400,44 @@ type Term struct {
 	// in the same window don't compete for the same focus slot.
 	focusID string
 
+	// winFocused tracks whether this terminal is the one the user is looking
+	// at, and gates the long-running-command notification. It is fed by the
+	// EventFocused/EventUnfocused pair in HandleWindowEvent, which carries
+	// two things at once: a standalone Term sees real window focus, while a
+	// pane manager also synthesizes the pair as the user moves between panes
+	// and tabs (term/workspace routes window events to the active pane only).
+	// The union is what the notification wants — a build running in a
+	// background tab of a focused window is just as unattended as one in a
+	// background window.
+	//
+	// Distinct from `focused` above, which is keyboard-focus routing and is
+	// set through the separate SetFocused entry point. Defaults to true in
+	// New: a Term that never sees a focus event is assumed visible, so
+	// notifications stay quiet until something says otherwise.
+	winFocused atomic.Bool
+
+	// cmdStart is the UnixNano instant the running command began (OSC 133 C),
+	// or 0 when no command is running. Written by the parser on the reader
+	// goroutine, read there too; atomic because SetNotifyAfter and the tests
+	// may touch the pair from elsewhere.
+	cmdStart atomic.Int64
+
+	// notifyAfter is the live long-running-command threshold in nanoseconds,
+	// seeded from Cfg.NotifyAfter and replaced by SetNotifyAfter. Zero
+	// disables the notification.
+	notifyAfter atomic.Int64
+
+	// clock is the time source, replaced in tests so a command's duration can
+	// be simulated without sleeping. Nil means time.Now — see Term.now.
+	clock func() time.Time
+
+	// activityPending is true while an OnActivity dispatch is queued but not
+	// yet run, and activityBell records that one of the reads folded into it
+	// rang the bell. Together they coalesce a burst of reads into one call —
+	// see reportActivity.
+	activityPending atomic.Bool
+	activityBell    atomic.Bool
+
 	// closed guards Close so multiple calls are safe.
 	closed atomic.Bool
 

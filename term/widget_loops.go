@@ -341,9 +341,21 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 	// goroutine immediately, off both the render loop and this read loop.
 	t.enqueueReplies()
 
-	if bellCount > t.bell.seenCount {
+	bellRang := bellCount > t.bell.seenCount
+	if bellRang {
 		t.bell.seenCount = bellCount
 		t.ringBell()
+	}
+
+	// Report activity to a pane manager. Computed here rather than per cell:
+	// needUpdate is already the answer to "did this read change the screen",
+	// so the hook costs one nil check per PTY read.
+	if fn := t.cfg.OnActivity; fn != nil && (needUpdate || bellRang) {
+		kind := ActivityOutput
+		if bellRang {
+			kind = ActivityBell
+		}
+		t.reportActivity(fn, kind)
 	}
 
 	// Coalesce: queue at most one outstanding UpdateWindow so a burst of
@@ -355,6 +367,35 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 		})
 	}
 	return needUpdate
+}
+
+// reportActivity hands one activity report to the embedder's OnActivity hook
+// on the main thread. Dispatched through queueCommand because the hook runs
+// there and grid.Mu must never be held across a go-gui call.
+//
+// Coalesced exactly like the redraw above it, and for the same reason: a child
+// spewing output produces a read every few hundred microseconds, and one
+// queued closure per read floods the command queue with calls whose answer is
+// identical. At most one dispatch is outstanding; further reads fold into it.
+// A bell arriving while one is pending upgrades the kind rather than queuing
+// its own, so the signal the embedder must not miss cannot be dropped.
+func (t *Term) reportActivity(fn func(ActivityKind), kind ActivityKind) {
+	if kind == ActivityBell {
+		t.activityBell.Store(true)
+	}
+	if t.activityPending.Swap(true) {
+		return
+	}
+	t.queueCommand(func(*gui.Window) {
+		// Cleared before the hook runs so activity produced during it queues a
+		// fresh dispatch instead of being swallowed.
+		t.activityPending.Store(false)
+		k := ActivityOutput
+		if t.activityBell.Swap(false) {
+			k = ActivityBell
+		}
+		fn(k)
+	})
 }
 
 // onSyncTimeout is the mode-2026 watchdog callback: a sync block was begun

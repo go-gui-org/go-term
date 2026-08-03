@@ -1,5 +1,7 @@
 package term
 
+import "strings"
+
 // Command regions derived from the OSC 133 mark stream. Nothing here is
 // stored: a commandSpan is reconstructed on demand from grid.Marks, so the
 // marks remain the single source of truth and reflow/trim keep working
@@ -193,6 +195,61 @@ func (g *grid) lastWrittenRow(from, to int) int {
 		}
 	}
 	return from - 1
+}
+
+// commandText returns the command line of the most recently started command:
+// the text of the markCommandStart row from the column that mark recorded (so
+// the prompt is excluded) to the end of the row. Returns "" when no command
+// has started.
+//
+// Only the first row is read. A command continued across a line continuation
+// or wrapped past the right margin is therefore truncated, which is the right
+// trade for the one caller — a notification body, where a single line is all
+// that fits anyway. Caller holds Mu.
+func (g *grid) commandText() string {
+	for i := len(g.Marks) - 1; i >= 0; i-- {
+		if g.Marks[i].Kind != markCommandStart {
+			continue
+		}
+		return g.rowTextFrom(g.Marks[i].Row, int(g.Marks[i].Col))
+	}
+	return ""
+}
+
+// rowTextFrom extracts content row text from col to the end of the row,
+// trimming trailing blanks. Mirrors the cell decoding in SelectedText —
+// interned grapheme clusters expand, Kitty Unicode placeholders count as
+// blank — without the selection geometry. Caller holds Mu.
+func (g *grid) rowTextFrom(row, col int) string {
+	if row < 0 || col < 0 || col >= g.Cols {
+		return ""
+	}
+	// Find the last non-blank cell first so the builder is sized once and no
+	// trailing run of spaces is emitted.
+	end := col - 1
+	for c := col; c < g.Cols; c++ {
+		cell := g.ContentCellAt(row, c)
+		if cell.Ch != ' ' && cell.Ch != 0 && !isPlaceholderCell(cell) {
+			end = c
+		}
+	}
+	if end < col {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(end - col + 1)
+	for c := col; c <= end; c++ {
+		cell := g.ContentCellAt(row, c)
+		switch {
+		case isPlaceholderCell(cell):
+			b.WriteByte(' ')
+		case cell.clusterID != 0 && int(cell.clusterID) < len(g.clusters):
+			b.WriteString(g.clusters[cell.clusterID])
+		case cell.Ch != 0:
+			b.WriteRune(cell.Ch)
+		}
+	}
+	return b.String()
 }
 
 // commandAt returns the span whose region contains row — from its prompt

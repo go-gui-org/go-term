@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-term/term"
@@ -96,6 +97,16 @@ type Workspace struct {
 	// which is what makes the first call happen at startup.
 	schemeKnown bool
 	schemeDark  bool
+
+	// silenceTimer schedules the repaint that flips a background tab's
+	// activity marker to silence. One timer serves every tab; see
+	// armSilenceTimer. Main-thread only.
+	silenceTimer *time.Timer
+
+	// clock is the time source for the activity indicators, replaced in tests
+	// so the silence transition can be driven without waiting. Nil means
+	// time.Now — see Workspace.now.
+	clock func() time.Time
 
 	prevOnEvent func(*gui.Event, *gui.Window)
 }
@@ -215,10 +226,11 @@ func (ws *Workspace) closeTabAt(idx int) {
 // newTab / addPane.
 func (ws *Workspace) hooks() paneHooks {
 	return paneHooks{
-		onExit:  ws.onPaneExit,
-		onFocus: ws.onPaneFocus,
-		onTitle: ws.onPaneTitle,
-		onInput: ws.onPaneInput,
+		onExit:     ws.onPaneExit,
+		onFocus:    ws.onPaneFocus,
+		onTitle:    ws.onPaneTitle,
+		onInput:    ws.onPaneInput,
+		onActivity: ws.onPaneActivity,
 	}
 }
 
@@ -302,6 +314,12 @@ func (ws *Workspace) closePaneInTab(tab *Tab, leafID string) {
 // Close tears down all terminals and restores the original OnEvent.
 func (ws *Workspace) Close() error {
 	ws.w.OnEvent = ws.prevOnEvent
+	// Stop the pending silence repaint: its callback queues work on a window
+	// this workspace no longer handles events for.
+	if ws.silenceTimer != nil {
+		ws.silenceTimer.Stop()
+		ws.silenceTimer = nil
+	}
 	for _, tab := range ws.tabs {
 		tab.closeAll()
 	}
@@ -330,6 +348,29 @@ func (ws *Workspace) ActivePane() *term.Term {
 	}
 	tab := ws.tabs[ws.activeTab]
 	return tab.terms[tab.focused]
+}
+
+// blurAllPanes tells every pane in every tab that it is in the background.
+//
+// A Term that has never seen a focus event assumes it is on screen, which is
+// the right default for the standalone case but wrong for a workspace that
+// constructs many panes at once and focuses one of them. The rest would keep
+// gating their long-running-command notifications on a focus state that never
+// became false, and stay silent forever. Every incremental path — a split, a
+// new tab, a tab switch — already unfocuses the pane it moves away from; this
+// exists for the one path that has no "away from" to unfocus.
+//
+// Blanket-sending the event is safe only where no child has had the chance to
+// enable focus reporting (?1004) yet, since a subscribed child would read a
+// redundant event as a CSI O report. Restore, whose shells have only just
+// spawned, is that place.
+func (ws *Workspace) blurAllPanes() {
+	for _, tab := range ws.tabs {
+		for _, t := range tab.terms {
+			t.SetFocused(false)
+			t.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
+		}
+	}
 }
 
 // tight creates a ContainerCfg with all inherited spacing zeroed.
@@ -561,9 +602,19 @@ func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 	inner := tight(gui.FillFit)
 	inner.Padding = gui.SomeP(1, 6, 1, 6)
 
-	content := []gui.View{
-		gui.Text(gui.TextCfg{Text: title, TextStyle: style}),
+	content := make([]gui.View, 0, 4)
+	// The activity marker leads the title. Only background tabs carry one —
+	// activateTab clears the state of whichever tab the user switches to.
+	if g := ws.tabGlyph(tab, isActive); g != "" {
+		markStyle := style
+		// Undimmed title color: an inactive tab's text is faded to 0.65, and
+		// the marker is the one thing on it that should catch the eye.
+		markStyle.Color = theme.M5.Color
+		content = append(content, gui.Text(gui.TextCfg{
+			Text: g + " ", TextStyle: markStyle,
+		}))
 	}
+	content = append(content, gui.Text(gui.TextCfg{Text: title, TextStyle: style}))
 	// closeID names the "×" text shape so the hover handlers below can
 	// recolor it by ID without disturbing the title text.
 	closeID := tab.id + "-close"
@@ -654,10 +705,15 @@ func (ws *Workspace) activateTab(idx int) {
 	}
 	ws.activeTab = idx
 	tab := ws.tabs[idx]
+	// Whatever this tab was reporting, the user is now looking at it.
+	tab.clearActivity()
 	if t, ok := tab.terms[tab.focused]; ok {
 		t.SetFocused(true)
 		t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 	}
+	// The cleared tab may have been the one the pending silence timer was
+	// waiting on, so recompute the deadline from what is left.
+	ws.armSilenceTimer()
 	ws.refresh()
 }
 

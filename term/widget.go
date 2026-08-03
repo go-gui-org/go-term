@@ -85,6 +85,7 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 		})
 	}
 	t.registerNotifyHandler()
+	t.registerCommandHandler()
 	t.registerDownloadHandler()
 	if !cfg.NoWindowHandler {
 		t.prevOnEvent = w.OnEvent
@@ -96,6 +97,11 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 		}
 	}
 	t.focused.Store(true)
+	// A Term that never receives a focus event is assumed to be on screen, so
+	// the long-running-command notification stays quiet until a real
+	// EventUnfocused says otherwise.
+	t.winFocused.Store(true)
+	t.notifyAfter.Store(int64(clampNotifyAfter(cfg.NotifyAfter)))
 	w.SetFocus(t.focusID)
 	t.replyCond = sync.NewCond(&t.replyMu)
 	// Record-from-startup. Started before readLoop so the recording cannot
@@ -197,6 +203,17 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 	// reflows content out from under the recorded unit bounds.
 	if e.Type == gui.EventMouseUp || e.Type == gui.EventResized {
 		t.resetClickCount()
+	}
+	// Window focus is tracked regardless of whether the child asked for focus
+	// reports: the long-running-command notification needs to know the window
+	// is unattended, and that has nothing to do with what the child enabled.
+	// This must stay ahead of the FocusReporting early-return below, which
+	// otherwise discards these events entirely for the common child.
+	switch e.Type {
+	case gui.EventFocused:
+		t.winFocused.Store(true)
+	case gui.EventUnfocused:
+		t.winFocused.Store(false)
 	}
 	var report []byte
 	t.grid.Mu.Lock()
