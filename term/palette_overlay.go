@@ -57,6 +57,24 @@ type overlayColors struct {
 	searchFill               gui.Color
 	searchNoMatchFill        gui.Color
 	searchText               gui.Color
+
+	// Hint label pills. hintTypedText tints the part of a label the user has
+	// already typed, so a two-character label shows its own progress; it shares
+	// hintFill, because dimming the text is what reads as "consumed" without
+	// making the pill itself look like a different kind of thing.
+	hintFill, hintText gui.Color
+	hintTypedText      gui.Color
+	hintRule           gui.Color
+}
+
+// contrastPole returns black or white, whichever contrasts more with c. Used
+// where a fill's own hue cannot supply a readable text color — see the hint
+// pill in deriveOverlay.
+func contrastPole(c gui.Color) gui.Color {
+	if contrastRatio(c, overlayBlack) >= contrastRatio(c, overlayWhite) {
+		return overlayBlack
+	}
+	return overlayWhite
 }
 
 // Accent hues. These are the identity of each overlay — what the user learns
@@ -77,6 +95,10 @@ var (
 	overlayCopyCurHue  = gui.RGB(255, 176, 0)   // copy-mode cursor
 	overlaySearchHue   = gui.RGB(40, 40, 90)    // search bar
 	overlayNoMatchHue  = gui.RGB(90, 20, 20)    // search bar, no matches
+	// Amber, deliberately the copy-mode cursor's hue rather than a new one:
+	// both mean "the keyboard is driving something other than the shell", and
+	// the two modes are never on screen at once.
+	overlayHintHue = gui.RGB(255, 176, 0) // hint label pills
 )
 
 // Pill fill alphas, unchanged from the literals they replace: semi-transparent
@@ -84,6 +106,14 @@ var (
 const (
 	overlayRecordAlpha uint8 = 210
 	overlayBadgeAlpha  uint8 = 225
+	// How far a typed label character is pulled from the pill's text color
+	// toward its fill. Far enough to read as spent, and no further: past ~42%
+	// it stops clearing the same text-legibility floor every other overlay
+	// label is held to, and TestOverlayContrast fails it.
+	hintTypedMixPct = 40
+	// The hint underline's alpha. Well below the pill's, so the marking of a
+	// link's extent stays subordinate to the key that picks it.
+	hintRuleAlpha uint8 = 150
 )
 
 // Blend fractions used by deriveOverlay, as integer percentages — float-free
@@ -355,6 +385,23 @@ func deriveOverlay(th Theme) overlayColors {
 	// matching should change the bar's color, not restyle its label.
 	ov.searchFill, ov.searchText = pillPair(overlaySearchHue, 255, dark)
 	ov.searchNoMatchFill, _ = pillPair(overlayNoMatchHue, 255, dark)
+
+	// Hint labels do not go through pillPair. That helper tints a pill's text
+	// from the pill's own hue, which reads well for the dark, desaturated hues
+	// the other pills use (the copy bar's green, the badge's near-black) and
+	// fails completely for this one: amber lightened toward white, sitting on
+	// bright amber, is the pill you cannot read. Driving the text to whichever
+	// pole actually contrasts is what makes a one-character label legible at
+	// terminal type sizes.
+	//
+	// Opaque fill, for the same reason: a label competing with the link text
+	// showing through it is a label you have to decode rather than read.
+	ov.hintFill = withAlpha(overlayHintHue, 255)
+	ov.hintText = contrastPole(ov.hintFill)
+	ov.hintTypedText = mixPct(ov.hintText, ov.hintFill, hintTypedMixPct)
+	// The underline is the quiet half of the pairing — it marks extent, the
+	// pill carries the key. Full-strength amber on both made the two compete.
+	ov.hintRule = withAlpha(overlayHintHue, hintRuleAlpha)
 
 	return ov
 }

@@ -63,6 +63,14 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if e.CharCode == 0 {
 		return
 	}
+	// Hints: label characters arrive here for the same reason copy mode's
+	// motions do, and are swallowed under the same rule — an unmatched label
+	// letter must not reach the shell's command line.
+	if t.hints.active {
+		t.handleHintsChar(rune(e.CharCode), w)
+		e.IsHandled = true
+		return
+	}
 	// Copy mode: bare printable keys (the vim motions) arrive here, not in
 	// onKeyDown — on macOS an unmodified printable key produces only OnChar.
 	// See the dispatch-split comment in widget_copymode.go. Always swallow,
@@ -352,7 +360,43 @@ func funcKeySeq(k gui.KeyCode, shift, ctrl bool) []byte {
 // move the viewport instead of writing to the pty; any other key snaps
 // the viewport back to live.
 func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-	// Copy mode first: while it is active it owns the keyboard, and its entry
+	// Hints first, ahead of copy mode: the entry chords must work from inside
+	// copy mode (a link you scrolled back to find is exactly the one you want
+	// to open), and while hints is up it owns the keyboard outright.
+	verb, isHintChord := hintOpen, false
+	switch {
+	case t.binds(ActionHints, e):
+		isHintChord = true
+	case t.binds(ActionHintsCopy, e):
+		verb, isHintChord = hintCopy, true
+	}
+	if isHintChord {
+		switch {
+		case !t.hints.active:
+			t.enterHints(w, verb)
+		case t.hints.verb == verb:
+			t.exitHints(w) // same chord toggles back out
+		default:
+			// The *other* chord switches what committing does. Dropping a set
+			// of labels the user is already reading, only to relabel the same
+			// links a keystroke later, would be the worse answer.
+			t.hints.verb = verb
+			t.scheduleViewUpdate(w)
+		}
+		e.IsHandled = true
+		return
+	}
+	if t.hints.active {
+		// Bare printable chords belong to onChar, exactly as in copy mode.
+		// Swallowed either way: a leaked label letter would land in the shell's
+		// command line.
+		if !producesChar(e) {
+			t.handleHintsKey(e, w)
+		}
+		e.IsHandled = true
+		return
+	}
+	// Copy mode next: while it is active it owns the keyboard, and its entry
 	// chord must be seen even when a search bar is open.
 	if t.binds(ActionCopyMode, e) {
 		if t.copy.active {

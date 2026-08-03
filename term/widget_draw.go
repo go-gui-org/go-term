@@ -296,6 +296,16 @@ func (t *Term) prepareResize(ds *drawState) {
 	}
 	t.grid.CellPxW = t.cellW * scale
 	t.grid.CellPxH = t.cellH * scale
+	// Hint labels address fixed grid positions captured on entry, so any
+	// content change — pty output, a scroll, a resize — leaves them pointing at
+	// rows that moved. Dropping the mode is the honest response: silently
+	// opening whatever slid under the label would be worse than making the user
+	// press the chord again. One dirty-row test covers all three causes.
+	if t.hints.active && t.grid.HasDirtyRows() {
+		t.hints.active = false
+		t.hints.targets = t.hints.targets[:0]
+		t.hints.typed = ""
+	}
 	t.grid.ClearDirty()
 
 	// Refresh ds dims after potential Resize.

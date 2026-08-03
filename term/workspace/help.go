@@ -264,6 +264,9 @@ func (ws *Workspace) helpPanel(ww, wh int) gui.View {
 		inner.ScrollMode = gui.ScrollVerticalOnly
 		inner.MaxHeight = hBudget
 		inner.Clip = true
+		// Reserve the scrollbar's lane; the last column's key text runs to the
+		// right edge, exactly where the thumb would otherwise land.
+		inner.Padding = gui.SomeP(0, scrollGutter(), 0, 0)
 	}
 
 	panel := tight(gui.FitFit)

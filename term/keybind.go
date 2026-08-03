@@ -39,3 +39,44 @@ func (t *Term) KeyBindings() KeyMap {
 	}
 	return km
 }
+
+// RunAction invokes a Term-level action as though its chord had been pressed,
+// and reports whether it ran. This is what lets a command palette act on the
+// entries AvailableShortcuts hands it.
+//
+// It works by synthesizing the action's first bound chord and feeding it to the
+// ordinary key handlers — the same trick copy mode already uses to turn a typed
+// character back into a chord (see chordForRune). Dispatching through the real
+// handlers is deliberate: each one carries conditional passthrough rules (Cmd+C
+// only copies when a selection exists, PageUp only scrolls off the alt screen)
+// that a side-door dispatch table would have to duplicate and could then get
+// wrong.
+//
+// An unbound action returns false. There is no chord to synthesize, so an
+// action a user has explicitly unbound stays unreachable — which is also why
+// AvailableShortcuts omits it from the list in the first place.
+//
+// Main-thread only.
+func (t *Term) RunAction(a Action, w *gui.Window) bool {
+	b, ok := t.bindingTable()[a]
+	if !ok || len(b.chords) == 0 {
+		return false
+	}
+	c := b.chords[0]
+	e := &gui.Event{KeyCode: c.Key, Modifiers: c.Modifiers}
+
+	// Copy-mode actions bypass onKeyDown. Their chords are bare letters, which
+	// onKeyDown routes to onChar on the grounds that a real keypress would
+	// arrive that way; a synthesized one would be swallowed by that same rule
+	// and do nothing. Going straight to the mode's handler is what makes the
+	// palette able to drive it.
+	if _, isCopyAction := copyActionSet[a]; isCopyAction {
+		if !t.copy.active {
+			return false
+		}
+		t.handleCopyModeKey(e, w)
+		return true
+	}
+	t.onKeyDown(nil, e, w)
+	return true
+}

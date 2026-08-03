@@ -36,6 +36,8 @@ const (
 	ActionFontDec        Action = "term.font-dec"
 	ActionFontReset      Action = "term.font-reset"
 	ActionCopyMode       Action = "term.copy-mode"
+	ActionHints          Action = "term.hints"
+	ActionHintsCopy      Action = "term.hints-copy"
 )
 
 // Copy-mode actions. These are only consulted while copy mode is active, so
@@ -84,6 +86,17 @@ var actionSet = func() map[Action]struct{} {
 	for _, a := range actionOrder {
 		m[a] = struct{}{}
 	}
+	for _, a := range copyActionOrder {
+		m[a] = struct{}{}
+	}
+	return m
+}()
+
+// copyActionSet is membership in copyActionOrder alone. RunAction needs to know
+// which actions only mean something inside copy mode, and which therefore have
+// to be dispatched to the mode's handler rather than through onKeyDown.
+var copyActionSet = func() map[Action]struct{} {
+	m := make(map[Action]struct{}, len(copyActionOrder))
 	for _, a := range copyActionOrder {
 		m[a] = struct{}{}
 	}
@@ -163,7 +176,7 @@ var actionOrder = []Action{
 	ActionJumpFailure, ActionSelectOutput,
 	ActionScrollPageUp, ActionScrollPageDown, ActionScrollTop, ActionScrollBottom,
 	ActionFontInc, ActionFontDec, ActionFontReset,
-	ActionCopyMode,
+	ActionCopyMode, ActionHints, ActionHintsCopy,
 }
 
 // copyActionOrder lists the copy-mode Actions. Kept separate from actionOrder
@@ -203,6 +216,8 @@ var actionLabels = map[Action]string{
 	ActionFontDec:        "Decrease font size",
 	ActionFontReset:      "Reset font size",
 	ActionCopyMode:       "Copy mode",
+	ActionHints:          "Open link (keyboard hints)",
+	ActionHintsCopy:      "Copy link (keyboard hints)",
 
 	// Copy-mode labels are unused by the flat help overlay (copyActionOrder is
 	// not walked by shortcutsFrom) but kept complete so an embedder rendering
@@ -295,6 +310,17 @@ func defaultBindings() map[Action]binding {
 			k(gui.KeySpace, gui.ModSuper|gui.ModShift),
 			k(gui.KeySpace, gui.ModCtrlShift)),
 
+		// Keyboard link hints. Shift is part of both chords because the
+		// unshifted Cmd+U / Cmd+Y are widely taken (readline kill-line, yank),
+		// and because Cmd+Shift+U is what kitty and WezTerm use for the same
+		// gesture. The copy variant sits next to it on Y for "yank".
+		ActionHints: b(false,
+			k(gui.KeyU, gui.ModSuper|gui.ModShift),
+			k(gui.KeyU, gui.ModCtrlShift)),
+		ActionHintsCopy: b(false,
+			k(gui.KeyY, gui.ModSuper|gui.ModShift),
+			k(gui.KeyY, gui.ModCtrlShift)),
+
 		// --- copy mode: bare vim keys, only matched while the mode is active.
 		//
 		// shiftOptional is false throughout: Shift is what tells v from V,
@@ -381,6 +407,10 @@ func mergeBindings(km KeyMap) map[Action]binding {
 type ShortcutInfo struct {
 	Label string
 	Keys  string // human-readable, platform-formatted (macOS glyphs on darwin)
+	// Action identifies the entry so a caller can act on it — a command palette
+	// needs to invoke what it lists, not just print it. A pure cheatsheet can
+	// ignore this field.
+	Action Action
 }
 
 // formatChords renders a chord list for display, joining alternatives with
@@ -399,16 +429,27 @@ func formatChords(chords []gui.Shortcut) string {
 	return strings.Join(parts, " / ")
 }
 
-// shortcutsFrom renders a binding table as display entries in actionOrder.
-// Unbound actions are omitted — a cheatsheet line with no keys is noise.
-func shortcutsFrom(tbl map[Action]binding) []ShortcutInfo {
-	out := make([]ShortcutInfo, 0, len(actionOrder))
-	for _, a := range actionOrder {
-		b, ok := tbl[a]
-		if !ok || len(b.chords) == 0 {
-			continue
+// shortcutsFrom renders a binding table as display entries, walking order.
+// Unbound actions are omitted — a cheatsheet line with no keys is noise, and a
+// palette entry with no chord could not be invoked anyway (see RunAction).
+func shortcutsFrom(tbl map[Action]binding, order ...[]Action) []ShortcutInfo {
+	n := 0
+	for _, o := range order {
+		n += len(o)
+	}
+	out := make([]ShortcutInfo, 0, n)
+	for _, o := range order {
+		for _, a := range o {
+			b, ok := tbl[a]
+			if !ok || len(b.chords) == 0 {
+				continue
+			}
+			out = append(out, ShortcutInfo{
+				Label:  actionLabels[a],
+				Keys:   formatChords(b.chords),
+				Action: a,
+			})
 		}
-		out = append(out, ShortcutInfo{Label: actionLabels[a], Keys: formatChords(b.chords)})
 	}
 	return out
 }
@@ -419,11 +460,28 @@ func shortcutsFrom(tbl map[Action]binding) []ShortcutInfo {
 //
 // Workspace-level shortcuts (tabs, panes, theme) live in the workspace
 // command registry and are listed separately by the help overlay.
-func Shortcuts() []ShortcutInfo { return shortcutsFrom(defaultBindings()) }
+func Shortcuts() []ShortcutInfo { return shortcutsFrom(defaultBindings(), actionOrder) }
 
 // Shortcuts returns this terminal's effective Term-level shortcuts, including
 // any overrides from Cfg.KeyBindings or SetKeyBindings, in display order.
 //
 // Goes through bindingTable so a Term built as a bare struct literal reports
 // the defaults, matching what its key handlers would actually do.
-func (t *Term) Shortcuts() []ShortcutInfo { return shortcutsFrom(t.bindingTable()) }
+func (t *Term) Shortcuts() []ShortcutInfo { return shortcutsFrom(t.bindingTable(), actionOrder) }
+
+// AvailableShortcuts returns the Term-level shortcuts that would actually do
+// something right now: the ordinary actions always, plus the copy-mode actions
+// only while copy mode is active.
+//
+// This is the list a command palette should show. Shortcuts is the wrong source
+// for that — it is the flat cheatsheet, and it deliberately omits the copy-mode
+// keys so the help overlay does not grow by twenty rows. The mode gating lives
+// here rather than behind an exported "is copy mode on" query, because whether
+// an action is live is this package's business, not the embedder's.
+func (t *Term) AvailableShortcuts() []ShortcutInfo {
+	tbl := t.bindingTable()
+	if t.copy.active {
+		return shortcutsFrom(tbl, actionOrder, copyActionOrder)
+	}
+	return shortcutsFrom(tbl, actionOrder)
+}

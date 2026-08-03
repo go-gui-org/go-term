@@ -72,6 +72,14 @@ const (
 	// The preview's scroll offset survives the rebuild that every cursor move
 	// causes, so it must not change between frames.
 	browserPreviewScrollID = "workspace-theme-preview"
+	// The name list's scroll container. Stable across rebuilds, or the wheel
+	// position would reset on every keystroke.
+	browserScrollID = "workspace-theme-list"
+
+	// Rows built beyond each edge of the visible range. Two is go-gui's own
+	// default for rows this size; it covers the partial row a fractional scroll
+	// offset exposes at each end.
+	browserOverscan = 2
 )
 
 // themeBrowser is the browser's state. The zero value is closed.
@@ -98,6 +106,19 @@ type themeBrowser struct {
 	// gen makes the filter Input's ID unique per "cleared" state. See
 	// themeBrowserDismiss.
 	gen int
+
+	// rowH and listH cache the list's pixel geometry as the last view build
+	// measured it, so cursor movement can work out whether the selected row is
+	// inside the scrolled viewport. Zero means no frame has measured it yet and
+	// the reveal no-ops. See revealBrowserRow.
+	rowH, listH float32
+
+	// revealPending defers the opening scroll until geometry exists. The
+	// browser opens on the *active* theme, which in a 600-entry corpus is
+	// usually far down the list, but on the frame that opens it nothing has
+	// measured a row yet — so the reveal is armed here and consumed by the
+	// first build that has the numbers.
+	revealPending bool
 }
 
 // browserFilterID is the filter Input's view ID for the current generation.
@@ -118,7 +139,10 @@ func (ws *Workspace) ToggleThemeBrowser() {
 		ws.closeThemeBrowser(true)
 		return
 	}
-	ws.browser = themeBrowser{visible: true}
+	// Bump the generation on every open, never resetting it — same reason the
+	// palette does (see TogglePalette): refresh no longer wipes go-gui's state
+	// registry, so an Input ID a previous open typed into still holds that text.
+	ws.browser = themeBrowser{visible: true, gen: ws.browser.gen + 1}
 	active := ws.activeThemeIdx()
 	if active >= 0 {
 		ws.browser.prev = ws.cfg.Themes[active]
@@ -134,6 +158,12 @@ func (ws *Workspace) ToggleThemeBrowser() {
 			break
 		}
 	}
+	// The scroll offset lives in window state keyed by the container's ID, so
+	// it outlives a close. Reset to the top, then let the first frame's
+	// measurements drive the reveal that brings the active theme into view —
+	// revealBrowserRow no-ops until then, since it has no geometry yet.
+	ws.w.ScrollVerticalTo(browserScrollID, 0)
+	ws.browser.revealPending = true
 	// Focus the filter box so typing searches immediately — no mode to enter
 	// and no "/" to press. The panes are out of the tree, so nothing else
 	// wants the keys.
@@ -146,7 +176,7 @@ func (ws *Workspace) ToggleThemeBrowser() {
 func (ws *Workspace) closeThemeBrowser(cancel bool) {
 	revert := cancel && ws.browser.applied && ws.browser.prevOK
 	prev := ws.browser.prev
-	ws.browser = themeBrowser{}
+	ws.browser = themeBrowser{gen: ws.browser.gen} // gen must survive; see ToggleThemeBrowser
 	if revert {
 		ws.applyThemeImpl(prev)
 	}
@@ -297,6 +327,9 @@ func (ws *Workspace) setThemeFilter(s string) {
 	}
 	ws.browser.filter = s
 	ws.refilterThemes()
+	// Narrowing rebuilds the row set under a scroll offset that referred to the
+	// old one, so the cursor's row has to be brought back into view.
+	ws.revealBrowserRow()
 	ws.refresh()
 }
 
@@ -310,6 +343,9 @@ func (ws *Workspace) themeBrowserMove(delta int) {
 		return
 	}
 	ws.browser.idx = ((ws.browser.idx+delta)%n + n) % n
+	// The wheel scrolls without touching the cursor, so by the time an arrow is
+	// pressed the cursor may be well off-screen; bring it back.
+	ws.revealBrowserRow()
 	ws.refresh()
 }
 
@@ -434,14 +470,15 @@ func (ws *Workspace) themeListColumn(theme gui.Theme, w, h float32) gui.View {
 
 // themeListRows renders the visible slice of the match list.
 //
-// Only a window around the cursor is built. The list is ~600 entries and the
-// view is rebuilt on every keystroke, so materialising every row would mean
-// hundreds of throwaway views per character typed. The cursor drives the
-// window, which is why the list scrolls in response to the arrow keys rather
-// than to the wheel.
+// Only a window around the scroll position is built. The list is ~600 entries
+// and the view is rebuilt on every keystroke, so materialising every row would
+// mean hundreds of throwaway views per character typed. The window used to be
+// driven by the cursor, which meant the list could only move in response to the
+// arrow keys; it is driven by the scroll offset instead, so the wheel moves the
+// viewport on its own and the cursor is pulled back into it by
+// revealBrowserRow when the arrows are used.
 func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 	list := tight(gui.FillFill)
-	list.Spacing = gui.SomeF(1)
 
 	b := &ws.browser
 	if len(b.matches) == 0 {
@@ -453,20 +490,41 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 		return gui.Column(list)
 	}
 
-	// Centre the window on the cursor, then pull it back inside the list:
-	// against the end when the tail would overrun, against 0 when the list is
-	// shorter than the window.
-	visible := browserVisibleRows(h, theme.M5.Size)
-	first := max(min(b.idx-visible/2, len(b.matches)-visible), 0)
-	last := min(first+visible, len(b.matches))
+	// The window is driven by the scroll offset rather than by the cursor, which
+	// is what lets the wheel move the list independently of the selection. Rows
+	// are a fixed height and the container's spacing is zero, so row N sits at
+	// exactly N*rowH — the arithmetic both the virtualisation and the
+	// keep-cursor-visible reveal depend on.
+	rowH := listRowH(theme.M5.Size, browserRowFactor)
+	listH := browserListHeight(h, theme.M5.Size)
+	b.rowH, b.listH = rowH, listH
+	list.Spacing = gui.SomeF(0)
+	if b.revealPending {
+		// Geometry exists now, so the deferred opening scroll can run. Doing it
+		// before the range is computed means this build already shows the right
+		// slice rather than scrolling on the frame after.
+		b.revealPending = false
+		ws.revealBrowserRow()
+	}
+
+	n := len(b.matches)
+	first, last := gui.ListVisibleRange(n, rowH, listH,
+		ws.w.ScrollVerticalOffset(browserScrollID), browserOverscan)
 
 	activeIdx := ws.activeThemeIdx()
-	rows := make([]gui.View, 0, last-first)
-	for j := first; j < last; j++ {
+	rows := make([]gui.View, 0, last-first+3)
+	// Spacers stand in for the rows that were not built, so the scrollable's
+	// content height is the full list's and the thumb reflects all 600 entries
+	// rather than just the handful on screen.
+	if first > 0 {
+		rows = append(rows, browserSpacer(float32(first)*rowH))
+	}
+	for j := first; j <= last && j < n; j++ {
 		ti := b.matches[j]
 		nt := ws.cfg.Themes[ti]
 
-		row := tight(gui.FillFit)
+		row := tight(gui.FillFixed)
+		row.Height = rowH
 		row.Padding = gui.SomeP(browserRowPadV, browserRowPadH, browserRowPadV, browserRowPadH)
 		row.Radius = gui.SomeF(3)
 		row.Spacing = gui.SomeF(8)
@@ -497,13 +555,66 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 		}
 		rows = append(rows, gui.Row(row))
 	}
+	if last < n-1 {
+		rows = append(rows, browserSpacer(float32(n-1-last)*rowH))
+	}
 	list.Content = rows
-	return gui.Column(list)
+
+	// Scrollable wrapper: what makes the wheel work over the list.
+	scroll := tight(gui.FillFit)
+	scroll.ID = browserScrollID
+	scroll.Scrollable = true
+	scroll.ScrollMode = gui.ScrollVerticalOnly
+	scroll.MaxHeight = listH
+	scroll.Clip = true
+	// Reserve the scrollbar's lane so the thumb doesn't paint over theme names.
+	scroll.Padding = gui.SomeP(0, scrollGutter(), 0, 0)
+	scroll.Content = []gui.View{gui.Column(list)}
+	return gui.Column(scroll)
+}
+
+// browserSpacer is an invisible fixed-height filler standing in for rows the
+// virtualised list did not build.
+func browserSpacer(h float32) gui.View {
+	return gui.Rectangle(gui.RectangleCfg{Sizing: gui.FillFixed, Height: h})
+}
+
+// revealBrowserRow keeps the selected theme inside the scrolled viewport. The
+// gap is zero: themeListRows pins the list's spacing to 0 precisely so row N
+// sits at exactly N*rowH.
+func (ws *Workspace) revealBrowserRow() {
+	b := &ws.browser
+	ws.revealListRow(browserScrollID, b.idx, b.rowH, b.listH, 0)
 }
 
 // finiteF32 reports whether x is a real number the layout can use.
 func finiteF32(x float32) bool {
 	return !math.IsNaN(float64(x)) && !math.IsInf(float64(x), 0)
+}
+
+// listFallbackSize is the type size the list overlays fall back to when the
+// backend reports a degenerate one — zero, NaN or Inf before the first
+// measurement.
+const listFallbackSize = 13
+
+// listRowH is the fixed pixel height of one list row at the given type size,
+// with degenerate sizes clamped away. Both list overlays pin their rows to this
+// so row N sits at exactly N*rowH — the arithmetic the theme browser's
+// virtualisation and both reveal helpers compute against. Clamping at the
+// source is what keeps a NaN out of the scroll offsets those helpers write,
+// where a `<= 0` guard would not catch it.
+func listRowH(size, factor float32) float32 {
+	if size <= 0 || !finiteF32(size) {
+		size = listFallbackSize
+	}
+	return size * factor
+}
+
+// browserListHeight is the pixel budget for the scrolling name list, derived
+// from the same clamped row count browserVisibleRows reports so the two cannot
+// disagree about how tall the list is.
+func browserListHeight(h, size float32) float32 {
+	return float32(browserVisibleRows(h, size)) * listRowH(size, browserRowFactor)
 }
 
 // browserVisibleRows estimates how many list rows fit in h pixels.
@@ -512,7 +623,7 @@ func browserVisibleRows(h float32, size float32) int {
 		return browserMinRows
 	}
 	if size <= 0 || !finiteF32(size) {
-		size = 13
+		size = listFallbackSize
 	}
 	// The filter box, header and footer eat into the list's share.
 	usable := h - 3*browserPad - 90
@@ -591,6 +702,8 @@ func (ws *Workspace) themePreviewColumn(theme gui.Theme) gui.View {
 	inner.Scrollable = true
 	inner.ScrollMode = gui.ScrollVerticalOnly
 	inner.Clip = true
+	// Reserve the scrollbar's lane so the thumb doesn't paint over the sample.
+	inner.Padding = gui.SomeP(0, scrollGutter(), 0, 0)
 
 	col := tight(gui.FillFill)
 	col.Color = th.DefaultBG
@@ -836,6 +949,22 @@ func selectedStyle(st gui.TextStyle, th term.Theme) gui.TextStyle {
 	return st
 }
 
+// themeCountText is the footer's inventory readout: how many themes are
+// listed, and — once a filter narrows the list — out of how many. Unfiltered
+// it stays a bare total, since "600 of 600" says nothing the total doesn't.
+func (ws *Workspace) themeCountText() string {
+	total := len(ws.cfg.Themes)
+	shown := len(ws.browser.matches)
+	noun := " themes"
+	if total == 1 {
+		noun = " theme"
+	}
+	if shown == total {
+		return strconv.Itoa(total) + noun
+	}
+	return strconv.Itoa(shown) + " of " + strconv.Itoa(total) + noun
+}
+
 // themeBrowserFooter is the key-hint strip.
 func (ws *Workspace) themeBrowserFooter(theme gui.Theme) gui.View {
 	bar := tight(gui.FillFit)
@@ -845,11 +974,15 @@ func (ws *Workspace) themeBrowserFooter(theme gui.Theme) gui.View {
 	hint := func(s string) gui.View {
 		return gui.Text(gui.TextCfg{Text: s, TextStyle: theme.M6})
 	}
+	// Spacer pushes the count to the right edge, away from the key hints.
+	fill := tight(gui.FillFit)
 	bar.Content = []gui.View{
 		hint("↑↓ move"),
 		hint("PgUp/PgDn page"),
 		hint("Enter apply"),
 		hint("Esc cancel"),
+		gui.Row(fill),
+		hint(ws.themeCountText()),
 	}
 
 	wrap := tight(gui.FillFit)

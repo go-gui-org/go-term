@@ -148,44 +148,57 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Global:   true,
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleThemeBrowser() },
 		},
-		// Theme browser navigation — only active while the browser is open, so
-		// these bare keys still reach the child the rest of the time. They must
-		// reuse these single registrations rather than adding a second Up/Down/
-		// Enter entry; see the note on dismissOverlay below.
+		// List-overlay navigation — only active while one of the list overlays
+		// (theme browser, command palette) is open, so these bare keys still
+		// reach the child the rest of the time.
+		//
+		// One registration per key, shared by both overlays, with the Execute
+		// switching on which is up. Adding a second Up/Down/Enter entry for the
+		// palette is not an option: go-gui's registry rejects duplicate
+		// shortcuts, and one rejection aborts the whole batch — see the note on
+		// dismissOverlay below.
 		{
-			ID:         "workspace.themeBrowserUp",
+			ID:         "workspace.overlayUp",
 			Shortcut:   gui.Shortcut{Key: gui.KeyUp},
 			Global:     true,
-			CanExecute: func(_ *gui.Window) bool { return ws.browser.visible },
-			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themeBrowserMove(-1) },
+			CanExecute: ws.listOverlayOpen,
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.overlayMove(-1) },
 		},
 		{
-			ID:         "workspace.themeBrowserDown",
+			ID:         "workspace.overlayDown",
 			Shortcut:   gui.Shortcut{Key: gui.KeyDown},
 			Global:     true,
-			CanExecute: func(_ *gui.Window) bool { return ws.browser.visible },
-			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themeBrowserMove(1) },
+			CanExecute: ws.listOverlayOpen,
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.overlayMove(1) },
 		},
 		{
-			ID:         "workspace.themeBrowserPageUp",
+			ID:         "workspace.overlayPageUp",
 			Shortcut:   gui.Shortcut{Key: gui.KeyPageUp},
 			Global:     true,
-			CanExecute: func(_ *gui.Window) bool { return ws.browser.visible },
-			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themeBrowserPage(-1) },
+			CanExecute: ws.listOverlayOpen,
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.overlayPage(-1) },
 		},
 		{
-			ID:         "workspace.themeBrowserPageDown",
+			ID:         "workspace.overlayPageDown",
 			Shortcut:   gui.Shortcut{Key: gui.KeyPageDown},
 			Global:     true,
-			CanExecute: func(_ *gui.Window) bool { return ws.browser.visible },
-			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themeBrowserPage(1) },
+			CanExecute: ws.listOverlayOpen,
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.overlayPage(1) },
 		},
 		{
-			ID:         "workspace.themeBrowserConfirm",
+			ID:         "workspace.overlayConfirm",
 			Shortcut:   gui.Shortcut{Key: gui.KeyEnter},
 			Global:     true,
-			CanExecute: func(_ *gui.Window) bool { return ws.browser.visible },
-			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themeBrowserConfirm() },
+			CanExecute: ws.listOverlayOpen,
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.overlayConfirm() },
+		},
+		// Command palette.
+		{
+			ID:       paletteCommandID,
+			Label:    "Command Palette",
+			Shortcut: gui.Shortcut{Key: gui.KeyP, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.TogglePalette() },
 		},
 		// Config reload. Cmd+, is deliberately left free for a future
 		// settings UI, so the reload lives on the Shift variant.
@@ -216,7 +229,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Shortcut: gui.Shortcut{Key: gui.KeyEscape},
 			Global:   true,
 			CanExecute: func(_ *gui.Window) bool {
-				return ws.browser.visible || ws.helpVisible
+				return ws.palette.visible || ws.browser.visible || ws.helpVisible
 			},
 			Execute: func(_ *gui.Event, w *gui.Window) { ws.dismissOverlay() },
 		},
@@ -358,10 +371,56 @@ func (ws *Workspace) installCommands(cmds []gui.Command) {
 	}
 }
 
-// dismissOverlay closes the topmost visible overlay. The theme picker is
-// drawn above the help panel, so it wins when both are open.
+// listOverlayOpen reports whether an overlay that owns Up/Down/Enter is up.
+// Shared by every navigation command so the gate cannot drift between them.
+// Same set as overlayOwnsKeys, and deliberately expressed as that call: an
+// overlay that owns Up/Down/Enter is exactly one that has taken the keyboard
+// off the pane, so the two must not drift apart.
+func (ws *Workspace) listOverlayOpen(_ *gui.Window) bool {
+	return ws.overlayOwnsKeys()
+}
+
+// overlayMove routes a cursor step to whichever list overlay is open. The
+// palette floats above the browser and is checked first, matching both the
+// z-order in View and the precedence in dismissOverlay.
+func (ws *Workspace) overlayMove(delta int) {
+	switch {
+	case ws.palette.visible:
+		ws.paletteMove(delta)
+	case ws.browser.visible:
+		ws.themeBrowserMove(delta)
+	}
+}
+
+// overlayPage routes a coarse jump to whichever list overlay is open.
+func (ws *Workspace) overlayPage(dir int) {
+	switch {
+	case ws.palette.visible:
+		ws.palettePage(dir)
+	case ws.browser.visible:
+		ws.themeBrowserPage(dir)
+	}
+}
+
+// overlayConfirm routes Enter to whichever list overlay is open.
+func (ws *Workspace) overlayConfirm() {
+	switch {
+	case ws.palette.visible:
+		ws.paletteConfirm()
+	case ws.browser.visible:
+		ws.themeBrowserConfirm()
+	}
+}
+
+// dismissOverlay closes the topmost visible overlay. The palette floats above
+// the theme picker, which is drawn above the help panel, so precedence runs in
+// that order when more than one is open.
 func (ws *Workspace) dismissOverlay() {
 	switch {
+	case ws.palette.visible:
+		// Not TogglePalette: Escape has its own two-stage meaning inside the
+		// palette (clear the filter, then close).
+		ws.paletteDismiss()
 	case ws.browser.visible:
 		// Not ToggleThemeBrowser: Escape has its own two-stage meaning inside
 		// the browser (clear the filter, then close-and-revert).

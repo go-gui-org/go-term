@@ -91,6 +91,11 @@ func TestOverlayContrast(t *testing.T) {
 				{"copyBarText", ov.copyBarText, ov.copyBarFill},
 				{"searchText", ov.searchText, ov.searchFill},
 				{"searchText/noMatch", ov.searchText, ov.searchNoMatchFill},
+				// The hint pill is the case that motivated contrastPole: run
+				// through pillPair it produced pale amber on bright amber,
+				// which passed nothing a user could actually read.
+				{"hintText", ov.hintText, ov.hintFill},
+				{"hintTypedText", ov.hintTypedText, ov.hintFill},
 				// drawCopyCursor paints the cell's glyph in DefaultBG over the
 				// copy cursor's fill, so that pairing is a label too.
 				{"copyCursorGlyph", bg, withAlpha(ov.copyCurFill, 255)},

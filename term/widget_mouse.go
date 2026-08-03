@@ -331,6 +331,11 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if t.copy.active {
 		t.exitCopyMode(w)
 	}
+	// Same reasoning for hints: reaching for the mouse means Cmd+click is the
+	// gesture now, so the labels have no reason to stay up.
+	if t.hints.active {
+		t.exitHints(w)
+	}
 	// Scrollbar takes priority over selection and host mouse reporting: it is
 	// a local overlay drawn on top of the grid. Only interactive while the
 	// thumb is visible, so a faded scrollbar never swallows clicks.

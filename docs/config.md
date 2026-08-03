@@ -359,10 +359,36 @@ actually want to press.
 | `workspace.chooseTheme`                        | `Cmd+Shift+T`                                                 |
 | `workspace.reloadConfig`                       | `Cmd+Shift+,`                                                 |
 | `workspace.toggleHelp`                         | `Cmd+/`                                                       |
+| `workspace.commandPalette`                     | `Cmd+Shift+P`                                                 |
 | `workspace.dismissOverlay`                     | `Escape` (only while an overlay is open)                      |
-| `workspace.themeBrowserUp` / `Down`            | `Up` / `Down` (only while the theme browser is open)          |
-| `workspace.themeBrowserPageUp` / `PageDown`    | `PageUp` / `PageDown` (only while the theme browser is open)  |
-| `workspace.themeBrowserConfirm`                | `Enter` (only while the theme browser is open)                |
+| `workspace.overlayUp` / `overlayDown`          | `Up` / `Down` (only while a list overlay is open)             |
+| `workspace.overlayPageUp` / `overlayPageDown`  | `PageUp` / `PageDown` (only while a list overlay is open)     |
+| `workspace.overlayConfirm`                     | `Enter` (only while a list overlay is open)                   |
+
+The `overlay*` commands are shared by every list overlay — the theme browser
+and the command palette — and route to whichever one is open. They are one
+registration each on purpose: duplicate shortcuts are rejected by the command
+registry, and a rejection drops the rest of the batch.
+
+#### Command palette
+
+`workspace.commandPalette` opens a searchable list of everything you can
+invoke, so a command you know by name doesn't have to be known by chord. Type
+to filter, `Up`/`Down` to move, `Enter` to run, `Escape` to clear the filter
+and then to close.
+
+- It spans both registries: the `workspace.*` commands above **and** the
+  `term.*` actions of the focused pane.
+- The `term.copy-mode.*` motions appear only while that pane is actually in
+  copy mode, since they do nothing outside it.
+- Actions you have unbound (`none`) are not listed. The palette invokes an
+  action by way of its chord, so an action with no chord has no way to run.
+- A single click runs a row, and clicking outside the panel dismisses. Hovering
+  a row only changes the pointer — it deliberately does not move the selection,
+  so a nudged mouse can't retarget what `Enter` runs.
+- The wheel scrolls the list without moving the selection, for the same reason.
+  `Up`/`Down` bring the selected row back into view. The theme browser's list
+  behaves identically.
 
 #### Broadcast input
 
@@ -409,6 +435,8 @@ window.
 | `term.font-dec`         | `Cmd+-`                                |
 | `term.font-reset`       | `Cmd+0`                                |
 | `term.copy-mode`        | `Cmd+Shift+Space` / `Ctrl+Shift+Space` |
+| `term.hints`            | `Cmd+Shift+U` / `Ctrl+Shift+U`         |
+| `term.hints-copy`       | `Cmd+Shift+Y` / `Ctrl+Shift+Y`         |
 
 An override replaces the action's whole default chord list with the single
 chord you give, but inherits the action's Shift tolerance. Where Shift is a
@@ -421,6 +449,31 @@ Several `term.*` actions only fire in context, and that gate is _not_ part of
 the binding: `Ctrl+C` still sends SIGINT when nothing is selected, the Find
 keys only apply while the search bar is open, and `term.copy` only copies when
 there is a selection.
+
+#### Keyboard link hints
+
+`term.hints` labels every link visible in the pane with a letter; press it to
+open the link. `term.hints-copy` is the same gesture with the URL going to the
+clipboard instead. Both remove the need to reach for `Cmd+click`.
+
+- Both explicit OSC 8 hyperlinks (what `ls --hyperlink=auto`, `gh` and friends
+  emit) and plain `http`/`https`/`mailto` text are labelled. Where a link is
+  both, the OSC 8 destination wins — the same precedence `Cmd+click` uses, so
+  the two gestures can't disagree about where a link goes.
+- Labels are one character while they fit the alphabet and two beyond it,
+  never a mix: a uniform width is what lets a keypress be unambiguous without
+  a disambiguation timeout.
+- `Escape` leaves, `Backspace` un-types, and pressing the same entry chord
+  again toggles back out. Pressing the *other* one switches what the label
+  does — open becomes copy and back — keeping the labels you are already
+  reading. A key matching no label also leaves — every key is swallowed while
+  hints are up either way, so nothing reaches the shell.
+- Hints drop themselves as soon as the screen changes (output, a scroll, a
+  resize). The labels address fixed cells, so acting on a stale one would open
+  whatever slid underneath it.
+- Only `http`, `https` and `mailto` are ever opened. Other schemes are dropped
+  rather than handed to the OS, so a hostile OSC 8 destination can't invoke an
+  arbitrary handler.
 
 #### Shell integration: prompt marks, failures, output selection
 
