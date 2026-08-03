@@ -397,7 +397,9 @@ func (t *Term) drawBellFlash(ds *drawState) {
 	// Ease out quadratically: near-peak at the leading edge where the eye
 	// catches the event, then a long shallow tail instead of a cliff.
 	fade := (1 - progress) * (1 - progress)
-	alpha := uint8(float64(bellFlashPeakAlpha)*fade + 0.5)
+	// Peak alpha is theme-derived: a saturated background needs a stronger
+	// wash to register at all (see deriveBell).
+	alpha := uint8(float64(ds.g.ov.bellPeakAlpha)*fade + 0.5)
 	if alpha == 0 {
 		return
 	}

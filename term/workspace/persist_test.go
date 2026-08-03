@@ -540,7 +540,7 @@ func TestPersistableThemeName_NilThemeOptsReturnsEmpty(t *testing.T) {
 
 func TestPersistableThemeName_NoThemesReturnsEmpty(t *testing.T) {
 	th := term.DefaultTheme
-	ws := &Workspace{cfg: Cfg{opts: termOpts{theme: &th}}}
+	ws := &Workspace{cfg: Cfg{opts: themeOpts(term.NamedTheme{Name: "Default", Theme: th})}}
 	if got := ws.persistableThemeName(); got != "" {
 		t.Errorf("zero Themes slice: got %q, want empty", got)
 	}
@@ -552,9 +552,9 @@ func TestPersistableThemeName_DefaultThemeReturnsEmpty(t *testing.T) {
 		cfg: Cfg{
 			Themes: []term.NamedTheme{
 				{Name: "Default", Theme: th},
-				{Name: "Dracula", Theme: term.DraculaTheme},
+				{Name: "Dracula", Theme: testTheme(t, "Dracula")},
 			},
-			opts: termOpts{theme: &th},
+			opts: themeOpts(term.NamedTheme{Name: "Default", Theme: th}),
 		},
 	}
 	if got := ws.persistableThemeName(); got != "" {
@@ -563,14 +563,14 @@ func TestPersistableThemeName_DefaultThemeReturnsEmpty(t *testing.T) {
 }
 
 func TestPersistableThemeName_NonDefaultReturnsName(t *testing.T) {
-	th := term.DraculaTheme
+	th := testTheme(t, "Dracula")
 	ws := &Workspace{
 		cfg: Cfg{
 			Themes: []term.NamedTheme{
 				{Name: "Default", Theme: term.DefaultTheme},
 				{Name: "Dracula", Theme: th},
 			},
-			opts: termOpts{theme: &th},
+			opts: themeOpts(term.NamedTheme{Name: "Dracula", Theme: th}),
 		},
 	}
 	if got := ws.persistableThemeName(); got != "Dracula" {
@@ -595,14 +595,14 @@ func TestSnapshot_ThemeOmittedForDefault(t *testing.T) {
 }
 
 func TestSnapshot_ThemePresentWhenNonDefault(t *testing.T) {
-	th := term.DraculaTheme
+	th := testTheme(t, "Dracula")
 	ws := &Workspace{
 		cfg: Cfg{
 			Themes: []term.NamedTheme{
 				{Name: "Default", Theme: term.DefaultTheme},
 				{Name: "Dracula", Theme: th},
 			},
-			opts: termOpts{theme: &th},
+			opts: themeOpts(term.NamedTheme{Name: "Dracula", Theme: th}),
 		},
 	}
 	snap := ws.snapshot()

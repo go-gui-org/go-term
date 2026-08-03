@@ -8,6 +8,38 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `term`: `BundledThemes()` returns the 602 color themes go-term now ships —
+  473 dark, 129 light — generated from the Ghostty-format schemes in
+  [mbadolato/iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes)
+  (MIT) into an embedded table and decoded on first use. Regenerate with
+  `go run ./term/genthemes`; the full name list is in `docs/themes.md`.
+
+- `workspace`: full-window theme browser on `Cmd+Shift+T`, replacing the old
+  floating picker. It takes over the pane area instead of dimming it behind a
+  scrim — the scrim made a theme impossible to judge while choosing it — and
+  brings its own preview: the theme's 16 ANSI colors and a block of sample
+  terminal output rendered on that theme's own background. Type to filter (a
+  leading `dark:` or `light:` narrows by character), arrows and PageUp/PageDown
+  move, `Enter` applies, `Escape` clears the filter and then cancels.
+
+  The preview is deliberately more than a color chart, because a chart cannot
+  answer the questions people actually have about a theme: the 16 ANSI swatches
+  are labelled with the indices applications name them by, a short
+  syntax-highlighted Go file exercises the keyword/string/number/type/comment
+  slots an editor or `bat` reaches for (with one selected range, since the
+  selection tint is derived and so cannot be guessed from the swatches), and a
+  paragraph of prose plus a row of bold/italic/underline/dim/reverse shows
+  whether the theme is readable for an hour rather than for a glance. It is all
+  drawn in the pane's own font at the pane's own size.
+
+- `term`: `Theme.SelectionBG()` returns the highlight background a theme gives
+  ordinary selected text, for an embedder drawing chrome that has to match what
+  the pane paints. Shares its blend with the per-cell draw path, so the two
+  cannot round differently. Cancelling
+  restores the theme that was active when the browser opened, which the old
+  picker could not do: it applied on every arrow press and Escape simply
+  stopped.
+
 - `term`: Kitty Graphics Protocol Unicode placeholder placement — `U=1`
   (#118). An image sent that way creates a *virtual* placement: it consumes no
   cells, blanks nothing, and does not move the cursor. It appears wherever the
@@ -115,6 +147,26 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `term`: `deriveOverlay` now enforces the contrast floors the overlays are
+  meant to keep, rather than reaching them by blend fractions that had been
+  tuned by eye against a handful of dark themes. Measured against the full
+  corpus, 36 of 602 themes produced chrome that washed out — a scrollbar thumb
+  or a failure tick indistinguishable from the background — because no fixed
+  percentage survives a mid-gray or saturated background. The visual-bell wash
+  also derives its peak alpha per theme now: on a saturated mid-luma background
+  (Hot Dog Stand, C64) even a pure white wash at the old alpha could not
+  register. 5 of 602 themes need that; the rest are unchanged.
+
+- `workspace`: theme selection is keyed by name rather than by `term.Theme`
+  value. The bundled corpus contains distinct themes sharing an identical
+  palette, so a value match could resolve to the wrong entry — putting the
+  browser's checkmark on the wrong row and saving a theme name the user never
+  chose.
+
+- `workspace`: a pane's `term.Cfg.Themes` now carries only the selected theme.
+  `term` reads element 0 and nothing else, so handing each pane a copy of the
+  whole list cost a 602-entry copy per pane for one lookup.
+
 - `term`: the configured font size (`Cfg.TextStyle.Size`, `SetTextStyle`) is
   now clamped to the same 4–72 pt bounds the zoom path already enforced, so no
   caller has to re-derive the limits.
@@ -124,6 +176,31 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   is now dropped outright instead of silently truncated, and the enlarged
   accumulator is released after each sequence rather than pinned for the
   parser's lifetime.
+
+### Removed
+
+- `term`: the 16 predefined theme variables other than `DefaultTheme`
+  (`GruvboxTheme`, `NordTheme`, `SolarizedDarkTheme`, `DraculaTheme`,
+  `CatppuccinMochaTheme`, `TokyoNightTheme`, `MonokaiTheme`, `OneDarkTheme`,
+  `RosePineTheme`, `KanagawaTheme`, `AyuDarkTheme`, `EverforestTheme`,
+  `GitHubDarkTheme`, `SolarizedLightTheme`, `GitHubLightTheme`,
+  `CatppuccinLatteTheme`). Every one is superseded by a corpus entry, and
+  keeping both meant two sources of truth for the same theme name.
+  `DefaultTheme` stays: it seeds the 256-color table's legacy index fallback
+  and is what a grid uses when `Cfg.Themes` is empty.
+
+  **Existing configs keep working.** The old *names* still resolve — `theme =
+  Tokyo Night` finds `TokyoNight`, `Solarized Dark` finds `iTerm2 Solarized
+  Dark`, and so on — for both the config file and saved workspaces.
+
+- `term`: `ThemeMenuItems`. go-term has no right-click menu; this was a helper
+  for an embedder to feed `gui.ContextMenu` and had no callers, and its only
+  natural argument now would build a 602-item menu.
+
+- `workspace`: `CycleTheme`. No keybinding, no command, no callers, and
+  "advance to the next of 602 themes" is not a usable operation. The theme
+  browser replaces it.
+
 
 ### Fixed
 

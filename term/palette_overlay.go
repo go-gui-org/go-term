@@ -34,6 +34,14 @@ type overlayColors struct {
 	thumb      gui.Color
 	thumbHover gui.Color
 
+	// bellPeakAlpha is the wash's alpha at the instant the bell fires, before
+	// the fade. Derived rather than constant because a saturated mid-luma
+	// background (Hot Dog Stand's red, C64's blue) leaves no headroom: at the
+	// baseline alpha even a pure white wash cannot clear minBellDist, so the
+	// alpha is what has to give. Equals bellFlashPeakAlpha for the great
+	// majority of themes.
+	bellPeakAlpha uint8
+
 	// Scrollbar-lane accents. Alpha is applied at the draw site, which varies
 	// it with the scrollbar's idle/active state.
 	fail     gui.Color
@@ -125,6 +133,89 @@ var (
 	overlayBlack = gui.RGB(0, 0, 0)
 )
 
+// Minimum channel-distance (chanDist, so 0..765) each overlay must keep from
+// what it is drawn on, measured after alpha compositing. Not a perceptual
+// standard — chanDist isn't one — but a floor a color washing out into its
+// background cannot clear.
+//
+// These live here rather than in the test because deriveOverlay now *enforces*
+// them (see pushOff): they are the derivation's contract, and the test verifies
+// the contract rather than defining it. They exist because the blend fractions
+// above were tuned by eye against a handful of dark themes; across the ~600
+// bundled ones, 36 produced chrome that washed out — a mid-gray or saturated
+// background defeats any fixed blend percentage.
+const (
+	// Chrome drawn over live cells: the scrollbar thumb, the bell wash. Low,
+	// because these are meant to be quiet; the bar to clear is "visible", not
+	// "prominent".
+	minChromeDist = 80
+	// The copy-mode cursor against the canvas. Higher than chrome: it is a
+	// position marker the user is aiming with, and it is the only overlay
+	// whose whole signal is its fill. It also has the glyph drawn over it in
+	// DefaultBG, so it carries minTextDist as well.
+	minCursorDist = 100
+	// A pill's label against its own plate, and the copy cursor's glyph
+	// against its fill. Higher: this is text being read, not chrome being
+	// noticed.
+	minTextDist = 250
+	// The bell wash gets its own, much lower floor: bellFlashPeakAlpha is 22,
+	// so even a pure white wash over pure black composites to 66. The wash is
+	// meant to be caught peripherally, not read — what this floor rules out is
+	// the case that motivated the whole pass, a wash on the same side of the
+	// spectrum as the background.
+	minBellDist = 45
+)
+
+// compositeOver returns c drawn at its own alpha over bg — what the eye
+// actually sees for the overlays painted semi-transparently. Comparing a raw
+// color against the background would accept colors that vanish once
+// composited, which is exactly the failure mode a light theme introduces.
+func compositeOver(c, bg gui.Color) gui.Color {
+	a := int(c.A)
+	mix := func(f, b uint8) uint8 {
+		return uint8((int(f)*a + int(b)*(255-a)) / 255)
+	}
+	return gui.RGB(mix(c.R, bg.R), mix(c.G, bg.G), mix(c.B, bg.B))
+}
+
+// overlayDist is the distance the eye sees between c, drawn at alpha over bg,
+// and bg itself. The single measure both pushOff and TestOverlayContrast use,
+// so the derivation cannot satisfy a different metric than the test checks.
+func overlayDist(c, bg gui.Color, alpha uint8) int {
+	return chanDist(compositeOver(withAlpha(c, alpha), bg), bg)
+}
+
+// pushOff nudges c toward whichever pole (white or black) is farther from bg,
+// stopping at the first step that clears min once composited at alpha. It
+// returns c unchanged when the derived color already clears the floor, which
+// is the common case — this only engages for the minority of themes whose
+// background defeats the fixed blends.
+//
+// Stepping rather than solving: alpha compositing plus the uint8 rounding in
+// mixPct make the closed form fiddly, and this runs once per theme change, not
+// per cell. Moving toward a pole desaturates, so the smallest step that works
+// is taken — a "fail" tick that has been pushed 20% toward white is still
+// recognisably red, which one pushed to the pole would not be.
+func pushOff(c, bg gui.Color, alpha uint8, min int) gui.Color {
+	if overlayDist(c, bg, alpha) >= min {
+		return c
+	}
+	// Whichever pole is farther from the background is the one with headroom.
+	pole := overlayWhite
+	if chanDist(overlayBlack, bg) > chanDist(overlayWhite, bg) {
+		pole = overlayBlack
+	}
+	for pct := 5; pct <= 100; pct += 5 {
+		if cand := mixPct(c, pole, pct); overlayDist(cand, bg, alpha) >= min {
+			return cand
+		}
+	}
+	// Unreachable for every bundled theme, but a background mid-way between
+	// the poles can genuinely put a low-alpha wash out of reach. The pole is
+	// the best available answer; returning c would be strictly worse.
+	return pole
+}
+
 // mixPct blends a toward b by pct percent (0 = a, 100 = b), per channel.
 func mixPct(a, b gui.Color, pct int) gui.Color {
 	return gui.RGB(
@@ -161,6 +252,36 @@ func accent(hue gui.Color, dark bool) gui.Color {
 	return mixPct(hue, overlayBlack, accentDarken)
 }
 
+// bellMaxPeakAlpha caps how far deriveBell may raise the wash's alpha. The
+// bell is meant to be caught peripherally, not to black out the screen; past
+// this the cure is worse than the invisible flash it fixes.
+const bellMaxPeakAlpha uint8 = 60
+
+// deriveBell resolves the bell wash and the alpha it peaks at. Color first: if
+// the tinted wash clears minBellDist at the baseline alpha — true for the great
+// majority of themes — nothing moves. Otherwise the wash is pushed toward the
+// pole and, only if that is still not enough, the alpha is raised.
+//
+// Alpha is the last resort rather than the first because raising it makes the
+// bell louder for every theme it touches, while pushing the color only makes it
+// less tinted.
+func deriveBell(th Theme, extreme gui.Color) (gui.Color, uint8) {
+	bg := th.DefaultBG
+	wash := pushOff(mixPct(extreme, th.DefaultFG, bellTint), bg,
+		bellFlashPeakAlpha, minBellDist)
+	if overlayDist(wash, bg, bellFlashPeakAlpha) >= minBellDist {
+		return wash, bellFlashPeakAlpha
+	}
+	// pushOff already moved the color as far as it goes; the remaining knob is
+	// how much of it lands on screen.
+	for a := bellFlashPeakAlpha + 1; a <= int(bellMaxPeakAlpha); a++ {
+		if overlayDist(wash, bg, uint8(a)) >= minBellDist {
+			return wash, uint8(a)
+		}
+	}
+	return wash, bellMaxPeakAlpha
+}
+
 // deriveOverlay computes the overlay palette for a theme. Pure function of the
 // theme so it is trivially testable — see TestOverlayContrast, which is what
 // actually holds the "checked against a light background" claim up.
@@ -177,22 +298,53 @@ func deriveOverlay(th Theme) overlayColors {
 		extreme = overlayBlack
 	}
 
-	ov := overlayColors{
-		bellFlash:  mixPct(extreme, th.DefaultFG, bellTint),
-		thumb:      withAlpha(mixPct(th.DefaultFG, th.DefaultBG, thumbMix), thumbAlpha),
-		thumbHover: withAlpha(mixPct(th.DefaultFG, th.DefaultBG, thumbHoverMix), thumbHoverAlpha),
+	bg := th.DefaultBG
 
-		fail:     accent(overlayFailHue, dark),
-		progress: accent(overlayProgressHue, dark),
-		paused:   accent(overlayPausedHue, dark),
-		indet:    accent(overlayIndetHue, dark),
+	// Every wash and accent is pushed off the background far enough to clear
+	// its floor. On the themes the blends were tuned against this changes
+	// nothing — pushOff returns its input when the floor is already met — so
+	// the tuned look is preserved and only the outliers move.
+	//
+	// The thumb needs it most: it is derived from DefaultFG, so a theme whose
+	// own text barely separates from its background yields chrome that barely
+	// separates from it either.
+	thumb := pushOff(mixPct(th.DefaultFG, bg, thumbMix), bg, thumbAlpha, minChromeDist)
+
+	bellWash, bellAlpha := deriveBell(th, extreme)
+
+	ov := overlayColors{
+		bellFlash:     bellWash,
+		bellPeakAlpha: bellAlpha,
+		thumb:         withAlpha(thumb, thumbAlpha),
+
+		fail:     pushOff(accent(overlayFailHue, dark), bg, scrollbarTickIdleAlpha, minChromeDist),
+		progress: pushOff(accent(overlayProgressHue, dark), bg, scrollbarTickIdleAlpha, minChromeDist),
+		paused:   pushOff(accent(overlayPausedHue, dark), bg, scrollbarTickIdleAlpha, minChromeDist),
+		indet:    pushOff(accent(overlayIndetHue, dark), bg, scrollbarTickIdleAlpha, minChromeDist),
 
 		// The copy cursor's glyph is drawn in DefaultBG by drawCopyCursor
 		// (the cell is inverted onto the cursor fill), so only the fill is
 		// derived here — and it must stay far from DefaultBG for that glyph
 		// to be legible, which is what darkening it on light themes buys.
-		copyCurFill: accent(overlayCopyCurHue, dark),
+		// minTextDist, not minCursorDist: the glyph on it is text being read,
+		// and it is the stricter of the two floors the fill has to clear.
+		copyCurFill: pushOff(accent(overlayCopyCurHue, dark), bg, 255, minTextDist),
 	}
+
+	// Hover must read as a response to the pointer, so it is derived from the
+	// thumb that was actually chosen rather than from DefaultFG independently.
+	// Deriving both from the theme and pushing each on its own could leave a
+	// pushed idle thumb sitting further off the background than its own hover.
+	hover := pushOff(mixPct(thumb, extreme, thumbMix-thumbHoverMix), bg,
+		thumbHoverAlpha, minChromeDist)
+	for pct := 0; pct <= 100; pct += 5 {
+		cand := mixPct(hover, extreme, pct)
+		if overlayDist(cand, bg, thumbHoverAlpha) > overlayDist(thumb, bg, thumbAlpha) {
+			hover = cand
+			break
+		}
+	}
+	ov.thumbHover = withAlpha(hover, thumbHoverAlpha)
 
 	ov.recordFill, ov.recordText = pillPair(overlayRecordHue, overlayRecordAlpha, dark)
 	ov.badgeFill, ov.badgeText = pillPair(overlayBadgeHue, overlayBadgeAlpha, dark)

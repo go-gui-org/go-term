@@ -1845,26 +1845,9 @@ func TestApplyScrollbackConfig(t *testing.T) {
 	}
 }
 
-func TestThemeMenuItems_Empty(t *testing.T) {
-	if got := ThemeMenuItems(nil); got != nil {
-		t.Errorf("expected nil for empty themes, got %v", got)
-	}
-}
-
-func TestThemeMenuItems_TwoThemes(t *testing.T) {
-	themes := []NamedTheme{
-		{Name: "Dark", Theme: DefaultTheme},
-		{Name: "Light", Theme: SolarizedDarkTheme},
-	}
-	items := ThemeMenuItems(themes)
-	if len(items) != 3 {
-		t.Fatalf("expected 3 menu items, got %d", len(items))
-	}
-}
-
 func TestApplyTheme_EmptyThemes(t *testing.T) {
 	g := newGrid(24, 80)
-	g.setTheme(SolarizedDarkTheme)
+	g.setTheme(mustBundled(t, "iTerm2 Solarized Dark"))
 	applyTheme(g, Cfg{})
 	if g.Theme.DefaultFG == DefaultTheme.DefaultFG {
 		t.Error("theme should not have changed when Themes is empty")
@@ -1873,13 +1856,14 @@ func TestApplyTheme_EmptyThemes(t *testing.T) {
 
 func TestApplyTheme_FirstTheme(t *testing.T) {
 	g := newGrid(24, 80)
+	nord := mustBundled(t, "Nord")
 	applyTheme(g, Cfg{
 		Themes: []NamedTheme{
-			{Name: "Nord", Theme: NordTheme},
+			{Name: "Nord", Theme: nord},
 			{Name: "Default", Theme: DefaultTheme},
 		},
 	})
-	if g.Theme.DefaultFG != NordTheme.DefaultFG {
+	if g.Theme.DefaultFG != nord.DefaultFG {
 		t.Error("expected first theme (Nord) to be applied")
 	}
 }
@@ -3024,7 +3008,7 @@ func TestTerm_SetTheme_ChangesGridTheme(t *testing.T) {
 func TestTerm_SetTheme_BumpsVersion(t *testing.T) {
 	term := &Term{grid: newGrid(2, 4)}
 	prev := term.drawVersion.Load()
-	term.SetTheme(GruvboxTheme)
+	term.SetTheme(mustBundled(t, "Gruvbox Dark"))
 	if term.drawVersion.Load() <= prev {
 		t.Error("SetTheme should bump drawVersion")
 	}
