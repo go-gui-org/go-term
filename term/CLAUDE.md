@@ -61,7 +61,8 @@ Supports a modern xterm/kitty-compatible subset:
   (VT510's soft-reset table does not list DECCOLM).
 - SGR (`CSI … m`): reset; bold/dim/italic/underline/inverse/strikethrough;
   blink (5/6, one attribute) and conceal (8) with their 25/28 resets;
-  extended underlines (4:1–4:5, SGR 21); underline color (58); fg/bg
+  extended underlines (4:1–4:5, SGR 21); underline color (58); overline
+  (53/55, drawn in the text color — 58 is underline-only); fg/bg
   16-color, 256-color, 24-bit truecolor. Blink and conceal are rendering-
   only: the grid keeps the real text so selection copy and search are
   unaffected (`maskGlyph` in `widget_draw.go` hides the glyph).
@@ -80,7 +81,7 @@ Supports a modern xterm/kitty-compatible subset:
   DECERA (`$ z`), DECFRA (`$ x`), DECCARA (`$ r`), DECRARA (`$ t`) and DECCRA
   (`$ v`) ignore protection, as does every ordinary erase/scroll/overwrite.
   DECSACE (`CSI Ps * x`) picks the stream (default) or rectangle extent for
-  DECCARA/DECRARA. Protection lives in `cell.Attrs` bit 8 (`attrProtected`)
+  DECCARA/DECRARA. Protection lives in `cell.Attrs` bit 9 (`attrProtected`)
   so DECSC/DECRC and the alt-screen swap carry it; SGR 0 must *not* clear it,
   DECSTR and RIS must. DA1 still reports VT100 level — apps that gate these
   on `CSI ?64…` will not emit them.
@@ -107,7 +108,15 @@ Supports a modern xterm/kitty-compatible subset:
   light vs. dark is the Rec.601 luma of `Theme.DefaultBG`, which OSC 11
   writes through, and deliberately ignores DECSCNM).
 - Kitty Keyboard Protocol: `CSI > u` / `< u` / `= u` / `? u` (push/pop/
-  set/query); key-release events; left/right modifier distinction.
+  set/query); key-release events; left/right modifier distinction. xterm's
+  `modifyOtherKeys` (`CSI > 4 ; Pm m`, query `CSI ? 4 m`) is deliberately
+  *not* implemented — KKP supersedes it and supporting both means two
+  encoders for one keystroke plus a precedence rule. The sequences fall into
+  the `'>'` / `'?'` branches of `dispatchCSI`, which have no `'m'` case, so
+  they are discarded before reaching `applySGR` — they share a final byte
+  with SGR and would otherwise set attributes from their parameters.
+  `TestParser_ModifyOtherKeys_Inert` pins that; rationale and the cost to
+  clients are in `docs/terminal-verification.md` under "Known Omissions".
 - DEC Special Graphics: `SI`/`SO`, `ESC (0` / `ESC (B`.
 - OSC: window title (0/1/2), palette set/query (4) and reset (104 —
   one index, or all with a bare `OSC 104`), CWD (7), hyperlinks (8),

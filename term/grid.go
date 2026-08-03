@@ -96,8 +96,8 @@ func isEmojiModifier(r rune) bool {
 	return r >= 0x1F3FB && r <= 0x1F3FF
 }
 
-// cell attribute bits. cell.Attrs is uint16; bits 0..7 are the SGR visual
-// attributes, bit 8 is DECSCA protection. Widening from uint8 was free —
+// cell attribute bits. cell.Attrs is uint16; bits 0..8 are the SGR visual
+// attributes, bit 9 is DECSCA protection. Widening from uint8 was free —
 // the second byte lands in padding cell already carried.
 const (
 	attrBold uint16 = 1 << iota
@@ -106,8 +106,9 @@ const (
 	attrDim
 	attrItalic
 	attrStrikethrough
-	attrBlink   // SGR 5/6 — glyph hidden on alternating half-cycles
-	attrConceal // SGR 8 — glyph never drawn (ncurses A_INVIS, password fields)
+	attrBlink    // SGR 5/6 — glyph hidden on alternating half-cycles
+	attrConceal  // SGR 8 — glyph never drawn (ncurses A_INVIS, password fields)
+	attrOverline // SGR 53 — rule along the cell top, cleared by 55
 
 	// attrProtected is DECSCA (CSI Ps " q), not an SGR attribute: SGR 0 must
 	// not clear it, and it has no visual effect. Only the selective erases —

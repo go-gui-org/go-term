@@ -2,9 +2,8 @@
 
 `go-term` is a full-featured terminal-emulator widget for
 [go-gui](https://github.com/go-gui-org/go-gui). 53 of 57 phases shipped;
-work remaining: 53 (competitive feature parity) then 54–56 (API
-stabilisation, which runs last so it audits the final surface). Phase 57
-(v1.0.0) blocked on go-gui v1.0.
+work remaining: 54–56 (API stabilisation, which runs last so it audits the
+final surface). Phase 57 (v1.0.0) blocked on go-gui v1.0.
 
 Platforms: macOS, Linux, and Windows all supported. The Windows/ConPTY
 backend (issue #15) shipped — including native toast notifications — so the
@@ -188,6 +187,7 @@ When go-gui ships v1.0.0:
 | 51  | Bundled theme corpus + theme browser    | 602 embedded themes, `Cmd+Shift+T` browser with live preview, `docs/themes.md` |
 | 52  | Shell integration, completed            | bash/zsh/fish OSC 133 hooks, `notify-after`, tab activity indicators |
 | 53  | Keyboard-driven discovery               | `Cmd+Shift+U`/`Y` link hints (OSC 8 + implicit), `Cmd+Shift+P` command palette over both registries |
+| 53a | Protocol-gap addendum                   | SGR 53/55 overline; `modifyOtherKeys` omission decided and documented (KKP supersedes it) |
 
 ## Commands
 
