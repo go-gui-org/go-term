@@ -199,4 +199,23 @@ func TestThemeList(t *testing.T) {
 		}
 		seen[th.Name] = true
 	}
+
+	// At least one theme of each character must be registered. A user with no
+	// light option is the reason this list grew light themes; a list with no
+	// dark one would be the same bug pointed the other way. It is also what
+	// makes mode 2031 reachable through the UI at all — Cmd+Shift+T can only
+	// notify a subscribed child if two registered themes disagree about the
+	// scheme.
+	var dark, light int
+	for _, th := range themes {
+		if th.Theme.IsDark() {
+			dark++
+		} else {
+			light++
+		}
+	}
+	if dark == 0 || light == 0 {
+		t.Errorf("themeList has %d dark and %d light themes; want at least one of each",
+			dark, light)
+	}
 }

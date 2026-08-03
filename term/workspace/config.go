@@ -29,14 +29,16 @@ type workspaceConfig struct {
 	fontFamily string // [font] family
 	theme      string // [general] theme, matched by name against Cfg.Themes
 
-	fontSize   float32       // [font] size, points
-	scrollbar  float32       // [general] scrollbar, px (negative hides)
-	scrollback int           // [general] scrollback rows (negative disables)
-	bell       term.BellMode // [general] bell
+	fontSize    float32       // [font] size, points
+	scrollbar   float32       // [general] scrollbar, px (negative hides)
+	minContrast float64       // [general] minimum-contrast, WCAG ratio
+	scrollback  int           // [general] scrollback rows (negative disables)
+	bell        term.BellMode // [general] bell
 
 	middleClickPaste bool // [general] middle-click-paste
 
 	hasFontSize         bool
+	hasMinContrast      bool
 	hasScrollback       bool
 	hasScrollbar        bool
 	hasBell             bool
@@ -173,6 +175,19 @@ func (c *workspaceConfig) setGeneral(key, val string) error {
 			return fmt.Errorf("scrollbar %v: out of range", n)
 		}
 		c.scrollbar, c.hasScrollbar = float32(n), true
+	case "minimum-contrast":
+		n, err := strconv.ParseFloat(val, 64)
+		if err != nil {
+			return fmt.Errorf("minimum-contrast %q: not a number", val)
+		}
+		// 1.0 is a color against itself (the "off" value) and 21.0 is black
+		// against white, so nothing outside the range can mean anything.
+		// Rejecting rather than clamping keeps a typo'd 45 from silently
+		// becoming "every glyph is black or white".
+		if math.IsNaN(n) || n < 1 || n > 21 {
+			return fmt.Errorf("minimum-contrast %v: want a ratio in 1..21", n)
+		}
+		c.minContrast, c.hasMinContrast = n, true
 	case "bell":
 		m, ok := parseBellMode(val)
 		if !ok {
@@ -371,10 +386,11 @@ type termOpts struct {
 	// in which case panes keep term's own default: Cfg.Themes[0].
 	theme *term.Theme
 
-	keys       term.KeyMap
-	scrollback int
-	scrollbar  float32
-	bell       term.BellMode
+	keys        term.KeyMap
+	scrollback  int
+	scrollbar   float32
+	minContrast float64
+	bell        term.BellMode
 
 	// middleClickPaste defaults to the platform convention rather than to
 	// false, so it is always set explicitly by applySettings.
@@ -408,6 +424,9 @@ func applySettings(base Cfg, fc workspaceConfig, keys term.KeyMap) Cfg {
 	}
 	if fc.hasScrollbar {
 		out.opts.scrollbar = fc.scrollbar
+	}
+	if fc.hasMinContrast {
+		out.opts.minContrast = fc.minContrast
 	}
 	if fc.hasBell {
 		out.opts.bell = fc.bell

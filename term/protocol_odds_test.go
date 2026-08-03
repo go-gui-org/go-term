@@ -27,21 +27,18 @@ func replyTo(t *testing.T, rows, cols int, input string, prep func(g *grid)) (st
 func TestThemeIsDark(t *testing.T) {
 	t.Parallel()
 
-	// Every shipped theme is a dark theme; if one ever isn't, the DSR ?996
-	// answer for it changes and this is where that shows up.
-	for _, th := range []struct {
-		name  string
-		theme Theme
-	}{
-		{"Default", DefaultTheme}, {"Gruvbox", GruvboxTheme}, {"Nord", NordTheme},
-		{"SolarizedDark", SolarizedDarkTheme}, {"Dracula", DraculaTheme},
-		{"CatppuccinMocha", CatppuccinMochaTheme}, {"TokyoNight", TokyoNightTheme},
-		{"Monokai", MonokaiTheme}, {"OneDark", OneDarkTheme}, {"RosePine", RosePineTheme},
-		{"Kanagawa", KanagawaTheme}, {"AyuDark", AyuDarkTheme},
-		{"Everforest", EverforestTheme}, {"GitHubDark", GitHubDarkTheme},
-	} {
-		if !themeIsDark(th.theme.DefaultBG) {
-			t.Errorf("%s: DefaultBG %v reports light", th.name, th.theme.DefaultBG)
+	// Every shipped theme declares its character in shippedThemes. A theme
+	// that reports the other one changes the DSR ?996 answer for it — and, in
+	// falcon, which way the window chrome goes — so this is where that shows
+	// up. Theme.IsDark is checked alongside the internal predicate because it
+	// is what embedders call; the two must not diverge.
+	for _, th := range shippedThemes() {
+		if got := themeIsDark(th.theme.DefaultBG); got != th.dark {
+			t.Errorf("%s: themeIsDark(DefaultBG %v) = %v, want %v",
+				th.name, th.theme.DefaultBG, got, th.dark)
+		}
+		if got := th.theme.IsDark(); got != th.dark {
+			t.Errorf("%s: Theme.IsDark() = %v, want %v", th.name, got, th.dark)
 		}
 	}
 

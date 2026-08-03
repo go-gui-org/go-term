@@ -99,6 +99,29 @@ func (t *Term) SetBellMode(m BellMode) { t.bellMode.Store(int32(m)) }
 // the next click, so a config reload needs no redraw.
 func (t *Term) SetMiddleClickPaste(on bool) { t.cfg.MiddleClickPaste = on }
 
+// SetMinimumContrast changes the render-time contrast floor on a live
+// terminal, mirroring Cfg.MinimumContrast. A ratio at or below 1 turns the
+// clamp off; a non-finite value is ignored. Main-thread only.
+//
+// Takes grid.Mu because the foreground pass reads the ratio and the memo it
+// keys, and the memo has to be dropped in the same critical section — entries
+// computed under the old ratio are wrong, not stale.
+func (t *Term) SetMinimumContrast(ratio float64) {
+	if !realNumber(ratio) {
+		return
+	}
+	t.grid.Mu.Lock()
+	if t.grid.MinContrast == ratio {
+		t.grid.Mu.Unlock()
+		return
+	}
+	t.grid.MinContrast = ratio
+	t.grid.contrast.reset()
+	t.grid.Mu.Unlock()
+	t.bumpVersion()
+	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+}
+
 // SetScrollbarWidth changes the scrollbar thumb width in pixels. Mirrors
 // Cfg.ScrollbarWidth: zero restores the built-in default, negative hides the
 // scrollbar. A non-finite value is ignored. Main-thread only.

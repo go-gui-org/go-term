@@ -482,10 +482,12 @@ func TestOnDraw_SearchBarNoMatch(t *testing.T) {
 	}
 	tm.grid.Mu.Unlock()
 	tm.onDraw(dc)
-	// Red background when no match.
+	// Red background when no match. Read from the theme-derived overlay
+	// palette rather than a literal: the no-match fill is derived per theme
+	// now, so a hardcoded color would only ever test the default one.
 	found := false
 	for _, b := range dc.Batches() {
-		if b.Color == gui.RGB(90, 20, 20) {
+		if b.Color == tm.grid.ov.searchNoMatchFill {
 			found = true
 			break
 		}
@@ -553,7 +555,7 @@ func TestOnDraw_ScrollbarVisibleWhenScrolledBack(t *testing.T) {
 	batches := dc.Batches()
 	found := false
 	for _, b := range batches {
-		if b.Color == gui.RGBA(128, 128, 128, 120) {
+		if b.Color == tm.grid.ov.thumb {
 			found = true
 			break
 		}
@@ -576,7 +578,7 @@ func TestOnDraw_ScrollbarHiddenLive(t *testing.T) {
 	tm.grid.Mu.Unlock()
 	tm.onDraw(dc)
 	for _, b := range dc.Batches() {
-		if b.Color == gui.RGBA(128, 128, 128, 120) {
+		if b.Color == tm.grid.ov.thumb {
 			t.Error("scrollbar should be hidden at live viewport")
 		}
 	}
@@ -588,7 +590,7 @@ func TestOnDraw_ScrollbarHiddenLive(t *testing.T) {
 
 // bellFlashAlpha runs one onDraw on a fresh Term/DrawContext with the flash
 // ending at until (over a total-long flash) and reports the alpha of the
-// white overlay, or 0 when no overlay was emitted. A fresh context per call
+// bell wash, or 0 when no overlay was emitted. A fresh context per call
 // matters: DrawContext accumulates batches, so reusing one across samples
 // would keep matching the first sample's overlay.
 func bellFlashAlpha(until time.Time, total time.Duration) uint8 {
@@ -607,8 +609,12 @@ func bellFlashAlpha(until time.Time, total time.Duration) uint8 {
 	tm.bell.flashNanos.Store(int64(total))
 	tm.bell.flashUntil.Store(until.UnixNano())
 	tm.onDraw(dc)
+	// Match on the theme-derived wash color rather than a literal white: the
+	// wash follows the theme now (see palette_overlay.go), so a hardcoded
+	// color here would only test the default theme.
+	wash := tm.grid.ov.bellFlash
 	for _, b := range dc.Batches() {
-		if b.Color.R == 255 && b.Color.G == 255 && b.Color.B == 255 &&
+		if b.Color.R == wash.R && b.Color.G == wash.G && b.Color.B == wash.B &&
 			b.Color.A > 0 {
 			return b.Color.A
 		}
@@ -675,7 +681,7 @@ func TestDrawCursor_CustomColor(t *testing.T) {
 func TestFillRun_DefaultBGSkipped(t *testing.T) {
 	tm, dc := newDrawTerm(4, 8, 10, 20)
 	before := len(dc.Batches())
-	tm.fillRun(dc, 0, 0, 5, tm.grid.Theme.DefaultBG, 0)
+	tm.fillRun(dc, 0, 0, 5, tm.grid.Theme.DefaultBG, 0, false)
 	if len(dc.Batches()) != before {
 		t.Error("fillRun should skip DefaultBG")
 	}
@@ -683,7 +689,7 @@ func TestFillRun_DefaultBGSkipped(t *testing.T) {
 
 func TestFillRun_NonDefaultBG(t *testing.T) {
 	tm, dc := newDrawTerm(4, 8, 10, 20)
-	tm.fillRun(dc, 0, 2, 5, gui.RGB(0, 255, 0), 0)
+	tm.fillRun(dc, 0, 2, 5, gui.RGB(0, 255, 0), 0, false)
 	batches := dc.Batches()
 	if len(batches) != 1 {
 		t.Fatalf("expected 1 batch, got %d", len(batches))
@@ -972,4 +978,94 @@ func TestPrepareSelection_BlockReversed(t *testing.T) {
 			t.Errorf("row %d: got %+v, want {c0:2 c1:4 active:true}", r, rb)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Sub-cell remainder at the canvas edges
+// ---------------------------------------------------------------------------
+
+// TestFillRun_BleedsIntoEdgeRemainder covers the strip of canvas that belongs
+// to no cell: rows and cols are floor(canvas/cell), so a window whose pixel
+// size is not an exact multiple of the cell leaves up to one cell short on the
+// right and bottom. That remainder keeps the canvas fill — the theme's
+// background — which is invisible until the content disagrees with the theme,
+// and then reads as a bright rim down the side of a full-screen app.
+func TestFillRun_BleedsIntoEdgeRemainder(t *testing.T) {
+	t.Parallel()
+
+	const cellW, cellH = 10, 20
+	// 4×8 cells is 80×80 px; the canvas is 7 px wider and 6 px taller, which
+	// is the remainder no cell covers.
+	newDC := func() *gui.DrawContext {
+		return gui.NewDrawContext(87, 86, testTextMeasurer{cellW: cellW, cellH: cellH})
+	}
+	tm, _ := newDrawTerm(4, 8, cellW, cellH)
+	fill := gui.RGB(16, 20, 29) // an alt-screen app's own dark background
+
+	t.Run("last_column_reaches_the_right_edge", func(t *testing.T) {
+		dc := newDC()
+		tm.fillRun(dc, 0, 6, 8, fill, 0, false)
+		_, _, x1, _, ok := batchBounds(dc, fill)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if x1 != dc.Width {
+			t.Errorf("run ends at x=%v, want %v (the canvas edge)", x1, dc.Width)
+		}
+	})
+
+	t.Run("last_row_reaches_the_bottom_edge", func(t *testing.T) {
+		dc := newDC()
+		tm.fillRun(dc, 3, 0, 2, fill, 0, true)
+		_, _, _, y1, ok := batchBounds(dc, fill)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if y1 != dc.Height {
+			t.Errorf("run ends at y=%v, want %v (the canvas edge)", y1, dc.Height)
+		}
+	})
+
+	t.Run("interior_runs_are_untouched", func(t *testing.T) {
+		// Only the runs that already abut an edge may grow. An interior run
+		// that stretched would paint over its neighbour.
+		dc := newDC()
+		tm.fillRun(dc, 1, 2, 4, fill, 0, false)
+		x0, y0, x1, y1, ok := batchBounds(dc, fill)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if x0 != 20 || x1 != 40 || y0 != 20 || y1 != 40 {
+			t.Errorf("interior run = (%v,%v)..(%v,%v), want (20,20)..(40,40)",
+				x0, y0, x1, y1)
+		}
+	})
+
+	t.Run("smooth_scroll_does_not_bleed_from_an_interior_row", func(t *testing.T) {
+		// Smooth scrolling shifts every row down by ViewSubPx. Once that
+		// offset exceeds the canvas remainder (6 px here), the second-to-last
+		// row also ends within one cell of the bottom — but a row still sits
+		// below it, so it must not stretch. Without the row-index gate this
+		// paints the row above's background over the last row.
+		dc := newDC()
+		tm.fillRun(dc, 2, 0, 2, fill, 10, false)
+		_, _, _, y1, ok := batchBounds(dc, fill)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if want := float32(2*cellH + 10 + cellH); y1 != want {
+			t.Errorf("interior run ends at y=%v, want %v (its own height)", y1, want)
+		}
+	})
+
+	t.Run("default_background_still_skips", func(t *testing.T) {
+		// When the run's color is the theme default there is nothing to fix:
+		// the canvas fill already agrees, and drawing it again would cost a
+		// rect per row for no visible change.
+		dc := newDC()
+		tm.fillRun(dc, 3, 6, 8, tm.grid.defaultBG(), 0, true)
+		if len(dc.Batches()) != 0 {
+			t.Errorf("default-bg run drew %d batches, want 0", len(dc.Batches()))
+		}
+	})
 }

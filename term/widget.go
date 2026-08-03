@@ -38,6 +38,7 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 	g := newGrid(initRows, initCols)
 	applyTheme(g, cfg)
 	applyScrollbackConfig(g, cfg)
+	applyContrastConfig(g, cfg)
 	seqID := termSeq.Add(1)
 	t := &Term{
 		cfg:         cfg,

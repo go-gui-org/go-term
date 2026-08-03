@@ -752,3 +752,45 @@ func TestApplySettings_MiddleClickPasteExplicit(t *testing.T) {
 		}
 	}
 }
+
+// TestSetGeneral_MinimumContrast covers the [general] minimum-contrast key.
+// The range is rejected rather than clamped: a typo'd 45 clamped to 21 would
+// silently paint every glyph pure black or white, which looks like a rendering
+// bug rather than like a bad config line.
+func TestSetGeneral_MinimumContrast(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepts_a_ratio", func(t *testing.T) {
+		var c workspaceConfig
+		if err := c.setGeneral("minimum-contrast", "4.5"); err != nil {
+			t.Fatalf("setGeneral: %v", err)
+		}
+		if !c.hasMinContrast || c.minContrast != 4.5 {
+			t.Errorf("minContrast = %v (has=%v)", c.minContrast, c.hasMinContrast)
+		}
+	})
+
+	t.Run("accepts_the_off_value", func(t *testing.T) {
+		// 1.0 is a color against itself, so it is the natural "off" and must
+		// round-trip rather than being rejected as out of range.
+		var c workspaceConfig
+		if err := c.setGeneral("minimum-contrast", "1"); err != nil {
+			t.Fatalf("setGeneral: %v", err)
+		}
+		if !c.hasMinContrast || c.minContrast != 1 {
+			t.Errorf("minContrast = %v (has=%v)", c.minContrast, c.hasMinContrast)
+		}
+	})
+
+	for _, val := range []string{"nan", "0.5", "0", "-3", "21.5", "45", "abc", ""} {
+		t.Run("rejects_"+val, func(t *testing.T) {
+			var c workspaceConfig
+			if err := c.setGeneral("minimum-contrast", val); err == nil {
+				t.Errorf("setGeneral(minimum-contrast, %q) accepted, want error", val)
+			}
+			if c.hasMinContrast {
+				t.Errorf("setGeneral(minimum-contrast, %q) set hasMinContrast", val)
+			}
+		})
+	}
+}

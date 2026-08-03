@@ -52,7 +52,16 @@
 // [SolarizedDarkTheme], [DraculaTheme], [CatppuccinMochaTheme],
 // [TokyoNightTheme], [MonokaiTheme], [OneDarkTheme],
 // [RosePineTheme], [KanagawaTheme], [AyuDarkTheme],
-// [EverforestTheme], and [GitHubDarkTheme].
+// [EverforestTheme], [GitHubDarkTheme], and the light schemes
+// [SolarizedLightTheme], [GitHubLightTheme] and [CatppuccinLatteTheme].
+// [Theme.IsDark] reports a theme's light/dark character — the same question
+// DSR ?996 answers for the child — for an embedder theming its own chrome.
+//
+// A light theme does not fix an application's *own* colors: a 24-bit SGR is
+// not themeable, and tools that pick colors for a dark background hand a light
+// theme text at 1.5:1. [Cfg.MinimumContrast] is the render-time floor that
+// does, and go-term sets COLORFGBG at spawn so a child that checks it can
+// choose correctly in the first place.
 //
 // # Cwd
 //
@@ -74,15 +83,19 @@
 // ([DefaultTheme], [GruvboxTheme], [NordTheme], [SolarizedDarkTheme],
 // [DraculaTheme], [CatppuccinMochaTheme], [TokyoNightTheme],
 // [MonokaiTheme], [OneDarkTheme], [RosePineTheme], [KanagawaTheme],
-// [AyuDarkTheme], [EverforestTheme], [GitHubDarkTheme]) —
+// [AyuDarkTheme], [EverforestTheme], [GitHubDarkTheme],
+// [SolarizedLightTheme], [GitHubLightTheme], [CatppuccinLatteTheme]) —
 // their names won't change and their color values won't shift in ways
-// that break contrast; the [MaxGridDim] and [MaxScrollbackCap] constants;
+// that break contrast; [Theme.IsDark], which answers the same light/dark
+// question the emulator reports to the child through DSR ?996, for an
+// embedder that themes its own chrome to match; the [MaxGridDim] and
+// [MaxScrollbackCap] constants;
 // the [New] constructor; every exported [Term] method ([Term.View],
 // [Term.Close] — idempotent, [Term.Cwd], [Term.Theme], [Term.SetTheme],
 // [Term.Rows], [Term.Cols], [Term.Write], [Term.PID], [Term.Alive],
-// [Term.SetFocused], [Term.HandleWindowEvent]); and [Shortcuts] /
-// [ShortcutInfo]. Term is an opaque handle: all fields are unexported,
-// so embedders interact only through methods.
+// [Term.SetFocused], [Term.HandleWindowEvent], [Term.SetMinimumContrast]);
+// and [Shortcuts] / [ShortcutInfo]. Term is an opaque handle: all fields are
+// unexported, so embedders interact only through methods.
 //
 // What may change before 1.0:
 //   - Cfg fields: new fields may be added. Renames and removals go

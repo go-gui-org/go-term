@@ -160,7 +160,9 @@ func replayWindowCfg(path string, onInit func(*gui.Window)) gui.WindowCfg {
 // shell, so no quit confirmation and no workspace to save; playback controls
 // (space, +/-, '.', '0') are keystrokes routed to the replay source.
 func runReplay(rc replayCfg) int {
-	applyTheme()
+	// The replay viewer registers only DefaultTheme, so its chrome follows
+	// that one theme and never changes.
+	applyChrome(term.DefaultTheme.IsDark())
 	var tm *term.Term
 	var initErr error
 	w := gui.NewWindow(replayWindowCfg(rc.path, func(w *gui.Window) {

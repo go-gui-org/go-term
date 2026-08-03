@@ -32,6 +32,14 @@ var (
 	AyuDarkTheme         Theme // Ayu Dark
 	EverforestTheme      Theme // Everforest
 	GitHubDarkTheme      Theme // GitHub Dark
+
+	// Light schemes. Each is the published light counterpart of a dark theme
+	// above, so a user switching for daylight keeps the palette they know.
+	// Their DefaultBG reads light under Theme.IsDark, which is what drives the
+	// DSR ?996 answer and the mode-2031 notification.
+	SolarizedLightTheme  Theme // Solarized Light
+	GitHubLightTheme     Theme // GitHub Light
+	CatppuccinLatteTheme Theme // Catppuccin Latte
 )
 
 // palette holds the xterm 256-color table. Indices 0–15 mirror
@@ -376,6 +384,79 @@ func init() {
 		DefaultBG: gui.RGB(13, 17, 23),
 	}
 
+	// https://ethanschoonover.com/solarized
+	//
+	// Solarized is one palette with two backgrounds: the light scheme's ANSI
+	// table is *identical* to the dark one, and only DefaultFG/DefaultBG move
+	// (fg base0 → base00, bg base03 → base3). That is upstream's own
+	// definition — the Xresources file ships a single color0–15 block, and the
+	// official iTerm2 Light and Dark presets have byte-identical ANSI entries.
+	//
+	// Do not "fix" this by inverting the base tones to match the light
+	// background. Slot 8 is the dim gray tools use for punctuation (eza's
+	// permission-column dashes, ls separators); reversing the table puts base3
+	// there, which is exactly DefaultBG, and every one of those glyphs
+	// disappears. That regression is what TestSolarizedLightSharesDarkANSI and
+	// TestThemeDimSlotIsVisible exist to catch.
+	//
+	// The known wart is upstream's, not ours: slot 15 (base3) *is* the light
+	// background, so an app printing bright white on default background is
+	// invisible. Every Solarized implementation shares it, and
+	// Cfg.MinimumContrast is the way out for a user who hits it.
+	SolarizedLightTheme = Theme{
+		ANSI:      SolarizedDarkTheme.ANSI,
+		DefaultFG: gui.RGB(101, 123, 131), // base00
+		DefaultBG: gui.RGB(253, 246, 227), // base3
+	}
+
+	// https://primer.style/primitives/colors
+	GitHubLightTheme = Theme{
+		ANSI: [16]gui.Color{
+			gui.RGB(36, 41, 47),    // 0  black
+			gui.RGB(207, 34, 46),   // 1  red
+			gui.RGB(17, 99, 41),    // 2  green
+			gui.RGB(77, 45, 0),     // 3  yellow
+			gui.RGB(9, 105, 218),   // 4  blue
+			gui.RGB(130, 80, 223),  // 5  purple
+			gui.RGB(27, 124, 131),  // 6  cyan
+			gui.RGB(110, 119, 129), // 7  gray
+			gui.RGB(87, 96, 106),   // 8  bright black
+			gui.RGB(164, 14, 38),   // 9  bright red
+			gui.RGB(26, 127, 55),   // 10 bright green
+			gui.RGB(99, 60, 1),     // 11 bright yellow
+			gui.RGB(33, 139, 255),  // 12 bright blue
+			gui.RGB(164, 117, 249), // 13 bright purple
+			gui.RGB(49, 146, 170),  // 14 bright cyan
+			gui.RGB(140, 149, 159), // 15 bright gray
+		},
+		DefaultFG: gui.RGB(36, 41, 47),    // fg.default
+		DefaultBG: gui.RGB(255, 255, 255), // canvas.default
+	}
+
+	// https://catppuccin.com
+	CatppuccinLatteTheme = Theme{
+		ANSI: [16]gui.Color{
+			gui.RGB(188, 192, 204), // 0  surface1
+			gui.RGB(210, 15, 57),   // 1  red
+			gui.RGB(64, 160, 43),   // 2  green
+			gui.RGB(223, 142, 29),  // 3  yellow
+			gui.RGB(30, 102, 245),  // 4  blue
+			gui.RGB(234, 118, 203), // 5  pink
+			gui.RGB(23, 146, 153),  // 6  teal
+			gui.RGB(92, 95, 119),   // 7  subtext1
+			gui.RGB(172, 176, 190), // 8  surface2
+			gui.RGB(210, 15, 57),   // 9  bright red
+			gui.RGB(64, 160, 43),   // 10 bright green
+			gui.RGB(223, 142, 29),  // 11 bright yellow
+			gui.RGB(30, 102, 245),  // 12 bright blue
+			gui.RGB(234, 118, 203), // 13 bright pink
+			gui.RGB(23, 146, 153),  // 14 bright teal
+			gui.RGB(108, 111, 133), // 15 subtext0
+		},
+		DefaultFG: gui.RGB(76, 79, 105),   // text
+		DefaultBG: gui.RGB(239, 241, 245), // base
+	}
+
 	// Mirror DefaultTheme ANSI 0–15 into palette so legacy palette-index
 	// fallback in resolve (for unknown high-byte tags) stays consistent.
 	for i := range 16 {
@@ -430,6 +511,10 @@ type palTable [256]gui.Color
 func (g *grid) rebuildPalette() {
 	g.pal = palTable(palette)
 	copy(g.pal[:16], g.Theme.ANSI[:])
+	// Overlay colors hang off DefaultFG/DefaultBG, not off the indexed table,
+	// but this is the one place every theme swap passes through — deriving
+	// them here is what keeps them from going stale.
+	g.rebuildOverlay()
 	if g.palOverride == nil {
 		return
 	}
@@ -511,6 +596,19 @@ func themeIsDark(c gui.Color) bool {
 	return 299*int(c.R)+587*int(c.G)+114*int(c.B) < 128*1000
 }
 
+// IsDark reports whether the theme reads as a dark color scheme, by the luma
+// of its DefaultBG.
+//
+// Exported because an embedder has the same question the emulator does — a
+// host that themes its own chrome (window borders, tab bar) has to match the
+// pane it wraps, and deriving that from a copy of the luma rule would let the
+// chrome disagree with what DSR ?996 tells the child. This is a snapshot of
+// the theme as declared; a child that repainted the background with OSC 11
+// changes what the *grid* reports, not this.
+func (t Theme) IsDark() bool {
+	return themeIsDark(t.DefaultBG)
+}
+
 // colorSchemeDark is the single source of truth for what DSR ?996 reports and
 // what the mode-2031 notification announces.
 //
@@ -540,17 +638,11 @@ func colorSchemeReport(dark bool) []byte {
 // fixed gray) makes the tint lighten on dark themes and darken on light ones,
 // and keeps syntax colors readable instead of inverting them away.
 //
-// Expressed as an integer fraction so the blend stays allocation- and
-// float-free in the per-cell draw path.
-const (
-	selTintNum = 3
-	selTintDen = 10
-)
-
-// mixChannel blends one 8-bit channel from a toward b by selTintNum/selTintDen.
-func mixChannel(a, b uint8) uint8 {
-	return uint8((int(a)*(selTintDen-selTintNum) + int(b)*selTintNum) / selTintDen)
-}
+// Expressed as an integer percentage so the blend stays allocation- and
+// float-free in the per-cell draw path — the same mixPct the overlay palette
+// uses (palette_overlay.go), so there is one blend rule in the package rather
+// than two that can round differently.
+const selTintPct = 30
 
 // chanDist is the sum of per-channel absolute differences between two colors —
 // a cheap, float-free stand-in for perceptual distance, adequate for the one
@@ -583,11 +675,7 @@ func (g *grid) selectionBG(bg gui.Color) gui.Color {
 	if chanDist(bg, target) < chanDist(bg, g.Theme.DefaultBG) {
 		target = g.Theme.DefaultBG
 	}
-	return gui.RGB(
-		mixChannel(bg.R, target.R),
-		mixChannel(bg.G, target.G),
-		mixChannel(bg.B, target.B),
-	)
+	return mixPct(bg, target, selTintPct)
 }
 
 // highlightSelected rewrites a cell so it renders as selected. The cell's

@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/go-gui-org/go-term/term"
@@ -312,5 +313,114 @@ func TestApplyThemeByName_SetsTheme(t *testing.T) {
 	}
 	if ws.persistableThemeName() != "Dracula" {
 		t.Errorf("persistableThemeName = %q, want Dracula", ws.persistableThemeName())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// OnColorScheme
+// ---------------------------------------------------------------------------
+
+// TestNotifyColorScheme covers the callback an embedder uses to keep its own
+// chrome in step with the panes: it must fire once when the scheme is first
+// established, again only when the character actually flips, and never for a
+// swap between two themes of the same character.
+func TestNotifyColorScheme(t *testing.T) {
+	var got []bool
+	ws := &Workspace{
+		tabs: []*Tab{{terms: make(map[string]*term.Term)}},
+		cfg: Cfg{
+			Themes: []term.NamedTheme{
+				{Name: "Default", Theme: term.DefaultTheme},
+				{Name: "Dracula", Theme: term.DraculaTheme},
+				{Name: "Solarized Light", Theme: term.SolarizedLightTheme},
+			},
+			OnColorScheme: func(dark bool) { got = append(got, dark) },
+		},
+	}
+
+	// First call: nothing reported yet, so the initial dark theme is news.
+	ws.notifyColorScheme()
+	// Same character, different theme: not news.
+	ws.applyThemeImpl(ws.cfg.Themes[1])
+	// Flip to light: news.
+	ws.applyThemeImpl(ws.cfg.Themes[2])
+	// Back to dark: news again.
+	ws.applyThemeImpl(ws.cfg.Themes[0])
+
+	if want := []bool{true, false, true}; !slices.Equal(got, want) {
+		t.Fatalf("OnColorScheme calls = %v, want %v", got, want)
+	}
+}
+
+// TestSelectThemeByName covers the restore path's pre-spawn theme resolution.
+// It has to settle opts.theme before any pane is built, because paneThemes
+// feeds Themes[0] to COLORFGBG and a child's environment cannot be corrected
+// after exec — a user who picked a light theme, quit, and relaunched would
+// otherwise get light cells and a shell told it was running on dark.
+func TestSelectThemeByName(t *testing.T) {
+	newWS := func(seen *[]bool) *Workspace {
+		return &Workspace{cfg: Cfg{
+			Themes: []term.NamedTheme{
+				{Name: "Default", Theme: term.DefaultTheme},
+				{Name: "Solarized Light", Theme: term.SolarizedLightTheme},
+			},
+			OnColorScheme: func(dark bool) { *seen = append(*seen, dark) },
+		}}
+	}
+
+	t.Run("sets_the_effective_theme_and_reports_the_scheme", func(t *testing.T) {
+		var seen []bool
+		ws := newWS(&seen)
+		if !ws.selectThemeByName("solarized light") { // matched case-insensitively
+			t.Fatal("selectThemeByName returned false for a listed theme")
+		}
+		if ws.cfg.opts.theme == nil || ws.cfg.opts.theme.IsDark() {
+			t.Fatalf("opts.theme = %v, want the light theme", ws.cfg.opts.theme)
+		}
+		// paneThemes is what the pane's term.Cfg is built from; it must now
+		// front the light theme, which is what fixes COLORFGBG.
+		if got := paneThemes(ws.cfg); len(got) == 0 || got[0].Name != "Solarized Light" {
+			t.Errorf("paneThemes[0] = %v, want Solarized Light", got)
+		}
+		if want := []bool{false}; !slices.Equal(seen, want) {
+			t.Errorf("OnColorScheme calls = %v, want %v", seen, want)
+		}
+	})
+
+	t.Run("unknown_and_empty_names_change_nothing", func(t *testing.T) {
+		for _, name := range []string{"", "No Such Theme"} {
+			var seen []bool
+			ws := newWS(&seen)
+			if ws.selectThemeByName(name) {
+				t.Errorf("selectThemeByName(%q) returned true", name)
+			}
+			if ws.cfg.opts.theme != nil {
+				t.Errorf("selectThemeByName(%q) set opts.theme", name)
+			}
+			if len(seen) != 0 {
+				t.Errorf("selectThemeByName(%q) fired OnColorScheme", name)
+			}
+		}
+	})
+
+	t.Run("no_themes_configured", func(t *testing.T) {
+		ws := &Workspace{}
+		if ws.selectThemeByName("Default") {
+			t.Error("selectThemeByName matched against an empty theme list")
+		}
+	})
+}
+
+func TestNotifyColorScheme_NoThemesStaysSilent(t *testing.T) {
+	called := false
+	ws := &Workspace{
+		cfg: Cfg{OnColorScheme: func(bool) { called = true }},
+	}
+	// With no themes configured the panes keep term's own default and the
+	// embedder's chrome choice stands; guessing at a character here would
+	// override a host that never asked for one.
+	ws.notifyColorScheme()
+	if called {
+		t.Error("OnColorScheme fired with no themes configured")
 	}
 }

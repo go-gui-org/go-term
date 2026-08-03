@@ -616,6 +616,19 @@ type grid struct {
 	pal         palTable
 	palOverride *palTable
 
+	// MinContrast is the WCAG contrast ratio a cell's foreground must reach
+	// against its background; <= 1 disables the clamp (the default). Set via
+	// Term.SetMinimumContrast / Cfg.MinimumContrast. contrast memoizes the
+	// per-pair result for the foreground pass — see palette_contrast.go.
+	MinContrast float64
+	contrast    contrastMemo
+
+	// ov holds the overlay colors (scrollbar lane, bell wash, HUD pills)
+	// resolved for the current theme. Derived state like pal — rebuilt by
+	// rebuildPalette and SetDynColor, never assigned directly. See
+	// palette_overlay.go for the derivation rules.
+	ov overlayColors
+
 	CurAttrs   uint16
 	CurULStyle uint8 // current underline style (ulNone..ulDashed)
 
@@ -1189,8 +1202,13 @@ func (g *grid) SetDynColor(ps int, c uint32) {
 	switch ps {
 	case 10:
 		g.Theme.DefaultFG = col
+		g.rebuildOverlay()
 	case 11:
 		g.Theme.DefaultBG = col
+		// A child that repaints the background light with OSC 11 has changed
+		// the color scheme as far as DSR ?996 is concerned; the overlays have
+		// to follow it for the same reason they follow a theme swap.
+		g.rebuildOverlay()
 	case 12:
 		g.CursorColor = c
 	}

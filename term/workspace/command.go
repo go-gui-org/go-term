@@ -238,6 +238,9 @@ func (ws *Workspace) loadAndApplyConfig() {
 	keys := applyKeybindingOverrides(cmds, fc.keybindings)
 	ws.cfg = applySettings(ws.baseCfg, fc, keys)
 	ws.installCommands(cmds)
+	// Covers both startup and reload: `theme =` in the config file is the
+	// other way the active scheme changes without anyone touching the picker.
+	ws.notifyColorScheme()
 }
 
 // ReloadConfig re-reads the config file and applies it to the running
@@ -282,6 +285,9 @@ func (ws *Workspace) applyTermSettings(prev Cfg) {
 			}
 			if prev.opts.scrollbar != cur.opts.scrollbar {
 				tm.SetScrollbarWidth(cur.opts.scrollbar)
+			}
+			if prev.opts.minContrast != cur.opts.minContrast {
+				tm.SetMinimumContrast(cur.opts.minContrast)
 			}
 			if prev.opts.middleClickPaste != cur.opts.middleClickPaste {
 				tm.SetMiddleClickPaste(cur.opts.middleClickPaste)

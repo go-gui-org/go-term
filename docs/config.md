@@ -72,6 +72,7 @@ Mono appears as `JetBrainsMono NFM`.
 | `scrollback`         | integer | `5000`                 | Scrollback rows. `0` restores the default; a negative value disables scrollback |
 | `bell`               | enum    | `auto`                 | `auto`, `audible`, `visual`, `both`, `none`                                     |
 | `scrollbar`          | number  | `4`                    | Scrollbar thumb width in px. Negative hides the scrollbar                       |
+| `minimum-contrast`   | number  | `1` (off)              | WCAG contrast ratio, `1`–`21`, that text is forced to reach against its cell background |
 | `middle-click-paste` | boolean | on for Linux, else off | Paste with the middle mouse button — see [Selection and mouse](#selection-and-mouse) |
 
 ```ini
@@ -80,6 +81,7 @@ theme              = Dracula
 scrollback         = 5000
 bell               = auto
 scrollbar          = 4
+minimum-contrast   = 1
 middle-click-paste = true
 ```
 
@@ -87,9 +89,45 @@ Booleans accept `true`/`false`, `yes`/`no`, `on`/`off`, and `1`/`0`.
 
 `theme` is matched by name against the themes the embedder registered; an
 unknown name is logged and the default is kept. Only names are accepted —
-nothing loads a theme from disk. `falcon` ships: Default, Dracula, Catppuccin
-Mocha, Tokyo Night, Monokai, One Dark, Rosé Pine, Kanagawa, Ayu Dark,
-Everforest, GitHub Dark, Gruvbox, Nord, Solarized Dark.
+nothing loads a theme from disk. `falcon` ships:
+
+- Dark: Default, Dracula, Catppuccin Mocha, Tokyo Night, Monokai, One Dark,
+  Rosé Pine, Kanagawa, Ayu Dark, Everforest, GitHub Dark, Gruvbox, Nord,
+  Solarized Dark.
+- Light: Solarized Light, GitHub Light, Catppuccin Latte.
+
+Picking a light theme also switches `falcon`'s window chrome (tab bar,
+borders) to light, and tells any child app subscribed to mode 2031 that the
+color scheme changed — so a `neovim` or `delta` that follows the terminal
+re-themes itself along with it. `COLORFGBG` is set at spawn from the startup
+theme's character, which is how `vim`, `less` and some prompts decide the same
+question without subscribing to anything. It cannot be updated in a running
+child, so a shell started under a dark theme still reports dark after a switch.
+
+### Minimum contrast
+
+`minimum-contrast` is the answer to the one thing a theme cannot fix. A
+24-bit color sequence is not themeable: `eza`, `starship` and most `ls` color
+schemes emit colors chosen against a dark background, and on a light theme they
+arrive exactly as sent. On a measured Catppuccin Latte session, 77% of the
+visible glyph pixels sat below a 3:1 contrast ratio, and every one of them came
+from a truecolor sequence rather than from the theme's palette.
+
+Setting a ratio forces any foreground that falls below it to be pushed toward
+white or black — whichever direction has room against that cell's background —
+until it clears. The color is blended rather than replaced, so a red that fails
+by a little stays recognizably red. Useful values:
+
+| Value | Effect                                                              |
+| ----- | ------------------------------------------------------------------- |
+| `1`   | Off (the default). A color against itself is 1:1                     |
+| `3`   | Fixes the worst dark-tuned colors, leaves most palettes alone        |
+| `4.5` | The WCAG floor for body text                                         |
+| `7`   | WCAG AAA. Expect most colors to be visibly adjusted                  |
+
+The clamp is render-only: the grid keeps the color the app sent, so copy,
+search and session recordings are unaffected. It costs about 11 ns per cell
+when on and nothing measurable when off.
 
 Bell modes: `auto` plays the system alert sound and falls back to a visual
 flash where the platform has none; `audible` never flashes; `visual` never

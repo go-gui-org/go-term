@@ -45,7 +45,7 @@ func TestDrawScrollbarProgress(t *testing.T) {
 	t.Run("half_fills_top_half", func(t *testing.T) {
 		tm, dc := setup(1, 50, false)
 		tm.onDraw(dc)
-		_, y0, _, y1, ok := batchBounds(dc, idle(scrollbarProgressColor))
+		_, y0, _, y1, ok := batchBounds(dc, idle(tm.grid.ov.progress))
 		if !ok {
 			t.Fatal("no progress fill drawn")
 		}
@@ -60,7 +60,7 @@ func TestDrawScrollbarProgress(t *testing.T) {
 	t.Run("state_zero_draws_nothing", func(t *testing.T) {
 		tm, dc := setup(0, 0, false)
 		tm.onDraw(dc)
-		if _, _, _, _, ok := batchBounds(dc, idle(scrollbarProgressColor)); ok {
+		if _, _, _, _, ok := batchBounds(dc, idle(tm.grid.ov.progress)); ok {
 			t.Error("progress fill drawn while state is 0")
 		}
 	})
@@ -70,7 +70,7 @@ func TestDrawScrollbarProgress(t *testing.T) {
 		// make a job that starts slowly look like a job that never started.
 		tm, dc := setup(1, 0, false)
 		tm.onDraw(dc)
-		_, y0, _, y1, ok := batchBounds(dc, idle(scrollbarProgressColor))
+		_, y0, _, y1, ok := batchBounds(dc, idle(tm.grid.ov.progress))
 		if !ok {
 			t.Fatal("no fill drawn for 0%")
 		}
@@ -82,7 +82,7 @@ func TestDrawScrollbarProgress(t *testing.T) {
 	t.Run("error_state_uses_failure_color", func(t *testing.T) {
 		tm, dc := setup(2, 30, false)
 		tm.onDraw(dc)
-		if _, _, _, _, ok := batchBounds(dc, idle(scrollbarFailColor)); !ok {
+		if _, _, _, _, ok := batchBounds(dc, idle(tm.grid.ov.fail)); !ok {
 			t.Error("error progress not drawn in the failure color")
 		}
 	})
@@ -90,7 +90,7 @@ func TestDrawScrollbarProgress(t *testing.T) {
 	t.Run("indeterminate_fills_whole_track", func(t *testing.T) {
 		tm, dc := setup(3, 0, false)
 		tm.onDraw(dc)
-		_, y0, _, y1, ok := batchBounds(dc, idle(scrollbarIndetColor))
+		_, y0, _, y1, ok := batchBounds(dc, idle(tm.grid.ov.indet))
 		if !ok {
 			t.Fatal("no indeterminate fill drawn")
 		}
@@ -102,7 +102,7 @@ func TestDrawScrollbarProgress(t *testing.T) {
 	t.Run("drawn_on_alt_screen", func(t *testing.T) {
 		tm, dc := setup(1, 50, true)
 		tm.onDraw(dc)
-		if _, _, _, _, ok := batchBounds(dc, idle(scrollbarProgressColor)); !ok {
+		if _, _, _, _, ok := batchBounds(dc, idle(tm.grid.ov.progress)); !ok {
 			t.Error("progress suppressed on the alt screen")
 		}
 	})

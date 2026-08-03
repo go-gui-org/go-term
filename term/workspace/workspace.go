@@ -50,6 +50,19 @@ type Cfg struct {
 	// a zero-tab file and the next launch starts fresh.
 	OnLastShellExit func(w *gui.Window)
 
+	// OnColorScheme, when non-nil, runs when the active theme's light/dark
+	// character is first established and whenever it changes — the same
+	// question, and the same answer, that the panes report to a subscribed
+	// child through mode 2031.
+	//
+	// It exists because the workspace has no business calling gui.SetTheme
+	// itself: go-gui's theme is process-global and the embedder's chrome is
+	// the embedder's policy (falcon, for one, wants borders on). This hands
+	// over the fact and lets the host decide what to do with it. Runs on the
+	// main thread, before the workspace refreshes the window, so a
+	// gui.SetTheme here lands in the same frame as the pane repaint.
+	OnColorScheme func(dark bool)
+
 	// opts carries the per-Term settings resolved from the config file. The
 	// workspace fills it in; embedders configure these through the config
 	// file, not here.
@@ -79,11 +92,56 @@ type Workspace struct {
 	themePickerVisible bool
 	themePickerIdx     int
 
+	// schemeDark caches the light/dark character last handed to
+	// Cfg.OnColorScheme, so the callback fires on a change rather than on
+	// every theme swap. schemeKnown separates "dark" from "never reported",
+	// which is what makes the first call happen at startup.
+	schemeKnown bool
+	schemeDark  bool
+
 	prevOnEvent func(*gui.Event, *gui.Window)
+}
+
+// notifyColorScheme tells the embedder the active theme's light/dark
+// character when it changes (and once when it is first established), so a host
+// that themes its own chrome can follow the panes it wraps.
+//
+// Reads the effective theme rather than taking one as an argument: config
+// reload and the theme picker reach it by different routes, and the two must
+// not be able to disagree about what is active.
+func (ws *Workspace) notifyColorScheme() {
+	if ws.cfg.OnColorScheme == nil {
+		return
+	}
+	th, ok := effectiveTheme(ws.cfg)
+	if !ok {
+		return // no themes configured; the embedder's chrome choice stands
+	}
+	dark := th.IsDark()
+	if ws.schemeKnown && ws.schemeDark == dark {
+		return
+	}
+	ws.schemeKnown, ws.schemeDark = true, dark
+	ws.cfg.OnColorScheme(dark)
 }
 
 // New creates a Workspace with a single tab containing a single terminal.
 func New(w *gui.Window, cfg Cfg) (*Workspace, error) {
+	ws, err := newWorkspace(w, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := ws.addTab(""); err != nil {
+		return nil, err
+	}
+	return ws, nil
+}
+
+// newWorkspace builds the Workspace and resolves its configuration without
+// spawning anything. Split out from New so the restore path can settle the
+// effective theme *before* the first pane exists: a pane's COLORFGBG is fixed
+// at spawn and cannot be corrected afterwards (see paneThemes).
+func newWorkspace(w *gui.Window, cfg Cfg) (*Workspace, error) {
 	if w == nil {
 		return nil, errors.New("workspace.New: nil window")
 	}
@@ -98,11 +156,6 @@ func New(w *gui.Window, cfg Cfg) (*Workspace, error) {
 	// the command table. Runs before the first tab so panes are built with the
 	// configured font, theme, and scrollback rather than being corrected after.
 	ws.loadAndApplyConfig()
-
-	_, err := ws.addTab("")
-	if err != nil {
-		return nil, err
-	}
 	return ws, nil
 }
 
@@ -507,6 +560,9 @@ func (ws *Workspace) applyThemeImpl(nt term.NamedTheme) {
 			tm.SetTheme(nt.Theme)
 		}
 	}
+	// After the panes, before the caller's refresh: chrome and cells should
+	// change in the same frame, not one after the other.
+	ws.notifyColorScheme()
 }
 
 // applyThemeByName looks up name in the configured theme list
@@ -524,6 +580,38 @@ func (ws *Workspace) applyThemeByName(name string) bool {
 			ws.applyThemeImpl(ws.cfg.Themes[i])
 			return true
 		}
+	}
+	return false
+}
+
+// selectThemeByName makes the named theme effective without touching any pane,
+// for the restore path to call *before* it spawns them.
+//
+// The persisted theme is the user's last picker choice and usually names a
+// theme the config file does not. Panes are built from ws.cfg, so leaving it
+// until the trailing applyThemeByName means paneThemes never sees it and every
+// child is spawned with COLORFGBG for the config file's theme instead — cells
+// in one scheme, and a shell told the other, which is precisely the
+// disagreement COLORFGBG exists to settle and the one thing about a pane that
+// cannot be corrected after exec.
+//
+// Reports whether a theme matched, so the caller can tell "no such theme" from
+// "already right".
+func (ws *Workspace) selectThemeByName(name string) bool {
+	if len(ws.cfg.Themes) == 0 || name == "" {
+		return false
+	}
+	for _, nt := range ws.cfg.Themes {
+		if !strings.EqualFold(nt.Name, name) {
+			continue
+		}
+		th := nt.Theme
+		ws.cfg.opts.theme = &th
+		// Chrome follows the theme the panes are about to be built with, not
+		// the config file's — otherwise a restore into a light theme paints
+		// dark chrome for one frame.
+		ws.notifyColorScheme()
+		return true
 	}
 	return false
 }

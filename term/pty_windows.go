@@ -121,6 +121,7 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	// trusting the parent's.
 	env := setTerminalIdentity(os.Environ())
 	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
+	env = append(env, colorFGBGEnv(cfg))
 	env = append(env, cfg.Env...)
 	envBlock, err := createEnvBlock(env)
 	if err != nil {

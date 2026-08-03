@@ -128,11 +128,22 @@ func defaultTextStyle() gui.TextStyle {
 	return gui.TextStyle{Family: defaultFontFamily, Size: 12}
 }
 
-// applyTheme sets the go-gui widget theme. Shared by the live and replay
-// paths for the same reason as the window geometry above: two call sites
-// setting the chrome independently is two chances to drift.
-func applyTheme() {
-	gui.SetTheme(gui.ThemeDark.WithBorders(true))
+// applyChrome sets the go-gui widget theme to match the terminal's light/dark
+// character. Shared by the live and replay paths for the same reason as the
+// window geometry above: two call sites setting the chrome independently is
+// two chances to drift.
+//
+// Wired to workspace.Cfg.OnColorScheme, so switching to a light terminal theme
+// takes the tab bar and borders with it instead of leaving a light pane inside
+// dark chrome. go-gui's theme is process-global and its Default*Style vars are
+// read when views are built; the workspace rebuilds its whole view tree on
+// every refresh, so a swap here shows up in the next frame.
+func applyChrome(dark bool) {
+	base := gui.ThemeLight
+	if dark {
+		base = gui.ThemeDark
+	}
+	gui.SetTheme(base.WithBorders(true))
 }
 
 // defaultDownloadDir picks where OSC 1337 File= transfers land. Downloads are
@@ -164,5 +175,8 @@ func themeList() []term.NamedTheme {
 		{Name: "Gruvbox", Theme: term.GruvboxTheme},
 		{Name: "Nord", Theme: term.NordTheme},
 		{Name: "Solarized Dark", Theme: term.SolarizedDarkTheme},
+		{Name: "Solarized Light", Theme: term.SolarizedLightTheme},
+		{Name: "GitHub Light", Theme: term.GitHubLightTheme},
+		{Name: "Catppuccin Latte", Theme: term.CatppuccinLatteTheme},
 	}
 }
