@@ -68,9 +68,21 @@ semantic units, now unblocked by Phase 48's click-count and selection-mode
 state), quake/dropdown window (needs go-gui support), pipe-scrollback /
 open-in-`$EDITOR`, named profiles.
 
-IME preedit (issue #134) is a correctness gap rather than a feature and should
-block Phase 57 independently: nothing in `term/` handles composition, so CJK
-input may be impossible today.
+IME commit (issue #134) is a correctness gap rather than a feature and should
+block Phase 57 independently. Preedit display works — `widget.go` pulls
+composition state from go-gui and `widget_draw_overlay.go` renders the preedit
+run and places the candidate window. *Commit* is broken, in two places:
+
+- go-gui drops the commit event entirely (upstream go-gui-org/go-gui#149). The
+  Metal backend keeps one global event slot, so a `setMarkedText:` firing after
+  `insertText:` within the same `sendEvent:` overwrites the committed text.
+  Blocked on a go-gui release.
+- `onChar` writes only `e.CharCode`, the first rune of the commit, ignoring
+  `e.IMEText` which carries the whole string. Fixable in `term/` now, but not
+  verifiable until the upstream fix lands.
+
+Also pending: `Term.View` reads window-global `IMEComposing`, so every pane in
+a split renders the same preedit rather than only the focused one.
 
 ### Phase 54 — Export audit + Godoc pass
 

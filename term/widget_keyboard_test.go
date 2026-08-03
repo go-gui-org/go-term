@@ -609,3 +609,72 @@ func TestOnInput_NilIsSafe(t *testing.T) {
 	tm, _ := newKeyboardTerm(24, 80)
 	tm.onChar(nil, &gui.Event{CharCode: 'x'}, nil)
 }
+
+// --- IME commit tests ---
+//
+// An IME commit arrives as a single EventChar whose CharCode holds only the
+// first rune of the composed string; the whole commit is in IMEText (go-gui
+// decodes it that way in gui/backend/metal/events.go). Reading CharCode alone
+// truncated 日本語 to 日, which is issue #134.
+
+// A multi-rune commit reaches the pty whole.
+func TestOnChar_IMECommitWritesFullText(t *testing.T) {
+	tm, buf := newKeyboardTerm(24, 80)
+	tm.onChar(nil, &gui.Event{CharCode: uint32('日'), IMEText: "日本語"}, nil)
+	if got, want := string(*buf), "日本語"; got != want {
+		t.Errorf("pty saw %q, want %q", got, want)
+	}
+}
+
+// Ordinary typing sets IMEText to the same single character. The two agree,
+// so the single-rune path must behave exactly as before.
+func TestOnChar_SingleRuneUnaffectedByIMEText(t *testing.T) {
+	tm, buf := newKeyboardTerm(24, 80)
+	tm.onChar(nil, &gui.Event{CharCode: 'x', IMEText: "x"}, nil)
+	if got, want := string(*buf), "x"; got != want {
+		t.Errorf("pty saw %q, want %q", got, want)
+	}
+}
+
+// Backends that never populate IMEText must still deliver the keystroke.
+func TestOnChar_EmptyIMETextFallsBackToCharCode(t *testing.T) {
+	tm, buf := newKeyboardTerm(24, 80)
+	tm.onChar(nil, &gui.Event{CharCode: uint32('é')}, nil)
+	if got, want := string(*buf), "é"; got != want {
+		t.Errorf("pty saw %q, want %q", got, want)
+	}
+}
+
+// KKP flag 8 reports keystrokes as CSI u escape codes. Composed text is not a
+// keystroke and has no single codepoint to report, so the commit must go
+// through as plain UTF-8 rather than as an escape sequence for its first rune.
+func TestOnChar_IMECommitBypassesKittyEncoding(t *testing.T) {
+	tm, buf := newKeyboardTerm(24, 80)
+	tm.grid.Mu.Lock()
+	tm.grid.KittyKeyFlags = 8
+	tm.grid.Mu.Unlock()
+
+	tm.onChar(nil, &gui.Event{CharCode: uint32('日'), IMEText: "日本語"}, nil)
+	if got, want := string(*buf), "日本語"; got != want {
+		t.Errorf("pty saw %q, want %q", got, want)
+	}
+
+	// A single-rune event still takes the KKP path.
+	*buf = (*buf)[:0]
+	tm.onChar(nil, &gui.Event{CharCode: 'a', IMEText: "a"}, nil)
+	if got, want := string(*buf), "\x1b[97u"; got != want {
+		t.Errorf("pty saw %q, want %q", got, want)
+	}
+}
+
+// The search bar takes the whole commit too — searching for CJK text is the
+// case that needs IME most.
+func TestOnChar_IMECommitReachesSearchBar(t *testing.T) {
+	tm, _ := newKeyboardTerm(24, 80)
+	tm.cmd = &gui.Window{} // the search path schedules a redraw
+	tm.search.active = true
+	tm.onChar(nil, &gui.Event{CharCode: uint32('日'), IMEText: "日本語"}, nil)
+	if got, want := tm.search.query, "日本語"; got != want {
+		t.Errorf("search query = %q, want %q", got, want)
+	}
+}
