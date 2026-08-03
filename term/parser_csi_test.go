@@ -778,6 +778,8 @@ func TestParser_SGR_NewAttrs_Set(t *testing.T) {
 		{"dim", "\x1b[2m", attrDim},
 		{"italic", "\x1b[3m", attrItalic},
 		{"strikethrough", "\x1b[9m", attrStrikethrough},
+		{"overline", "\x1b[53m", attrOverline},
+		{"overline+underline", "\x1b[4m\x1b[53m", attrUnderline | attrOverline},
 		{"bold+dim", "\x1b[1m\x1b[2m", attrBold | attrDim},
 		{"bold+italic", "\x1b[1m\x1b[3m", attrBold | attrItalic},
 	}
@@ -803,7 +805,8 @@ func TestParser_SGR_NewAttrs_Clear(t *testing.T) {
 		{"bold+dim via 22", "\x1b[1m\x1b[2m", "\x1b[22m", attrBold | attrDim},
 		{"italic via 23", "\x1b[3m", "\x1b[23m", attrItalic},
 		{"strikethrough via 29", "\x1b[9m", "\x1b[29m", attrStrikethrough},
-		{"all via SGR 0", "\x1b[1m\x1b[2m\x1b[3m\x1b[9m", "\x1b[0m", attrBold | attrDim | attrItalic | attrStrikethrough},
+		{"overline via 55", "\x1b[53m", "\x1b[55m", attrOverline},
+		{"all via SGR 0", "\x1b[1m\x1b[2m\x1b[3m\x1b[9m\x1b[53m", "\x1b[0m", attrBold | attrDim | attrItalic | attrStrikethrough | attrOverline},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -815,6 +818,81 @@ func TestParser_SGR_NewAttrs_Clear(t *testing.T) {
 			feed(t, g, p, []byte(tt.clearSeq))
 			if g.CurAttrs&tt.bits != 0 {
 				t.Errorf("after clear: attrs=%08b want %08b clear", g.CurAttrs, tt.bits)
+			}
+		})
+	}
+}
+
+// SGR 55 clears the overline only. 53/55 and 4/24 are independent pairs —
+// the table test above can only assert the bit it names, so the survival of
+// the *other* decoration needs its own check.
+func TestParser_SGR55_LeavesUnderline(t *testing.T) {
+	g, p := newParserGrid(1, 1)
+	feed(t, g, p, []byte("\x1b[4m\x1b[53m\x1b[55m"))
+	if g.CurAttrs&attrOverline != 0 {
+		t.Errorf("attrs=%09b: 55 did not clear overline", g.CurAttrs)
+	}
+	if g.CurAttrs&attrUnderline == 0 {
+		t.Errorf("attrs=%09b: 55 cleared the underline too", g.CurAttrs)
+	}
+	if g.CurULStyle != ulSingle {
+		t.Errorf("ULStyle=%d want %d: 55 disturbed the underline style", g.CurULStyle, ulSingle)
+	}
+}
+
+// An overlined cell must round-trip through the cell buffer, not just live in
+// CurAttrs — the render pass reads cell.Attrs.
+func TestParser_SGR53_StoredOnCell(t *testing.T) {
+	g, p := newParserGrid(1, 4)
+	feed(t, g, p, []byte("\x1b[53mA\x1b[55mB"))
+	if c := g.At(0, 0); c == nil || c.Attrs&attrOverline == 0 {
+		t.Errorf("cell 0: overline not stored")
+	}
+	if c := g.At(0, 1); c == nil || c.Attrs&attrOverline != 0 {
+		t.Errorf("cell 1: overline leaked past SGR 55")
+	}
+}
+
+// attrVisual is defined as "every bit below attrProtected"; overline must
+// fall inside it or blank-cell fast paths (reflow, run coalescing, the
+// DECRQSS default-SGR check) would treat an overlined space as untouched.
+func TestOverlineIsVisualAttr(t *testing.T) {
+	if attrOverline&attrVisual == 0 {
+		t.Errorf("attrOverline=%09b not covered by attrVisual=%09b", attrOverline, attrVisual)
+	}
+	if attrOverline&attrProtected != 0 {
+		t.Errorf("attrOverline collides with attrProtected")
+	}
+}
+
+// modifyOtherKeys is deliberately not implemented — KKP supersedes it (see
+// docs/terminal-verification.md, "Known Omissions"). What matters is that the
+// sequences are *inert*: they share the final byte 'm' with SGR, so a
+// dispatcher that ignored the '>' / '?' private marker would set attributes
+// from the parameters. `CSI > 4 ; 2 m` would then apply SGR 4 (underline) and
+// SGR 2 (dim) to everything that followed.
+func TestParser_ModifyOtherKeys_Inert(t *testing.T) {
+	for _, seq := range []string{
+		"\x1b[>4;2m", // set, level 2
+		"\x1b[>4;1m", // set, level 1
+		"\x1b[>4m",   // reset to default
+		"\x1b[?4m",   // XTQMODKEYS query
+	} {
+		t.Run(seq[2:], func(t *testing.T) {
+			g, p := newParserGrid(1, 4)
+			var replies []byte
+			p.onReply = func(b []byte) { replies = append(replies, b...) }
+			feed(t, g, p, []byte(seq))
+			if g.CurAttrs != 0 {
+				t.Errorf("%q leaked into SGR state: attrs=%09b", seq, g.CurAttrs)
+			}
+			if g.CurFG != DefaultColor || g.CurBG != DefaultColor {
+				t.Errorf("%q disturbed colors: fg=%08x bg=%08x", seq, g.CurFG, g.CurBG)
+			}
+			// Silence is the contract: a reply would tell the client the mode
+			// was understood, which is exactly what it must not conclude.
+			if len(replies) != 0 {
+				t.Errorf("%q replied %q; unsupported modes must stay silent", seq, replies)
 			}
 		})
 	}

@@ -679,6 +679,13 @@ func (p *parser) applySGR() {
 			g.CurAttrs &^= attrConceal
 		case n == 29:
 			g.CurAttrs &^= attrStrikethrough
+		case n == 53:
+			// Overline (ECMA-48 "overlined"). Rendered in the text color:
+			// SGR 58 is defined for the underline only, so there is no
+			// separate overline color to honor.
+			g.CurAttrs |= attrOverline
+		case n == 55:
+			g.CurAttrs &^= attrOverline
 		case n >= 30 && n <= 37:
 			g.CurFG = paletteColor(uint8(n - 30))
 		case n == 39:

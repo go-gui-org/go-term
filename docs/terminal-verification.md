@@ -87,6 +87,42 @@ Validate:
 | Persistence    | quit with `--save-workspace`, relaunch with `--workspace`, layout restores |
 | Graphics       | `img2sixel` / `kitten icat` / `imgcat` render inline images                |
 
+## Known Omissions
+
+Things go-term deliberately does not implement, recorded here so the gap is a
+decision rather than an oversight.
+
+### `modifyOtherKeys` (xterm)
+
+Not implemented. `CSI > 4 ; Pm m` (set), `CSI > 4 m` (reset) and
+`CSI ? 4 m` (XTQMODKEYS, query) are parsed as unknown private sequences and
+discarded. They are inert, not misread: they share the final byte `m` with
+SGR, but the `>` / `?` private marker routes them away from SGR dispatch, so
+they cannot leak into text attributes. `TestParser_ModifyOtherKeys_Inert`
+pins that. The query is answered with silence — a reply would tell the client
+the mode was understood.
+
+**Why.** The Kitty Keyboard Protocol is implemented (`CSI > u` push,
+`CSI < u` pop, `CSI = u` set, `CSI ? u` query) and supersedes it. KKP
+disambiguates strictly more: key release events, left/right modifier
+distinction, and the `Ctrl+I` vs `Tab` / `Ctrl+M` vs `Enter` collisions that
+`modifyOtherKeys` level 2 exists to resolve. Supporting both would mean two
+encoders for the same keystrokes and a precedence rule between them.
+
+**What this costs.** An application that probes *only* `modifyOtherKeys` and
+never tries KKP falls back to legacy encoding, so chords that legacy encoding
+cannot express — `Ctrl+Shift+<letter>`, most `Ctrl+<digit>` and
+`Ctrl+<punctuation>` combinations — arrive as their unmodified or
+control-collapsed byte, or not at all. In practice this is a narrow set:
+clients that support `modifyOtherKeys` and not KKP. Both are queryable, and
+an app that queries KKP first gets full fidelity.
+
+**If you hit this**, the fix is a level 1/2 encoder in
+`term/widget_keyboard.go` gated on state set from `parser_csi.go`'s `'>'`
+branch, plus a precedence rule making KKP win when both are enabled. File an
+issue with the application name — a real client that needs it is the evidence
+that would change this decision.
+
 ## External Conformance Tools
 
 This repo does not bundle a full external terminal conformance suite.

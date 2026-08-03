@@ -78,6 +78,7 @@ type runKey struct {
 	ulColor       gui.Color
 	ulStyle       uint8 // ulNone..ulDashed; drives underline rendering
 	strikethrough bool
+	overline      bool // SGR 53; drawn in runKey.color, not ulColor
 }
 
 // cellRunKey computes the runKey for cell, applying attribute and
@@ -143,6 +144,7 @@ func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int, cmdH
 		typeface:      tf,
 		ulStyle:       ulStyle,
 		strikethrough: cell.Attrs&attrStrikethrough != 0,
+		overline:      cell.Attrs&attrOverline != 0,
 	}
 }
 
@@ -344,7 +346,7 @@ func (t *Term) flushRun(dc *gui.DrawContext, r int, style gui.TextStyle, yOff fl
 	// Trim trailing spaces when no decoration spans them: "abc   " and
 	// "abc" share a layout-cache entry, so trimming keeps cache hits
 	// stable as tail padding wobbles frame to frame.
-	if fr.key.ulStyle == ulNone && !fr.key.strikethrough {
+	if fr.key.ulStyle == ulNone && !fr.key.strikethrough && !fr.key.overline {
 		text = strings.TrimRight(text, " ")
 		if text == "" {
 			fr.open = false
@@ -366,6 +368,11 @@ func (t *Term) flushRun(dc *gui.DrawContext, r int, style gui.TextStyle, yOff fl
 			float32(fr.cols)*t.cellW,
 			fr.key.ulStyle, fr.key.ulColor)
 	}
+	if fr.key.overline {
+		t.drawOverlineDecor(dc,
+			float32(fr.start)*t.cellW, rowY,
+			float32(fr.cols)*t.cellW, fr.key.color)
+	}
 	fr.open = false
 	t.draw.runBuf.Reset()
 	fr.cols = 0
@@ -384,6 +391,9 @@ func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell cell, k runKey, 
 	dc.Text(x, y, t.cellText(cell), cs)
 	if k.ulStyle != ulNone {
 		t.drawUnderlineDecor(dc, x, y, float32(cell.Width)*t.cellW, k.ulStyle, k.ulColor)
+	}
+	if k.overline {
+		t.drawOverlineDecor(dc, x, y, float32(cell.Width)*t.cellW, k.color)
 	}
 }
 

@@ -509,6 +509,19 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 	}
 }
 
+// drawOverlineDecor renders the SGR 53 rule for a text run. x,y are the
+// top-left of the run; w is its pixel width. Thickness matches
+// drawUnderlineDecor so the two rules read as a pair on a cell carrying
+// both, and the rule sits flush with the cell top — one thickness down, so
+// it stays inside the row rather than bleeding into the row above.
+func (t *Term) drawOverlineDecor(dc *gui.DrawContext, x, y, w float32, color gui.Color) {
+	thick := t.cellH / 14
+	if thick < 1 {
+		thick = 1
+	}
+	dc.FilledRect(x, y+thick, w, thick, color)
+}
+
 // drawUnderlineDecor renders underline decorations for a text run.
 // x,y are the top-left of the run; w is its pixel width. Handles all
 // ULStyle values including ulSingle (drawn as a rect so ulColor is honored).

@@ -8,6 +8,18 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `term`: SGR 53 / 55 overline. The rule is drawn in the text color, since
+  SGR 58 defines an underline color only. `attrOverline` sits below
+  `attrProtected`, so SGR 0 clears it and the `attrVisual` blank-cell fast
+  paths count an overlined space as non-blank.
+
+- `docs`: "Known Omissions" section in `docs/terminal-verification.md`,
+  recording that xterm's `modifyOtherKeys` is deliberately unimplemented
+  because the Kitty Keyboard Protocol supersedes it — what it costs, and what
+  evidence would reverse the decision. No behavior change; the sequences were
+  already discarded, and now a test pins that they stay inert rather than
+  leaking into SGR.
+
 - `term`: `BundledThemes()` returns the 602 color themes go-term now ships —
   473 dark, 129 light — generated from the Ghostty-format schemes in
   [mbadolato/iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes)
