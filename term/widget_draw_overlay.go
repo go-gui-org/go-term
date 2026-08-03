@@ -3,11 +3,17 @@ package term
 import (
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	glyph "github.com/go-gui-org/go-glyph"
 	"github.com/go-gui-org/go-gui/gui"
 )
+
+// hintRuleFrac is the hint underline's thickness as a fraction of cell height.
+// Floored at one device pixel by the draw site, so it stays visible at small
+// type sizes.
+const hintRuleFrac = 0.08
 
 // imeCompRuneLimit caps the number of runes accepted from the IME
 // composition string. Typical compositions contain fewer than 50 runes;
@@ -351,6 +357,13 @@ func (t *Term) drawOverlays(ds *drawState) {
 	}
 	if t.search.active {
 		t.drawSearchBar(ds.dc, ds.style)
+	}
+
+	// Hint labels sit above the bars: they are the thing the user is currently
+	// aiming at, and a pill hidden behind a status bar is a link that cannot be
+	// picked.
+	if t.hints.active {
+		t.drawHints(ds)
 	}
 
 	// Recording indicator: nothing else tells the user the session is being
@@ -751,4 +764,98 @@ func (t *Term) drawSearchBar(dc *gui.DrawContext, style gui.TextStyle) {
 	cs.Color = t.grid.ov.searchText
 	cs.Typeface = glyph.TypefaceRegular
 	dc.Text(0, y, label, cs)
+}
+
+// drawHints paints one label pill per hint target, anchored at the first
+// visible cell of each link. Called under Mu (inside onDraw).
+//
+// Targets whose label no longer matches what has been typed are dropped rather
+// than dimmed: with a two-character alphabet the second keystroke is chosen
+// from what is still on screen, so showing the losers would be showing keys
+// that do nothing.
+func (t *Term) drawHints(ds *drawState) {
+	dc := ds.dc
+	typed := t.hints.typed
+
+	// Bold: the label is one or two characters carrying the whole interaction,
+	// and it has to win against the link text it sits beside at terminal type
+	// sizes.
+	cs := ds.style
+	cs.Typeface = glyph.TypefaceBold
+
+	// Underlines first, pills second, so a pill is never clipped by the
+	// underline of the link next to it.
+	//
+	// Drawn here rather than through ds.rowURL (the Cmd-hover path) on purpose:
+	// that buffer holds one span per viewport row, which is exactly right when
+	// one link is under the pointer and wrong here, where a single row commonly
+	// carries several labelled links. Painting them in the overlay pass keeps
+	// the per-cell foreground loop untouched.
+	rule := max(t.cellH*hintRuleFrac, 1)
+	for i, target := range t.hints.targets {
+		if !strings.HasPrefix(t.hints.labels[i], typed) {
+			continue
+		}
+		for _, sp := range target.spans {
+			vr, ok := ds.g.ContentRowToViewport(sp.Row)
+			if !ok || vr < ds.renderTop || vr >= ds.renderRows {
+				continue
+			}
+			x := float32(sp.C0) * t.cellW
+			w := float32(sp.C1-sp.C0+1) * t.cellW
+			dc.FilledRect(x, float32(vr+1)*t.cellH-rule, w, rule, ds.g.ov.hintRule)
+		}
+	}
+
+	for i, target := range t.hints.targets {
+		label := t.hints.labels[i]
+		if !strings.HasPrefix(label, typed) || len(target.spans) == 0 {
+			continue
+		}
+		vr, ok := ds.g.ContentRowToViewport(target.spans[0].Row)
+		if !ok || vr < ds.renderTop || vr >= ds.renderRows {
+			continue
+		}
+		// Prefer the blank cells immediately left of the link, falling back to
+		// covering its first characters. Overlaying is what kitty and WezTerm
+		// do, but it turns "https://go.dev" into "attps://go.dev" — the label
+		// stops reading as a label and starts reading as a corrupted URL. Text
+		// almost always has a space before a link, so the fallback is rare.
+		col := hintLabelCol(ds.g, target.spans[0], len(label))
+		x := float32(col) * t.cellW
+		y := float32(vr) * t.cellH
+		w := float32(len(label)) * t.cellW
+		// Clamp so a label anchored near the right margin stays on canvas
+		// instead of being clipped to a single character.
+		if x+w > dc.Width {
+			x = max(dc.Width-w, 0)
+		}
+		dc.FilledRect(x, y, w, t.cellH, ds.g.ov.hintFill)
+
+		// Two runs so the already-typed prefix reads as spent. Both are
+		// substrings of label, so neither allocates in the draw path.
+		n := len(typed)
+		if n > 0 {
+			cs.Color = ds.g.ov.hintTypedText
+			dc.Text(x, y, label[:n], cs)
+		}
+		cs.Color = ds.g.ov.hintText
+		dc.Text(x+float32(n)*t.cellW, y, label[n:], cs)
+	}
+}
+
+// hintLabelCol picks the column a label of width cols is drawn at for a link
+// starting at sp: the run of blank cells just left of it when the whole label
+// fits there, otherwise the link's own first column. Caller holds Mu.
+func hintLabelCol(g *grid, sp urlSpan, cols int) int {
+	start := sp.C0 - cols
+	if start < 0 {
+		return sp.C0
+	}
+	for c := start; c < sp.C0; c++ {
+		if ch := g.ContentCellAt(sp.Row, c).Ch; ch != 0 && ch != ' ' {
+			return sp.C0
+		}
+	}
+	return start
 }

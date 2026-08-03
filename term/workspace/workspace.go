@@ -91,6 +91,14 @@ type Workspace struct {
 	// "closed"; see themebrowser.go.
 	browser themeBrowser
 
+	// palette is the command palette's state. Zero value is "closed";
+	// see palette.go.
+	palette palette
+
+	// viewInstalled records whether the view generator has been handed to
+	// go-gui. Installing it is a one-time act; see refresh.
+	viewInstalled bool
+
 	// schemeDark caches the light/dark character last handed to
 	// Cfg.OnColorScheme, so the callback fires on a change rather than on
 	// every theme swap. schemeKnown separates "dark" from "never reported",
@@ -383,11 +391,63 @@ func tight(sizing gui.Sizing) gui.ContainerCfg {
 	}
 }
 
+// scrollGutter is the right padding a vertically scrollable container needs so
+// its scrollbar gets a lane of its own. go-gui draws the bar as an overlay on
+// the container's content box, so without a reserved gutter the thumb sits on
+// top of the right-most text — the palette's key column, the theme browser's
+// prose. Matches go-gui's own idiom (scroll_demo, showcase): bar size plus a
+// few pixels of breathing room.
+func scrollGutter() float32 {
+	return gui.CurrentTheme().ScrollbarStyle.Size + 5
+}
+
+// revealListRow scrolls a list overlay's container the minimum distance needed
+// to bring the row at idx into view, and does nothing when it is already there.
+//
+// Shared by both list overlays because the arithmetic is identical; only the
+// container, the geometry the last frame measured, and the inter-row gap
+// differ. Rows are laid out at a fixed height with a fixed gap, which is what
+// makes row N's offset exactly N*(rowH+gap) without querying the layout tree.
+// Zero rowH or listH means no frame has measured the list yet, and the reveal
+// no-ops.
+//
+// Offsets run from 0 (top) downward through negative values — the convention
+// every go-gui scrollable uses.
+func (ws *Workspace) revealListRow(scrollID string, idx int, rowH, listH, gap float32) {
+	if rowH <= 0 || listH <= 0 {
+		return
+	}
+	top := -ws.w.ScrollVerticalOffset(scrollID)
+	rowTop := float32(idx) * (rowH + gap)
+	switch rowBot := rowTop + rowH; {
+	case rowTop < top:
+		ws.w.ScrollVerticalTo(scrollID, -rowTop)
+	case rowBot > top+listH:
+		ws.w.ScrollVerticalTo(scrollID, -(rowBot - listH))
+	}
+}
+
+// overlayOwnsKeys reports whether a modal overlay — the command palette or the
+// theme browser — is up and has a text field the keyboard belongs to.
+//
+// It exists because a focused Term re-asserts go-gui focus from inside its own
+// View (see the SetFocus in term/widget.go), which happens on every layout
+// build. With a pane still focused, the rebuild that follows each keystroke
+// yanks focus off the overlay's filter box and back into the terminal — so the
+// box takes no input at all, and the characters go to the child shell instead.
+// The help overlay is not listed: it has no input, and the pane keeping focus
+// under it is what lets Escape and the pane's own keys keep working.
+func (ws *Workspace) overlayOwnsKeys() bool {
+	return ws.palette.visible || ws.browser.visible
+}
+
 // refresh updates the window title from the active tab's focused pane
 // and schedules a view rebuild. Call after any state change that affects
 // the title or layout. It also ensures the active pane has pane focus so
 // the invariant "active terminal always owns keyboard focus" holds regardless of
-// which code path triggered the refresh.
+// which code path triggered the refresh — except while an overlay owns the
+// keyboard, where the invariant is suspended for exactly as long as the
+// overlay is up.
 func (ws *Workspace) refresh() {
 	if ws.activeTab >= 0 && ws.activeTab < len(ws.tabs) {
 		ws.w.SetTitle(ws.tabs[ws.activeTab].focusedTitle())
@@ -395,10 +455,22 @@ func (ws *Workspace) refresh() {
 		// correct — cheap atomic compare-and-swap.
 		tab := ws.tabs[ws.activeTab]
 		if t, ok := tab.terms[tab.focused]; ok {
-			t.SetFocused(true)
+			t.SetFocused(!ws.overlayOwnsKeys())
 		}
 	}
-	ws.w.UpdateView(ws.View)
+	// UpdateView wipes go-gui's whole state registry, including the per-input
+	// caret positions keyed by view ID. Doing that on every rebuild left every
+	// filter box inserting at position 0, since each keystroke rebuilt the view
+	// and threw the caret away — typing "dark" into the theme browser produced
+	// "krad". The generator only needs installing once; every rebuild after
+	// that is UpdateWindow, which marks the layout dirty and leaves widget
+	// state alone.
+	if !ws.viewInstalled {
+		ws.viewInstalled = true
+		ws.w.UpdateView(ws.View)
+		return
+	}
+	ws.w.UpdateWindow()
 }
 
 // View returns the workspace's go-gui view tree.
@@ -450,6 +522,11 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 		// Float children are excluded from normal flow, so the backdrop
 		// and panel overlay the panes without disturbing their layout.
 		content = append(content, ws.helpBackdrop(ww, wh), ws.helpPanel(ww, wh))
+	}
+	// The palette floats over everything else, help included: it is the thing
+	// with focus, and it is what the next keystroke belongs to.
+	if ws.palette.visible {
+		content = append(content, ws.paletteBackdrop(ww, wh), ws.palettePanel(ww, wh))
 	}
 	outer.Content = content
 	return gui.Column(outer)

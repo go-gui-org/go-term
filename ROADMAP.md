@@ -62,21 +62,6 @@ what the tap hands out, `SendInput` takes back in),
 Unshipped work only. A phase that lands is deleted from here and recorded as
 one row in [Completed](#completed).
 
-### Phase 53 — Keyboard-driven discovery (issue #133)
-
-Copy mode removed the mouse requirement for selection. Opening a URL still
-needs Cmd+click, and the ~60 rebindable actions are discoverable only through
-the help overlay. Both are overlays over existing machinery — `grid_urls.go`
-detection and the `Shortcuts()`/`KeyMap` metadata.
-
-- [ ] `term.hints` — label visible URLs, press a letter to open; open vs.
-      copy-to-clipboard variants
-- [ ] Command palette: fuzzy search over `actionOrder` + `copyActionOrder`,
-      reading chords from `defaultBindings` rather than a second list
-- [ ] Both registered as Actions so they are rebindable and appear in the
-      overlay
-- [ ] `docs/config.md` sections
-
 ### Post-1.0 backlog
 
 Tracked as issues without a phase number: smart selection (regex-driven
@@ -90,8 +75,8 @@ input may be impossible today.
 
 ### Phase 54 — Export audit + Godoc pass
 
-Runs _after_ 52–53. Each of those phases adds public surface (new Actions,
-config keys), so auditing first means auditing twice.
+Unblocked: 52 and 53 have both shipped, and they were the last phases adding
+public surface before the audit.
 
 Every exported symbol gets a deliberate reason and complete doc comment.
 
@@ -104,6 +89,11 @@ Every exported symbol gets a deliberate reason and complete doc comment.
 - `ActivityKind` + constants, `Cfg.OnActivity`, `Cfg.NotifyAfter`,
   `SetNotifyAfter` (Phase 52) — keep; confirm `ActivityKind` should not also
   carry a "silence" value, which `term/workspace` currently derives itself
+- `ShortcutInfo.Action`, `Term.AvailableShortcuts`, `Term.RunAction` (Phase 53) —
+  keep; `RunAction` invokes by synthesizing the action's chord, so an unbound
+  action is unreachable. Decide whether that limitation is acceptable for 1.0 or
+  whether it wants a real `map[Action]func()` dispatch table (which would mean
+  moving the conditional-passthrough logic out of ~42 handlers)
 - `DefaultColor` — unexport (internal encoding detail)
 - `Fixture`, `CaptureFixture` — keep with doc disclaimer, or move to `term/termtest` with deprecation shim
 - `FocusID()` — keep, document multi-Term contract
@@ -113,7 +103,7 @@ Every exported symbol gets a deliberate reason and complete doc comment.
 - `Workspace`, `New`, `Restore`, `Close`, `View`, `Cfg`, `Save`, `DefaultWorkspacePath` — keep
 - `Tab` — exported with no methods → unexport
 - `SplitDir`, `SplitVertical`, `SplitHorizontal` — no public consumer → unexport
-- `AddTab`, `CloseTab`, `ClosePane`, `*Tab`, `*Pane`, `SplitPane`, `ToggleHelp`, `ToggleThemeBrowser`, `LiveTermCount`, `GoToTab`, `ActivePane`, `FocusPane` — review which ones external callers need; unexport the rest (`CycleTheme` was removed in Phase 51)
+- `AddTab`, `CloseTab`, `ClosePane`, `*Tab`, `*Pane`, `SplitPane`, `ToggleHelp`, `ToggleThemeBrowser`, `TogglePalette`, `LiveTermCount`, `GoToTab`, `ActivePane`, `FocusPane` — review which ones external callers need; unexport the rest (`CycleTheme` was removed in Phase 51)
 
 - [ ] term: export audit + Godoc pass
 - [ ] workspace: export audit + Godoc pass
@@ -197,6 +187,7 @@ When go-gui ships v1.0.0:
 | 50  | Light themes                            | Solarized Light, GitHub Light, minimum contrast, derived overlay palette       |
 | 51  | Bundled theme corpus + theme browser    | 602 embedded themes, `Cmd+Shift+T` browser with live preview, `docs/themes.md` |
 | 52  | Shell integration, completed            | bash/zsh/fish OSC 133 hooks, `notify-after`, tab activity indicators |
+| 53  | Keyboard-driven discovery               | `Cmd+Shift+U`/`Y` link hints (OSC 8 + implicit), `Cmd+Shift+P` command palette over both registries |
 
 ## Commands
 

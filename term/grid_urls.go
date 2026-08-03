@@ -52,46 +52,90 @@ func (g *grid) rowWrapped(contentRow int) bool {
 // loop, so a modest amount of work per call is fine; the persisted scratch
 // buffers keep it allocation-light after warmup.
 func (g *grid) detectURLAt(cp contentPos) (url string, spans []urlSpan, ok bool) {
-	sb := g.Scrollback.Len()
-	total := g.ContentRows()
-	if g.Cols <= 0 || cp.Row < 0 || cp.Row >= total {
+	if g.Cols <= 0 || cp.Row < 0 || cp.Row >= g.ContentRows() {
 		return "", nil, false
 	}
 
-	// Find the logical-line bounds around cp by following wrap flags, capped at
-	// maxURLScanRows per direction. On the alt screen, do not cross the
-	// scrollback/live boundary — the alt buffer has its own wrap state and the
-	// old main-screen scrollback below it is unrelated.
-	lo := 0
-	if g.AltActive {
-		lo = sb
-	}
-	start := cp.Row
-	for start > lo && start > cp.Row-maxURLScanRows && g.rowWrapped(start-1) {
-		start--
-	}
-	end := cp.Row
-	for end < total-1 && end < cp.Row+maxURLScanRows && g.rowWrapped(end) {
-		end++
+	// Walk the wrap flags in both directions from cp to find the logical line,
+	// then join it. Continuation cells (Ch == 0, the trailing half of a wide
+	// glyph or an empty tail) are stripped by searchRow, so a hover over blank
+	// space finds no rune at cp and yields no match.
+	start := g.logicalLineStart(cp.Row)
+	end := g.logicalLineEnd(cp.Row, maxURLScanRows)
+	runes, rows, cols, bytes, byteLen := g.joinRows(start, end)
+	if len(runes) == 0 {
+		return "", nil, false
 	}
 
-	// Build the joined clean text of [start, end] plus rune→(row, col, byte)
-	// maps, and record cp's rune index within it. Continuation cells (Ch == 0,
-	// the trailing half of a wide glyph or an empty tail) are stripped by
-	// searchRow, so a hover over blank space yields cpRune == -1 → no match.
-	runes := g.urlRunes[:0]
-	rows := g.urlRows[:0]
-	cols := g.urlCols[:0]
-	bytes := g.urlBytes[:0]
+	// Locate cp's rune index within the joined line. Linear, but bounded by
+	// maxURLScanRows rows and only ever reached from a hover/click.
 	cpRune := -1
-	byteLen := 0
+	for i := range rows {
+		if rows[i] == cp.Row && cols[i] == cp.Col {
+			cpRune = i
+			break
+		}
+	}
+	if cpRune < 0 {
+		return "", nil, false
+	}
+
+	// Pick the match covering cpRune.
+	g.urlMatches = urlRangesIn(runes, bytes, byteLen, g.urlMatches[:0])
+	for _, m := range g.urlMatches {
+		if cpRune >= m[0] && cpRune < m[1] {
+			return string(runes[m[0]:m[1]]), spansFor(rows, cols, m[0], m[1]), true
+		}
+	}
+	return "", nil, false
+}
+
+// logicalLineStart returns the first content row of the soft-wrapped logical
+// line containing row, capped at maxURLScanRows rows above it. On the alt
+// screen the walk stops at the scrollback/live boundary — the alt buffer has
+// its own wrap state, and the old main-screen scrollback below it is unrelated.
+// Caller holds Mu.
+func (g *grid) logicalLineStart(row int) int {
+	lo := 0
+	if g.AltActive {
+		lo = g.Scrollback.Len()
+	}
+	start := row
+	for start > lo && start > row-maxURLScanRows && g.rowWrapped(start-1) {
+		start--
+	}
+	return start
+}
+
+// logicalLineEnd returns the last content row of the soft-wrapped logical line
+// containing row, following at most maxRows continuations downward. Caller
+// holds Mu.
+func (g *grid) logicalLineEnd(row, maxRows int) int {
+	total := g.ContentRows()
+	end := row
+	for end < total-1 && end < row+maxRows && g.rowWrapped(end) {
+		end++
+	}
+	return end
+}
+
+// joinRows builds the joined clean text of content rows [start, end] plus the
+// rune→(row, col, byte) maps that map a regexp byte span back to grid
+// positions. bytes[i] is the byte offset of rune i in string(runes); byteLen
+// is the one-past-end sentinel.
+//
+// The returned slices alias the grid's persistent scratch buffers, so a caller
+// must finish with them before the next call. Reusing those buffers is what
+// keeps repeated scans allocation-light after warmup. Caller holds Mu.
+func (g *grid) joinRows(start, end int) (runes []rune, rows, cols, bytes []int, byteLen int) {
+	runes = g.urlRunes[:0]
+	rows = g.urlRows[:0]
+	cols = g.urlCols[:0]
+	bytes = g.urlBytes[:0]
 	for row := start; row <= end; row++ {
 		rr, colMap := g.searchRow(row, g.searchRunes, g.searchCols)
 		g.searchRunes, g.searchCols = rr, colMap
 		for i, r := range rr {
-			if row == cp.Row && colMap[i] == cp.Col {
-				cpRune = len(runes)
-			}
 			runes = append(runes, r)
 			rows = append(rows, row)
 			cols = append(cols, colMap[i])
@@ -100,24 +144,25 @@ func (g *grid) detectURLAt(cp contentPos) (url string, spans []urlSpan, ok bool)
 		}
 	}
 	g.urlRunes, g.urlRows, g.urlCols, g.urlBytes = runes, rows, cols, bytes
-	if cpRune < 0 || len(runes) == 0 {
-		return "", nil, false
-	}
+	return runes, rows, cols, bytes, byteLen
+}
 
+// urlRangesIn appends the rune range [is, ie) of every implicit URL in a joined
+// line to dst, in left-to-right order, with trailing punctuation already
+// trimmed. Empty ranges (a match that trimmed away to nothing) are skipped.
+func urlRangesIn(runes []rune, bytes []int, byteLen int, dst [][2]int) [][2]int {
 	// Regexp works on the byte string; map each match's byte span back to rune
-	// indices via the byte-offset table (bytes[i] is the start of rune i;
-	// byteLen is the one-past-end sentinel). Pick the match covering cpRune.
+	// indices via the byte-offset table.
 	line := string(runes)
 	for _, m := range urlRe.FindAllStringIndex(line, -1) {
 		is := sort.SearchInts(bytes, m[0])
 		ie := runeIndexForByte(bytes, byteLen, m[1])
 		ie = is + trimTrailingURL(runes[is:ie])
-		if is >= ie || cpRune < is || cpRune >= ie {
-			continue
+		if is < ie {
+			dst = append(dst, [2]int{is, ie})
 		}
-		return string(runes[is:ie]), spansFor(rows, cols, is, ie), true
 	}
-	return "", nil, false
+	return dst
 }
 
 // runeIndexForByte returns the rune index whose byte offset is b, treating b ==

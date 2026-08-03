@@ -369,6 +369,8 @@ type Term struct {
 
 	copy copyState
 
+	hints hintState
+
 	mouse mouseState
 
 	// loopWg tracks the auxiliary goroutines (blink, autoScroll, momentum,

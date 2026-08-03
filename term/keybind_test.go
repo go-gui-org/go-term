@@ -33,6 +33,7 @@ var legacyShortcutLabels = []string{
 	"Scroll page up", "Scroll page down", "Scroll to top", "Scroll to bottom",
 	"Increase font size", "Decrease font size", "Reset font size",
 	"Copy mode",
+	"Open link (keyboard hints)", "Copy link (keyboard hints)",
 }
 
 func TestShortcuts_MatchesLegacyList(t *testing.T) {
@@ -327,5 +328,95 @@ func TestHandleSearchKey_ToggleRegex(t *testing.T) {
 	}
 	if !tm.search.regex {
 		t.Error("Ctrl+R should have enabled regex")
+	}
+}
+
+// --- AvailableShortcuts / RunAction ---
+
+// The palette's list: ordinary actions always, copy-mode actions only while
+// the mode they belong to is active.
+func TestAvailableShortcuts_GatesCopyModeOnMode(t *testing.T) {
+	tm, _ := copyTerm(20, "hello")
+
+	hasCopyAction := func(list []ShortcutInfo) bool {
+		for _, s := range list {
+			if _, ok := copyActionSet[s.Action]; ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	if got := tm.AvailableShortcuts(); hasCopyAction(got) {
+		t.Error("copy-mode actions listed while copy mode is off")
+	}
+	tm.enterCopyMode(nil)
+	if got := tm.AvailableShortcuts(); !hasCopyAction(got) {
+		t.Error("copy-mode actions missing while copy mode is on")
+	}
+}
+
+// Every entry carries the Action it names, or a palette could list a command
+// it cannot invoke.
+func TestAvailableShortcuts_CarryAction(t *testing.T) {
+	tm, _ := copyTerm(20, "hello")
+	list := tm.AvailableShortcuts()
+	if len(list) == 0 {
+		t.Fatal("no shortcuts reported")
+	}
+	for _, s := range list {
+		if s.Action == "" {
+			t.Errorf("entry %q has no Action", s.Label)
+		}
+		if _, ok := actionSet[s.Action]; !ok {
+			t.Errorf("entry %q names unknown action %q", s.Label, s.Action)
+		}
+	}
+}
+
+func TestRunAction_UnboundReturnsFalse(t *testing.T) {
+	tm, _ := copyTerm(20, "hello")
+	tm.SetKeyBindings(KeyMap{ActionCopyMode: gui.Shortcut{}}) // unbind
+	if tm.RunAction(ActionCopyMode, nil) {
+		t.Error("RunAction ran an unbound action")
+	}
+	if tm.copy.active {
+		t.Error("unbound action took effect anyway")
+	}
+}
+
+func TestRunAction_DrivesOrdinaryAction(t *testing.T) {
+	tm, _ := copyTerm(20, "hello", "world")
+	if !tm.RunAction(ActionCopyMode, nil) {
+		t.Fatal("RunAction reported failure")
+	}
+	if !tm.copy.active {
+		t.Error("copy mode did not activate")
+	}
+}
+
+// Copy-mode actions are bare letters, which onKeyDown routes to onChar. A
+// synthesized event would be swallowed by that rule, so RunAction has to reach
+// the mode's handler directly.
+func TestRunAction_DrivesCopyModeAction(t *testing.T) {
+	tm, _ := copyTerm(20, "hello", "world")
+	tm.enterCopyMode(nil)
+	// Down, not up: the cursor enters at the grid cursor, which is the top row
+	// here, so "up" would clamp and prove nothing.
+	before := tm.copy.cursor
+
+	if !tm.RunAction(ActionCopyModeDown, nil) {
+		t.Fatal("RunAction reported failure for a copy-mode action")
+	}
+	if tm.copy.cursor == before {
+		t.Errorf("cursor did not move: still %v", before)
+	}
+}
+
+// A copy-mode action outside the mode does nothing rather than half-applying.
+func TestRunAction_CopyModeActionInactiveIsNoOp(t *testing.T) {
+	tm, _ := copyTerm(20, "hello", "world")
+	if tm.RunAction(ActionCopyModeDown, nil) {
+		t.Error("RunAction ran a copy-mode action with the mode off")
 	}
 }
