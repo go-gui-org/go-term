@@ -47,7 +47,7 @@ term/gotermrec/          CLI over a recording: info/cat/play/fixture/export.
 
 Public API: `Cfg`, `Term`, `Theme`, `NamedTheme`, `New`, `View`, `Close`, `Cwd`,
 `SetTheme`, `Rows`, `Cols`, `Write`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`,
-`ShortcutInfo`/`Shortcuts` (help overlay), `ThemeMenuItems`,
+`ShortcutInfo`/`Shortcuts` (help overlay), `BundledThemes`, `Theme.SelectionBG`,
 `Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings`/`ParseAction` (rebindable
 shortcuts), `SetTextStyle`/`SetScrollbackRows`/`SetBellMode`/`SetScrollbarWidth`/
 `SetMiddleClickPaste` (live settings),
@@ -108,7 +108,8 @@ Every exported symbol gets a deliberate reason and complete doc comment.
 
 **term:**
 
-- `Cfg`, `New`, `Term`, `Theme`, `NamedTheme`, predef themes, `ShortcutInfo`, `Shortcuts`, `ThemeMenuItems` — keep
+- `Cfg`, `New`, `Term`, `Theme`, `NamedTheme`, `DefaultTheme`, `BundledThemes`, `ShortcutInfo`, `Shortcuts` — keep
+  (`ThemeMenuItems` and the 16 other predefined theme vars were removed in Phase 56)
 - `Action` + action constants, `KeyMap`, `Cfg.KeyBindings`, `Term.SetKeyBindings`, `Term.KeyBindings`, `Term.Shortcuts` — keep
 - `MaxGridDim`, `MaxScrollbackCap` — keep
 - `DefaultColor` — unexport (internal encoding detail)
@@ -120,7 +121,7 @@ Every exported symbol gets a deliberate reason and complete doc comment.
 - `Workspace`, `New`, `Restore`, `Close`, `View`, `Cfg`, `Save`, `DefaultWorkspacePath` — keep
 - `Tab` — exported with no methods → unexport
 - `SplitDir`, `SplitVertical`, `SplitHorizontal` — no public consumer → unexport
-- `AddTab`, `CloseTab`, `ClosePane`, `*Tab`, `*Pane`, `SplitPane`, `ToggleHelp`, `CycleTheme`, `LiveTermCount`, `GoToTab`, `ActivePane`, `FocusPane` — review which ones external callers need; unexport the rest
+- `AddTab`, `CloseTab`, `ClosePane`, `*Tab`, `*Pane`, `SplitPane`, `ToggleHelp`, `ToggleThemeBrowser`, `LiveTermCount`, `GoToTab`, `ActivePane`, `FocusPane` — review which ones external callers need; unexport the rest (`CycleTheme` was removed in Phase 56)
 
 - [ ] term: export audit + Godoc pass
 - [ ] workspace: export audit + Godoc pass
@@ -137,6 +138,28 @@ Every exported symbol gets a deliberate reason and complete doc comment.
 - [ ] Write `CHANGELOG.md` — narrative by theme (rendering, input, clipboard, graphics, workspace)
 - [ ] Archive: `ROADMAP.md` → `ROADMAP-v0.md`; new thin `ROADMAP.md` for v1.0+ items
 - [ ] Update README with v1.0 API examples
+
+### Phase 56 — Bundled theme corpus + full-window theme browser
+
+- [x] `term.BundledThemes()`: 602 themes generated from mbadolato/iTerm2-Color-Schemes
+      (MIT) into an embedded table, decoded lazily; `term/genthemes` regenerates it
+- [x] Remove the 16 hand-written theme vars superseded by the corpus, plus the
+      unused `ThemeMenuItems` and `CycleTheme`; legacy names still resolve via an
+      alias table so existing configs and saved workspaces keep working
+- [x] `deriveOverlay` now *enforces* its contrast floors instead of relying on
+      blend fractions tuned against a handful of dark themes (36 of 602 failed);
+      bell wash alpha becomes theme-derived for saturated backgrounds
+- [x] Full-window theme browser on `Cmd+Shift+T`: filter box, ~600-entry list with
+      a cursor-driven row window. Replaces the pane area rather than dimming it
+      behind a scrim
+- [x] Preview pane: index-labelled ANSI swatches, syntax-highlighted code sample
+      with a selected range, prose paragraph and text-attribute row, all in the
+      pane font. `term.Theme.SelectionBG()` exported so the selection tint shown
+      is the one the grid paints
+- [x] Escape reverts to the theme active on open; Enter commits
+- [x] Theme selection keyed by name rather than by `Theme` value — the corpus has
+      distinct names sharing a palette
+- [x] `docs/themes.md` (generated), `docs/config.md`
 
 ### Phase 55 — Tag v1.0.0 (blocked on go-gui v1.0)
 

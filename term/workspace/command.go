@@ -146,29 +146,46 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Label:    "Choose Theme...",
 			Shortcut: gui.Shortcut{Key: gui.KeyT, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleThemePicker() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleThemeBrowser() },
 		},
-		// Theme picker keyboard navigation — only active when picker is visible.
+		// Theme browser navigation — only active while the browser is open, so
+		// these bare keys still reach the child the rest of the time. They must
+		// reuse these single registrations rather than adding a second Up/Down/
+		// Enter entry; see the note on dismissOverlay below.
 		{
-			ID:         "workspace.themePickerUp",
+			ID:         "workspace.themeBrowserUp",
 			Shortcut:   gui.Shortcut{Key: gui.KeyUp},
 			Global:     true,
-			CanExecute: func(_ *gui.Window) bool { return ws.themePickerVisible },
-			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themePickerMoveUp() },
+			CanExecute: func(_ *gui.Window) bool { return ws.browser.visible },
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themeBrowserMove(-1) },
 		},
 		{
-			ID:         "workspace.themePickerDown",
+			ID:         "workspace.themeBrowserDown",
 			Shortcut:   gui.Shortcut{Key: gui.KeyDown},
 			Global:     true,
-			CanExecute: func(_ *gui.Window) bool { return ws.themePickerVisible },
-			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themePickerMoveDown() },
+			CanExecute: func(_ *gui.Window) bool { return ws.browser.visible },
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themeBrowserMove(1) },
 		},
 		{
-			ID:         "workspace.themePickerConfirm",
+			ID:         "workspace.themeBrowserPageUp",
+			Shortcut:   gui.Shortcut{Key: gui.KeyPageUp},
+			Global:     true,
+			CanExecute: func(_ *gui.Window) bool { return ws.browser.visible },
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themeBrowserPage(-1) },
+		},
+		{
+			ID:         "workspace.themeBrowserPageDown",
+			Shortcut:   gui.Shortcut{Key: gui.KeyPageDown},
+			Global:     true,
+			CanExecute: func(_ *gui.Window) bool { return ws.browser.visible },
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themeBrowserPage(1) },
+		},
+		{
+			ID:         "workspace.themeBrowserConfirm",
 			Shortcut:   gui.Shortcut{Key: gui.KeyEnter},
 			Global:     true,
-			CanExecute: func(_ *gui.Window) bool { return ws.themePickerVisible },
-			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themePickerConfirm() },
+			CanExecute: func(_ *gui.Window) bool { return ws.browser.visible },
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.themeBrowserConfirm() },
 		},
 		// Config reload. Cmd+, is deliberately left free for a future
 		// settings UI, so the reload lives on the Shift variant.
@@ -199,7 +216,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Shortcut: gui.Shortcut{Key: gui.KeyEscape},
 			Global:   true,
 			CanExecute: func(_ *gui.Window) bool {
-				return ws.themePickerVisible || ws.helpVisible
+				return ws.browser.visible || ws.helpVisible
 			},
 			Execute: func(_ *gui.Event, w *gui.Window) { ws.dismissOverlay() },
 		},
@@ -342,8 +359,10 @@ func (ws *Workspace) installCommands(cmds []gui.Command) {
 // drawn above the help panel, so it wins when both are open.
 func (ws *Workspace) dismissOverlay() {
 	switch {
-	case ws.themePickerVisible:
-		ws.ToggleThemePicker()
+	case ws.browser.visible:
+		// Not ToggleThemeBrowser: Escape has its own two-stage meaning inside
+		// the browser (clear the filter, then close-and-revert).
+		ws.themeBrowserDismiss()
 	case ws.helpVisible:
 		ws.ToggleHelp()
 	}

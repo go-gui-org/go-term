@@ -510,17 +510,18 @@ func TestParseConfig_FontSizeOutOfRange(t *testing.T) {
 // applySettings
 // ---------------------------------------------------------------------------
 
-func testThemes() []term.NamedTheme {
+func testThemes(t testing.TB) []term.NamedTheme {
+	t.Helper()
 	return []term.NamedTheme{
 		{Name: "Default", Theme: term.DefaultTheme},
-		{Name: "Dracula", Theme: term.DraculaTheme},
+		{Name: "Dracula", Theme: testTheme(t, "Dracula")},
 	}
 }
 
 func TestApplySettings_OverridesBase(t *testing.T) {
 	base := Cfg{
 		TextStyle: gui.TextStyle{Family: "Menlo", Size: 12},
-		Themes:    testThemes(),
+		Themes:    testThemes(t),
 	}
 	fc, _ := parseConfig(strings.NewReader(`
 [font]
@@ -540,7 +541,7 @@ scrollbar  = 8
 	if got.opts.scrollback != 999 || got.opts.bell != term.BellNone || got.opts.scrollbar != 8 {
 		t.Errorf("opts = %+v", got.opts)
 	}
-	if got.opts.theme == nil || *got.opts.theme != term.DraculaTheme {
+	if got.opts.theme == nil || *got.opts.theme != testTheme(t, "Dracula") {
 		t.Errorf("theme = %v, want Dracula (matched case-insensitively)", got.opts.theme)
 	}
 	if base.TextStyle.Family != "Menlo" {
@@ -551,7 +552,7 @@ scrollbar  = 8
 func TestApplySettings_EmptyConfigKeepsBase(t *testing.T) {
 	base := Cfg{
 		TextStyle: gui.TextStyle{Family: "Menlo", Size: 12},
-		Themes:    testThemes(),
+		Themes:    testThemes(t),
 	}
 	got := applySettings(base, workspaceConfig{}, nil)
 	if got.TextStyle != base.TextStyle {
@@ -567,7 +568,7 @@ func TestApplySettings_EmptyConfigKeepsBase(t *testing.T) {
 }
 
 func TestApplySettings_UnknownThemeKeepsDefault(t *testing.T) {
-	base := Cfg{Themes: testThemes()}
+	base := Cfg{Themes: testThemes(t)}
 	got := applySettings(base, workspaceConfig{theme: "no-such-theme"}, nil)
 	if got.opts.theme != nil {
 		t.Error("unknown theme name should not be applied")
@@ -734,7 +735,7 @@ func TestSetGeneral_MiddleClickPaste(t *testing.T) {
 // (which has PRIMARY), off elsewhere. This is the only place that policy
 // lives — term/ just honors Cfg.MiddleClickPaste.
 func TestApplySettings_MiddleClickPasteDefault(t *testing.T) {
-	got := applySettings(Cfg{Themes: testThemes()}, workspaceConfig{}, nil)
+	got := applySettings(Cfg{Themes: testThemes(t)}, workspaceConfig{}, nil)
 	if got.opts.middleClickPaste != defaultMiddleClickPaste() {
 		t.Errorf("middleClickPaste = %v, want the platform default %v",
 			got.opts.middleClickPaste, defaultMiddleClickPaste())
@@ -746,7 +747,7 @@ func TestApplySettings_MiddleClickPasteDefault(t *testing.T) {
 func TestApplySettings_MiddleClickPasteExplicit(t *testing.T) {
 	for _, want := range []bool{true, false} {
 		fc := workspaceConfig{middleClickPaste: want, hasMiddleClickPaste: true}
-		got := applySettings(Cfg{Themes: testThemes()}, fc, nil)
+		got := applySettings(Cfg{Themes: testThemes(t)}, fc, nil)
 		if got.opts.middleClickPaste != want {
 			t.Errorf("middleClickPaste = %v, want %v", got.opts.middleClickPaste, want)
 		}
@@ -792,5 +793,82 @@ func TestSetGeneral_MinimumContrast(t *testing.T) {
 				t.Errorf("setGeneral(minimum-contrast, %q) set hasMinContrast", val)
 			}
 		})
+	}
+}
+
+// TestFindTheme_LegacyNames covers the upgrade path: the 17 hand-written
+// themes go-term used to ship were deleted in favour of the bundled corpus,
+// but their names persist in user config files and saved workspaces. Every
+// alias must resolve, or upgrading silently drops those users to the default.
+func TestFindTheme_LegacyNames(t *testing.T) {
+	t.Parallel()
+
+	themes := append(
+		[]term.NamedTheme{{Name: "Default", Theme: term.DefaultTheme}},
+		term.BundledThemes()...,
+	)
+
+	// Every name the old themeList() offered, including the two that carry
+	// over verbatim and so are deliberately absent from the alias map.
+	legacy := []string{
+		"Default", "Dracula", "Catppuccin Mocha", "Tokyo Night", "Monokai",
+		"One Dark", "Rosé Pine", "Kanagawa", "Ayu Dark", "Everforest",
+		"GitHub Dark", "Gruvbox", "Nord", "Solarized Dark", "Solarized Light",
+		"GitHub Light", "Catppuccin Latte",
+	}
+	for _, name := range legacy {
+		if _, ok := findTheme(themes, name); !ok {
+			t.Errorf("legacy theme name %q no longer resolves", name)
+		}
+	}
+
+	// The light ones must still be light after remapping — an alias pointing
+	// at a same-named dark variant would flip a user's terminal at startup and
+	// send the wrong COLORFGBG to every shell.
+	for _, name := range []string{"Solarized Light", "GitHub Light", "Catppuccin Latte"} {
+		nt, ok := findTheme(themes, name)
+		if !ok {
+			t.Fatalf("%q did not resolve", name)
+		}
+		if nt.Theme.IsDark() {
+			t.Errorf("%q resolved to %q, which reports dark", name, nt.Name)
+		}
+	}
+
+	// Aliasing must not swallow genuine typos: an unknown name still fails, so
+	// the "unknown theme" log line still happens.
+	if _, ok := findTheme(themes, "Not A Theme"); ok {
+		t.Error("an unknown name resolved through the alias table")
+	}
+}
+
+// Every alias must point at a theme that actually exists in the corpus. This
+// is what catches a regenerated table that renamed one of the targets.
+func TestLegacyThemeAliases_TargetsExist(t *testing.T) {
+	t.Parallel()
+
+	for from, to := range legacyThemeAliases {
+		if _, ok := findTheme(term.BundledThemes(), to); !ok {
+			t.Errorf("alias %q -> %q: target is not in the bundled corpus", from, to)
+		}
+	}
+}
+
+// findTheme tries exact (case-folded) names before the alias table, so an
+// entry whose key the corpus already carries verbatim can never fire. Such an
+// entry is dead weight that reads as load-bearing, and a regeneration that
+// introduces the key upstream is how one appears without anyone noticing.
+func TestLegacyThemeAliases_AreLoadBearing(t *testing.T) {
+	t.Parallel()
+
+	bundled := term.BundledThemes()
+	for from, to := range legacyThemeAliases {
+		for _, nt := range bundled {
+			if strings.EqualFold(nt.Name, from) {
+				t.Errorf("alias %q -> %q is unreachable: the corpus already has "+
+					"%q, which the exact-match pass finds first", from, to, nt.Name)
+				break
+			}
+		}
 	}
 }

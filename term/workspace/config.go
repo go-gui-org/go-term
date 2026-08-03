@@ -386,6 +386,15 @@ type termOpts struct {
 	// in which case panes keep term's own default: Cfg.Themes[0].
 	theme *term.Theme
 
+	// themeName is the display name theme was selected by, and the key every
+	// lookup uses. term.Theme is comparable and the old code matched on the
+	// value, which was fine for 17 hand-written themes and is not for ~600
+	// bundled ones: the corpus contains distinct names sharing an identical
+	// palette, so a value match can return the wrong entry — putting the
+	// checkmark on the wrong row and persisting a name the user never picked.
+	// Empty exactly when theme is nil.
+	themeName string
+
 	keys        term.KeyMap
 	scrollback  int
 	scrollbar   float32
@@ -395,6 +404,15 @@ type termOpts struct {
 	// middleClickPaste defaults to the platform convention rather than to
 	// false, so it is always set explicitly by applySettings.
 	middleClickPaste bool
+}
+
+// setTheme records the selected theme as a value/name pair. The two must move
+// together — every lookup keys on the name while every apply uses the value —
+// so this is the only thing that writes either field.
+func (o *termOpts) setTheme(nt term.NamedTheme) {
+	th := nt.Theme
+	o.theme = &th
+	o.themeName = nt.Name
 }
 
 // defaultMiddleClickPaste is the middle-click-paste default when the config
@@ -436,8 +454,11 @@ func applySettings(base Cfg, fc workspaceConfig, keys term.KeyMap) Cfg {
 		out.opts.middleClickPaste = fc.middleClickPaste
 	}
 	if fc.theme != "" {
-		if th, ok := findTheme(base.Themes, fc.theme); ok {
-			out.opts.theme = &th
+		if named, ok := findTheme(base.Themes, fc.theme); ok {
+			// Record the list's spelling, not the file's: matching is
+			// case-insensitive, and every later lookup compares against
+			// Cfg.Themes.
+			out.opts.setTheme(named)
 		} else {
 			log.Printf("workspace: unknown theme %q in config; keeping default", fc.theme)
 		}
@@ -447,13 +468,60 @@ func applySettings(base Cfg, fc workspaceConfig, keys term.KeyMap) Cfg {
 
 // findTheme looks up a theme by display name, case-insensitively so a config
 // file need not reproduce the exact capitalization of "Catppuccin Mocha".
-func findTheme(themes []term.NamedTheme, name string) (term.Theme, bool) {
+//
+// Returns the NamedTheme rather than the bare Theme so the caller records the
+// list's spelling of the name alongside the value — see termOpts.setTheme.
+func findTheme(themes []term.NamedTheme, name string) (term.NamedTheme, bool) {
+	if name == "" {
+		return term.NamedTheme{}, false
+	}
 	for _, nt := range themes {
 		if strings.EqualFold(nt.Name, name) {
-			return nt.Theme, true
+			return nt, true
 		}
 	}
-	return term.Theme{}, false
+	// Fall back to the retired names before giving up, so an existing config
+	// file or saved workspace keeps working.
+	if alias, ok := legacyThemeAliases[strings.ToLower(name)]; ok {
+		for _, nt := range themes {
+			if strings.EqualFold(nt.Name, alias) {
+				return nt, true
+			}
+		}
+	}
+	return term.NamedTheme{}, false
+}
+
+// legacyThemeAliases maps the names of the 17 hand-written themes go-term used
+// to ship onto their equivalents in the bundled corpus.
+//
+// Those themes were deleted when the corpus arrived — every one was duplicated
+// there — but the names live on in two places go-term does not control: a
+// user's config file (`[general] theme`) and a saved workspace's JSON. Without
+// this, upgrading would silently drop such a user back to the default theme
+// with only a log line to explain it.
+//
+// Only entries whose spelling actually changed are here. "Dracula", "Nord",
+// "Catppuccin Mocha", "Catppuccin Latte", "Rose Pine" and "GitHub Dark" carry
+// over verbatim and so resolve on the exact-match pass above — an entry for
+// one of those would be unreachable, which is what
+// TestLegacyThemeAliases_AreLoadBearing pins down. Note "Rosé Pine" still
+// needs one: findTheme folds case, not accents.
+//
+// Not a general alias facility — nothing adds to this map, and it can be
+// deleted once the pre-corpus releases are old enough.
+var legacyThemeAliases = map[string]string{
+	"gruvbox":         "Gruvbox Dark",
+	"solarized dark":  "iTerm2 Solarized Dark",
+	"solarized light": "iTerm2 Solarized Light",
+	"tokyo night":     "TokyoNight",
+	"monokai":         "Monokai Classic",
+	"one dark":        "One Half Dark",
+	"rosé pine":       "Rose Pine",
+	"kanagawa":        "Kanagawa Wave",
+	"ayu dark":        "Ayu",
+	"everforest":      "Everforest Dark Med",
+	"github light":    "GitHub Light Default",
 }
 
 // termPrefix / workspacePrefix namespace a [keybindings] entry. A key with

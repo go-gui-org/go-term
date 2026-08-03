@@ -47,13 +47,14 @@
 // # Theme configuration
 //
 // Use [Cfg.Themes] to provide a list of named themes for runtime
-// switching. The first entry is the initial theme. Built-in themes
-// include [DefaultTheme], [GruvboxTheme], [NordTheme],
-// [SolarizedDarkTheme], [DraculaTheme], [CatppuccinMochaTheme],
-// [TokyoNightTheme], [MonokaiTheme], [OneDarkTheme],
-// [RosePineTheme], [KanagawaTheme], [AyuDarkTheme],
-// [EverforestTheme], [GitHubDarkTheme], and the light schemes
-// [SolarizedLightTheme], [GitHubLightTheme] and [CatppuccinLatteTheme].
+// switching. The first entry is the initial theme: it seeds the grid and
+// decides the COLORFGBG a child is spawned with, which cannot be corrected
+// once the process is running.
+//
+// [BundledThemes] returns the ~600 color themes go-term ships, sorted by
+// name, decoded on first call. [DefaultTheme] is separate and is what a grid
+// falls back to when Cfg.Themes is empty. A typical embedder registers the
+// default first and the corpus after it.
 // [Theme.IsDark] reports a theme's light/dark character — the same question
 // DSR ?996 answers for the child — for an embedder theming its own chrome.
 //
@@ -79,14 +80,9 @@
 // go-term is pre-1.0. The public API is deliberately small so embedders
 // have a narrow, well-defined contract to code against.
 //
-// Stable: [NamedTheme], [Theme], and the built-in theme variables
-// ([DefaultTheme], [GruvboxTheme], [NordTheme], [SolarizedDarkTheme],
-// [DraculaTheme], [CatppuccinMochaTheme], [TokyoNightTheme],
-// [MonokaiTheme], [OneDarkTheme], [RosePineTheme], [KanagawaTheme],
-// [AyuDarkTheme], [EverforestTheme], [GitHubDarkTheme],
-// [SolarizedLightTheme], [GitHubLightTheme], [CatppuccinLatteTheme]) —
-// their names won't change and their color values won't shift in ways
-// that break contrast; [Theme.IsDark], which answers the same light/dark
+// Stable: [NamedTheme], [Theme], [DefaultTheme] and [BundledThemes] — the
+// bundled names won't change and their color values won't shift in ways that
+// break contrast; [Theme.IsDark], which answers the same light/dark
 // question the emulator reports to the child through DSR ?996, for an
 // embedder that themes its own chrome to match; the [MaxGridDim] and
 // [MaxScrollbackCap] constants;

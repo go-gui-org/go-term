@@ -135,32 +135,28 @@ func (t *Tab) addPane(
 	return nil
 }
 
-// paneThemes returns the theme list a pane's term.Cfg gets, with the config
-// file's [general] theme moved to the front.
+// paneThemes returns the theme list a pane's term.Cfg gets: just the selected
+// theme, or the workspace's first when none is selected.
 //
 // term reads Themes[0] twice and only one of them can be corrected afterwards:
 // it seeds the grid (which applyPaneTheme then overrides) *and* it decides the
 // COLORFGBG the child is spawned with, which cannot be changed in a running
-// process. Leaving the order alone meant a user who set `theme = Solarized
-// Light` got light cells and a child told it was running on a dark background
-// — the exact question COLORFGBG exists to answer.
+// process. Handing the pane the unselected theme meant a user who set
+// `theme = Solarized Light` got light cells and a child told it was running on
+// a dark background — the exact question COLORFGBG exists to answer.
 //
-// Safe to reorder because this list goes only to the pane: the theme picker
-// and the persisted theme name read ws.cfg.Themes, which is untouched.
+// Only element 0 is ever read, so the rest is dead weight: term uses
+// Cfg.Themes for nothing else, and the workspace's own list (browser,
+// persisted name) reads ws.cfg.Themes, which is untouched. With ~600 bundled
+// themes, returning the whole slice meant copying it per pane for one lookup.
 func paneThemes(cfg Cfg) []term.NamedTheme {
 	if cfg.opts.theme == nil {
-		return cfg.Themes
-	}
-	for i, nt := range cfg.Themes {
-		if nt.Theme != *cfg.opts.theme {
-			continue
+		if len(cfg.Themes) == 0 {
+			return nil
 		}
-		out := make([]term.NamedTheme, 0, len(cfg.Themes))
-		out = append(out, nt)
-		out = append(out, cfg.Themes[:i]...)
-		return append(out, cfg.Themes[i+1:]...)
+		return cfg.Themes[:1:1]
 	}
-	return cfg.Themes
+	return []term.NamedTheme{{Name: cfg.opts.themeName, Theme: *cfg.opts.theme}}
 }
 
 // applyPaneTheme applies the config file's [general] theme to a freshly built

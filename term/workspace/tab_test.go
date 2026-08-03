@@ -75,22 +75,25 @@ func TestPaneThemes(t *testing.T) {
 
 	themes := []term.NamedTheme{
 		{Name: "Default", Theme: term.DefaultTheme},
-		{Name: "Dracula", Theme: term.DraculaTheme},
-		{Name: "Solarized Light", Theme: term.SolarizedLightTheme},
+		{Name: "Dracula", Theme: testTheme(t, "Dracula")},
+		{Name: "Solarized Light", Theme: testTheme(t, "iTerm2 Solarized Light")},
 	}
 
-	t.Run("no_configured_theme_keeps_the_order", func(t *testing.T) {
+	t.Run("no_configured_theme_uses_the_workspace_default", func(t *testing.T) {
 		got := paneThemes(Cfg{Themes: themes})
-		if len(got) != len(themes) || got[0].Name != "Default" {
-			t.Errorf("paneThemes = %v, want the list unchanged", got)
+		if len(got) != 1 || got[0].Name != "Default" {
+			t.Errorf("paneThemes = %v, want just Default", got)
 		}
 	})
 
-	t.Run("configured_theme_moves_to_the_front", func(t *testing.T) {
-		light := term.SolarizedLightTheme
-		got := paneThemes(Cfg{Themes: themes, opts: termOpts{theme: &light}})
-		if len(got) != len(themes) {
-			t.Fatalf("paneThemes dropped entries: %d, want %d", len(got), len(themes))
+	t.Run("configured_theme_is_the_one_the_pane_gets", func(t *testing.T) {
+		light := term.NamedTheme{
+			Name:  "Solarized Light",
+			Theme: testTheme(t, "iTerm2 Solarized Light"),
+		}
+		got := paneThemes(Cfg{Themes: themes, opts: themeOpts(light)})
+		if len(got) != 1 {
+			t.Fatalf("paneThemes returned %d entries, want 1", len(got))
 		}
 		if got[0].Name != "Solarized Light" {
 			t.Errorf("paneThemes[0] = %q, want Solarized Light", got[0].Name)
@@ -98,36 +101,46 @@ func TestPaneThemes(t *testing.T) {
 		if got[0].Theme.IsDark() {
 			t.Error("the pane's startup theme reports dark; COLORFGBG would lie")
 		}
-		// Every original entry must survive: the list is the full set the
-		// pane's own theme menu would show.
-		for _, want := range themes {
-			var found bool
-			for _, nt := range got {
-				if nt.Name == want.Name {
-					found = true
-				}
-			}
-			if !found {
-				t.Errorf("paneThemes lost %q", want.Name)
-			}
-		}
 	})
 
-	t.Run("theme_not_in_the_list_is_left_alone", func(t *testing.T) {
+	t.Run("theme_not_in_the_list_still_reaches_the_pane", func(t *testing.T) {
 		// opts.theme is a value, not an index, so nothing guarantees it
-		// appears in Themes. applyPaneTheme is the backstop; this must not
-		// panic or drop entries getting there.
-		odd := term.MonokaiTheme
-		got := paneThemes(Cfg{Themes: themes[:2], opts: termOpts{theme: &odd}})
-		if len(got) != 2 || got[0].Name != "Default" {
-			t.Errorf("paneThemes = %v, want the list unchanged", got)
+		// appears in Themes. The pane must still be built with it — that is
+		// what fixes COLORFGBG, which applyPaneTheme cannot correct later.
+		odd := term.NamedTheme{Name: "Monokai", Theme: testTheme(t, "Monokai Classic")}
+		got := paneThemes(Cfg{Themes: themes[:2], opts: themeOpts(odd)})
+		if len(got) != 1 || got[0].Name != "Monokai" {
+			t.Errorf("paneThemes = %v, want just Monokai", got)
 		}
 	})
 
-	t.Run("no_themes_at_all", func(t *testing.T) {
-		light := term.SolarizedLightTheme
-		if got := paneThemes(Cfg{opts: termOpts{theme: &light}}); len(got) != 0 {
+	t.Run("no_themes_and_none_selected", func(t *testing.T) {
+		if got := paneThemes(Cfg{}); len(got) != 0 {
 			t.Errorf("paneThemes = %v, want empty", got)
 		}
+	})
+
+	t.Run("selected_theme_without_a_list", func(t *testing.T) {
+		// Not reachable through the config file (findTheme searches the list),
+		// but the pane should get the selected theme rather than none.
+		light := term.NamedTheme{
+			Name:  "Solarized Light",
+			Theme: testTheme(t, "iTerm2 Solarized Light"),
+		}
+		got := paneThemes(Cfg{opts: themeOpts(light)})
+		if len(got) != 1 || got[0].Name != "Solarized Light" {
+			t.Errorf("paneThemes = %v, want just Solarized Light", got)
+		}
+	})
+
+	t.Run("result_does_not_alias_the_workspace_list", func(t *testing.T) {
+		// The pane's slice is handed to term.Cfg and outlives this call; an
+		// append into it must not scribble over ws.cfg.Themes[1].
+		got := paneThemes(Cfg{Themes: themes})
+		got = append(got, term.NamedTheme{Name: "Injected"})
+		if themes[1].Name != "Dracula" {
+			t.Errorf("appending to the pane list overwrote Themes[1]: %q", themes[1].Name)
+		}
+		_ = got
 	})
 }

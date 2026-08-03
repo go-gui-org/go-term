@@ -1,7 +1,6 @@
 package term
 
 import (
-	"strconv"
 	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -255,23 +254,6 @@ func applyScrollbackConfig(g *grid, cfg Cfg) {
 	default:
 		// Negative: leave ScrollbackCap = 0 (scrollback disabled).
 	}
-}
-
-// buildThemeMenu builds a right-click context menu from cfg.Themes.
-// Returns nil when no themes are configured.
-// ThemeMenuItems returns a ContextMenu item list for the given themes.
-// Returns nil when themes is empty. Multi-Term embedders use this to
-// attach a theme menu at the appropriate level of their view tree.
-func ThemeMenuItems(themes []NamedTheme) []gui.MenuItemCfg {
-	if len(themes) == 0 {
-		return nil
-	}
-	items := make([]gui.MenuItemCfg, 0, len(themes)+1)
-	items = append(items, gui.MenuSubtitle("Theme"))
-	for i, nt := range themes {
-		items = append(items, gui.MenuItemCfg{ID: strconv.Itoa(i), Text: nt.Name})
-	}
-	return items
 }
 
 // applyTheme sets the initial grid theme from cfg.Themes. When no

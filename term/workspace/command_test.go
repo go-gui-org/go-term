@@ -110,17 +110,18 @@ func TestRegisterCommands_TabDigitsSelectTab(t *testing.T) {
 	}
 }
 
-// TestDismissOverlay_ThemePickerWinsOverHelp covers the merged Escape binding:
-// one command now owns both overlays, closing the topmost first.
-func TestDismissOverlay_ThemePickerWinsOverHelp(t *testing.T) {
+// TestDismissOverlay_ThemeBrowserWinsOverHelp covers the merged Escape binding:
+// one command owns both the browser and the help overlay, closing the topmost
+// first.
+func TestDismissOverlay_ThemeBrowserWinsOverHelp(t *testing.T) {
 	ws := newTestWorkspace(t)
 	ws.cfg.Themes = []term.NamedTheme{{Name: "test"}}
 	ws.helpVisible = true
-	ws.themePickerVisible = true
+	ws.browser.visible = true
 
 	ws.dismissOverlay()
-	if ws.themePickerVisible {
-		t.Error("theme picker still visible after first Escape")
+	if ws.browser.visible {
+		t.Error("theme browser still visible after first Escape")
 	}
 	if !ws.helpVisible {
 		t.Error("help closed by the same Escape that closed the picker")
@@ -137,14 +138,14 @@ func TestDismissOverlay_ThemePickerWinsOverHelp(t *testing.T) {
 func TestDismissOverlay_NoOverlayOpen(t *testing.T) {
 	ws := newTestWorkspace(t)
 	ws.helpVisible = false
-	ws.themePickerVisible = false
+	ws.browser.visible = false
 	// Must not panic, and flags must stay false.
 	ws.dismissOverlay()
 	if ws.helpVisible {
 		t.Error("help flag flipped from false to true")
 	}
-	if ws.themePickerVisible {
-		t.Error("picker flag flipped from false to true")
+	if ws.browser.visible {
+		t.Error("browser flag flipped from false to true")
 	}
 }
 

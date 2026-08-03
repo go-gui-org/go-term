@@ -221,11 +221,12 @@ func TestPalette_OverrideSurvivesThemeSwitch(t *testing.T) {
 	g.SetPaletteColor(1, rgbColor(1, 2, 3))
 	// An embedder theme switch (Term.SetTheme assigns g.Theme) leaves
 	// child-set OSC 4 entries in place — they live in their own layer.
-	g.setTheme(GruvboxTheme)
+	gruvbox := mustBundled(t, "Gruvbox Dark")
+	g.setTheme(gruvbox)
 	if got, want := g.fgOf(cell{Ch: ' ', FG: 1}), gui.RGB(1, 2, 3); got != want {
 		t.Errorf("override after theme switch: got %+v want %+v", got, want)
 	}
-	if got, want := g.fgOf(cell{Ch: ' ', FG: 2}), GruvboxTheme.ANSI[2]; got != want {
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 2}), gruvbox.ANSI[2]; got != want {
 		t.Errorf("non-overridden index: got %+v want %+v", got, want)
 	}
 }
@@ -312,5 +313,45 @@ func TestParser_DECSCNM_SetResetAndRIS(t *testing.T) {
 	feed(t, g, p, []byte("\x1b[?5h\x1bc"))
 	if g.ReverseScreen {
 		t.Fatal("RIS did not clear reverse video")
+	}
+}
+
+// TestThemeSelectionBG covers the exported selection tint the theme browser's
+// preview draws with. It has to agree with what the grid paints per cell —
+// they share selectionTint precisely so an embedder's chrome cannot end up a
+// different shade than the pane beside it.
+func TestThemeSelectionBG(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"Dracula", "Catppuccin Latte", "iTerm2 Solarized Light"} {
+		th := mustBundled(t, name)
+		g := newGrid(2, 4)
+		g.setTheme(th)
+
+		if got, want := th.SelectionBG(), g.selectionBG(th.DefaultBG); got != want {
+			t.Errorf("%s: Theme.SelectionBG() = %v, grid paints %v", name, got, want)
+		}
+		// A tint equal to the background is no selection at all, which is the
+		// failure the blend's "farther endpoint" rule exists to prevent.
+		if th.SelectionBG() == th.DefaultBG {
+			t.Errorf("%s: selection tint is identical to DefaultBG", name)
+		}
+	}
+}
+
+// Every bundled theme must produce a visible selection, not just the few named
+// above. A selection that vanishes is indistinguishable from a broken one.
+func TestBundledThemesSelectionVisible(t *testing.T) {
+	t.Parallel()
+
+	// Lower than the overlay floors: the selection is a tint behind text that
+	// stays readable, so it is meant to be subtle. What this rules out is no
+	// tint at all.
+	const minSelDist = 12
+	for _, nt := range BundledThemes() {
+		if d := chanDist(nt.Theme.SelectionBG(), nt.Theme.DefaultBG); d < minSelDist {
+			t.Errorf("%q: selection tint is %d from DefaultBG, want >= %d",
+				nt.Name, d, minSelDist)
+		}
 	}
 }

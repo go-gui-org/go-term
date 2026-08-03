@@ -9,80 +9,31 @@ import (
 type shippedTheme struct {
 	name  string
 	theme Theme
-	dark  bool
 }
 
-// shippedThemes is every built-in theme with the light/dark character it must
-// report. Shared by TestThemeIsDark (which checks the character itself) and
-// TestOverlayContrast (which checks that the overlays derived from it are
-// visible). A new built-in has to be added here, which is the point: it forces
-// the question "does this theme's chrome still work" to be answered once.
+// shippedThemes is every theme go-term ships: DefaultTheme plus the whole
+// generated bundle. Shared by TestOverlayContrast (which checks that the
+// overlays derived from a theme stay visible against it) and
+// TestThemeDimSlotIsVisible.
 //
-// A function, not a var: the theme values are assigned in palette.go's init,
-// which runs after package-level variable initialization, so a var here would
-// capture zero-value themes and quietly pass everything.
+// Deriving this from BundledThemes rather than listing themes by hand is the
+// point: regenerating the table re-runs every readability assertion over the
+// new corpus, so a theme that would render go-term's own chrome unreadable
+// cannot arrive unnoticed. It also means these two tests cover ~600 palettes
+// instead of the 17 that were maintained by hand.
+//
+// A function, not a var: DefaultTheme is assigned in palette.go's init, which
+// runs after package-level variable initialization, so a var here would
+// capture a zero-value theme and quietly pass everything.
 func shippedThemes() []shippedTheme {
-	return []shippedTheme{
-		{"Default", DefaultTheme, true},
-		{"Gruvbox", GruvboxTheme, true},
-		{"Nord", NordTheme, true},
-		{"SolarizedDark", SolarizedDarkTheme, true},
-		{"Dracula", DraculaTheme, true},
-		{"CatppuccinMocha", CatppuccinMochaTheme, true},
-		{"TokyoNight", TokyoNightTheme, true},
-		{"Monokai", MonokaiTheme, true},
-		{"OneDark", OneDarkTheme, true},
-		{"RosePine", RosePineTheme, true},
-		{"Kanagawa", KanagawaTheme, true},
-		{"AyuDark", AyuDarkTheme, true},
-		{"Everforest", EverforestTheme, true},
-		{"GitHubDark", GitHubDarkTheme, true},
-		{"SolarizedLight", SolarizedLightTheme, false},
-		{"GitHubLight", GitHubLightTheme, false},
-		{"CatppuccinLatte", CatppuccinLatteTheme, false},
+	bundled := BundledThemes()
+	out := make([]shippedTheme, 0, len(bundled)+1)
+	out = append(out, shippedTheme{"Default", DefaultTheme})
+	for _, nt := range bundled {
+		out = append(out, shippedTheme{nt.Name, nt.Theme})
 	}
+	return out
 }
-
-// composite returns c drawn at its own alpha over bg — what the eye actually
-// sees for the overlays that are painted semi-transparently. Comparing the raw
-// color against the background would pass colors that vanish once composited,
-// which is exactly the failure mode a light theme introduces.
-func composite(c, bg gui.Color) gui.Color {
-	a := int(c.A)
-	mix := func(f, b uint8) uint8 {
-		return uint8((int(f)*a + int(b)*(255-a)) / 255)
-	}
-	return gui.RGB(mix(c.R, bg.R), mix(c.G, bg.G), mix(c.B, bg.B))
-}
-
-// Minimum channel-distance (chanDist, so 0..765) an overlay must keep from
-// what it sits on. Not a perceptual standard — chanDist isn't one — but a
-// floor that a color washing out into its background cannot clear.
-const (
-	// Chrome drawn over live cells: the scrollbar thumb, the bell wash. Low,
-	// because these are meant to be quiet; the bar to clear is "visible", not
-	// "prominent".
-	minChromeDist = 80
-	// The copy-mode cursor against the canvas. Higher than chrome: it is a
-	// position marker the user is aiming with, and it is the only overlay
-	// whose whole signal is its fill.
-	//
-	// Pill plates get no such floor. A plate is backing for a label, not a
-	// signal — the size badge's near-black plate on the near-black default
-	// theme has always been invisible as a shape and perfectly legible as a
-	// badge, because what the eye finds is the text. The requirement that
-	// actually matters for a pill is minTextDist, below.
-	minCursorDist = 100
-	// A pill's label against its own plate. Higher: this is text being read,
-	// not chrome being noticed.
-	minTextDist = 250
-	// The bell wash gets its own, much lower floor: bellFlashPeakAlpha is 22,
-	// so even a pure white wash over pure black composites to 66. The wash is
-	// meant to be caught peripherally, not read — what this floor rules out is
-	// the case that motivated the whole pass, a wash on the same side of the
-	// spectrum as the background.
-	minBellDist = 45
-)
 
 // TestOverlayContrast is what holds up the claim that the overlays work on a
 // light theme. Every derived color is measured against what it is drawn on —
@@ -111,7 +62,7 @@ func TestOverlayContrast(t *testing.T) {
 			}{
 				{"thumb", ov.thumb, bg, minChromeDist},
 				{"thumbHover", ov.thumbHover, bg, minChromeDist},
-				{"bellFlash", withAlpha(ov.bellFlash, bellFlashPeakAlpha), bg, minBellDist},
+				{"bellFlash", withAlpha(ov.bellFlash, ov.bellPeakAlpha), bg, minBellDist},
 
 				{"fail", withAlpha(ov.fail, scrollbarTickIdleAlpha), bg, minChromeDist},
 				{"progress", withAlpha(ov.progress, scrollbarTickIdleAlpha), bg, minChromeDist},
@@ -121,7 +72,7 @@ func TestOverlayContrast(t *testing.T) {
 				{"copyCursor", withAlpha(ov.copyCurFill, 255), bg, minCursorDist},
 			}
 			for _, c := range checks {
-				if d := chanDist(composite(c.c, c.on), c.on); d < c.min {
+				if d := chanDist(compositeOver(c.c, c.on), c.on); d < c.min {
 					t.Errorf("%s: distance %d from what it sits on %v, want >= %d",
 						c.name, d, c.on, c.min)
 				}
@@ -145,7 +96,7 @@ func TestOverlayContrast(t *testing.T) {
 				{"copyCursorGlyph", bg, withAlpha(ov.copyCurFill, 255)},
 			}
 			for _, l := range labels {
-				plate := composite(l.fill, bg)
+				plate := compositeOver(l.fill, bg)
 				if d := chanDist(l.text, plate); d < minTextDist {
 					t.Errorf("%s: distance %d from its plate %v, want >= %d",
 						l.name, d, plate, minTextDist)
@@ -154,8 +105,8 @@ func TestOverlayContrast(t *testing.T) {
 
 			// Hover must read as a response to the pointer, not as a
 			// coincidence: strictly more separated than the idle thumb.
-			idle := chanDist(composite(ov.thumb, bg), bg)
-			hover := chanDist(composite(ov.thumbHover, bg), bg)
+			idle := chanDist(compositeOver(ov.thumb, bg), bg)
+			hover := chanDist(compositeOver(ov.thumbHover, bg), bg)
 			if hover <= idle {
 				t.Errorf("thumb hover distance %d not above idle %d", hover, idle)
 			}
@@ -169,8 +120,11 @@ func TestOverlayContrast(t *testing.T) {
 func TestDeriveOverlayFollowsCharacter(t *testing.T) {
 	t.Parallel()
 
-	dark := deriveOverlay(SolarizedDarkTheme)
-	light := deriveOverlay(SolarizedLightTheme)
+	// Solarized's two halves are the cleanest available pair: one palette,
+	// two backgrounds, so the only thing the derivation can be responding to
+	// is the light/dark character itself.
+	dark := deriveOverlay(mustBundled(t, "iTerm2 Solarized Dark"))
+	light := deriveOverlay(mustBundled(t, "iTerm2 Solarized Light"))
 
 	luma := func(c gui.Color) int {
 		return 299*int(c.R) + 587*int(c.G) + 114*int(c.B)
@@ -218,33 +172,9 @@ func TestOverlayTracksDynamicColors(t *testing.T) {
 	if g.ov.bellFlash == before {
 		t.Fatal("bell wash unchanged after OSC 11 repainted the background light")
 	}
-	if d := chanDist(composite(withAlpha(g.ov.bellFlash, bellFlashPeakAlpha),
+	if d := chanDist(compositeOver(withAlpha(g.ov.bellFlash, bellFlashPeakAlpha),
 		g.Theme.DefaultBG), g.Theme.DefaultBG); d < minBellDist {
 		t.Errorf("bell wash distance %d after OSC 11, want >= %d", d, minBellDist)
-	}
-}
-
-// TestSolarizedLightSharesDarkANSI pins Solarized's defining property: it is
-// one palette with two backgrounds, so the light and dark schemes have
-// identical ANSI tables and differ only in DefaultFG/DefaultBG. Upstream's
-// Xresources ships a single color0–15 block, and the official iTerm2 presets
-// for Light and Dark have byte-identical ANSI entries.
-//
-// This exists because the obvious-looking "fix" — reversing the base tones so
-// the table matches the light background — is wrong, and its symptom is
-// subtle: it puts base3 (the background) in slot 8, and every glyph an app
-// dims with bright-black silently vanishes.
-func TestSolarizedLightSharesDarkANSI(t *testing.T) {
-	t.Parallel()
-
-	if SolarizedLightTheme.ANSI != SolarizedDarkTheme.ANSI {
-		t.Error("Solarized Light and Dark must share one ANSI table")
-	}
-	if SolarizedLightTheme.DefaultBG == SolarizedDarkTheme.DefaultBG {
-		t.Error("Solarized Light and Dark must differ in DefaultBG")
-	}
-	if SolarizedLightTheme.IsDark() {
-		t.Error("Solarized Light reports dark")
 	}
 }
 
@@ -263,17 +193,12 @@ const dimSlot = 8
 func TestThemeDimSlotIsVisible(t *testing.T) {
 	t.Parallel()
 
-	// Solarized Dark is upstream's own wart, not ours: its color8 is base03,
-	// which is also its background. Every Solarized implementation renders
-	// bright-black invisible there, and deviating would make this theme not
-	// Solarized. Cfg.MinimumContrast is the way out for a user who hits it.
-	exempt := map[string]bool{"SolarizedDark": true}
-
+	// No exemptions: the whole bundled corpus clears this floor. If a
+	// regenerated table ever brings in a theme that does not, add it here with
+	// the upstream reason rather than lowering minDimDist — Cfg.MinimumContrast
+	// is the escape hatch for a user who picks such a theme anyway.
 	const minDimDist = 40
 	for _, th := range shippedThemes() {
-		if exempt[th.name] {
-			continue
-		}
 		c := th.theme.ANSI[dimSlot]
 		if d := chanDist(c, th.theme.DefaultBG); d < minDimDist {
 			t.Errorf("%s: ANSI 8 %v is %d from DefaultBG %v, want >= %d — "+
@@ -292,14 +217,80 @@ func TestSetThemeRebuildsOverlay(t *testing.T) {
 	t.Parallel()
 
 	g := newGrid(4, 8)
-	g.setTheme(CatppuccinMochaTheme)
+	g.setTheme(mustBundled(t, "Catppuccin Mocha"))
 	dark := g.ov
 
-	g.setTheme(CatppuccinLatteTheme)
+	latte := mustBundled(t, "Catppuccin Latte")
+	g.setTheme(latte)
 	if g.ov == dark {
 		t.Fatal("overlay palette unchanged after a dark -> light theme swap")
 	}
-	if want := deriveOverlay(CatppuccinLatteTheme); g.ov != want {
+	if want := deriveOverlay(latte); g.ov != want {
 		t.Errorf("grid overlay does not match deriveOverlay for the new theme")
+	}
+}
+
+// TestDeriveBellAlphaOnlyRisesWhenForced pins the escalation order in
+// deriveBell: the wash's color is what moves first, and the alpha only leaves
+// its baseline for a background that leaves no headroom. Without this, a change
+// that raised the alpha eagerly would make the bell louder on every theme and
+// no test would notice — TestOverlayContrast only checks the floor is met, not
+// what it cost to meet it.
+func TestDeriveBellAlphaOnlyRisesWhenForced(t *testing.T) {
+	t.Parallel()
+
+	// Hot Dog Stand's background is a saturated red at middling luma: at the
+	// baseline alpha even a pure white wash cannot clear minBellDist, so this
+	// is a theme where the alpha genuinely has to move.
+	forced := deriveOverlay(mustBundled(t, "Hot Dog Stand"))
+	if forced.bellPeakAlpha <= bellFlashPeakAlpha {
+		t.Errorf("bellPeakAlpha = %d, want above the %d baseline — this theme "+
+			"cannot reach minBellDist without it", forced.bellPeakAlpha, bellFlashPeakAlpha)
+	}
+	if forced.bellPeakAlpha > bellMaxPeakAlpha {
+		t.Errorf("bellPeakAlpha = %d exceeds the %d cap", forced.bellPeakAlpha, bellMaxPeakAlpha)
+	}
+
+	// The overwhelming majority must be untouched, or the escalation is not a
+	// last resort. Counted rather than asserted per theme: the exact set is a
+	// property of the corpus, the proportion is the design intent.
+	var raised int
+	for _, th := range shippedThemes() {
+		if deriveOverlay(th.theme).bellPeakAlpha != bellFlashPeakAlpha {
+			raised++
+		}
+	}
+	if limit := len(shippedThemes()) / 20; raised > limit {
+		t.Errorf("%d of %d themes needed a raised bell alpha, want at most %d — "+
+			"the wash's color should be doing this work",
+			raised, len(shippedThemes()), limit)
+	}
+	t.Logf("%d of %d themes needed a raised bell alpha", raised, len(shippedThemes()))
+}
+
+// pushOff's last line is documented as unreachable for every bundled theme,
+// which is exactly why it needs a test: a background midway between the poles
+// combined with a near-transparent alpha genuinely puts the floor out of
+// reach, and the loop has to give up with the best available answer rather
+// than run off the end or spin.
+func TestPushOffUnreachableFloorReturnsPole(t *testing.T) {
+	t.Parallel()
+
+	// Mid gray: neither pole is far from it. Alpha 1 means essentially nothing
+	// of the color lands on screen, so no blend can move the composite.
+	bg := gui.RGB(128, 128, 128)
+	got := pushOff(gui.RGB(200, 40, 40), bg, 1, 700)
+
+	// Black is the marginally farther pole from mid gray (Rec.601 is not in
+	// play here — pushOff picks by chanDist).
+	if want := overlayBlack; got != want {
+		t.Errorf("pushOff on an unreachable floor = %v, want the far pole %v", got, want)
+	}
+
+	// And the ordinary case must still short-circuit: a color already clearing
+	// the floor comes back untouched, so the tuned look is preserved.
+	c := gui.RGB(255, 255, 255)
+	if got := pushOff(c, gui.RGB(0, 0, 0), 255, minChromeDist); got != c {
+		t.Errorf("pushOff moved a color that already cleared the floor: %v -> %v", c, got)
 	}
 }

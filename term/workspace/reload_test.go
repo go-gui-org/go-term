@@ -23,7 +23,7 @@ func newConfiguredWorkspace(t *testing.T, body string) (*Workspace, string) {
 		TextStyle:  gui.TextStyle{Family: "Menlo", Size: 12},
 		Themes: []term.NamedTheme{
 			{Name: "Default", Theme: term.DefaultTheme},
-			{Name: "Dracula", Theme: term.DraculaTheme},
+			{Name: "Dracula", Theme: testTheme(t, "Dracula")},
 		},
 	}
 	ws := &Workspace{w: &gui.Window{}, cfg: base, baseCfg: base}
@@ -61,7 +61,7 @@ term.find               = Cmd+G
 		ws.cfg.opts.scrollbar != 3 {
 		t.Errorf("opts = %+v", ws.cfg.opts)
 	}
-	if ws.cfg.opts.theme == nil || *ws.cfg.opts.theme != term.DraculaTheme {
+	if ws.cfg.opts.theme == nil || *ws.cfg.opts.theme != testTheme(t, "Dracula") {
 		t.Error("theme not resolved to Dracula")
 	}
 	if got := ws.cfg.opts.keys[term.ActionFind]; got.Key != gui.KeyG {

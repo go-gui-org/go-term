@@ -1,0 +1,621 @@
+# Bundled themes
+
+<!-- GENERATED FILE — DO NOT EDIT. See term/genthemes. -->
+
+go-term ships 602 color themes. Press `Cmd+Shift+T` to browse them
+with a live preview and filter — that is the intended way to pick one.
+
+Any name below is also valid for the `theme` key in `[general]`
+(see [config.md](config.md)); matching is case-insensitive.
+
+## Attribution
+
+These themes are generated from the Ghostty-format schemes in
+[mbadolato/iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes),
+commit `875a82f0fdc773ae45099ce683a11c56bb0f8b3d`, distributed under the MIT License,
+Copyright (c) 2011 to Present Mark Badolato.
+
+## Names (602)
+
+- 0x96f
+- 12-bit Rainbow
+- 3024 Day
+- 3024 Night
+- Aardvark Blue
+- Aardvark Ink
+- Abernathy
+- Acid Lime
+- Adventure
+- Adventure Time
+- Adwaita
+- Adwaita Dark
+- Afterglow
+- Aizen Dark
+- Aizen Light
+- Alabaster
+- Alien Blood
+- Amber CRT Retro
+- Andromeda
+- Apple Classic
+- Apple System Colors
+- Apple System Colors Light
+- Arcoiris
+- Ardoise
+- Argonaut
+- Arthur
+- Atelier Sulphurpool
+- Atlas Ragnarok
+- Atom
+- Atom One Dark
+- Atom One Light
+- Aubade
+- Aura
+- Aura Dark
+- Aurora
+- Ayu
+- Ayu Light
+- Ayu Mirage
+- Banana Blueberry
+- base16-icy
+- Batman
+- Belafonte Day
+- Belafonte Night
+- Birds Of Paradise
+- Black Metal
+- Black Metal (Bathory)
+- Black Metal (Burzum)
+- Black Metal (Dark Funeral)
+- Black Metal (Gorgoroth)
+- Black Metal (Immortal)
+- Black Metal (Khold)
+- Black Metal (Marduk)
+- Black Metal (Mayhem)
+- Black Metal (Nile)
+- Black Metal (Venom)
+- Blazer
+- Blue Berry Pie
+- Blue Dolphin
+- Blue Matrix
+- Bluloco Dark
+- Bluloco Light
+- Borland
+- Box
+- branch
+- Breadog
+- Breeze
+- Bright Lights
+- Broadcast
+- Brogrammer
+- Builtin Dark
+- Builtin Light
+- Builtin Pastel Dark
+- Builtin Tango Dark
+- Builtin Tango Light
+- C64
+- Calamity
+- Carbonfox
+- Cassette Tape
+- Catppuccin Frappe
+- Catppuccin Latte
+- Catppuccin Macchiato
+- Catppuccin Mocha
+- CGA
+- Chalk
+- Chalkboard
+- Challenger Deep
+- Chester
+- Ciapre
+- Citrus Ink
+- Citruszest
+- Claude
+- Claude Dark
+- Claude Light
+- Clear Dark
+- Clear Light
+- CLRS
+- Cobalt Neon
+- Cobalt Next
+- Cobalt Next Dark
+- Cobalt Next Minimal
+- Cobalt2
+- Coffee Theme
+- Cool Night
+- Crayon Pony Fish
+- CRT Amber
+- Cursor Dark
+- Cursor Light
+- Cutie Pro
+- Cyberdyne
+- Cyberpunk
+- Cyberpunk Scarlet Protocol
+- cyberpunk-icy
+- Dalton Dark
+- Dark Modern
+- Dark Pastel
+- Dark+
+- Darkermatrix
+- Darkmatrix
+- Darkside
+- datum (dark)
+- datum (light)
+- Dawnfox
+- Daybreak
+- Dayfox
+- Deep
+- Desert
+- Detuned
+- Dimidium
+- Dimmed Monokai
+- Django
+- Django Reborn Again
+- Django Smooth
+- Dogxi Misty
+- Doom One
+- Doom Peacock
+- Dot Gov
+- Dracula
+- Dracula+
+- Driftwood
+- Duckbones
+- Duotone Dark
+- Duskfox
+- Earthsong
+- Eclipse
+- Electron Highlighter
+- Electron Highlighter Day
+- Elegant
+- Elemental
+- Elementary
+- Embark
+- Embers Dark
+- Emerald Synth
+- ENCOM
+- Espresso
+- Espresso Libre
+- Everblush
+- Everforest Dark Hard
+- Everforest Dark Med
+- Everforest Dark Soft
+- Everforest Light Hard
+- Everforest Light Med
+- Everforest Light Soft
+- Fahrenheit
+- Fairyfloss
+- Farmhouse Dark
+- Farmhouse Light
+- Fideloper
+- Firefly Traditional
+- Firefox Dev
+- Firewatch
+- Fish Tank
+- Flat
+- Flatland
+- Flexoki Dark
+- Flexoki Light
+- Floraverse
+- Forest Blue
+- Forge Ember
+- Framer
+- Front End Delight
+- Frostbyte
+- Fun Forrest
+- Galaxy
+- Galizur
+- Ghostty Default Style Dark
+- GitHub
+- GitHub Dark
+- GitHub Dark Colorblind
+- GitHub Dark Default
+- GitHub Dark Dimmed
+- GitHub Dark High Contrast
+- GitHub Light Colorblind
+- GitHub Light Default
+- GitHub Light High Contrast
+- GitLab Dark
+- GitLab Dark Grey
+- GitLab Light
+- Glacier
+- Gleam
+- Gleam Classic
+- Grape
+- Graphite
+- Grass
+- Green Phosphor CRT
+- Grey Green
+- Gruber Darker
+- Gruvbox Dark
+- Gruvbox Dark Hard
+- Gruvbox Light
+- Gruvbox Light Hard
+- Gruvbox Material
+- Gruvbox Material Dark
+- Gruvbox Material Light
+- Guezwhoz
+- Hacktober
+- Hardcore
+- Harper
+- Havn Daggry
+- Havn Skumring
+- HaX0R Blue
+- HaX0R Gr33N
+- HaX0R R3D
+- hazyland
+- Heeler
+- Highway
+- Hipster Green
+- Hivacruz
+- Homebrew
+- Hopscotch
+- Hopscotch.256
+- Horizon
+- Horizon Bright
+- Hot Dog Stand
+- Hot Dog Stand (Mustard)
+- Hurtado
+- Hybrid
+- IBM 5153 CGA
+- IBM 5153 CGA (Black)
+- IC Green PPL
+- IC Orange PPL
+- Iceberg Dark
+- Iceberg Light
+- Idea
+- Idle Toes
+- IR Black
+- IRIX Console
+- IRIX Terminal
+- iTerm2 Dark Background
+- iTerm2 Default
+- iTerm2 Light Background
+- iTerm2 Pastel Dark Background
+- iTerm2 Smoooooth
+- iTerm2 Solarized Dark
+- iTerm2 Solarized Light
+- iTerm2 Tango Dark
+- iTerm2 Tango Light
+- Jackie Brown
+- Japanesque
+- Jellybeans
+- JetBrains Darcula
+- JetBrains Islands Dark
+- JetCalm Light
+- Jubi
+- Kanagawa Dragon
+- Kanagawa Lotus
+- Kanagawa Wave
+- Kanagawabones
+- Kanso Ink
+- Kanso Mist
+- Kanso Pearl
+- Kanso Zen
+- Karasu Night
+- Karasu Snow
+- Karma Dark
+- Karma Dark Dimmed
+- Karma Dark HC
+- Karma Light
+- Karma Light Dimmed
+- Karma Light HC
+- Keys Ocean Sunset
+- Keys Ocean Sunset HC
+- Kibble
+- Kitty Default
+- Kitty Low Contrast
+- Klein Void
+- Kolorit
+- Konsolas
+- Kurokula
+- Lab Fox
+- Laser
+- Later This Evening
+- Lavandula
+- Letterpress
+- Light Owl
+- Liquid Carbon
+- Liquid Carbon Transparent
+- London Bonfire Night
+- London Columbia Road
+- London Embankment Dusk
+- London Soho Night
+- Lovelace
+- Man Page
+- Mariana
+- Matcha Zen
+- Material
+- Material Dark
+- Material Darker
+- Material Design Colors
+- Material Ocean
+- Mathias
+- Matrix
+- Matte Black
+- Medallion
+- Melange Dark
+- Melange Light
+- Mellifluous
+- Mellow
+- Mesila One
+- Miami Heat
+- Miasma
+- Midnight Arcade
+- Midnight In Mojave
+- Mirage
+- Misterioso
+- Modus Operandi
+- Modus Operandi Deuteranopia
+- Modus Operandi Tinted
+- Modus Operandi Tritanopia
+- Modus Vivendi
+- Modus Vivendi Deuteranopia
+- Modus Vivendi Tinted
+- Modus Vivendi Tritanopia
+- Molokai
+- Mona Lisa
+- Monokai Classic
+- Monokai Pro
+- Monokai Pro Light
+- Monokai Pro Light Sun
+- Monokai Pro Machine
+- Monokai Pro Octagon
+- Monokai Pro Ristretto
+- Monokai Pro Spectrum
+- Monokai Remastered
+- Monokai Soda
+- Monokai SublimeText
+- Monokai Vivid
+- Monospace Dark
+- Monospace Light
+- Moonfly
+- Moonwalk
+- N0Tch2K
+- Nebula Drift
+- Neobones Dark
+- Neobones Light
+- Neon
+- Neon Purple
+- Neopolitan
+- Neutron
+- Night Lion V1
+- Night Lion V2
+- Night Owl
+- Night Owlish Light
+- Nightfox
+- Niji
+- No Clown Fiesta
+- No Clown Fiesta Light
+- Noctis
+- Noctis Azureus
+- Noctis Bordo
+- Noctis Hibernus
+- Noctis Lilac
+- Noctis Lux
+- Noctis Minimus
+- Noctis Obscuro
+- Noctis Sereno
+- Noctis Uva
+- Noctis Viola
+- Nocturnal Winter
+- Nord
+- Nord Light
+- Nord Wave
+- Nordfox
+- Novel
+- novmbr
+- Nvim Dark
+- Nvim Light
+- Obsidian
+- Ocean
+- Oceanic Material
+- Oceanic Next
+- Ollie
+- One Dark Two
+- One Double Dark
+- One Double Light
+- One Half Dark
+- One Half Light
+- Onenord
+- Onenord Light
+- Opaline
+- Operator Mono Dark
+- Outrun Electric
+- Overnight Slumber
+- owl
+- Oxblood
+- Oxide
+- Oxocarbon
+- Pale Night Hc
+- Pandora
+- Paraiso Dark
+- Patina
+- Patina Dark
+- Patina Dark Soft
+- Patina Lichen
+- Patina Light
+- Patina Moss
+- Patina Stellar
+- Paul Millr
+- Pencil Dark
+- Pencil Light
+- Peppermint
+- Phala Green Dark
+- Piatto Light
+- Pierre Dark
+- Pierre Light
+- Pnevma
+- Poimandres
+- Poimandres Darker
+- Poimandres Storm
+- Poimandres White
+- Popping And Locking
+- Porcelain
+- Powershell
+- Primary
+- Prism
+- Pro
+- Pro Light
+- Purple Portal
+- Purple Rain
+- Purplepeter
+- Pyrokai
+- Pyrokai Light
+- Rapture
+- Raycast Dark
+- Raycast Light
+- Rebecca
+- Red Alert
+- Red Planet
+- Red Sands
+- Relaxed
+- Retro
+- Retro Legends
+- Rippedcasts
+- Rose Pine
+- Rose Pine Dawn
+- Rose Pine Moon
+- Rouge 2
+- Royal
+- Ryuuko
+- Sakura
+- Sandstone Classic
+- Sandstone Ink
+- Sandstone Warm
+- Sauber
+- Scarlet Protocol
+- Sea Shells
+- Seafoam Pastel
+- SeedFlip Abyss
+- SeedFlip Amethyst
+- SeedFlip Canopy
+- SeedFlip Carbon
+- SeedFlip Coral
+- SeedFlip Ember
+- SeedFlip Glacier
+- SeedFlip Inkwell
+- SeedFlip Ivory
+- SeedFlip Nightfall
+- SeedFlip Phosphor
+- SeedFlip Pulse
+- SeedFlip Ultraviolet
+- SeedFlip Voltage
+- SeedFlip Wavelength
+- Selenized Black
+- Selenized Dark
+- Selenized Light
+- Seoulbones Dark
+- Seoulbones Light
+- Sequoia Monochrome Dark
+- Sequoia Monochrome Light
+- Sequoia Moonlight Dark
+- Sequoia Moonlight Light
+- Sequoia Retro Dark
+- Sequoia Retro Light
+- Serendipity Midnight
+- Serendipity Morning
+- Serendipity Sunset
+- Seti
+- Shades Of Purple
+- Shaman
+- Shokunin
+- Slate
+- Sleepy Hollow
+- Smyck
+- Snazzy
+- Snazzy Soft
+- Soft Server
+- Solarized Darcula
+- Solarized Dark Higher Contrast
+- Solarized Dark Patched
+- Solarized Osaka Night
+- Sonokai
+- Spacedust
+- Spacegray
+- Spacegray Bright
+- Spacegray Eighties
+- Spacegray Eighties Dull
+- Spiderman
+- Spring
+- Square
+- Squintless
+- Squirrelsong Dark
+- Srcery
+- Starlight
+- Sublette
+- Subliminal
+- Sugarplum
+- Sumi Linen
+- Sumi Phosphor
+- Sundried
+- Sunset Drive
+- Symfonic
+- Synthwave
+- Synthwave Alpha
+- Synthwave Everything
+- Tango Adapted
+- Tango Half Adapted
+- Tearout
+- Teerb
+- Terafox
+- Terminal Basic
+- Terminal Basic Dark
+- Terminal Green 1999
+- Thayer Bright
+- The Hulk
+- Tinacious Design Dark
+- Tinacious Design Light
+- Token Dark
+- Token Light
+- TokyoNight
+- TokyoNight Day
+- TokyoNight Moon
+- TokyoNight Night
+- TokyoNight Storm
+- Tomorrow
+- Tomorrow Night
+- Tomorrow Night Blue
+- Tomorrow Night Bright
+- Tomorrow Night Burns
+- Tomorrow Night Eighties
+- Toy Chest
+- traffic
+- Trapped in Amber
+- Treehouse
+- Twilight
+- Ubuntu
+- Ultra Dark
+- Ultra Violent
+- Under The Sea
+- Unikitty
+- urban
+- Urple
+- Vague
+- Vaporwave Sunset
+- Vaughn
+- Velvet Court
+- Vercel
+- Verdigris
+- Vesper
+- Vibrant Ink
+- Vimbones
+- Violet Dark
+- Violet Light
+- Violite
+- Warm Neon
+- Wez
+- Whimsy
+- Wild Cherry
+- Wilmersdorf
+- Wombat
+- Wryan
+- Xcode Dark
+- Xcode Dark hc
+- Xcode Light
+- Xcode Light hc
+- Xcode WWDC
+- Y2K Chrome
+- Zenbones
+- Zenbones Dark
+- Zenbones Light
+- Zenburn
+- Zenburned
+- Zenwritten Dark
+- Zenwritten Light

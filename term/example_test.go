@@ -22,10 +22,13 @@ func ExampleCfg() {
 	cfg := term.Cfg{
 		ScrollbackRows:  10000,
 		AllowOSC52Write: true, // trusted environment
-		Themes: []term.NamedTheme{
-			{Name: "Default", Theme: term.DefaultTheme},
-			{Name: "Solarized Dark", Theme: term.SolarizedDarkTheme},
-		},
+		// Themes[0] seeds the grid and decides the child's COLORFGBG, so the
+		// theme to start in goes first; the rest are what the theme browser
+		// offers. term.BundledThemes returns every theme go-term ships.
+		Themes: append(
+			[]term.NamedTheme{{Name: "Default", Theme: term.DefaultTheme}},
+			term.BundledThemes()...,
+		),
 	}
 	_ = cfg // cfg is passed to term.New
 }

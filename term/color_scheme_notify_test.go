@@ -95,7 +95,7 @@ func TestSetThemeNotifiesColorScheme(t *testing.T) {
 	// dark → dark: nothing changed that the notification can describe, and one
 	// report per keystroke of a theme-cycling chord is noise in the child's
 	// input stream.
-	tm.SetTheme(GruvboxTheme)
+	tm.SetTheme(mustBundled(t, "Gruvbox Dark"))
 	if got := readWithin(out, 150*time.Millisecond); len(got) != 0 {
 		t.Fatalf("same-scheme switch emitted %q", got)
 	}

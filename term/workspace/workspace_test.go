@@ -228,27 +228,21 @@ func TestLiveTermCount_NoTabsAndEmptyTermsReturnsZero(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Theme picker — no-op guard paths
+// Theme browser — no-op guard paths
 //
-// Active paths (Toggle open, arrow-key navigation, apply, confirm) require a
-// live *gui.Window + *term.Term and are covered visually via examples/falcon.
-// These exercise the early-return guards: zero themes, out-of-bounds apply.
+// Active paths (open, navigation, filter, apply, cancel) need a live
+// *gui.Window + *term.Term and live in restore_test.go. This exercises the
+// early-return guard: zero configured themes.
 // ---------------------------------------------------------------------------
 
-func TestToggleThemePicker_ZeroThemesNoop(t *testing.T) {
+func TestToggleThemeBrowser_ZeroThemesNoop(t *testing.T) {
 	ws := &Workspace{cfg: Cfg{}}
-	// Must not panic and themePickerVisible must remain false.
-	ws.ToggleThemePicker()
-	if ws.themePickerVisible {
-		t.Error("themePickerVisible unexpectedly true with zero themes")
+	// Must not panic, and it must not open — the guard runs before ws.w is
+	// touched, which matters because ws.w is nil here.
+	ws.ToggleThemeBrowser()
+	if ws.browser.visible {
+		t.Error("browser unexpectedly visible with zero themes")
 	}
-}
-
-func TestApplyTheme_OutOfBoundsReturns(t *testing.T) {
-	ws := &Workspace{cfg: Cfg{Themes: []term.NamedTheme{{Name: "a"}}}}
-	// Negative index: early return before ws.w.UpdateWindow (window is nil).
-	ws.applyTheme(-1)
-	ws.applyTheme(5)
 }
 
 // ---------------------------------------------------------------------------
@@ -281,13 +275,13 @@ func TestApplyThemeByName_UnknownNameReturnsFalse(t *testing.T) {
 }
 
 func TestApplyThemeByName_CaseInsensitiveMatch(t *testing.T) {
-	th := term.DraculaTheme
+	th := testTheme(t, "Dracula")
 	ws := &Workspace{
 		cfg: Cfg{
 			Themes: []term.NamedTheme{
 				{Name: "Dracula", Theme: th},
 			},
-			opts: termOpts{theme: &term.DefaultTheme},
+			opts: themeOpts(term.NamedTheme{Name: "Default", Theme: term.DefaultTheme}),
 		},
 	}
 	if !ws.applyThemeByName("dRaCuLa") {
@@ -304,7 +298,7 @@ func TestApplyThemeByName_SetsTheme(t *testing.T) {
 		cfg: Cfg{
 			Themes: []term.NamedTheme{
 				{Name: "Default", Theme: term.DefaultTheme},
-				{Name: "Dracula", Theme: term.DraculaTheme},
+				{Name: "Dracula", Theme: testTheme(t, "Dracula")},
 			},
 		},
 	}
@@ -331,8 +325,8 @@ func TestNotifyColorScheme(t *testing.T) {
 		cfg: Cfg{
 			Themes: []term.NamedTheme{
 				{Name: "Default", Theme: term.DefaultTheme},
-				{Name: "Dracula", Theme: term.DraculaTheme},
-				{Name: "Solarized Light", Theme: term.SolarizedLightTheme},
+				{Name: "Dracula", Theme: testTheme(t, "Dracula")},
+				{Name: "Solarized Light", Theme: testTheme(t, "iTerm2 Solarized Light")},
 			},
 			OnColorScheme: func(dark bool) { got = append(got, dark) },
 		},
@@ -362,7 +356,7 @@ func TestSelectThemeByName(t *testing.T) {
 		return &Workspace{cfg: Cfg{
 			Themes: []term.NamedTheme{
 				{Name: "Default", Theme: term.DefaultTheme},
-				{Name: "Solarized Light", Theme: term.SolarizedLightTheme},
+				{Name: "Solarized Light", Theme: testTheme(t, "iTerm2 Solarized Light")},
 			},
 			OnColorScheme: func(dark bool) { *seen = append(*seen, dark) },
 		}}

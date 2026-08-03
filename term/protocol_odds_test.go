@@ -27,18 +27,51 @@ func replyTo(t *testing.T, rows, cols int, input string, prep func(g *grid)) (st
 func TestThemeIsDark(t *testing.T) {
 	t.Parallel()
 
-	// Every shipped theme declares its character in shippedThemes. A theme
-	// that reports the other one changes the DSR ?996 answer for it — and, in
-	// falcon, which way the window chrome goes — so this is where that shows
-	// up. Theme.IsDark is checked alongside the internal predicate because it
-	// is what embedders call; the two must not diverge.
+	// Theme.IsDark is what embedders call; themeIsDark is what the DSR ?996
+	// answer and the mode-2031 notification go through. They must not diverge
+	// for any theme go-term ships, which at ~600 themes is worth asserting
+	// mechanically rather than by hand.
 	for _, th := range shippedThemes() {
-		if got := themeIsDark(th.theme.DefaultBG); got != th.dark {
-			t.Errorf("%s: themeIsDark(DefaultBG %v) = %v, want %v",
-				th.name, th.theme.DefaultBG, got, th.dark)
+		if got, want := th.theme.IsDark(), themeIsDark(th.theme.DefaultBG); got != want {
+			t.Errorf("%s: Theme.IsDark() = %v but themeIsDark(DefaultBG %v) = %v",
+				th.name, got, th.theme.DefaultBG, want)
 		}
-		if got := th.theme.IsDark(); got != th.dark {
-			t.Errorf("%s: Theme.IsDark() = %v, want %v", th.name, got, th.dark)
+	}
+
+	// The loop above only proves the two agree — it cannot catch them agreeing
+	// on the wrong answer, which is what a regenerated table that swapped
+	// foreground and background would produce. These expectations are stated
+	// by a human for that reason; a failure here means the corpus changed
+	// character, not that the predicate drifted.
+	character := []struct {
+		name string
+		dark bool
+	}{
+		{"Default", true},
+		{"Dracula", true},
+		{"Gruvbox Dark", true},
+		{"Nord", true},
+		{"Catppuccin Mocha", true},
+		{"iTerm2 Solarized Dark", true},
+		{"Catppuccin Latte", false},
+		{"Gruvbox Light", false},
+		{"iTerm2 Solarized Light", false},
+		{"GitHub Light Default", false},
+	}
+	shipped := make(map[string]Theme, len(shippedThemes()))
+	for _, th := range shippedThemes() {
+		shipped[th.name] = th.theme
+	}
+	for _, c := range character {
+		th, ok := shipped[c.name]
+		if !ok {
+			t.Errorf("%s: no longer shipped — pick another theme of the same "+
+				"character rather than dropping the assertion", c.name)
+			continue
+		}
+		if got := th.IsDark(); got != c.dark {
+			t.Errorf("%s: IsDark() = %v, want %v (DefaultBG %v)",
+				c.name, got, c.dark, th.DefaultBG)
 		}
 	}
 

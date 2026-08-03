@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -158,25 +159,25 @@ func defaultDownloadDir() string {
 	return filepath.Join(home, "Downloads")
 }
 
-// themeList returns the built-in color themes available in falcon.
+// themeList returns the color themes available in falcon: go-term's own
+// default followed by the whole bundled corpus.
+//
+// Index 0 matters — term reads Themes[0] both to seed the grid and to decide
+// the COLORFGBG a child is spawned with — so Default stays first. The bundle
+// is already sorted case-insensitively by name, which is the order the theme
+// browser displays.
 func themeList() []term.NamedTheme {
-	return []term.NamedTheme{
-		{Name: "Default", Theme: term.DefaultTheme},
-		{Name: "Dracula", Theme: term.DraculaTheme},
-		{Name: "Catppuccin Mocha", Theme: term.CatppuccinMochaTheme},
-		{Name: "Tokyo Night", Theme: term.TokyoNightTheme},
-		{Name: "Monokai", Theme: term.MonokaiTheme},
-		{Name: "One Dark", Theme: term.OneDarkTheme},
-		{Name: "Rosé Pine", Theme: term.RosePineTheme},
-		{Name: "Kanagawa", Theme: term.KanagawaTheme},
-		{Name: "Ayu Dark", Theme: term.AyuDarkTheme},
-		{Name: "Everforest", Theme: term.EverforestTheme},
-		{Name: "GitHub Dark", Theme: term.GitHubDarkTheme},
-		{Name: "Gruvbox", Theme: term.GruvboxTheme},
-		{Name: "Nord", Theme: term.NordTheme},
-		{Name: "Solarized Dark", Theme: term.SolarizedDarkTheme},
-		{Name: "Solarized Light", Theme: term.SolarizedLightTheme},
-		{Name: "GitHub Light", Theme: term.GitHubLightTheme},
-		{Name: "Catppuccin Latte", Theme: term.CatppuccinLatteTheme},
+	bundled := term.BundledThemes()
+	out := make([]term.NamedTheme, 0, len(bundled)+1)
+	out = append(out, term.NamedTheme{Name: "Default", Theme: term.DefaultTheme})
+	for _, nt := range bundled {
+		// The bundle has no "Default" today, but guard anyway: two entries
+		// with the same name would make theme = Default ambiguous and would
+		// show a duplicate row in the browser.
+		if strings.EqualFold(nt.Name, "Default") {
+			continue
+		}
+		out = append(out, nt)
 	}
+	return out
 }

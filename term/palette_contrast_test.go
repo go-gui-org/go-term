@@ -242,7 +242,7 @@ func TestApplyMinContrastGate(t *testing.T) {
 // run per cell, which is what the memo is for.
 func BenchmarkCellRunKey(b *testing.B) {
 	g := newGrid(24, 80)
-	g.setTheme(CatppuccinLatteTheme)
+	g.setTheme(mustBundled(b, "Catppuccin Latte"))
 	c := cell{Ch: 'x', Width: 1, FG: rgbColor(255, 161, 1)}
 	style := gui.TextStyle{}
 
@@ -268,7 +268,7 @@ func TestCellRunKey_AppliesMinimumContrast(t *testing.T) {
 	t.Parallel()
 
 	g := newGrid(4, 8)
-	g.setTheme(CatppuccinLatteTheme)
+	g.setTheme(mustBundled(t, "Catppuccin Latte"))
 	bg := g.Theme.DefaultBG
 	style := gui.TextStyle{}
 

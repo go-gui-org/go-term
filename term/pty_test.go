@@ -146,7 +146,7 @@ func TestColorFGBGEnv(t *testing.T) {
 			// the one the child is actually running inside.
 			name: "first_theme_wins",
 			cfg: Cfg{Themes: []NamedTheme{
-				{Name: "Solarized Light", Theme: SolarizedLightTheme},
+				{Name: "Solarized Light", Theme: mustBundled(t, "iTerm2 Solarized Light")},
 				{Name: "Default", Theme: DefaultTheme},
 			}},
 			want: "COLORFGBG=0;15",
@@ -154,14 +154,14 @@ func TestColorFGBGEnv(t *testing.T) {
 		{
 			name: "dark_theme",
 			cfg: Cfg{Themes: []NamedTheme{
-				{Name: "Catppuccin Mocha", Theme: CatppuccinMochaTheme},
+				{Name: "Catppuccin Mocha", Theme: mustBundled(t, "Catppuccin Mocha")},
 			}},
 			want: "COLORFGBG=15;0",
 		},
 		{
 			name: "light_theme",
 			cfg: Cfg{Themes: []NamedTheme{
-				{Name: "GitHub Light", Theme: GitHubLightTheme},
+				{Name: "GitHub Light", Theme: mustBundled(t, "GitHub Light Default")},
 			}},
 			want: "COLORFGBG=0;15",
 		},

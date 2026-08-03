@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	glyph "github.com/go-gui-org/go-glyph"
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-term/term"
 )
@@ -87,10 +86,9 @@ type Workspace struct {
 	commands    []gui.Command // metadata source for the help overlay
 	helpVisible bool
 
-	// themePickerVisible toggles the theme-selection overlay. When true,
-	// themePickerIdx tracks the highlighted row (arrow keys move it).
-	themePickerVisible bool
-	themePickerIdx     int
+	// browser is the full-window theme browser's state. Zero value is
+	// "closed"; see themebrowser.go.
+	browser themeBrowser
 
 	// schemeDark caches the light/dark character last handed to
 	// Cfg.OnColorScheme, so the callback fires on a change rather than on
@@ -378,7 +376,18 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 	if len(ws.tabs) > 1 {
 		contentH -= ws.tabBarHeight()
 	}
-	split := ws.splitView(tab.root, tab, contentW, contentH)
+	// The theme browser takes over the content area outright: a floating
+	// panel over a dimmed backdrop was the old picker, and the dimming is
+	// exactly what made a theme impossible to judge while choosing it. The
+	// panes are removed from the tree rather than covered, so no OnDraw runs
+	// for them and no PTY resize is published — reopening finds them
+	// unchanged.
+	var split gui.View
+	if ws.browser.visible {
+		split = ws.themeBrowserView(contentW, contentH)
+	} else {
+		split = ws.splitView(tab.root, tab, contentW, contentH)
+	}
 
 	outer := tight(gui.FixedFixed)
 	outer.Width = float32(ww)
@@ -391,8 +400,8 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 	} else {
 		content = []gui.View{split}
 	}
-	// Appended before the overlays so a help panel or theme picker draws
-	// over the pill rather than under it.
+	// Appended before the overlays so a help panel draws over the pill
+	// rather than under it.
 	if tab.broadcast {
 		content = append(content, ws.broadcastPill())
 	}
@@ -401,160 +410,37 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 		// and panel overlay the panes without disturbing their layout.
 		content = append(content, ws.helpBackdrop(ww, wh), ws.helpPanel(ww, wh))
 	}
-	if ws.themePickerVisible {
-		content = append(content, ws.themePickerBackdrop(ww, wh),
-			ws.themePickerPanel())
-	}
 	outer.Content = content
 	return gui.Column(outer)
 }
 
 // — theme picker overlay ————————————————————————————————————
 
-// activeThemeIdx returns the index of the currently-active terminal theme
-// within cfg.Themes, or -1 when no pane is focused or the theme is not
-// found within the configured list.
+// activeThemeIdx returns the index of the currently-active theme within
+// cfg.Themes, or -1 when no theme is active or its name is not in the list.
+//
+// Keyed on the selected *name* rather than on the pane's Theme value: the
+// bundled corpus contains distinct themes with identical palettes, so a value
+// match can return an earlier entry that merely looks the same — which would
+// put the browser's checkmark on the wrong row and, through
+// persistableThemeName, save a theme the user never chose.
 func (ws *Workspace) activeThemeIdx() int {
-	if p := ws.ActivePane(); p != nil {
-		curTheme := p.Theme()
-		for i, nt := range ws.cfg.Themes {
-			if nt.Theme == curTheme {
-				return i
-			}
+	if ws.cfg.opts.themeName == "" {
+		return -1
+	}
+	for i, nt := range ws.cfg.Themes {
+		if strings.EqualFold(nt.Name, ws.cfg.opts.themeName) {
+			return i
 		}
 	}
 	return -1
-}
-
-// ToggleThemePicker shows or hides the theme-selection overlay. When
-// showing, the selected index is initialized to the currently-active theme.
-// Bound to Cmd+Shift+T. No-op when no themes are configured.
-func (ws *Workspace) ToggleThemePicker() {
-	if len(ws.cfg.Themes) == 0 {
-		return
-	}
-	if ws.themePickerVisible {
-		ws.themePickerVisible = false
-		ws.refresh()
-		return
-	}
-	ws.themePickerIdx = ws.activeThemeIdx()
-	if ws.themePickerIdx < 0 {
-		ws.themePickerIdx = 0
-	}
-	ws.themePickerVisible = true
-	ws.refresh()
-}
-
-// themePickerBackdrop dims the panes and dismisses the picker on click.
-func (ws *Workspace) themePickerBackdrop(ww, wh int) gui.View {
-	b := tight(gui.FixedFixed)
-	b.Width = float32(ww)
-	b.Height = float32(wh)
-	b.Float = true
-	b.FloatAnchor = gui.FloatTopLeft
-	b.FloatTieOff = gui.FloatTopLeft
-	b.FloatZIndex = 999
-	b.Color = gui.RGBA(0, 0, 0, 120)
-	b.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-		const edgePx = float32(30)
-		if e.MouseX < edgePx || e.MouseX > float32(ww)-edgePx ||
-			e.MouseY < edgePx || e.MouseY > float32(wh)-edgePx {
-			return
-		}
-		ws.themePickerVisible = false
-		ws.refresh()
-		e.IsHandled = true
-	}
-	return gui.Column(b)
-}
-
-// themePickerPanel renders a centered float listing every configured theme.
-// The currently-active theme is marked with a check; the arrow-key-highlighted
-// row gets a distinct background. Clicking a row applies that theme.
-func (ws *Workspace) themePickerPanel() gui.View {
-	theme := gui.CurrentTheme()
-	if len(ws.cfg.Themes) == 0 {
-		return gui.Column(tight(gui.FixedFit))
-	}
-	// Find index of currently-active theme for the check mark.
-	activeIdx := ws.activeThemeIdx()
-	// Clamp highlight index.
-	if ws.themePickerIdx < 0 {
-		ws.themePickerIdx = 0
-	}
-	if ws.themePickerIdx >= len(ws.cfg.Themes) {
-		ws.themePickerIdx = len(ws.cfg.Themes) - 1
-	}
-
-	rows := make([]gui.View, 0, len(ws.cfg.Themes)+1)
-	// The picker keeps the roomier M5 type; only the help overlay tightens.
-	headStyle := theme.M5
-	headStyle.Typeface = glyph.TypefaceBold
-	rows = append(rows, ws.helpHeader("Themes", theme, headStyle))
-	for i, nt := range ws.cfg.Themes {
-		idx := i // capture
-		bg := gui.Color{}
-		if idx == ws.themePickerIdx {
-			bg = theme.ColorActive
-		}
-		mark := "  "
-		if idx == activeIdx {
-			mark = "✓ "
-		}
-		row := tight(gui.FillFit)
-		row.Padding = gui.SomeP(2, 6, 2, 6)
-		row.Color = bg
-		row.Radius = gui.SomeF(3)
-		row.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-			ws.applyTheme(idx)
-			ws.themePickerVisible = false
-			ws.refresh()
-			e.IsHandled = true
-		}
-		style := theme.M5
-		row.Content = []gui.View{
-			gui.Text(gui.TextCfg{Text: mark + nt.Name, TextStyle: style}),
-		}
-		rows = append(rows, gui.Row(row))
-	}
-
-	panel := tight(gui.FixedFit)
-	panel.Width = 320
-	panel.Float = true
-	panel.FloatAnchor = gui.FloatMiddleCenter
-	panel.FloatTieOff = gui.FloatMiddleCenter
-	panel.FloatZIndex = 1000
-	panel.Color = theme.ColorPanel
-	panel.ColorBorder = theme.ColorBorder
-	panel.SizeBorder = gui.SomeF(1)
-	panel.Radius = gui.SomeF(6)
-	panel.Padding = gui.SomeP(14, 18, 14, 18)
-	panel.Spacing = gui.SomeF(2)
-	// Swallow clicks so they don't fall through to the backdrop.
-	panel.OnClick = func(_ *gui.Layout, e *gui.Event, _ *gui.Window) { e.IsHandled = true }
-	panel.Content = rows
-	return gui.Column(panel)
-}
-
-// applyTheme sets the given theme index on all panes across all tabs
-// and refreshes the window. Callers that are already building the view
-// (restoreWorkspace, Restore zero-tab path) should use applyThemeByName
-// instead, which skips the extra UpdateWindow.
-func (ws *Workspace) applyTheme(idx int) {
-	if idx < 0 || idx >= len(ws.cfg.Themes) {
-		return
-	}
-	nt := ws.cfg.Themes[idx]
-	ws.applyThemeImpl(nt)
-	ws.w.UpdateWindow()
 }
 
 // applyThemeImpl sets the active theme pointer and calls SetTheme on every
 // pane across every tab. Does not refresh the window — callers that need a
 // refresh must call UpdateWindow themselves.
 func (ws *Workspace) applyThemeImpl(nt term.NamedTheme) {
-	ws.cfg.opts.theme = &nt.Theme
+	ws.cfg.opts.setTheme(nt)
 	for _, tab := range ws.tabs {
 		for _, tm := range tab.terms {
 			tm.SetTheme(nt.Theme)
@@ -567,21 +453,17 @@ func (ws *Workspace) applyThemeImpl(nt term.NamedTheme) {
 
 // applyThemeByName looks up name in the configured theme list
 // (case-insensitively) and applies the matched theme to all panes.
-// Returns false when no theme matches. Unlike applyTheme it does not
+// Returns false when no theme matches. It does not
 // call UpdateWindow — callers that are already building the view
 // (restoreWorkspace, Restore zero-tab path) will trigger a refresh
 // themselves.
 func (ws *Workspace) applyThemeByName(name string) bool {
-	if len(ws.cfg.Themes) == 0 || name == "" {
+	nt, ok := findTheme(ws.cfg.Themes, name)
+	if !ok {
 		return false
 	}
-	for i, nt := range ws.cfg.Themes {
-		if strings.EqualFold(nt.Name, name) {
-			ws.applyThemeImpl(ws.cfg.Themes[i])
-			return true
-		}
-	}
-	return false
+	ws.applyThemeImpl(nt)
+	return true
 }
 
 // selectThemeByName makes the named theme effective without touching any pane,
@@ -598,52 +480,16 @@ func (ws *Workspace) applyThemeByName(name string) bool {
 // Reports whether a theme matched, so the caller can tell "no such theme" from
 // "already right".
 func (ws *Workspace) selectThemeByName(name string) bool {
-	if len(ws.cfg.Themes) == 0 || name == "" {
+	nt, ok := findTheme(ws.cfg.Themes, name)
+	if !ok {
 		return false
 	}
-	for _, nt := range ws.cfg.Themes {
-		if !strings.EqualFold(nt.Name, name) {
-			continue
-		}
-		th := nt.Theme
-		ws.cfg.opts.theme = &th
-		// Chrome follows the theme the panes are about to be built with, not
-		// the config file's — otherwise a restore into a light theme paints
-		// dark chrome for one frame.
-		ws.notifyColorScheme()
-		return true
-	}
-	return false
-}
-
-// themePickerMoveUp moves the highlight up by one entry and applies
-// the theme immediately for live preview.
-func (ws *Workspace) themePickerMoveUp() {
-	ws.themePickerIdx--
-	if ws.themePickerIdx < 0 {
-		ws.themePickerIdx = len(ws.cfg.Themes) - 1
-	}
-	ws.applyTheme(ws.themePickerIdx)
-	ws.refresh()
-}
-
-// themePickerMoveDown moves the highlight down by one entry and applies
-// the theme immediately for live preview.
-func (ws *Workspace) themePickerMoveDown() {
-	ws.themePickerIdx++
-	if ws.themePickerIdx >= len(ws.cfg.Themes) {
-		ws.themePickerIdx = 0
-	}
-	ws.applyTheme(ws.themePickerIdx)
-	ws.refresh()
-}
-
-// themePickerConfirm dismisses the picker without changing the theme
-// (the currently-highlighted theme was already applied by arrow-key
-// navigation or a click).
-func (ws *Workspace) themePickerConfirm() {
-	ws.themePickerVisible = false
-	ws.refresh()
+	ws.cfg.opts.setTheme(nt)
+	// Chrome follows the theme the panes are about to be built with, not the
+	// config file's — otherwise a restore into a light theme paints dark
+	// chrome for one frame.
+	ws.notifyColorScheme()
+	return true
 }
 
 // —————————————————————————————————————————————————————————————
@@ -886,21 +732,6 @@ func (ws *Workspace) tabBarHeight() float32 {
 		return style.Size + 2
 	}
 	return 18
-}
-
-// CycleTheme applies the next theme from cfg.Themes to every pane in
-// every tab, wrapping after the last. The active pane's current theme
-// determines the starting point. No-op when no themes are configured.
-func (ws *Workspace) CycleTheme() {
-	if len(ws.cfg.Themes) == 0 {
-		return
-	}
-	cur := ws.activeThemeIdx()
-	if cur < 0 {
-		cur = 0
-	}
-	next := (cur + 1) % len(ws.cfg.Themes)
-	ws.applyTheme(next)
 }
 
 // onPaneTitle is called from the Term's OnTitle callback (via

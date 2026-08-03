@@ -89,12 +89,16 @@ Booleans accept `true`/`false`, `yes`/`no`, `on`/`off`, and `1`/`0`.
 
 `theme` is matched by name against the themes the embedder registered; an
 unknown name is logged and the default is kept. Only names are accepted —
-nothing loads a theme from disk. `falcon` ships:
+nothing loads a theme from disk.
 
-- Dark: Default, Dracula, Catppuccin Mocha, Tokyo Night, Monokai, One Dark,
-  Rosé Pine, Kanagawa, Ayu Dark, Everforest, GitHub Dark, Gruvbox, Nord,
-  Solarized Dark.
-- Light: Solarized Light, GitHub Light, Catppuccin Latte.
+`falcon` registers go-term's own `Default` plus the whole bundled corpus: 602
+themes, 473 dark and 129 light. **Press `Cmd+Shift+T` to browse them** with a
+live preview and a filter — that is the intended way to choose one, and the
+names are listed in [themes.md](themes.md) if you would rather set it here.
+
+Theme names that go-term shipped before the corpus (`Tokyo Night`, `One Dark`,
+`Solarized Dark`, `Gruvbox`, …) still resolve, to their closest corpus
+equivalent. Existing config files and saved workspaces keep working.
 
 Picking a light theme also switches `falcon`'s window chrome (tab bar,
 borders) to light, and tells any child app subscribed to mode 2031 that the
@@ -269,7 +273,9 @@ actually want to press.
 | `workspace.reloadConfig`                       | `Cmd+Shift+,`                                                 |
 | `workspace.toggleHelp`                         | `Cmd+/`                                                       |
 | `workspace.dismissOverlay`                     | `Escape` (only while an overlay is open)                      |
-| `workspace.themePickerUp` / `Down` / `Confirm` | `Up` / `Down` / `Enter` (only while the theme picker is open) |
+| `workspace.themeBrowserUp` / `Down`            | `Up` / `Down` (only while the theme browser is open)          |
+| `workspace.themeBrowserPageUp` / `PageDown`    | `PageUp` / `PageDown` (only while the theme browser is open)  |
+| `workspace.themeBrowserConfirm`                | `Enter` (only while the theme browser is open)                |
 
 #### Broadcast input
 
@@ -429,7 +435,7 @@ family = JetBrainsMono NFM
 size   = 13
 
 [general]
-theme              = Tokyo Night
+theme              = TokyoNight
 scrollback         = 20000
 bell               = visual
 scrollbar          = 6
