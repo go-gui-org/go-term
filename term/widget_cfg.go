@@ -144,6 +144,18 @@ type Cfg struct {
 	// Zero (default) uses the built-in 4 px. Negative hides the scrollbar.
 	ScrollbarWidth float32
 
+	// MinimumContrast is the WCAG contrast ratio (1.0–21.0) a cell's
+	// foreground is forced to reach against its background at render time. Any
+	// value at or below 1 (the default) disables the clamp.
+	//
+	// It exists because a truecolor SGR is not themeable: an app that emits
+	// colors chosen for a dark background — eza, starship, most `ls` themes —
+	// hands a light theme text at 1.5:1 that no palette setting can fix. The
+	// grid keeps the color the child sent, so copy, search and recording are
+	// unaffected; only what is painted changes. 3.0 is a reasonable setting,
+	// 4.5 is the WCAG floor for body text.
+	MinimumContrast float64
+
 	// MiddleClickPaste enables pasting with the middle mouse button: the X11
 	// PRIMARY selection where one exists, the clipboard otherwise. Off by
 	// default because it is a Unix convention rather than a universal one —
@@ -267,5 +279,15 @@ func ThemeMenuItems(themes []NamedTheme) []gui.MenuItemCfg {
 func applyTheme(g *grid, cfg Cfg) {
 	if len(cfg.Themes) > 0 {
 		g.setTheme(cfg.Themes[0].Theme)
+	}
+}
+
+// applyContrastConfig seeds the render-time contrast floor. A non-finite value
+// is treated as unset rather than propagated: NaN would compare false against
+// every threshold and silently disable the clamp in a way no caller could
+// debug from the config file.
+func applyContrastConfig(g *grid, cfg Cfg) {
+	if r := cfg.MinimumContrast; realNumber(r) && r > contrastDisabled {
+		g.MinContrast = r
 	}
 }

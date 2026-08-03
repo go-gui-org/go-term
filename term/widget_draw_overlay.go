@@ -70,11 +70,11 @@ func scrollbarOffsetForY(sbLen, rows int, y, viewH float32) float32 {
 	return off
 }
 
-// Failure ticks: small red marks in the scrollbar track at the prompt row of
-// every command that exited non-zero, so a failure buried in a long build log
-// is findable by eye rather than only by chord.
-var scrollbarFailColor = gui.RGB(214, 74, 66)
-
+// Failure-tick geometry. The ticks are small marks in the scrollbar track at
+// the prompt row of every command that exited non-zero, so a failure buried in
+// a long build log is findable by eye rather than only by chord. Their red
+// comes from the theme-derived overlay palette (grid.ov) so it stays legible
+// over a light track — see palette_overlay.go.
 const (
 	scrollbarTickH float32 = 2
 	// Ticks stay painted when the scrollbar is idle — a marker you can only
@@ -121,7 +121,7 @@ func (t *Term) drawScrollbarFailures(ds *drawState, sw, inset float32, thumbVisi
 	if thumbVisible || t.scrollbar.hovered {
 		alpha = scrollbarTickActiveAlpha
 	}
-	c := scrollbarFailColor
+	c := g.ov.fail
 	c.A = alpha
 
 	x := ds.dc.Width - sw - inset
@@ -137,17 +137,14 @@ func (t *Term) drawScrollbarFailures(ds *drawState, sw, inset float32, thumbVisi
 	}
 }
 
-// OSC 9;4 progress fill. Shares the scrollbar lane with the failure ticks
-// rather than claiming new chrome: the track is already the pane's "status of
-// the whole buffer" column, and a build's progress belongs to the same axis.
-var (
-	scrollbarProgressColor = gui.RGB(64, 132, 214)  // normal
-	scrollbarPausedColor   = gui.RGB(214, 158, 66)  // paused / warning
-	scrollbarIndetColor    = gui.RGB(128, 128, 128) // indeterminate
-)
-
 // drawScrollbarProgress paints the OSC 9;4 progress state as a fill running
 // down from the top of the scrollbar track.
+//
+// It shares the scrollbar lane with the failure ticks rather than claiming new
+// chrome: the track is already the pane's "status of the whole buffer" column,
+// and a build's progress belongs to the same axis. Its four colors (normal,
+// error, paused, indeterminate) come from grid.ov, so they darken on a light
+// theme instead of washing out at the track's alpha.
 //
 // The indeterminate state fills the whole track at the idle alpha instead of
 // animating. An animated pulse would need a version bump every frame, which
@@ -159,13 +156,13 @@ func (t *Term) drawScrollbarProgress(ds *drawState, sw, inset float32, thumbVisi
 	frac := float32(g.ProgressValue) / 100
 	switch g.ProgressState {
 	case 1:
-		c = scrollbarProgressColor
+		c = g.ov.progress
 	case 2:
-		c = scrollbarFailColor
+		c = g.ov.fail
 	case 3:
-		c, frac = scrollbarIndetColor, 1
+		c, frac = g.ov.indet, 1
 	case 4:
-		c = scrollbarPausedColor
+		c = g.ov.paused
 	default:
 		return // state 0 — nothing to show
 	}
@@ -329,9 +326,9 @@ func (t *Term) drawOverlays(ds *drawState) {
 		thumbX := ds.dc.Width - sw - inset
 		viewOffsetVal := float32(g.ViewOffset) + g.ViewSubPx/t.cellH
 		thumbY, thumbH := scrollbarGeometry(sb, g.Rows, viewOffsetVal, ds.dc.Height)
-		thumbColor := gui.RGBA(128, 128, 128, 120)
+		thumbColor := g.ov.thumb
 		if t.scrollbar.hovered {
-			thumbColor = gui.RGBA(180, 180, 180, 150)
+			thumbColor = g.ov.thumbHover
 		}
 		ds.dc.FilledRoundedRect(thumbX, thumbY, sw, thumbH,
 			sw/2, thumbColor)
@@ -366,7 +363,7 @@ func (t *Term) drawOverlays(ds *drawState) {
 	// (80×24 for vttest, a width a tool assumes) guesswork.
 	t.drawSizeBadge(ds)
 
-	// Visual bell: a faint white wash that eases out over the flash
+	// Visual bell: a faint contrasting wash that eases out over the flash
 	// duration rather than switching on and off, so an incidental BEL
 	// registers peripherally instead of strobing the whole pane.
 	t.drawBellFlash(ds)
@@ -404,8 +401,11 @@ func (t *Term) drawBellFlash(ds *drawState) {
 	if alpha == 0 {
 		return
 	}
+	// The wash color follows the theme (grid.ov): a light wash on a dark
+	// theme, a dark one on a light theme. A fixed white flash over a white
+	// canvas is not a subtle bell, it is no bell at all.
 	ds.dc.FilledRect(0, 0, ds.dc.Width, ds.dc.Height,
-		gui.RGBA(255, 255, 255, alpha))
+		withAlpha(ds.g.ov.bellFlash, alpha))
 
 	// Drive the next step of the fade. scheduleBellClear already covers the
 	// final repaint that removes the overlay; this only fills in the frames
@@ -581,7 +581,7 @@ func (t *Term) drawRecordIndicator(ds *drawState) {
 	label += strconv.Itoa(sec)
 
 	cs := ds.style
-	cs.Color = gui.RGB(255, 235, 235)
+	cs.Color = ds.g.ov.recordText
 	cs.Typeface = glyph.TypefaceRegular
 	textW := ds.dc.TextWidth(label, cs)
 	if textW <= 0 || !realNumber(textW) {
@@ -596,7 +596,7 @@ func (t *Term) drawRecordIndicator(ds *drawState) {
 	y := float32(recordIndicatorPad)
 	// Semi-transparent so it dims rather than hides the cells underneath —
 	// the terminal content matters more than the badge.
-	ds.dc.FilledRoundedRect(x, y, w, h, h/2, gui.RGBA(150, 30, 30, 210))
+	ds.dc.FilledRoundedRect(x, y, w, h, h/2, ds.g.ov.recordFill)
 	ds.dc.Text(x+recordIndicatorPad, y+recordIndicatorPad/2, label, cs)
 }
 
@@ -634,7 +634,7 @@ func (t *Term) drawSizeBadge(ds *drawState) {
 	label := strconv.Itoa(t.resize.badgeCols) + " × " + strconv.Itoa(t.resize.badgeRows)
 
 	cs := ds.style
-	cs.Color = gui.RGB(240, 240, 240)
+	cs.Color = ds.g.ov.badgeText
 	cs.Typeface = glyph.TypefaceRegular
 	textW := ds.dc.TextWidth(label, cs)
 	if textW <= 0 || !realNumber(textW) {
@@ -647,22 +647,24 @@ func (t *Term) drawSizeBadge(ds *drawState) {
 	if x < 0 || y < 0 {
 		return // pane too small to hold the badge without clipping
 	}
-	// Dark and mostly opaque: this is a momentary HUD read at a glance, so
-	// legibility beats seeing the cells behind it.
-	ds.dc.FilledRoundedRect(x, y, w, h, h/4, gui.RGBA(20, 20, 20, 225))
+	// Mostly opaque: this is a momentary HUD read at a glance, so legibility
+	// beats seeing the cells behind it. Dark plate with light text on a dark
+	// theme, the reverse on a light one.
+	ds.dc.FilledRoundedRect(x, y, w, h, h/4, ds.g.ov.badgeFill)
 	ds.dc.Text(x+sizeBadgePad, y+sizeBadgePad, label, cs)
 }
-
-// copyCursorColor is the copy-mode cursor's fill. Deliberately not the theme's
-// cursor color: the copy cursor must be distinguishable from the terminal
-// cursor at a glance, or there is no feedback that a motion key did anything —
-// on entry the two sit on the same cell.
-var copyCursorColor = gui.RGB(255, 176, 0)
 
 // drawCopyCursor paints the copy-mode cursor at its viewport position.
 // Separate from drawCursor, which deliberately bails whenever ViewOffset != 0 —
 // copy mode is mostly used while scrolled back, which is exactly the case
 // drawCursor skips. Called under Mu (inside onDraw).
+//
+// The fill (grid.ov.copyCurFill) is deliberately not the theme's cursor color:
+// the copy cursor must be distinguishable from the terminal cursor at a
+// glance, or there is no feedback that a motion key did anything — on entry
+// the two sit on the same cell. It keeps its amber identity across themes and
+// only darkens on light ones, where the cell's glyph is drawn over it in
+// DefaultBG.
 func (t *Term) drawCopyCursor(ds *drawState) {
 	g := ds.g
 	vr, ok := g.ContentRowToViewport(t.copy.cursor.Row)
@@ -675,7 +677,7 @@ func (t *Term) drawCopyCursor(ds *drawState) {
 
 	// Steady, never blinking: it marks a position the user is aiming with, and
 	// a blinking target is harder to track than a still one.
-	ds.dc.FilledRect(x, y, t.cellW, t.cellH, copyCursorColor)
+	ds.dc.FilledRect(x, y, t.cellW, t.cellH, g.ov.copyCurFill)
 
 	cell := maskGlyph(g.ViewCellAt(vr, cc), ds.blinkOff)
 	cs := ds.style
@@ -709,7 +711,7 @@ var copyBarLabels = [...]string{
 func (t *Term) drawCopyBar(ds *drawState) {
 	dc := ds.dc
 	y := float32(0)
-	dc.FilledRect(0, y, dc.Width, t.cellH, gui.RGB(30, 70, 45))
+	dc.FilledRect(0, y, dc.Width, t.cellH, ds.g.ov.copyBarFill)
 
 	label := copyBarLabels[copySelNone]
 	if int(t.copy.sel) < len(copyBarLabels) {
@@ -717,7 +719,7 @@ func (t *Term) drawCopyBar(ds *drawState) {
 	}
 
 	cs := ds.style
-	cs.Color = gui.RGB(220, 220, 220)
+	cs.Color = ds.g.ov.copyBarText
 	cs.Typeface = glyph.TypefaceRegular
 	dc.Text(0, y, label, cs)
 }
@@ -727,9 +729,11 @@ func (t *Term) drawCopyBar(ds *drawState) {
 func (t *Term) drawSearchBar(dc *gui.DrawContext, style gui.TextStyle) {
 	y := dc.Height - t.cellH
 	noMatch := t.search.query != "" && len(t.search.matches) == 0
-	bgColor := gui.RGB(40, 40, 90)
+	// Called under Mu (from drawOverlays), so reading the grid's derived
+	// overlay colors here is safe.
+	bgColor := t.grid.ov.searchFill
 	if noMatch {
-		bgColor = gui.RGB(90, 20, 20)
+		bgColor = t.grid.ov.searchNoMatchFill
 	}
 	dc.FilledRect(0, y, dc.Width, dc.Height-y, bgColor)
 	var label string
@@ -742,7 +746,7 @@ func (t *Term) drawSearchBar(dc *gui.DrawContext, style gui.TextStyle) {
 		label = "Find (^R=regex): " + t.search.query + "▌"
 	}
 	cs := style
-	cs.Color = gui.RGB(220, 220, 220)
+	cs.Color = t.grid.ov.searchText
 	cs.Typeface = glyph.TypefaceRegular
 	dc.Text(0, y, label, cs)
 }

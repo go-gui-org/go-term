@@ -9,7 +9,11 @@ import (
 
 // realNumber reports whether f is non-NaN and non-Inf. Used for inputs
 // (mouse coords, scroll deltas) where zero and negative are legal.
-func realNumber(f float32) bool {
+//
+// Generic over both float widths rather than duplicated per width: the pixel
+// metrics are float32 and the contrast ratio is float64 (WCAG luminance math
+// works in float64), and one predicate is what keeps the two from drifting.
+func realNumber[T ~float32 | ~float64](f T) bool {
 	x := float64(f)
 	return !math.IsNaN(x) && !math.IsInf(x, 0)
 }

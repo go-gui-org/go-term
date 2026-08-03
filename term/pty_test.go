@@ -123,3 +123,54 @@ func TestDropEnv(t *testing.T) {
 		t.Errorf("dropEnv mutated its input: %q", in)
 	}
 }
+
+// TestColorFGBGEnv covers the one lever go-term has on a child's *own* color
+// choices: telling it which way the terminal is painted before it makes them.
+// The value is read at spawn and cannot be updated afterwards, so getting the
+// startup theme's character right is the whole feature.
+func TestColorFGBGEnv(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		cfg  Cfg
+		want string
+	}{
+		{
+			name: "no_themes_uses_the_default",
+			cfg:  Cfg{},
+			want: "COLORFGBG=15;0",
+		},
+		{
+			// The first entry is what applyTheme gives a new pane, so it is
+			// the one the child is actually running inside.
+			name: "first_theme_wins",
+			cfg: Cfg{Themes: []NamedTheme{
+				{Name: "Solarized Light", Theme: SolarizedLightTheme},
+				{Name: "Default", Theme: DefaultTheme},
+			}},
+			want: "COLORFGBG=0;15",
+		},
+		{
+			name: "dark_theme",
+			cfg: Cfg{Themes: []NamedTheme{
+				{Name: "Catppuccin Mocha", Theme: CatppuccinMochaTheme},
+			}},
+			want: "COLORFGBG=15;0",
+		},
+		{
+			name: "light_theme",
+			cfg: Cfg{Themes: []NamedTheme{
+				{Name: "GitHub Light", Theme: GitHubLightTheme},
+			}},
+			want: "COLORFGBG=0;15",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := colorFGBGEnv(tc.cfg); got != tc.want {
+				t.Errorf("colorFGBGEnv = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -75,12 +75,13 @@ func (t *Tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHoo
 	return term.Cfg{
 		NoWindowHandler: true,
 		TextStyle:       cfg.TextStyle,
-		Themes:          cfg.Themes,
+		Themes:          paneThemes(cfg),
 		Dir:             dir,
 		RecordInput:     cfg.RecordInput,
 		DownloadDir:     cfg.DownloadDir,
 		ScrollbackRows:  cfg.opts.scrollback,
 		ScrollbarWidth:  cfg.opts.scrollbar,
+		MinimumContrast: cfg.opts.minContrast,
 		BellMode:        cfg.opts.bell,
 		KeyBindings:     cfg.opts.keys,
 
@@ -134,10 +135,38 @@ func (t *Tab) addPane(
 	return nil
 }
 
+// paneThemes returns the theme list a pane's term.Cfg gets, with the config
+// file's [general] theme moved to the front.
+//
+// term reads Themes[0] twice and only one of them can be corrected afterwards:
+// it seeds the grid (which applyPaneTheme then overrides) *and* it decides the
+// COLORFGBG the child is spawned with, which cannot be changed in a running
+// process. Leaving the order alone meant a user who set `theme = Solarized
+// Light` got light cells and a child told it was running on a dark background
+// — the exact question COLORFGBG exists to answer.
+//
+// Safe to reorder because this list goes only to the pane: the theme picker
+// and the persisted theme name read ws.cfg.Themes, which is untouched.
+func paneThemes(cfg Cfg) []term.NamedTheme {
+	if cfg.opts.theme == nil {
+		return cfg.Themes
+	}
+	for i, nt := range cfg.Themes {
+		if nt.Theme != *cfg.opts.theme {
+			continue
+		}
+		out := make([]term.NamedTheme, 0, len(cfg.Themes))
+		out = append(out, nt)
+		out = append(out, cfg.Themes[:i]...)
+		return append(out, cfg.Themes[i+1:]...)
+	}
+	return cfg.Themes
+}
+
 // applyPaneTheme applies the config file's [general] theme to a freshly built
-// pane. term seeds a new Term from Cfg.Themes[0]; the config names a different
-// entry of that same list, applied here rather than by reordering Themes —
-// which would also reorder the theme picker the user sees.
+// pane. Redundant with paneThemes for a theme that is in the list, and the
+// backstop for one that is not — opts.theme is a value, not an index, so
+// nothing guarantees it appears there.
 func applyPaneTheme(tm *term.Term, cfg Cfg) {
 	if cfg.opts.theme != nil {
 		tm.SetTheme(*cfg.opts.theme)

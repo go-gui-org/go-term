@@ -63,6 +63,7 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	// the palette. Without it the child downgrades truecolor output for no
 	// reason.
 	env = append(env, "COLORTERM=truecolor")
+	env = append(env, colorFGBGEnv(cfg))
 	// cfg.Env goes last so callers can override anything set above.
 	env = append(env, cfg.Env...)
 	cmd.Env = env

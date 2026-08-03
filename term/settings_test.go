@@ -265,3 +265,80 @@ func TestParseAction(t *testing.T) {
 		}
 	}
 }
+
+// TestSetMinimumContrast covers the live setter a config reload drives. The
+// memo behind the clamp is keyed by color pair and *not* by ratio, so entries
+// computed under the old ratio are wrong rather than merely stale — dropping
+// them is part of the setter's contract, not an optimization.
+func TestSetMinimumContrast(t *testing.T) {
+	var queued int
+	tm := newSettingsTerm(Cfg{})
+	tm.cmd = countingScheduler{n: &queued}
+
+	// A starship orange on a Catppuccin Latte background: fails every floor
+	// this test sets, and by a different amount for each.
+	fg, bg := gui.RGB(255, 161, 1), gui.RGB(239, 241, 245)
+
+	tm.SetMinimumContrast(3)
+	if tm.grid.MinContrast != 3 {
+		t.Fatalf("MinContrast = %v, want 3", tm.grid.MinContrast)
+	}
+	if queued == 0 {
+		t.Error("a ratio change queued no repaint")
+	}
+	loose := tm.grid.applyMinContrast(fg, bg) // populates the memo slot
+
+	queued = 0
+	tm.SetMinimumContrast(3)
+	if queued != 0 {
+		t.Errorf("a no-op change queued %d repaints, want 0", queued)
+	}
+
+	tm.SetMinimumContrast(7)
+	if strict := tm.grid.applyMinContrast(fg, bg); strict == loose {
+		t.Error("memo survived the ratio change: still returning the 3.0 result")
+	}
+
+	// Non-finite is ignored rather than stored: NaN would compare false
+	// against every threshold and silently disable the clamp.
+	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		tm.SetMinimumContrast(bad)
+		if tm.grid.MinContrast != 7 {
+			t.Fatalf("SetMinimumContrast(%v) stored %v, want 7 unchanged",
+				bad, tm.grid.MinContrast)
+		}
+	}
+
+	// 1.0 is a color against itself, so it is the documented "off".
+	tm.SetMinimumContrast(1)
+	if got := tm.grid.applyMinContrast(fg, bg); got != fg {
+		t.Errorf("clamp still active at ratio 1: %v became %v", fg, got)
+	}
+}
+
+// TestApplyContrastConfig covers the construction-time half of the same
+// setting, which has to agree with the setter about what counts as "off".
+func TestApplyContrastConfig(t *testing.T) {
+	cases := []struct {
+		name string
+		in   float64
+		want float64
+	}{
+		{"unset_stays_off", 0, 0},
+		{"at_the_off_value", 1, 0},
+		{"below_the_off_value", 0.5, 0},
+		{"negative", -3, 0},
+		{"a_real_ratio", 4.5, 4.5},
+		{"nan_is_ignored", math.NaN(), 0},
+		{"inf_is_ignored", math.Inf(1), 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newGrid(4, 8)
+			applyContrastConfig(g, Cfg{MinimumContrast: tc.in})
+			if g.MinContrast != tc.want {
+				t.Errorf("MinContrast = %v, want %v", g.MinContrast, tc.want)
+			}
+		})
+	}
+}

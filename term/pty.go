@@ -77,6 +77,32 @@ func setTerminalIdentity(env []string) []string {
 	return append(dropEnv(env, hostTerminalEnvKeys[:]), selfIdentityEnv[:]...)
 }
 
+// colorFGBGEnv builds the COLORFGBG value describing the theme the child is
+// about to run inside: "0;15" for a light scheme, "15;0" for a dark one (the
+// two numbers are foreground and background as palette indices, which is the
+// form rxvt established and everything else copied).
+//
+// vim, less and a handful of prompt tools read it to pick a light or dark
+// variant of their own colors. That matters because a truecolor SGR is not
+// themeable — a child that emits an orange chosen for a dark background gets
+// that exact orange on a light one — so the only lever go-term has on those
+// colors is telling the child which way the terminal is painted before it
+// picks them.
+//
+// Only accurate at spawn: the variable cannot be updated in a running child,
+// which is what mode 2031 exists for. Tools that read neither are why
+// Cfg.MinimumContrast exists.
+func colorFGBGEnv(cfg Cfg) string {
+	th := DefaultTheme // what a Term with no configured themes renders with
+	if len(cfg.Themes) > 0 {
+		th = cfg.Themes[0].Theme
+	}
+	if th.IsDark() {
+		return "COLORFGBG=15;0"
+	}
+	return "COLORFGBG=0;15"
+}
+
 // dropEnv returns env without any entry naming one of keys. The input slice is
 // never mutated: os.Environ() hands back a fresh slice, but cfg.Env may not.
 func dropEnv(env []string, keys []string) []string {

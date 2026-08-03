@@ -533,7 +533,7 @@ func TestCopyMode_DrawsDistinctCursor(t *testing.T) {
 
 	var found bool
 	for _, b := range dc.Batches() {
-		if b.Color == copyCursorColor {
+		if b.Color == tm.grid.ov.copyCurFill {
 			found = true
 			break
 		}

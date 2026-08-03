@@ -39,14 +39,25 @@ func run() int {
 		return runReplay(*replay)
 	}
 
-	applyTheme()
+	themes := themeList()
+	// Chrome for the window frame itself, which exists before the workspace
+	// has read the config file. OnColorScheme corrects it a moment later if
+	// `theme =` names a scheme of the other character. An empty list is not
+	// reachable today but must not panic here: term falls back to its own dark
+	// DefaultTheme in that case, so the chrome follows it.
+	startupDark := true
+	if len(themes) > 0 {
+		startupDark = themes[0].Theme.IsDark()
+	}
+	applyChrome(startupDark)
 
 	a := &app{
 		wc: workspace.Cfg{
 			TextStyle:              defaultTextStyle(),
 			ExitWhenLastShellExits: true,
 			DownloadDir:            defaultDownloadDir(),
-			Themes:                 themeList(),
+			Themes:                 themes,
+			OnColorScheme:          applyChrome,
 		},
 		loadPath:   start.resolvedWorkspacePath(),
 		savePath:   start.effectiveSavePath(),

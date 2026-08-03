@@ -126,6 +126,17 @@ func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int, cmdH
 		col := color
 		color = gui.RGB(col.R/2, col.G/2, 255)
 	}
+	// Minimum contrast, last: it must see the color that will actually be
+	// painted, after dim and hover recolor, or it would raise a color those
+	// then push back below the floor. Gated so a Term with the clamp off pays
+	// one float comparison and skips the bgOf resolve entirely.
+	//
+	// The underline color is deliberately left alone — it decorates text that
+	// has already been made legible, and clamping it too would flatten the
+	// distinction a colored underline exists to draw.
+	if g.MinContrast > contrastDisabled {
+		color = g.applyMinContrast(color, g.bgOf(cell))
+	}
 	return runKey{
 		color:         color,
 		ulColor:       ulColor,
@@ -160,12 +171,14 @@ func (t *Term) drawBgPrecomputed(dc *gui.DrawContext, r int, row []cell, yOff fl
 	for c := 1; c < cols; c++ {
 		cur := g.bgOf(row[c])
 		if cur != runColor {
-			t.fillRun(dc, r, runStart, c, runColor, yOff)
+			t.fillRun(dc, r, runStart, c, runColor, yOff, false)
 			runStart = c
 			runColor = cur
 		}
 	}
-	t.fillRun(dc, r, runStart, cols, runColor, yOff)
+	// Never the bottom-most row: this path draws the partial row *above* the
+	// viewport (r == -1), so it must not bleed downward.
+	t.fillRun(dc, r, runStart, cols, runColor, yOff, false)
 }
 
 // drawBgResolved coalesces background-color runs for a single row.
@@ -173,17 +186,20 @@ func (t *Term) drawBgPrecomputed(dc *gui.DrawContext, r int, row []cell, yOff fl
 func (t *Term) drawBgResolved(dc *gui.DrawContext, r int, yOff float32, ds *drawState) {
 	g := ds.g
 	cols := ds.cols
+	// Only the bottom-most drawn row may bleed into the sub-cell remainder
+	// below it — see bleedToEdge.
+	last := r == ds.renderRows-1
 	runStart := 0
 	runColor := g.bgOf(ds.resolveVisual(r, 0))
 	for c := 1; c < cols; c++ {
 		cur := g.bgOf(ds.resolveVisual(r, c))
 		if cur != runColor {
-			t.fillRun(dc, r, runStart, c, runColor, yOff)
+			t.fillRun(dc, r, runStart, c, runColor, yOff, last)
 			runStart = c
 			runColor = cur
 		}
 	}
-	t.fillRun(dc, r, runStart, cols, runColor, yOff)
+	t.fillRun(dc, r, runStart, cols, runColor, yOff, last)
 }
 
 // textBlinkOff reports whether SGR 5/6 text is in the hidden half of its blink
@@ -371,12 +387,51 @@ func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell cell, k runKey, 
 	}
 }
 
-func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yOff float32) {
+// lastRow says this run belongs to the bottom-most drawn row, which is the
+// only one allowed to bleed downward — see bleedToEdge.
+func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yOff float32, lastRow bool) {
 	if color == t.grid.defaultBG() {
 		return // canvas already painted with default bg.
 	}
 	x := float32(c0) * t.cellW
 	y := float32(row)*t.cellH + yOff
-	w := float32(c1-c0) * t.cellW
-	dc.FilledRect(x, y, w, t.cellH, color)
+	// Both axes bleed into the sub-cell remainder — see bleedToEdge. A run
+	// whose color *is* the default returned above, so the remainder correctly
+	// keeps the canvas fill in the case where the two agree.
+	w := bleedToEdge(x, float32(c1-c0)*t.cellW, dc.Width, t.cellW)
+	h := t.cellH
+	if lastRow {
+		h = bleedToEdge(y, h, dc.Height, t.cellH)
+	}
+	dc.FilledRect(x, y, w, h, color)
+}
+
+// bleedToEdge extends a run that already abuts the canvas edge so it covers
+// the sub-cell remainder beyond it, and returns interior runs unchanged.
+//
+// rows and cols are floor(canvas/cell), so up to one cell short of the right
+// edge and one short of the bottom belongs to no cell and keeps whatever the
+// canvas was filled with — the theme's background. That is invisible while the
+// theme's background is also what the content uses, and obvious the moment it
+// isn't: a full-screen app with a dark palette running under a light theme
+// gets a bright rim down its right side and along its bottom. Extending the
+// run that already abuts the edge is what every other emulator does, and it
+// costs nothing — the rect was being drawn anyway.
+//
+// start/size describe the run along one axis, extent is the canvas size on
+// that axis, and cell is the cell size. The test is "does this run reach
+// within one cell of the edge"; an interior run that stretched would paint
+// over its neighbour.
+//
+// That test alone identifies the last column, but not the last row: smooth
+// scrolling shifts every row down by ViewSubPx (0 ≤ ViewSubPx < cellH), so
+// once the offset exceeds the canvas remainder the *second*-to-last row also
+// ends within a cell of the bottom while a row still sits below it. fillRun
+// therefore gates the vertical call on the row index, and this function only
+// decides how far the bleed reaches.
+func bleedToEdge(start, size, extent, cell float32) float32 {
+	if rest := extent - start; rest > size && extent-(start+size) < cell {
+		return rest
+	}
+	return size
 }

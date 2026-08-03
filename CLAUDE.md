@@ -81,14 +81,15 @@ input) lives in `term/CLAUDE.md`, loaded when working under `term/`.
 
 - Comments wrap at ~90 columns.
 - Public API in `term/` is small on purpose: `Cfg`, `Term`, `NamedTheme`,
-  `Theme`, `BellMode`, `New`, `View`, `Close`, `Cwd`, `SetTheme`, `Rows`,
+  `Theme` (incl. `Theme.IsDark`, which an embedder needs to match its own
+  chrome to the pane), `BellMode`, `New`, `View`, `Close`, `Cwd`, `SetTheme`, `Rows`,
   `Cols`, `Write`, `SendInput`, `PID`, `Alive`, `SetFocused`, `HandleWindowEvent`,
   `StartRecording`/`StopRecording`/`Recording`, `NewReplay`/`ReplayCfg`, plus
   `Shortcuts`/`ShortcutInfo` (display metadata for help overlays) and
   `Action`/`KeyMap`/`SetKeyBindings`/`KeyBindings`/`ParseAction` (rebindable
   Term-level shortcuts), and the live setters a config reload needs —
   `SetTextStyle`, `SetScrollbackRows`, `SetBellMode`, `SetScrollbarWidth`,
-  `SetMiddleClickPaste`,
+  `SetMiddleClickPaste`, `SetMinimumContrast`,
   plus `InputKind`/`Cfg.OnInput`/`SendInput` — the symmetric input tap and
   injection pair a pane manager needs to mirror keys and pastes to sibling
   panes (`term/workspace` broadcast mode). What the tap hands out, `SendInput`

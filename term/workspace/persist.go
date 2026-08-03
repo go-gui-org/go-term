@@ -185,12 +185,17 @@ func Restore(w *gui.Window, cfg Cfg, path string) (*Workspace, error) {
 	}
 	if len(pw.Tabs) == 0 {
 		// A zero-tab workspace (last-shell-exit path) starts fresh but
-		// still carries a user's theme choice when one was persisted.
-		ws, err := New(w, cfg)
+		// still carries a user's theme choice when one was persisted. The
+		// choice is settled before the first tab is built rather than applied
+		// after: a pane's COLORFGBG is fixed at spawn (see selectThemeByName).
+		ws, err := newWorkspace(w, cfg)
 		if err != nil {
 			return nil, err
 		}
-		ws.applyThemeByName(pw.Theme)
+		ws.selectThemeByName(pw.Theme)
+		if _, err := ws.addTab(""); err != nil {
+			return nil, err
+		}
 		return ws, nil
 	}
 	return restoreWorkspace(w, cfg, pw)
@@ -238,6 +243,11 @@ func restoreWorkspace(w *gui.Window, cfg Cfg, pw persistedWorkspace) (*Workspace
 	// is built, so restored panes get the configured font, theme, scrollback
 	// and keybindings at construction rather than being corrected afterwards.
 	ws.loadAndApplyConfig()
+	// The user's last picker choice outranks the config file's theme, and it
+	// has to win *here*, not at the applyThemeByName below: every pane about
+	// to be built takes its COLORFGBG from ws.cfg and keeps it for the life of
+	// the child process. See selectThemeByName.
+	ws.selectThemeByName(pw.Theme)
 
 	for _, pt := range pw.Tabs {
 		tabID := "tab-" + strconv.Itoa(ws.nextTabID)
@@ -261,7 +271,9 @@ func restoreWorkspace(w *gui.Window, cfg Cfg, pw persistedWorkspace) (*Workspace
 	}
 	ws.activeTab = activeTab
 
-	// Apply the user's last theme choice over the config file default.
+	// Push the same choice at the panes. Redundant with selectThemeByName for
+	// panes that built cleanly — they already have it — and the backstop for
+	// anything constructed off a different path.
 	ws.applyThemeByName(pw.Theme)
 
 	tab := ws.tabs[ws.activeTab]

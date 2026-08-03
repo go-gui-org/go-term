@@ -217,6 +217,11 @@ const configStub = `# go-term configuration.
 # [general]
 # theme = Default
 # scrollback = 10000
+
+# Force text to reach a WCAG contrast ratio against its background. Worth
+# turning on with a light theme: apps that emit 24-bit color (eza, starship)
+# pick it for a dark background, and no theme setting can reach those.
+# minimum-contrast = 3
 `
 
 func writeConfigStub(path string) error {
