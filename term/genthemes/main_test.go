@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -192,7 +193,9 @@ func TestParseDir_SkipsUnusable(t *testing.T) {
 	dir := t.TempDir()
 	writeTheme(t, dir, "Good")
 	writeTheme(t, dir, "Also Good")
-	writeTheme(t, dir, "Bad\tName")
+	if runtime.GOOS != "windows" {
+		writeTheme(t, dir, "Bad\tName")
+	}
 	if err := os.WriteFile(filepath.Join(dir, "Incomplete"),
 		[]byte("background = #000000\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -212,8 +215,12 @@ func TestParseDir_SkipsUnusable(t *testing.T) {
 		}
 		t.Fatalf("kept %v, want the two good themes only", names)
 	}
-	if skipped != 2 {
-		t.Errorf("skipped = %d, want 2 (incomplete + unusable name)", skipped)
+	wantSkipped := 2 // incomplete + unusable name
+	if runtime.GOOS == "windows" {
+		wantSkipped = 1 // only incomplete (tab in filename rejected by OS)
+	}
+	if skipped != wantSkipped {
+		t.Errorf("skipped = %d, want %d", skipped, wantSkipped)
 	}
 }
 
