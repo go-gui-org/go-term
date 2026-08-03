@@ -43,6 +43,12 @@ type parser struct {
 	onNotify    func(title, body string)
 	onDownload  func(name string, data []byte)
 
+	// onCommand, if non-nil, is invoked for the OSC 133 marks that bracket a
+	// command's execution: 'C' when output starts and 'D' when it ends, with
+	// the reported exit status. It is how the widget times a command without
+	// putting a timestamp on every mark. Runs under grid.Mu like the rest.
+	onCommand func(kind byte, exit int16)
+
 	// curTitle mirrors the last title reported via OSC 0/1/2 and titleStack
 	// holds the ones pushed by XTWINOPS 22 (CSI 22 t), popped by 23. vim and
 	// tmux bracket their session with a push/pop pair and rely on the pop to
@@ -139,6 +145,12 @@ func (p *parser) SetClipboardWriteAllowed(ok bool) { p.allowClipboardWrite = ok 
 // while grid.Mu is held — the handler must not block; fire a goroutine
 // for any slow work (e.g. exec).
 func (p *parser) SetNotifyHandler(fn func(title, body string)) { p.onNotify = fn }
+
+// SetCommandHandler registers a callback for the OSC 133 C and D marks.
+// Called while grid.Mu is held, immediately after the mark is recorded — so
+// the handler may read the grid (commandText) but must not re-lock it, and
+// must not block.
+func (p *parser) SetCommandHandler(fn func(kind byte, exit int16)) { p.onCommand = fn }
 
 // SetDownloadHandler registers a callback for OSC 1337 File= transfers that
 // are not inline images (iTerm2's imgcat -d, it2dl). name is sanitized down

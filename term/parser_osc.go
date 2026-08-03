@@ -182,8 +182,15 @@ func (p *parser) dispatchOSC() {
 			p.g.AddMark(markCommandStart)
 		case 'C':
 			p.g.AddMark(markOutputStart)
+			if p.onCommand != nil {
+				p.onCommand('C', markExitUnknown)
+			}
 		case 'D':
-			p.g.AddCommandEnd(oscExitStatus(pt))
+			exit := oscExitStatus(pt)
+			p.g.AddCommandEnd(exit)
+			if p.onCommand != nil {
+				p.onCommand('D', exit)
+			}
 		}
 	case 22:
 		// OSC 22 — mouse cursor shape. sanitizeOSCString strips the control

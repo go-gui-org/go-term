@@ -272,6 +272,10 @@ func restoreWorkspace(w *gui.Window, cfg Cfg, pw persistedWorkspace) (*Workspace
 	// anything constructed off a different path.
 	ws.applyThemeByName(pw.Theme)
 
+	// Restore is the one path that builds every pane at once and focuses a
+	// single one of them, so the rest need to be told they are in the
+	// background — see blurAllPanes.
+	ws.blurAllPanes()
 	tab := ws.tabs[ws.activeTab]
 	if t, ok := tab.terms[tab.focused]; ok {
 		t.SetFocused(true)

@@ -42,6 +42,20 @@ const (
 	InputPaste
 )
 
+// ActivityKind labels what a Cfg.OnActivity callback observed. A bell
+// outranks plain output: a read that both drew text and rang the bell reports
+// ActivityBell, because that is the one a pane manager must surface.
+type ActivityKind int
+
+const (
+	// ActivityOutput is child output that changed the screen. Output that
+	// changes nothing — a query the parser answers, a no-op sequence — does
+	// not count, so an idle full-screen app does not read as busy.
+	ActivityOutput ActivityKind = iota
+	// ActivityBell is a BEL the child emitted, whatever BellMode does with it.
+	ActivityBell
+)
+
 // Cfg configures a Term widget. All fields are optional.
 type Cfg struct {
 
@@ -59,6 +73,18 @@ type Cfg struct {
 	// notify-send (Linux), or a WinRT toast (Windows). Called on a
 	// background goroutine — safe to block.
 	OnNotify func(title, body string)
+
+	// OnActivity, if non-nil, is called on the main thread when the child
+	// produces output that changed the screen, or rang the bell. A pane
+	// manager uses it to mark background tabs — see term/workspace, which
+	// derives its activity, bell, and silence indicators from this one hook.
+	//
+	// It fires at most once per PTY read, not once per cell, and is not a
+	// change feed: consecutive output collapses into a single call, and the
+	// kind reports what that read contained rather than everything since the
+	// last call. Callers that need the screen contents should read the grid
+	// on the next draw instead.
+	OnActivity func(kind ActivityKind)
 
 	// CursorBlink, if non-nil, overrides the application's DECSCUSR
 	// blink request. Use *true to force blinking on, *false to force
@@ -142,6 +168,18 @@ type Cfg struct {
 	// ScrollbarWidth overrides the pixel width of the scrollbar thumb.
 	// Zero (default) uses the built-in 4 px. Negative hides the scrollbar.
 	ScrollbarWidth float32
+
+	// NotifyAfter fires a desktop notification when a command that ran at
+	// least this long finishes while the user is looking elsewhere — the
+	// window is in the background, or (under a pane manager) this pane is not
+	// the active one. Zero (the default) or negative disables it; a positive
+	// value below one second is raised to one second.
+	//
+	// Commands are delimited by the OSC 133 marks a shell emits only once its
+	// integration hooks are installed (scripts/shell-integration/), so this
+	// does nothing under an unconfigured shell. Term.SetNotifyAfter changes
+	// it on a live terminal.
+	NotifyAfter time.Duration
 
 	// MinimumContrast is the WCAG contrast ratio (1.0–21.0) a cell's
 	// foreground is forced to reach against its background at render time. Any

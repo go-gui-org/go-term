@@ -45,6 +45,21 @@ term.find               = Cmd+G
 See [docs/config.md](docs/config.md) for every section, key, default, and the
 full list of rebindable actions.
 
+## Shell integration
+
+Prompt jumping, jump-to-last-failure, whole-output selection, and the
+long-running-command notification all need the shell to mark where commands
+begin and end. Source the hook for your shell — bash, zsh, and fish are in
+[`scripts/shell-integration/`](scripts/shell-integration) — and add one line
+to your rc file:
+
+```bash
+source /path/to/go-term/scripts/shell-integration/goterm.bash
+```
+
+Details, including what fish 4.x already does for itself, are in
+[docs/config.md](docs/config.md#shell-integration).
+
 ## Session recording
 
 Record a terminal session to a `.gtr` file and play it back through the

@@ -14,6 +14,18 @@ type mark struct {
 	// The field is free: Row+Kind already pad to 16 bytes on 64-bit, and
 	// an int16 at offset 10 keeps the struct that size.
 	Exit int16
+	// Col is the cursor column the mark arrived at. Only meaningful for
+	// markCommandStart, where it is where the prompt ended and the typed
+	// command begins — commandText reads the row from here so the
+	// notification body is the command rather than the prompt plus the
+	// command. Also free: it sits in the padding Exit left behind, so the
+	// struct is still 16 bytes.
+	//
+	// MaxGridDim (1024) bounds it, so int16 cannot overflow. Reflow does not
+	// adjust it (remapMarks rewrites rows only), so a resize mid-command can
+	// leave it pointing at the wrong column; the cost is a cosmetically wrong
+	// notification body, never a wrong span.
+	Col int16
 }
 
 // markExitUnknown marks a command end whose exit status was absent or
@@ -35,7 +47,12 @@ func (g *grid) addMark(kind markKind, exit int16) {
 		return
 	}
 	row := g.Scrollback.Len() + g.CursorR
-	g.Marks = append(g.Marks, mark{Row: row, Kind: kind, Exit: exit})
+	// settledCol collapses the deferred-wrap encoding (CursorC == Cols), which
+	// a prompt ending exactly at the right margin would otherwise store as a
+	// column one past the end of the row.
+	g.Marks = append(g.Marks, mark{
+		Row: row, Kind: kind, Exit: exit, Col: int16(g.settledCol()),
+	})
 	if len(g.Marks) > maxMarks {
 		g.Marks = g.Marks[len(g.Marks)-maxMarks:]
 	}

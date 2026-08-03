@@ -12,15 +12,23 @@ import (
 // registerNotifyHandler wires the OSC 9 / OSC 777 notification path.
 // Extracted so tests can reuse the same handler without copy-paste drift.
 func (t *Term) registerNotifyHandler() {
-	t.parser.SetNotifyHandler(func(title, body string) {
-		if !t.notifyBusy.CompareAndSwap(false, true) {
-			return
-		}
-		go func() {
-			defer t.notifyBusy.Store(false)
-			t.notify(title, body)
-		}()
-	})
+	t.parser.SetNotifyHandler(t.notifyAsync)
+}
+
+// notifyAsync delivers a notification off the reader goroutine, dropping it if
+// one is already in flight. The busy flag is what keeps a child emitting OSC 9
+// in a loop — or a burst of long commands finishing at once — from spawning a
+// goroutine (and on the built-in path, a subprocess) per sequence. Callers run
+// under grid.Mu and must not block, which is why the delivery is a goroutine
+// rather than an inline call.
+func (t *Term) notifyAsync(title, body string) {
+	if !t.notifyBusy.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer t.notifyBusy.Store(false)
+		t.notify(title, body)
+	}()
 }
 
 // notify delivers a desktop notification through the host's OnNotify hook, or

@@ -74,6 +74,7 @@ Mono appears as `JetBrainsMono NFM`.
 | `scrollbar`          | number  | `4`                    | Scrollbar thumb width in px. Negative hides the scrollbar                       |
 | `minimum-contrast`   | number  | `1` (off)              | WCAG contrast ratio, `1`–`21`, that text is forced to reach against its cell background |
 | `middle-click-paste` | boolean | on for Linux, else off | Paste with the middle mouse button — see [Selection and mouse](#selection-and-mouse) |
+| `notify-after`       | duration | `0` (off)             | Notify when a command that ran this long finishes while you are looking elsewhere — see [Shell integration](#shell-integration) |
 
 ```ini
 [general]
@@ -138,6 +139,92 @@ flash where the platform has none; `audible` never flashes; `visual` never
 beeps; `both` does both; `none` ignores BEL entirely.
 
 Scrollback is clamped to at most 100000 rows.
+
+## Shell integration
+
+A handful of features need to know where your prompt is, where a command's
+output starts, and whether it succeeded. Nothing in a terminal can work that
+out by looking at the text — the shell has to say so, by printing OSC 133
+marks around each command. Until you install the hooks below, these do
+nothing:
+
+| Feature                              | Shortcut                              |
+| ------------------------------------ | ------------------------------------- |
+| Jump to the previous / next prompt   | <kbd>Cmd</kbd>+<kbd>Up</kbd> / <kbd>Down</kbd> |
+| Jump to the last failed command      | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> |
+| Select a command's whole output      | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> |
+| Failure ticks in the scrollbar       | —                                     |
+| `notify-after` (below)               | —                                     |
+
+Open a new pane in the current directory also depends on the OSC 7 report the
+same hooks emit.
+
+### Installing
+
+Add one line to your shell's rc file, pointing at this repository's copy of
+the script:
+
+```bash
+# ~/.bashrc
+source /path/to/go-term/scripts/shell-integration/goterm.bash
+```
+
+```zsh
+# ~/.zshrc
+source /path/to/go-term/scripts/shell-integration/goterm.zsh
+```
+
+```fish
+# ~/.config/fish/config.fish
+source /path/to/go-term/scripts/shell-integration/goterm.fish
+```
+
+Then start a new shell. The scripts are safe to source twice, append to any
+`precmd`/`preexec` chain you already have rather than replacing it, and emit
+nothing that other terminals mind — iTerm2, kitty, and WezTerm read the same
+marks, so one rc file works everywhere.
+
+Two notes on what the scripts do and do not do:
+
+- **fish 4.0 and newer need nothing.** They emit the whole set natively, so
+  the fish script installs nothing there and exists only for fish 3.x.
+- **bash can only preserve a `DEBUG` trap it can see.** If you set your own
+  `trap … DEBUG`, load [bash-preexec] before this script — it is detected and
+  used, and then nothing fights over the trap. A sourced file cannot read the
+  outer `DEBUG` trap, so without bash-preexec ours replaces yours.
+
+[bash-preexec]: https://github.com/rcaloras/bash-preexec
+
+### Notify on long-running commands
+
+With the marks flowing, `notify-after` fires a desktop notification when a
+command that ran at least that long finishes while you are looking somewhere
+else — the window is in the background, or the pane is in a tab you are not
+on. A command that finishes in the pane you are watching never notifies,
+because you just saw it happen.
+
+```ini
+[general]
+notify-after = 30      # seconds; "30s" and "2m" work too, 0 disables
+```
+
+The notification names the command (`cargo build --release`) and reports the
+duration, plus the exit status when the command failed. Values below one
+second are raised to one second, and anything over an hour is rejected as a
+unit mix-up.
+
+### Tab activity indicators
+
+A tab you are not looking at shows a marker to the left of its title:
+
+| Marker | Meaning                                                       |
+| ------ | ------------------------------------------------------------- |
+| `●`    | The pane produced output                                      |
+| `○`    | It produced output, then went quiet for 10 seconds            |
+| `!`    | The pane rang the bell                                        |
+
+Switching to the tab clears whichever marker it was showing. These need no
+shell integration — they follow raw output, not marks.
 
 ## Selection and mouse
 
