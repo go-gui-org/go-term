@@ -81,9 +81,18 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		e.IsHandled = true
 		return
 	}
+	// An IME commit delivers the whole composed string in IMEText; CharCode
+	// carries only its first rune, so writing CharCode alone truncates 日本語
+	// to 日. For ordinary typing IMEText is that same single character, so the
+	// two agree and the fast paths below stay on the single-rune branch.
+	// IMEText is empty on backends that do not populate it — fall back then.
+	text := e.IMEText
+	if text == "" {
+		text = string(rune(e.CharCode))
+	}
 	if t.search.active {
 		if utf8.RuneCountInString(t.search.query) < MaxGridDim {
-			t.search.query += string(rune(e.CharCode))
+			t.search.query += text
 			t.recompileSearchRE()
 		}
 		e.IsHandled = true
@@ -93,11 +102,16 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	}
 	t.snapToLive()
 	r := rune(e.CharCode)
+	// A commit longer than one rune is composed text, not a keystroke. Skip
+	// the KKP encoder for it: there is no single codepoint to report, and the
+	// modifiers held during composition describe the IME's own keys, not the
+	// text it produced.
+	singleRune := utf8.RuneLen(r) == len(text)
 
 	// KKP flag 8: report all printable keys as CSI u escape codes.
 	// The codepoint is the base (unshifted) form; Shift is in the modifier.
 	kkpFlags := t.keyModes().kittyKeyFlags
-	if kkpFlags&8 != 0 {
+	if singleRune && kkpFlags&8 != 0 {
 		cp := int(r)
 		if r >= 'A' && r <= 'Z' && e.Modifiers.Has(gui.ModShift) {
 			cp = int(r-'A') + 'a'
@@ -109,10 +123,15 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		}
 	}
 
-	var buf [4]byte
-	n := utf8.EncodeRune(buf[:], r)
-	if n > 0 {
-		t.writeBytes(buf[:n])
+	// Keep the single-rune path allocation-free — it is every ordinary
+	// keystroke. Only a real IME commit pays for the conversion.
+	if singleRune {
+		var buf [4]byte
+		if n := utf8.EncodeRune(buf[:], r); n > 0 {
+			t.writeBytes(buf[:n])
+		}
+	} else {
+		t.writeBytes([]byte(text))
 	}
 	e.IsHandled = true
 }
