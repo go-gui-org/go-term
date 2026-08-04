@@ -2639,6 +2639,15 @@ func TestTerm_View_RestoresFocus(t *testing.T) {
 		t.Errorf("after View, FocusID = %q, want %q", got, term.focusID)
 	}
 
+	// Focus held by some other widget must still be reclaimed — the
+	// FocusID guard in View() skips the SetFocus call only when this
+	// Term already owns the ID.
+	win.SetFocus("some-other-widget")
+	_ = term.View(win)
+	if got := win.FocusID(); got != term.focusID {
+		t.Errorf("after View over foreign focus, FocusID = %q, want %q", got, term.focusID)
+	}
+
 	// When unfocused, View() must not overwrite focus.
 	term.SetFocused(false)
 	win.ClearFocus()

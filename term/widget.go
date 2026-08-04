@@ -485,7 +485,13 @@ func (t *Term) View(w *gui.Window) gui.View {
 		// keys to the dialog layer, and re-asserting here would steal
 		// focus back to the terminal, breaking Tab/Esc/Enter in the
 		// dialog. DialogDismiss restores focus to this pane on close.
-		if !w.DialogIsVisible() {
+		//
+		// Only assert when the ID is not already ours: SetFocus takes the
+		// window lock and re-activates the platform input context, and View()
+		// runs on every layout rebuild — i.e. every keystroke. Re-asserting
+		// unconditionally is what surfaced go-gui#157, where SetFocus was not
+		// idempotent and cleared the IME preedit mid-composition.
+		if !w.DialogIsVisible() && w.FocusID() != t.focusID {
 			w.SetFocus(t.focusID)
 		}
 	}
