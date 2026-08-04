@@ -68,35 +68,9 @@ semantic units, now unblocked by Phase 48's click-count and selection-mode
 state), quake/dropdown window (needs go-gui support), pipe-scrollback /
 open-in-`$EDITOR`, named profiles.
 
-IME commit (issue #134) is a correctness gap rather than a feature and should
-block Phase 57 independently. Everything inside `term/` is now fixed; CJK input
-is still unusable end-to-end because of a live go-gui defect.
-
-Fixed here:
-
-- `onChar` truncated a commit to `e.CharCode`, its first rune. It now reads
-  `e.IMEText`, the whole composed string. Verified against go-gui main: a
-  seven-character commit reaches the pty intact.
-- `Term.View` read window-global `IMEComposing`, so every pane in a split
-  rendered the same preedit. The read is gated on pane focus, and an unfocused
-  pane clears state it cached before focus moved.
-
-Fixed upstream, unreleased:
-
-- go-gui dropped the commit event entirely — the Metal backend kept one global
-  text-input slot, so a `setMarkedText:` firing after `insertText:` within the
-  same `sendEvent:` overwrote the committed text (go-gui-org/go-gui#152).
-  v0.47.0, which `go.mod` pins, predates the fix.
-
-**Still broken upstream (blocks this issue):** go-gui pushes an *empty*
-`METAL_EVENT_IME_COMP` after every composition update, not just at the end of
-one (`metal_window_darwin.m:312`). The preedit is cleared on each keystroke —
-it visibly flashes — and the composition itself is rebuilt from scratch each
-time, so typing `nihongo` yields garbage kana rather than にほんご. Filed as
-go-gui-org/go-gui#156.
-
-**Then: bump go-gui past v0.47.0** in the next sibling sync. Linux ibus is
-unverified (no Linux machine).
+IME: macOS CJK input is fixed and verified end to end (issue #134, needs go-gui
+≥ v0.48.0), so it no longer blocks Phase 57. What remains is verification on
+Linux ibus — untested, no Linux machine here.
 
 ### Phase 54 — Export audit + Godoc pass
 
