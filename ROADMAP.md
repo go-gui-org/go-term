@@ -69,20 +69,34 @@ state), quake/dropdown window (needs go-gui support), pipe-scrollback /
 open-in-`$EDITOR`, named profiles.
 
 IME commit (issue #134) is a correctness gap rather than a feature and should
-block Phase 57 independently. Preedit display works — `widget.go` pulls
-composition state from go-gui and `widget_draw_overlay.go` renders the preedit
-run and places the candidate window. *Commit* is broken, in two places:
+block Phase 57 independently. Everything inside `term/` is now fixed; CJK input
+is still unusable end-to-end because of a live go-gui defect.
 
-- go-gui drops the commit event entirely (upstream go-gui-org/go-gui#149). The
-  Metal backend keeps one global event slot, so a `setMarkedText:` firing after
-  `insertText:` within the same `sendEvent:` overwrites the committed text.
-  Blocked on a go-gui release.
-- `onChar` writes only `e.CharCode`, the first rune of the commit, ignoring
-  `e.IMEText` which carries the whole string. Fixable in `term/` now, but not
-  verifiable until the upstream fix lands.
+Fixed here:
 
-Also pending: `Term.View` reads window-global `IMEComposing`, so every pane in
-a split renders the same preedit rather than only the focused one.
+- `onChar` truncated a commit to `e.CharCode`, its first rune. It now reads
+  `e.IMEText`, the whole composed string. Verified against go-gui main: a
+  seven-character commit reaches the pty intact.
+- `Term.View` read window-global `IMEComposing`, so every pane in a split
+  rendered the same preedit. The read is gated on pane focus, and an unfocused
+  pane clears state it cached before focus moved.
+
+Fixed upstream, unreleased:
+
+- go-gui dropped the commit event entirely — the Metal backend kept one global
+  text-input slot, so a `setMarkedText:` firing after `insertText:` within the
+  same `sendEvent:` overwrote the committed text (go-gui-org/go-gui#152).
+  v0.47.0, which `go.mod` pins, predates the fix.
+
+**Still broken upstream (blocks this issue):** go-gui pushes an *empty*
+`METAL_EVENT_IME_COMP` after every composition update, not just at the end of
+one (`metal_window_darwin.m:312`). The preedit is cleared on each keystroke —
+it visibly flashes — and the composition itself is rebuilt from scratch each
+time, so typing `nihongo` yields garbage kana rather than にほんご. Filed as
+go-gui-org/go-gui#156.
+
+**Then: bump go-gui past v0.47.0** in the next sibling sync. Linux ibus is
+unverified (no Linux machine).
 
 ### Phase 54 — Export audit + Godoc pass
 
