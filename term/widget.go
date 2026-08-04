@@ -418,9 +418,22 @@ func (t *Term) onAmendLayout(l *gui.Layout, _ *gui.Window) {
 // gui.Window UpdateView generator: w.UpdateView(t.View).
 func (t *Term) View(w *gui.Window) gui.View {
 	// Detect IME composition state changes and bump version to redraw.
-	composing := w.IMEComposing()
-	compText := w.IMECompText()
-	compCursor := w.IMECompCursor()
+	// Composition state is window-global, but only the focused pane may
+	// render it — otherwise every Term in a split paints the same preedit
+	// strip at its own cursor. An unfocused pane must also *clear* state it
+	// cached before losing focus (focus can change mid-composition), so read
+	// zero values rather than returning early: the change detection below
+	// then clears the cache and repaints exactly once.
+	var (
+		composing  bool
+		compText   string
+		compCursor int
+	)
+	if t.focused.Load() {
+		composing = w.IMEComposing()
+		compText = w.IMECompText()
+		compCursor = w.IMECompCursor()
+	}
 	if composing != t.ime.composing || compText != t.ime.compText || compCursor != t.ime.compCursor {
 		t.ime.composing = composing
 		t.ime.compText = compText
