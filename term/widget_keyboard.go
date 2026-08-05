@@ -63,6 +63,18 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	if e.CharCode == 0 {
 		return
 	}
+	// A chord holding Cmd/Ctrl/Alt produces no text: AppKit suppresses
+	// insertText: for those, and onKeyDown owns them (shortcut handlers,
+	// control bytes, KKP sequences). The X11 backend synthesizes a char
+	// event for every printable keypress regardless of modifiers, so
+	// without this gate a Super+Shift+V paste would also type 'V' and
+	// Ctrl+C would send its control byte *and* the letter. Drop the
+	// duplicate char; keep Shift, which is just the same letter's
+	// uppercase form.
+	if e.Modifiers&(gui.ModCtrl|gui.ModAlt|gui.ModSuper) != 0 {
+		e.IsHandled = true
+		return
+	}
 	// Hints: label characters arrive here for the same reason copy mode's
 	// motions do, and are swallowed under the same rule — an unmatched label
 	// letter must not reach the shell's command line.
