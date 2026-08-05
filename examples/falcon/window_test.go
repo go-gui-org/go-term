@@ -20,9 +20,19 @@ func assertSharedWindowCfg(t *testing.T, cfg gui.WindowCfg) {
 	}
 	// An empty IconPNG is not cosmetic-only: the macOS backend then
 	// installs go-gui's default icon as the application icon, which
-	// overrides the bundle's .icns in the Dock and app switcher.
+	// overrides the bundle's .icns in the Dock and app switcher, and
+	// the Linux/Windows backends fall back to go-gui's default window
+	// icon in the taskbar.
 	if len(cfg.IconPNG) == 0 {
 		t.Error("IconPNG is empty: go-gui's default icon would override the bundle icon")
+	}
+	// WMClass names the window for X11 window managers: grouping and
+	// .desktop-file matching (StartupWMClass). Empty WM_CLASS falls
+	// back to the WM's default icon for apps without a .desktop file,
+	// and a class that disagrees with the app name splits the window
+	// off from the rest of the app's grouping.
+	if cfg.WMClass != appName {
+		t.Errorf("WMClass = %q, want %q", cfg.WMClass, appName)
 	}
 }
 

@@ -45,6 +45,7 @@ func (a *app) windowCfg() gui.WindowCfg {
 		Width:          windowWidth,
 		Height:         windowHeight,
 		IconPNG:        appIconPNG,
+		WMClass:        appName,
 		OnCloseRequest: a.onCloseRequest,
 		OnInit:         a.onInit,
 	}
@@ -152,6 +153,7 @@ func replayWindowCfg(path string, onInit func(*gui.Window)) gui.WindowCfg {
 		Width:   windowWidth,
 		Height:  windowHeight,
 		IconPNG: appIconPNG,
+		WMClass: appName,
 		OnInit:  onInit,
 	}
 }
