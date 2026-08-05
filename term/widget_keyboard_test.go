@@ -681,19 +681,20 @@ func TestOnChar_PlainAndShiftedCharsStillType(t *testing.T) {
 
 // The reported Linux bug end-to-end: X11 delivers a KeyDown for the paste
 // chord and a separate Char for the key's letter. The keydown pastes; the
-// char must be dropped rather than typed after the payload. Covers both
-// paste chords, the macOS-style Super one and the Linux Ctrl+Shift one.
+// char must be dropped rather than typed after the payload. Chords are
+// remapped so the canonical paste chord matches on every platform
+// (remapMod folds the macOS Super form into Windows' Ctrl+Shift).
 func TestOnChar_PasteChordCharDropped(t *testing.T) {
 	for _, mods := range []gui.Modifier{
-		gui.ModSuper | gui.ModShift,
-		gui.ModCtrl | gui.ModShift,
+		remapMod(gui.ModSuper),
+		remapMod(gui.ModCtrlShift),
 	} {
 		tm, buf := newKeyboardTerm(24, 80)
 		w := &gui.Window{}
 		w.SetClipboardGetFn(func() string { return "hello" })
 
 		tm.onKeyDown(nil, &gui.Event{KeyCode: gui.KeyV, Modifiers: mods}, w)
-		tm.onChar(nil, &gui.Event{CharCode: 'V', Modifiers: mods}, nil)
+		tm.onChar(nil, &gui.Event{CharCode: 'V', Modifiers: mods | gui.ModShift}, nil)
 
 		if got, want := string(*buf), "hello"; got != want {
 			t.Errorf("mods %v: pty saw %q, want %q (no trailing letter)", mods, got, want)
