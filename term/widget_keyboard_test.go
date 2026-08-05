@@ -645,6 +645,62 @@ func TestOnChar_EmptyIMETextFallsBackToCharCode(t *testing.T) {
 	}
 }
 
+// The X11 backend synthesizes a char event for every printable keypress,
+// even chords onKeyDown already consumed (Super+Shift+V paste, Ctrl+C
+// SIGINT, Alt+letter). AppKit suppresses those chars, so on Linux they
+// must be dropped here or the paste payload picks up a trailing 'V'.
+func TestOnChar_ModifierChordWritesNothing(t *testing.T) {
+	mods := []gui.Modifier{
+		gui.ModSuper,
+		gui.ModSuper | gui.ModShift,
+		gui.ModCtrl,
+		gui.ModCtrl | gui.ModShift,
+		gui.ModAlt,
+		gui.ModAlt | gui.ModShift,
+		gui.ModSuper | gui.ModCtrl | gui.ModAlt | gui.ModShift,
+	}
+	for _, m := range mods {
+		tm, buf := newKeyboardTerm(24, 80)
+		tm.onChar(nil, &gui.Event{CharCode: 'V', Modifiers: m}, nil)
+		if len(*buf) != 0 {
+			t.Errorf("mods %v: pty saw %q, want nothing", m, *buf)
+		}
+	}
+}
+
+// The modifier gate must not swallow ordinary typing: Shift is just the
+// same letter's uppercase form, and plain chars pass untouched.
+func TestOnChar_PlainAndShiftedCharsStillType(t *testing.T) {
+	tm, buf := newKeyboardTerm(24, 80)
+	tm.onChar(nil, &gui.Event{CharCode: 'v'}, nil)
+	tm.onChar(nil, &gui.Event{CharCode: 'V', Modifiers: gui.ModShift}, nil)
+	if got, want := string(*buf), "vV"; got != want {
+		t.Errorf("pty saw %q, want %q", got, want)
+	}
+}
+
+// The reported Linux bug end-to-end: X11 delivers a KeyDown for the paste
+// chord and a separate Char for the key's letter. The keydown pastes; the
+// char must be dropped rather than typed after the payload. Covers both
+// paste chords, the macOS-style Super one and the Linux Ctrl+Shift one.
+func TestOnChar_PasteChordCharDropped(t *testing.T) {
+	for _, mods := range []gui.Modifier{
+		gui.ModSuper | gui.ModShift,
+		gui.ModCtrl | gui.ModShift,
+	} {
+		tm, buf := newKeyboardTerm(24, 80)
+		w := &gui.Window{}
+		w.SetClipboardGetFn(func() string { return "hello" })
+
+		tm.onKeyDown(nil, &gui.Event{KeyCode: gui.KeyV, Modifiers: mods}, w)
+		tm.onChar(nil, &gui.Event{CharCode: 'V', Modifiers: mods}, nil)
+
+		if got, want := string(*buf), "hello"; got != want {
+			t.Errorf("mods %v: pty saw %q, want %q (no trailing letter)", mods, got, want)
+		}
+	}
+}
+
 // KKP flag 8 reports keystrokes as CSI u escape codes. Composed text is not a
 // keystroke and has no single codepoint to report, so the commit must go
 // through as plain UTF-8 rather than as an escape sequence for its first rune.
