@@ -8,6 +8,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `deps`: `go-glyph` v1.18.2 → v1.18.3. Batches atlas uploads to the frame
+  boundary: the v1.18.2 one-frame-lag fix uploaded the whole atlas page per
+  draw call, so a terminal frame's hundreds of per-glyph text calls turned
+  any glyph-cold frame (scrolling into scrollback rows the screen never
+  painted) into GB-scale main-thread texture uploads — measured 355 ms per
+  frame for 1500 fresh glyphs. Frame-boundary batching costs 17 ms / 43 MB.
+  The issue-#89 ordering guarantee is preserved.
 - `deps`: `go-gui` v0.50.0 → v0.51.0. Gives `gui.Event.ScrollY` a defined
   unit — lines of text for discrete wheel deltas — and makes the Win32
   backend honour the user's `SPI_GETWHEELSCROLLLINES` setting, which it had
