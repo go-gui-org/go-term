@@ -54,14 +54,28 @@ func isDefaultBlank(c cell) bool {
 // so reflow does not pay one heap allocation per physical row. Blocks start
 // at 8 rows and double up to 256, so a screen-sized reflow allocates in
 // proportion to what it produces while a deep-scrollback one still amortises
-// to no per-row allocation. Growth never copies — a full block is simply
-// abandoned by the arena and kept alive by the rows carved out of it — so
-// rows carved from earlier blocks remain valid after the arena grows.
+// to no per-row allocation. A filled block is appended to the list, never
+// replaced, so growth never copies and nothing carved earlier is abandoned
+// — rows carved from earlier blocks remain valid after the arena grows.
+//
+// That block-list layout is what lets the arena persist on the grid across
+// Resizes (grid.reflowArena): logicalReflow only resets off/bi/rowW, so the
+// next reflow re-carves the existing blocks instead of reallocating them,
+// and only appends when it outgrows what is retained. Blocks are valid
+// scratch regardless of the current rowW (next() carves any block of any
+// width) and rewrapLine writes every cell it carves, so a reused block
+// needs no clearing. The arena is reset to the zero value wherever the
+// scrollback backing is dropped (RIS, ED 3, cap changes) so a shrink
+// returns the memory.
 type rowArena struct {
-	buf  []cell
-	off  int
-	rowW int
-	blk  int // rows in the current block; 0 before the first allocation
+	// blocks hold the carved rows, oldest first. bi is the index of the
+	// block rows are currently being carved from; off is the offset within
+	// it. Together they make re-carving after a reset start at block 0.
+	blocks [][]cell
+	bi     int
+	off    int
+	rowW   int
+	blk    int // row count of the most recent block when it was allocated; 0 before the first allocation
 }
 
 // next returns a zero-length row slice whose capacity is exactly rowW
@@ -72,16 +86,25 @@ func (a *rowArena) next() []cell {
 	if a.rowW <= 0 {
 		return nil
 	}
-	if a.off+a.rowW > len(a.buf) {
-		// Grow the block geometrically rather than jumping straight to 256:
-		// a 24-row reflow must not pay for a 256-row block. The floor sets
-		// the first block (blk is 0 then); the ceiling keeps deep-scrollback
-		// reflow at one allocation per 256 rows.
-		a.blk = clamp(a.blk*2, 8, 256)
-		a.buf = make([]cell, a.rowW*a.blk)
+	// Advance past exhausted blocks (off may be mid-block) before appending,
+	// so a re-carve that started at block 0 walks the retained list instead
+	// of discarding residual capacity in blocks sized for an older width.
+	for a.bi < len(a.blocks) && a.off+a.rowW > len(a.blocks[a.bi]) {
+		a.bi++
 		a.off = 0
 	}
-	row := a.buf[a.off : a.off : a.off+a.rowW]
+	if a.bi >= len(a.blocks) {
+		// Grow the block list geometrically rather than jumping straight to
+		// 256: a 24-row reflow must not pay for a 256-row block. The floor
+		// sets the first block (blk is 0 then); the ceiling keeps deep-
+		// scrollback reflow at one allocation per 256 rows. Appending (not
+		// replacing) preserves every block already carved.
+		a.blk = clamp(a.blk*2, 8, 256)
+		a.blocks = append(a.blocks, make([]cell, a.rowW*a.blk))
+		a.bi = len(a.blocks) - 1
+		a.off = 0
+	}
+	row := a.blocks[a.bi][a.off : a.off : a.off+a.rowW]
 	a.off += a.rowW
 	return row
 }
@@ -90,17 +113,20 @@ func (a *rowArena) next() []cell {
 // line, with continuation cells already stripped) into physical rows of
 // newCols columns. All rows except the last are marked wrapped=true.
 // An empty input produces a single blank row.
-// Rows are carved from arena to avoid per-row heap allocations.
-func rewrapLine(cells []cell, newCols int, arena *rowArena) []physRow {
+// Rows are carved from arena to avoid per-row heap allocations, and appended
+// to *dest — the caller's allNew slice — so a line's rows cost no slice
+// allocation of their own. Returns the number of rows appended.
+func rewrapLine(cells []cell, newCols int, arena *rowArena, dest *[]physRow) int {
 	if len(cells) == 0 {
 		blank := arena.next()
 		for len(blank) < newCols {
 			blank = append(blank, defaultCell())
 		}
-		return []physRow{{cells: blank, wrapped: false}}
+		*dest = append(*dest, physRow{cells: blank, wrapped: false})
+		return 1
 	}
 
-	var rows []physRow
+	start := len(*dest)
 	cur := arena.next()
 
 	for i := 0; i < len(cells); {
@@ -120,7 +146,7 @@ func rewrapLine(cells []cell, newCols int, arena *rowArena) []physRow {
 			for len(cur) < newCols {
 				cur = append(cur, defaultCell())
 			}
-			rows = append(rows, physRow{cells: cur, wrapped: true})
+			*dest = append(*dest, physRow{cells: cur, wrapped: true})
 			cur = arena.next()
 		}
 		cur = append(cur, c)
@@ -133,8 +159,8 @@ func rewrapLine(cells []cell, newCols int, arena *rowArena) []physRow {
 	for len(cur) < newCols {
 		cur = append(cur, defaultCell())
 	}
-	rows = append(rows, physRow{cells: cur, wrapped: false})
-	return rows
+	*dest = append(*dest, physRow{cells: cur, wrapped: false})
+	return len(*dest) - start
 }
 
 // maxReflowRows caps the total (scrollback + live) row count processed
@@ -157,6 +183,12 @@ type reflowConfig struct {
 	cursorR       int
 	cursorC       int
 	scrollbackCap int
+
+	// arena is the rowArena rewrapLine carves rows from. A grid-persisted
+	// arena (grid.reflowArena) lets consecutive Resizes reuse the previous
+	// reflow's blocks; nil falls back to a per-call arena, which keeps
+	// direct-call tests independent of grid state.
+	arena *rowArena
 
 	// trackRows lists content rows (scrollback + live, the same coordinate
 	// space as mark.Row) to re-map through the re-wrap. Order is preserved
@@ -350,7 +382,7 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 	}
 	allNew := make([]physRow, 0, estRows)
 	cursorNewPhysStart := 0
-	var cursorLineRewrapped []physRow
+	cursorLineRows := 0
 
 	// Row tracking bookkeeping. A row's *virtual* index is its index in
 	// allNew plus everything trimmed off the front so far; because the trim
@@ -367,9 +399,23 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 	// lineCells is reused across logical lines to avoid per-line allocation.
 	var lineCells []cell
 
-	// Transient arena for rewrapLine: rows are carved from flat blocks
-	// instead of allocated individually.
-	arena := rowArena{rowW: newCols}
+	// Arena for rewrapLine: rows are carved from flat blocks instead of
+	// allocated individually. A grid-persisted arena (cfg.arena, see
+	// grid.reflowArena) survives across Resizes so steady-state resizing
+	// re-carves the previous reflow's blocks; the per-call fallback covers
+	// direct callers (tests) that pass none. Only off/bi/rowW reset — blk
+	// and the block list carry over, keeping the geometric growth floor
+	// and ceiling.
+	var arena *rowArena
+	if cfg.arena != nil {
+		cfg.arena.off = 0
+		cfg.arena.bi = 0
+		cfg.arena.rowW = newCols
+		arena = cfg.arena
+	} else {
+		local := rowArena{rowW: newCols}
+		arena = &local
+	}
 
 	for li, ll := range lines {
 		// Collect cells for this logical line. Trim trailing default
@@ -404,16 +450,19 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 			lineCells = append(lineCells, row[:trimTo]...)
 		}
 
-		rewrapped := rewrapLine(lineCells, newCols, &arena)
 		if li == cursorLineIdx {
 			cursorNewPhysStart = len(allNew)
-			cursorLineRewrapped = rewrapped
 		}
 		if lineBase != nil {
 			lineBase[li] = len(allNew) + dropped
-			lineRows[li] = len(rewrapped)
 		}
-		allNew = append(allNew, rewrapped...)
+		n := rewrapLine(lineCells, newCols, arena, &allNew)
+		if li == cursorLineIdx {
+			cursorLineRows = n
+		}
+		if lineBase != nil {
+			lineRows[li] = n
+		}
 
 		if li < cursorLineIdx {
 			capRows := max(newRows+scrollbackCap, newRows*2)
@@ -426,13 +475,13 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 
 	rowOffset := 0
 	colOffset := 0
-	if newCols > 0 && len(cursorLineRewrapped) > 0 {
-		maxLogCol := max(len(cursorLineRewrapped)*newCols-1, 0)
+	if newCols > 0 && cursorLineRows > 0 {
+		maxLogCol := max(cursorLineRows*newCols-1, 0)
 		effective := min(cursorLogCol, maxLogCol)
 		rowOffset = effective / newCols
 		colOffset = effective % newCols
-		if rowOffset >= len(cursorLineRewrapped) {
-			rowOffset = len(cursorLineRewrapped) - 1
+		if rowOffset >= cursorLineRows {
+			rowOffset = cursorLineRows - 1
 		}
 	}
 	newCursorPhys := cursorNewPhysStart + rowOffset
@@ -627,6 +676,7 @@ func (g *grid) Resize(rows, cols int) {
 				cursorR:       g.mainSaved.cursorR,
 				cursorC:       g.mainSaved.cursorC,
 				scrollbackCap: g.ScrollbackCap,
+				arena:         &g.reflowArena,
 				// Marks, selection and graphics describe main-screen
 				// content, so they remap against this reflow even though
 				// the alt buffer itself is only cropped/padded.
@@ -654,6 +704,7 @@ func (g *grid) Resize(rows, cols int) {
 			cursorR:       g.CursorR,
 			cursorC:       g.CursorC,
 			scrollbackCap: g.ScrollbackCap,
+			arena:         &g.reflowArena,
 			trackRows:     trackRows,
 		})
 		tracked = res.trackedRows

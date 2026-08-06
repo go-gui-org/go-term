@@ -81,6 +81,10 @@ func (t *Term) resizeScrollback(capRows int) bool {
 	// column count: a differing value would reset the content, and the ring
 	// is repopulated at the live column count by scrollUpRegion anyway.
 	t.grid.Scrollback.EnsureGeom(capRows, t.grid.Scrollback.cols)
+	// The reflow scratch scales with the ring: a cap change invalidates it,
+	// so return its blocks with the ring's so a user lowering the cap
+	// actually shrinks the footprint.
+	t.grid.reflowArena = rowArena{}
 	// The viewport may have been scrolled into rows that no longer exist.
 	if n := t.grid.Scrollback.Len(); t.grid.ViewOffset > n {
 		t.grid.ViewOffset = n

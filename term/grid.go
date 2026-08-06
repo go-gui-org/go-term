@@ -438,6 +438,13 @@ type grid struct {
 	// grid so an overlapping copy costs no allocation after the first call.
 	rectBuf []cell
 
+	// reflowArena is the rowArena reused across Resize reflows: the blocks
+	// one reflow carves are re-carved by the next, so steady-state resizing
+	// allocates no per-resize scrollback volume (issue #156). Reset to the
+	// zero value wherever the scrollback backing is dropped (RIS, ED 3,
+	// scrollback cap changes) so a shrink actually returns the memory.
+	reflowArena rowArena
+
 	// clusters interns multi-codepoint grapheme cluster strings. A cell's
 	// clusterID indexes here (0 = none, index 0 is unused). clusterIDs is the
 	// reverse map for deduplication. The pool grows only, bounded by the

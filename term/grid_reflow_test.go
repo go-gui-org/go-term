@@ -333,8 +333,8 @@ func TestRowArena_BlockSizeCapsAt256(t *testing.T) {
 	if a.blk != 256 {
 		t.Errorf("block size = %d after %d rows, want 256", a.blk, rows)
 	}
-	if len(a.buf) != rowW*256 {
-		t.Errorf("buf len = %d, want %d", len(a.buf), rowW*256)
+	if last := a.blocks[len(a.blocks)-1]; len(last) != rowW*256 {
+		t.Errorf("last block len = %d, want %d", len(last), rowW*256)
 	}
 }
 
@@ -347,9 +347,8 @@ func TestRowArena_NonPositiveWidth(t *testing.T) {
 		if row := a.next(); row != nil {
 			t.Errorf("rowW %d: next() = %v, want nil", rowW, row)
 		}
-		if a.buf != nil {
-			t.Errorf("rowW %d: allocated a block of %d cells, want none",
-				rowW, len(a.buf))
+		if len(a.blocks) != 0 {
+			t.Errorf("rowW %d: allocated blocks, want none", rowW)
 		}
 	}
 }
@@ -393,6 +392,24 @@ func BenchmarkResize_Reflow_Empty(b *testing.B) {
 	}
 }
 
+// BenchmarkResize_Reflow_LargeCap isolates the content-independent,
+// cap-scaled cost: an empty grid at MaxScrollbackCap under the same
+// alternating 132/80 DECCOLM widths as BenchmarkResize_Reflow_Empty.
+// The ring's reuse band should hold steady-state resizing to near-zero
+// allocation after the first width change; a residual cost here means
+// SetGeom (or the reflow) is still allocating proportional to the cap
+// rather than to stored content (issue #126's separate observation).
+func BenchmarkResize_Reflow_LargeCap(b *testing.B) {
+	g := newGrid(24, 100)
+	g.ScrollbackCap = MaxScrollbackCap
+
+	b.ResetTimer()
+	for b.Loop() {
+		g.Resize(24, 132)
+		g.Resize(24, 80)
+	}
+}
+
 // feedBench is like feed but for benchmarks (no test error helpers).
 func feedBench(b *testing.B, g *grid, p *parser, data []byte) {
 	b.Helper()
@@ -405,7 +422,12 @@ func TestRewrapLine_PreserveAttributes(t *testing.T) {
 	c := cell{Ch: '🍣', Width: 2, FG: 1, BG: 2, Attrs: attrBold, LinkID: 42}
 	cells := []cell{c, {Width: 0}} // wide char + continuation
 
-	rows := rewrapLine(cells, 10, &rowArena{rowW: 10})
+	var dest []physRow
+	n := rewrapLine(cells, 10, &rowArena{rowW: 10}, &dest)
+	if n != 1 {
+		t.Fatalf("expected 1 row, got %d", n)
+	}
+	rows := dest
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
@@ -421,6 +443,128 @@ func TestRewrapLine_PreserveAttributes(t *testing.T) {
 	if cont.Attrs != attrBold {
 		t.Errorf("expected Bold attr, got %d", cont.Attrs)
 	}
+}
+
+// TestRewrapLine_AppendsIntoDest pins the append contract: consecutive
+// calls stack into the same destination slice and report their own counts.
+func TestRewrapLine_AppendsIntoDest(t *testing.T) {
+	arena := &rowArena{rowW: 10}
+	var dest []physRow
+	if n := rewrapLine(nil, 10, arena, &dest); n != 1 || len(dest) != 1 {
+		t.Fatalf("blank line: n=%d dest=%d, want 1/1", n, len(dest))
+	}
+	cells := []cell{{Ch: 'a', Width: 1}, {Ch: 'b', Width: 1}}
+	if n := rewrapLine(cells, 10, arena, &dest); n != 1 || len(dest) != 2 {
+		t.Fatalf("single-row line: n=%d dest=%d, want 1/2", n, len(dest))
+	}
+	if got := dest[1].cells[0].Ch; got != 'a' {
+		t.Errorf("second append misaligned: dest[1][0] = %q, want 'a'", got)
+	}
+}
+
+// TestRowArena_PersistedReuse checks the arena survives a rowW change the
+// way a grid-persisted arena sees it across Resizes: logicalReflow only
+// resets off/bi/rowW, so a second reflow must re-carve the retained blocks
+// without appending while they still fit, and rows carved before the reset
+// must stay valid (they alias the shared blocks). Rows come back
+// zero-length with cap == rowW (append fills them), so len stays 0.
+func TestRowArena_PersistedReuse(t *testing.T) {
+	var a rowArena
+	a.rowW = 132
+	first := make([][]cell, 0, 64)
+	for range 64 {
+		row := a.next()
+		if cap(row) != 132 {
+			t.Fatalf("carved row cap %d, want 132", cap(row))
+		}
+		first = append(first, row)
+	}
+	blocks := len(a.blocks)
+
+	// Reset exactly as logicalReflow does for the next reflow.
+	a.off = 0
+	a.bi = 0
+	a.rowW = 80
+	for range 64 {
+		if row := a.next(); cap(row) != 80 {
+			t.Fatalf("carved row cap %d, want 80", cap(row))
+		}
+	}
+	if len(a.blocks) != blocks {
+		t.Errorf("appended %d block(s) when the retained blocks still fit",
+			len(a.blocks)-blocks)
+	}
+	for i, row := range first {
+		if cap(row) != 132 {
+			t.Errorf("row %d cap %d, want 132", i, cap(row))
+		}
+	}
+}
+
+// TestRowArena_SkipsTooSmallBlocks pins the advance path of next(): a
+// re-carve at a much larger rowW must walk past retained blocks that cannot
+// hold even one row of the new width before appending, and must not lose
+// rows along the way.
+func TestRowArena_SkipsTooSmallBlocks(t *testing.T) {
+	var a rowArena
+	a.rowW = 4
+	for range 8 { // one 8-row block of 4-wide cells = 32 cells
+		a.next()
+	}
+	if len(a.blocks) != 1 {
+		t.Fatalf("carved %d block(s), want 1", len(a.blocks))
+	}
+
+	// 100-wide rows need 100 cells; every retained block is too small, so
+	// next() must skip them all and append a fresh block at the new width.
+	a.off = 0
+	a.bi = 0
+	a.rowW = 100
+	if row := a.next(); cap(row) != 100 {
+		t.Fatalf("carved row cap %d, want 100", cap(row))
+	}
+	if len(a.blocks) != 2 {
+		t.Errorf("blocks = %d, want 2 (skip the small block, append one)",
+			len(a.blocks))
+	}
+	if last := a.blocks[len(a.blocks)-1]; len(last) < 100 {
+		t.Errorf("new block len %d, want >= 100", len(last))
+	}
+}
+
+// TestRowArena_PersistedReuse_DeepThenShallow re-carves a deep arena for a
+// shallow reflow: the first block alone must cover the whole carve, leaving
+// every later block untouched — the shallow reflow pays no allocation.
+func TestRowArena_PersistedReuse_DeepThenShallow(t *testing.T) {
+	var a rowArena
+	a.rowW = 80
+	for range 2000 {
+		a.next()
+	}
+	blocks := len(a.blocks)
+	first := a.blocks[0]
+
+	a.off = 0
+	a.bi = 0
+	a.rowW = 80
+	for range 24 {
+		if row := a.next(); cap(row) != 80 {
+			t.Fatalf("carved row cap %d, want 80", cap(row))
+		}
+	}
+	if len(a.blocks) != blocks {
+		t.Errorf("appended %d block(s) for a 24-row reflow",
+			len(a.blocks)-blocks)
+	}
+	if !sameSlicePtr(a.blocks[0], first) {
+		t.Error("shallow reflow replaced the first block")
+	}
+}
+
+// sameSlicePtr reports whether two non-empty slices share an underlying
+// array (and identical len/cap headers).
+func sameSlicePtr(a, b []cell) bool {
+	return len(a) == len(b) && cap(a) == cap(b) && &a[0] == &b[0]
 }
 
 func TestLogicalReflow_ZeroDimsClamped(t *testing.T) {
