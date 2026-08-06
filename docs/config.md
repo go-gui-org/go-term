@@ -272,6 +272,16 @@ Where there is no PRIMARY, the gesture pastes the clipboard instead. An
 application that has enabled mouse reporting always receives the middle button
 itself — no paste is injected behind its back.
 
+### Wheel scroll distance
+
+One wheel notch scrolls three rows, matching xterm, kitty and Windows
+Terminal. There is no setting for this in `goterm.ini` — the distance comes
+from the platform. On Windows it is whatever Control Panel → Mouse → Wheel is
+set to (three by default, and "one screen at a time" is honoured); on macOS
+AppKit's own scroll acceleration applies on top, so a fast flick travels
+further than a slow one. Trackpads bypass the line unit entirely and pan by
+finger travel.
+
 ### The wheel on the alt screen
 
 Pagers such as `less` and `man` take the alternate screen but never enable
@@ -336,30 +346,34 @@ actually want to press.
 
 ### `workspace.*` commands
 
-| Command                                        | Default                                                       |
+Both forms are listed: macOS/Linux first, then the Windows chord the
+remapping above produces. Windows has no `Cmd`, and `Super+…` is never
+registered there — press the second form.
+
+| Command                                        | Default (macOS / Linux) / Windows                             |
 | ---------------------------------------------- | ------------------------------------------------------------- |
-| `workspace.splitVertical`                      | `Cmd+D`                                                       |
-| `workspace.splitHorizontal`                    | `Cmd+Shift+D`                                                 |
-| `workspace.closePane`                          | `Cmd+Shift+W`                                                 |
-| `workspace.nextPane`                           | `Cmd+]`                                                       |
-| `workspace.prevPane`                           | `Cmd+[`                                                       |
-| `workspace.resizeLeft`                         | `Cmd+Ctrl+Left`                                               |
-| `workspace.resizeRight`                        | `Cmd+Ctrl+Right`                                              |
-| `workspace.resizeUp`                           | `Cmd+Ctrl+Up`                                                 |
-| `workspace.resizeDown`                         | `Cmd+Ctrl+Down`                                               |
-| `workspace.newTab`                             | `Cmd+T`                                                       |
-| `workspace.closeTab`                           | `Cmd+Ctrl+W`                                                  |
-| `workspace.moveTabLeft`                        | `Cmd+Alt+[`                                                   |
-| `workspace.moveTabRight`                       | `Cmd+Alt+]`                                                   |
-| `workspace.nextTab`                            | `Cmd+Shift+]`                                                 |
-| `workspace.prevTab`                            | `Cmd+Shift+[`                                                 |
-| `workspace.tab1` … `workspace.tab9`            | `Cmd+1` … `Cmd+9`                                             |
-| `workspace.toggleRecording`                    | `Cmd+Shift+R`                                                 |
-| `workspace.toggleBroadcast`                    | `Cmd+Shift+I`                                                 |
-| `workspace.chooseTheme`                        | `Cmd+Shift+T`                                                 |
-| `workspace.reloadConfig`                       | `Cmd+Shift+,`                                                 |
-| `workspace.toggleHelp`                         | `Cmd+/`                                                       |
-| `workspace.commandPalette`                     | `Cmd+Shift+P`                                                 |
+| `workspace.splitVertical`                      | `Cmd+D` / `Ctrl+Shift+D`                                      |
+| `workspace.splitHorizontal`                    | `Cmd+Shift+D` / `Ctrl+Alt+D`                                  |
+| `workspace.closePane`                          | `Cmd+Shift+W` / `Ctrl+Alt+W`                                  |
+| `workspace.nextPane`                           | `Cmd+]` / `Ctrl+Shift+]`                                      |
+| `workspace.prevPane`                           | `Cmd+[` / `Ctrl+Shift+[`                                      |
+| `workspace.resizeLeft`                         | `Cmd+Ctrl+Left` / `Ctrl+Alt+Shift+Left`                       |
+| `workspace.resizeRight`                        | `Cmd+Ctrl+Right` / `Ctrl+Alt+Shift+Right`                     |
+| `workspace.resizeUp`                           | `Cmd+Ctrl+Up` / `Ctrl+Alt+Shift+Up`                           |
+| `workspace.resizeDown`                         | `Cmd+Ctrl+Down` / `Ctrl+Alt+Shift+Down`                       |
+| `workspace.newTab`                             | `Cmd+T` / `Ctrl+Shift+T`                                      |
+| `workspace.closeTab`                           | `Cmd+Ctrl+W` / `Ctrl+Alt+Shift+W`                             |
+| `workspace.moveTabLeft`                        | `Cmd+Alt+[` / `Alt+Shift+[`                                   |
+| `workspace.moveTabRight`                       | `Cmd+Alt+]` / `Alt+Shift+]`                                   |
+| `workspace.nextTab`                            | `Cmd+Shift+]` / `Ctrl+Alt+]`                                  |
+| `workspace.prevTab`                            | `Cmd+Shift+[` / `Ctrl+Alt+[`                                  |
+| `workspace.tab1` … `workspace.tab9`            | `Cmd+1` … `Cmd+9` / `Ctrl+Shift+1` … `Ctrl+Shift+9`           |
+| `workspace.toggleRecording`                    | `Cmd+Shift+R` / `Ctrl+Alt+R`                                  |
+| `workspace.toggleBroadcast`                    | `Cmd+Shift+I` / `Ctrl+Alt+I`                                  |
+| `workspace.chooseTheme`                        | `Cmd+Shift+T` / `Ctrl+Alt+T`                                  |
+| `workspace.reloadConfig`                       | `Cmd+Shift+,` / `Ctrl+Alt+,`                                  |
+| `workspace.toggleHelp`                         | `Cmd+/` / `Ctrl+Shift+/`                                      |
+| `workspace.commandPalette`                     | `Cmd+Shift+P` / `Ctrl+Alt+P`                                  |
 | `workspace.dismissOverlay`                     | `Escape` (only while an overlay is open)                      |
 | `workspace.overlayUp` / `overlayDown`          | `Up` / `Down` (only while a list overlay is open)             |
 | `workspace.overlayPageUp` / `overlayPageDown`  | `PageUp` / `PageDown` (only while a list overlay is open)     |

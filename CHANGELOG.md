@@ -6,6 +6,32 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `deps`: `go-gui` v0.50.0 → v0.51.0. Gives `gui.Event.ScrollY` a defined
+  unit — lines of text for discrete wheel deltas — and makes the Win32
+  backend honour the user's `SPI_GETWHEELSCROLLLINES` setting, which it had
+  been discarding. Required by the wheel fix below.
+
+### Fixed
+
+- `term`: mouse-wheel scrolling was far too slow on Windows and Linux. A
+  wheel delta is now measured in lines and scaled by the cell height, so one
+  reported line moves exactly one grid row and a notch travels three — the
+  xterm / kitty / Windows Terminal convention. It was a flat 5px per unit,
+  tuned against the Metal backend's old 2.5-per-notch pre-scale; the Win32
+  and X11 backends reported a bare 1.0 for the same notch, landing them at
+  5px against a ~18px cell — barely a quarter of a row. Requires go-gui's
+  defined `Event.ScrollY` unit. `wheelReportTicks` picks the new distance up
+  unchanged, so the SGR wheel reports sent to `vim` and `tmux` now match how
+  far the local viewport moves instead of being floored at one tick per
+  event. Trackpad panning is unaffected.
+
+- `docs`: `config.md` listed only the `Cmd` chord for every `workspace.*`
+  command, so a Windows user reading the table saw shortcuts that cannot
+  fire there — Super is OS-reserved and the defaults are remapped. Both
+  forms are now listed, matching the `term.*` table.
+
 ## [0.7.0] - 2026-08-04
 
 ### Added
