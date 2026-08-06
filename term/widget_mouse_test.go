@@ -756,7 +756,7 @@ func TestOnMouseScroll_LocalScrollBack(t *testing.T) {
 	func() {
 		tm.grid.Mu.Lock()
 		defer tm.grid.Mu.Unlock()
-		// wheelSensitivity=5, 1*5=5px, cellH=20 → ViewSubPx=5.
+		// Wheel deltas are lines: 1 line × cellH=20 → exactly one row.
 		if tm.grid.ViewSubPx == 0 && tm.grid.ViewOffset == 0 {
 			t.Error("expected viewport movement after scroll")
 		}
@@ -804,7 +804,7 @@ func TestOnMouseScroll_NonPreciseIsMouseWheel(t *testing.T) {
 	tm.onMouseScroll(nil, e, &gui.Window{})
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
-	// wheelSensitivity=5, 2.5*5=12.5px, cellH=20 → ViewSubPx=12.5.
+	// Wheel deltas are lines: 2.5 × cellH=20 → 50px → 2 rows + 10px.
 	if tm.grid.ViewSubPx == 0 && tm.grid.ViewOffset == 0 {
 		t.Error("expected viewport movement from wheel scroll")
 	}
@@ -864,15 +864,15 @@ func countReports(buf []byte, prefix string) int {
 
 // TestOnMouseScroll_SGRWheelDeltaMultiplier verifies that a large wheel
 // delta emits multiple SGR wheel reports — one per cellH of scaled scroll
-// distance — instead of a single tick per event. cellH=20,
-// wheelSensitivity=5: ScrollY=10 → 50px → 2 ticks.
+// distance — instead of a single tick per event. cellH=20 and a wheel
+// delta is lines: ScrollY=2.5 → 50px → 2 ticks.
 func TestOnMouseScroll_SGRWheelDeltaMultiplier(t *testing.T) {
 	tm, buf := newMouseTerm(4, 8)
 	tm.grid.Mu.Lock()
 	tm.grid.MouseTrack = true
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
-	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 10}
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
 	tm.onMouseScroll(nil, e, &gui.Window{})
 	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 2 {
 		t.Errorf("ticks = %d, want 2 (buf %q)", got, *buf)
@@ -880,7 +880,7 @@ func TestOnMouseScroll_SGRWheelDeltaMultiplier(t *testing.T) {
 }
 
 // TestOnMouseScroll_SGRWheelResidualAccumulates verifies that the
-// fractional remainder carries across events: two ScrollY=10 events are
+// fractional remainder carries across events: two ScrollY=2.5 events are
 // 100px total → 5 ticks at cellH=20 (2 then 3).
 func TestOnMouseScroll_SGRWheelResidualAccumulates(t *testing.T) {
 	tm, buf := newMouseTerm(4, 8)
@@ -888,12 +888,42 @@ func TestOnMouseScroll_SGRWheelResidualAccumulates(t *testing.T) {
 	tm.grid.MouseTrack = true
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
-	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 10}
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
 	tm.onMouseScroll(nil, e, &gui.Window{})
-	e = &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 10}
+	e = &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
 	tm.onMouseScroll(nil, e, &gui.Window{})
 	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 5 {
 		t.Errorf("ticks = %d, want 5 (buf %q)", got, *buf)
+	}
+}
+
+// TestOnMouseScroll_WheelNotchTravelsThreeRows pins the fix for the
+// too-slow wheel: a notch reports three lines on every backend, and each
+// line must move exactly one grid row. Before this, the factor was a flat
+// 5px and a Win32/X11 notch moved a quarter of a row.
+func TestOnMouseScroll_WheelNotchTravelsThreeRows(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.Scrollback.SetGeom(20, 8)
+	row := make([]cell, 8)
+	for i := range row {
+		row[i] = defaultCell()
+	}
+	for range 10 {
+		tm.grid.Scrollback.Push(row, false)
+	}
+	tm.grid.ViewOffset = 0
+	tm.grid.ViewSubPx = 0
+	tm.grid.Mu.Unlock()
+
+	// One notch, as every backend now reports it.
+	tm.onMouseScroll(nil, &gui.Event{ScrollY: 3}, &gui.Window{})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.ViewOffset != 3 || tm.grid.ViewSubPx != 0 {
+		t.Errorf("one notch moved offset=%d subpx=%v, want 3 rows exactly",
+			tm.grid.ViewOffset, tm.grid.ViewSubPx)
 	}
 }
 
@@ -914,7 +944,7 @@ func TestOnMouseScroll_SGRWheelMinOneTick(t *testing.T) {
 
 // TestOnMouseScroll_SGRWheelDirectionResetsResidual verifies that
 // reversing scroll direction discards the accumulated residual: up
-// ScrollY=10 leaves 10px residual, then down ScrollY=10 must emit
+// ScrollY=2.5 leaves 10px residual, then down ScrollY=-2.5 must emit
 // floor(50/20)=2 down ticks, not 3.
 func TestOnMouseScroll_SGRWheelDirectionResetsResidual(t *testing.T) {
 	tm, buf := newMouseTerm(4, 8)
@@ -922,9 +952,9 @@ func TestOnMouseScroll_SGRWheelDirectionResetsResidual(t *testing.T) {
 	tm.grid.MouseTrack = true
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
-	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 10}
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
 	tm.onMouseScroll(nil, e, &gui.Window{})
-	e = &gui.Event{MouseX: 35, MouseY: 45, ScrollY: -10}
+	e = &gui.Event{MouseX: 35, MouseY: 45, ScrollY: -2.5}
 	tm.onMouseScroll(nil, e, &gui.Window{})
 	if got := countReports(*buf, "\x1b[<65;4;3M"); got != 2 {
 		t.Errorf("down ticks = %d, want 2 (buf %q)", got, *buf)
@@ -993,15 +1023,17 @@ func TestWheelReportTicks_ZeroCellHReturnsOne(t *testing.T) {
 	}
 }
 
-// TestScrollSensitivityFor_PreciseVsWheel verifies that the precise flag
-// selects the trackpad factor (20) while non-precise gets the wheel
-// factor (5).
-func TestScrollSensitivityFor_PreciseVsWheel(t *testing.T) {
-	if got := scrollSensitivityFor(true); got != trackpadSensitivity {
+// TestScrollSensitivity_PreciseVsWheel verifies that the precise flag
+// selects the fixed trackpad pixel factor, while a non-precise (wheel)
+// delta — which arrives in lines — is scaled by the cell height so one
+// line is one row.
+func TestScrollSensitivity_PreciseVsWheel(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.scrollSensitivity(true); got != trackpadSensitivity {
 		t.Errorf("precise factor = %v, want %v", got, trackpadSensitivity)
 	}
-	if got := scrollSensitivityFor(false); got != wheelSensitivity {
-		t.Errorf("wheel factor = %v, want %v", got, wheelSensitivity)
+	if got := tm.scrollSensitivity(false); got != tm.cellH {
+		t.Errorf("wheel factor = %v, want cellH %v", got, tm.cellH)
 	}
 }
 

@@ -749,24 +749,29 @@ func openURL(rawURL string) {
 	}
 }
 
-// wheelSensitivity converts a discrete mouse-wheel delta into scroll
-// pixels. The Metal backend pre-scales one notch to ~2.5, so this lands
-// a notch at ~12.5px before macOS scroll acceleration.
-const wheelSensitivity float32 = 5
-
 // trackpadSensitivity converts a precise (trackpad / high-res) delta
 // into scroll pixels. The Metal backend pre-scales precise deltas by
 // 0.075; at 10 the effective finger-travel multiplier is ~0.75×.
 const trackpadSensitivity float32 = 10
 
-// scrollSensitivityFor selects the delta→pixel factor for a scroll
-// event. Backends that don't distinguish (everything non-Metal today)
-// leave ScrollPrecise false and get the wheel factor.
-func scrollSensitivityFor(precise bool) float32 {
+// scrollSensitivity selects the delta→pixel factor for a scroll event.
+//
+// A discrete wheel delta arrives in lines (gui.Event.ScrollY's unit when
+// ScrollPrecise is false), so the factor is the cell height: one
+// reported line scrolls exactly one grid row, and a notch moves the
+// three rows every backend reports — the same distance xterm, kitty and
+// Windows Terminal travel. It was a flat 5px, tuned against the Metal
+// backend's old 2.5-per-notch pre-scale; Win32 and X11 reported a bare
+// 1.0 for the same notch, which landed them at 5px — barely a quarter of
+// a row, so the wheel felt dead on both.
+//
+// Precise deltas are points of finger travel, not lines, and keep the
+// pixel factor.
+func (t *Term) scrollSensitivity(precise bool) float32 {
 	if precise {
 		return trackpadSensitivity
 	}
-	return wheelSensitivity
+	return t.cellH
 }
 
 // maxWheelTicks caps the SGR wheel reports emitted for a single scroll
@@ -794,7 +799,7 @@ func (t *Term) wheelReportTicks(scrollY float32, precise bool) int {
 		t.mouse.wheelResidual = 0
 	}
 	total := float64(t.mouse.wheelResidual) +
-		math.Abs(float64(scrollY))*float64(scrollSensitivityFor(precise))
+		math.Abs(float64(scrollY))*float64(t.scrollSensitivity(precise))
 	ticks := int(total / float64(t.cellH))
 	if ticks < 1 {
 		// Below one row of travel: emit a single tick and drop the
@@ -887,7 +892,7 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 
 	// Pixel-perfect scroll: pass the raw scaled delta directly to ScrollViewPx
 	// which accumulates it into ViewOffset + ViewSubPx. No integer truncation.
-	deltaPx := e.ScrollY * scrollSensitivityFor(e.ScrollPrecise)
+	deltaPx := e.ScrollY * t.scrollSensitivity(e.ScrollPrecise)
 	changed := func() bool {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
