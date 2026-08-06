@@ -195,6 +195,9 @@ func (g *grid) HardReset() {
 	if g.Scrollback.Len() > 0 {
 		g.Scrollback.DropBacking()
 	}
+	// The reflow scratch follows the ring: nothing reflows on a cleared
+	// screen, so its blocks only retain memory here.
+	g.reflowArena = rowArena{}
 	g.Marks = g.Marks[:0]
 	g.marksVer++
 	g.Graphics = g.Graphics[:0]

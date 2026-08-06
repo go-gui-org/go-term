@@ -637,6 +637,9 @@ func (g *grid) eraseInDisplay(mode int, selective bool) {
 		if mode == 3 {
 			if sb := g.Scrollback.Len(); sb > 0 {
 				g.Scrollback.DropBacking()
+				// Reflow scratch too: with history gone there is nothing
+				// for the next Resize to re-carve.
+				g.reflowArena = rowArena{}
 				g.trimMarks(sb)
 				g.trimGraphics(sb)
 			}
