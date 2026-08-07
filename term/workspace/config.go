@@ -30,6 +30,11 @@ type workspaceConfig struct {
 	fontFamily string // [font] family
 	theme      string // [general] theme, matched by name against Cfg.Themes
 
+	// env is the [env] section: variable name → value. Entries ride on
+	// term.Cfg.Env, which is applied *after* the identity scrub, so a user
+	// can override TERM_PROGRAM (and anything else the embedder sets).
+	env map[string]string
+
 	fontSize    float32       // [font] size, points
 	scrollbar   float32       // [general] scrollbar, px (negative hides)
 	minContrast float64       // [general] minimum-contrast, WCAG ratio
@@ -55,6 +60,7 @@ const (
 	maxKeybindings = 256 // per-file keybinding entry cap
 	maxKeyLen      = 128 // max bytes for a config key
 	maxValLen      = 128 // max bytes for a config value
+	maxEnvEntries  = 64  // per-file [env] entry cap
 )
 
 // maxFontSizeCfg bounds a [font] size entry before it reaches term. term
@@ -107,6 +113,25 @@ func parseConfig(r io.Reader) (workspaceConfig, []error) {
 				continue
 			}
 			cfg.keybindings[key] = val
+		case "env":
+			if len(cfg.env) >= maxEnvEntries {
+				errs = append(errs, fmt.Errorf("line %d: env limit (%d) reached", lineNum, maxEnvEntries))
+				continue
+			}
+			if cfg.env == nil {
+				cfg.env = make(map[string]string)
+			}
+			// A NUL would truncate the entry when the environment block is
+			// serialized at exec time — the child would inherit a variable
+			// whose name/value is not what the config says. A corrupt file
+			// should not produce a silently wrong environment.
+			if strings.ContainsRune(key, 0) || strings.ContainsRune(val, 0) {
+				errs = append(errs, fmt.Errorf("line %d: env key or value contains NUL", lineNum))
+				continue
+			}
+			// A later entry wins, like env(1) — and the key/value length
+			// caps above already bound the line.
+			cfg.env[key] = val
 		case "font":
 			if err := cfg.setFont(key, val); err != nil {
 				errs = append(errs, fmt.Errorf("line %d: %w", lineNum, err))
@@ -445,6 +470,12 @@ type termOpts struct {
 	bell        term.BellMode
 	notifyAfter time.Duration
 
+	// env carries the [env] section as "KEY=value" entries (nil when the
+	// section is absent), applied to every pane's term.Cfg.Env. It is the
+	// one opts field with no live setter — a child's environment is fixed
+	// at spawn — so it reaches new panes only.
+	env []string
+
 	// middleClickPaste defaults to the platform convention rather than to
 	// false, so it is always set explicitly by applySettings.
 	middleClickPaste bool
@@ -499,6 +530,21 @@ func applySettings(base Cfg, fc workspaceConfig, keys term.KeyMap) Cfg {
 	out.opts.middleClickPaste = defaultMiddleClickPaste()
 	if fc.hasMiddleClickPaste {
 		out.opts.middleClickPaste = fc.middleClickPaste
+	}
+	// Sorted keys so the slice (and therefore the child environment) is
+	// deterministic regardless of file order. A later duplicate in the file
+	// already won inside the map.
+	if n := len(fc.env); n > 0 {
+		names := make([]string, 0, n)
+		for name := range fc.env {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		env := make([]string, 0, n)
+		for _, name := range names {
+			env = append(env, name+"="+fc.env[name])
+		}
+		out.opts.env = env
 	}
 	if fc.theme != "" {
 		if named, ok := findTheme(base.Themes, fc.theme); ok {

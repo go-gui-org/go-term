@@ -16,6 +16,11 @@ type Cfg struct {
 	TextStyle gui.TextStyle
 	Themes    []term.NamedTheme
 
+	// Identity names this terminal to every pane's child via TERM_PROGRAM.
+	// Empty (default) advertises "go-term"; see term.Cfg.Identity. The
+	// config file's [env] section can override it per-user.
+	Identity string
+
 	// ConfigPath is the path to the human-edited config file (INI-style).
 	// When empty, the default location is used: $XDG_CONFIG_HOME/go-term/config,
 	// ~/.config/go-term/config, or os.UserConfigDir()/go-term/config.

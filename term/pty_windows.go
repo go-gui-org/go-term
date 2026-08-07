@@ -118,8 +118,9 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	// promises the 256-color palette, so TUI toolkits quantize without it.
 	// The host terminal's identity is replaced by this one's first (see
 	// setTerminalIdentity) so the child probes this terminal instead of
-	// trusting the parent's.
-	env := setTerminalIdentity(os.Environ())
+	// trusting the parent's. cfg.Identity names it; empty falls back to
+	// "go-term".
+	env := setTerminalIdentity(os.Environ(), cfg.Identity)
 	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
 	env = append(env, colorFGBGEnv(cfg))
 	env = append(env, cfg.Env...)

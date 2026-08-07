@@ -137,6 +137,15 @@ type Cfg struct {
 	// "KEY=" (trailing equals) to unset.
 	Env []string
 
+	// Identity names this terminal to children via TERM_PROGRAM, replacing
+	// whatever emulator the host ran under (see setTerminalIdentity). Empty
+	// (default) advertises "go-term". Embedders that implement the same
+	// capability profile as a known emulator can set that name here so
+	// children that key their behavior off TERM_PROGRAM — yazi and superfile
+	// pick their image protocol from it — get the right one. cfg.Env is
+	// applied after, so an Env entry still wins.
+	Identity string
+
 	// TextStyle overrides the default monospace text style. When set to
 	// the zero value, the widget falls back to gui.CurrentTheme().M5.
 	// To use a custom style you must set at least one field (typically

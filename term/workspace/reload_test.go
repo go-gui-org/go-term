@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -138,6 +139,23 @@ workspace.splitVertical = Cmd+E
 	}
 	if cmd.Shortcut.Key != gui.KeyD {
 		t.Errorf("splitVertical = %v, want the default KeyD", cmd.Shortcut.Key)
+	}
+}
+
+// TestReloadConfig_EnvFollowsFile pins the [env] section's reload contract:
+// it is spawn-time only, but the effective Cfg must still track the file —
+// a pane opened after the reload gets the new entries, and removing the
+// section restores the embedder's default (no env at all).
+func TestReloadConfig_EnvFollowsFile(t *testing.T) {
+	ws, path := newConfiguredWorkspace(t, "[env]\nTERM_PROGRAM = Ghostty\n")
+	want := []string{"TERM_PROGRAM=Ghostty"}
+	if !slices.Equal(ws.cfg.opts.env, want) {
+		t.Errorf("opts.env = %q, want %q", ws.cfg.opts.env, want)
+	}
+	writeConfig(t, path, "")
+	ws.ReloadConfig()
+	if ws.cfg.opts.env != nil {
+		t.Errorf("opts.env = %q, want nil after the section was removed", ws.cfg.opts.env)
 	}
 }
 

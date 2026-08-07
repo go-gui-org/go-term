@@ -175,3 +175,27 @@ func TestStartPTY_CfgEnvCanRestoreTermProgram(t *testing.T) {
 		t.Errorf("TERM_PROGRAM = %q; want falcon", got)
 	}
 }
+
+// Identity is the first-class version of the same knob: the scrub name is
+// replaced with the embedder's own, which is what lets a host that implements
+// the Kitty protocol (go-term does) get superfile/yazi to use it instead of
+// falling back to sixel.
+func TestStartPTY_IdentityNamesTheTerminal(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "iTerm.app")
+	p, err := startPTY(24, 80, Cfg{
+		Command: "/bin/sh", Args: []string{"-c", "exit 0"},
+		Identity: "Falcon",
+	})
+	if err != nil {
+		t.Skipf("startPTY: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	if got := envValue(p.cmd.Env, "TERM_PROGRAM"); got != "Falcon" {
+		t.Errorf("TERM_PROGRAM = %q; want Falcon", got)
+	}
+	// The version follows the identity, not the name — an embedder naming
+	// itself must not drag the host's version along.
+	if got := envValue(p.cmd.Env, "TERM_PROGRAM_VERSION"); got != termVersion {
+		t.Errorf("TERM_PROGRAM_VERSION = %q; want %q", got, termVersion)
+	}
+}

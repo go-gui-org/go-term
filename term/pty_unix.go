@@ -22,7 +22,7 @@ type ptyDev struct {
 // xterm-256color so apps emit standard SGR sequences, a UTF-8 LANG is
 // supplied when the environment carries no locale, and the host terminal's
 // identity variables are scrubbed (hostTerminalEnvKeys) then replaced with
-// this terminal's own name (selfIdentityEnv). cfg.Command,
+// this terminal's own name (selfIdentity). cfg.Command,
 // cfg.Args, and cfg.Env allow callers to override the command and
 // environment.
 func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
@@ -37,8 +37,8 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	cmd := exec.Command(shell, args...)
 	// Identity of the *host* terminal is replaced by this one's first: what
 	// follows describes this terminal, and a leftover TERM_PROGRAM would
-	// outrank it.
-	env := setTerminalIdentity(os.Environ())
+	// outrank it. cfg.Identity names it; empty falls back to "go-term".
+	env := setTerminalIdentity(os.Environ(), cfg.Identity)
 	// On macOS, GUI apps inherit a minimal PATH from launchd that omits
 	// Homebrew directories (/opt/homebrew/bin, /usr/local/bin). Run
 	// path_helper to construct the full system PATH from /etc/paths and
