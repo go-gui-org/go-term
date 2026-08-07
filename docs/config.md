@@ -31,8 +31,8 @@ Whitespace around `=` is trimmed. Keys and values are capped at 128 bytes each.
 ## Reloading
 
 `Cmd+Shift+,` (`Ctrl+Alt+,` on Windows) re-reads the file and applies it to
-every open pane without restarting: font, theme, scrollback, bell, scrollbar
-and every keybinding.
+every open pane without restarting: font, theme, scrollback, bell, scrollbar,
+every keybinding, and — for panes created from then on — `[env]`.
 
 `Cmd+,` opens this file in the OS-default editor, creating a commented stub
 first if it doesn't exist yet. That binding belongs to falcon, not to
@@ -139,6 +139,33 @@ flash where the platform has none; `audible` never flashes; `visual` never
 beeps; `both` does both; `none` ignores BEL entirely.
 
 Scrollback is clamped to at most 100000 rows.
+
+## `[env]`
+
+Environment variables handed to every child process (shell and the programs
+it runs). The full child environment is built from the parent's, with the
+host terminal's identity scrubbed and the pane's own `TERM`, `COLORTERM` and
+`COLORFGBG` set; entries here are applied last, so they win over all of it —
+including `TERM_PROGRAM`.
+
+| Key        | Type   | Default  | Meaning                                              |
+| ---------- | ------ | -------- | ---------------------------------------------------- |
+| any `NAME` | string | inherited | `NAME=value` added to every child's environment; an empty value unsets |
+
+```ini
+[env]
+TERM_PROGRAM = Ghostty
+PATH         = /opt/homebrew/bin:/usr/bin:/bin
+```
+
+`TERM_PROGRAM` is what TUI file managers key their image protocol off: yazi
+and superfile use the Kitty Graphics Protocol (sharp, full-color images) under
+a name they recognize and fall back to sixel otherwise. go-term implements
+KGP, so naming a known emulator here gets you its image quality. `falcon`
+advertises its own name (`Falcon`) by default.
+
+Variables apply to panes created after the reload — a running child's
+environment is fixed at spawn.
 
 ## Shell integration
 
@@ -594,6 +621,9 @@ scrollback         = 20000
 bell               = visual
 scrollbar          = 6
 middle-click-paste = true
+
+[env]
+TERM_PROGRAM = Ghostty
 
 [keybindings]
 workspace.splitVertical   = Cmd+D

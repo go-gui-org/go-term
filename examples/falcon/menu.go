@@ -222,6 +222,14 @@ const configStub = `# go-term configuration.
 # turning on with a light theme: apps that emit 24-bit color (eza, starship)
 # pick it for a dark background, and no theme setting can reach those.
 # minimum-contrast = 3
+
+# Environment variables for every child process. These are applied last, so
+# they override the terminal's own — including TERM_PROGRAM, which is what
+# yazi and superfile key their image protocol off. go-term implements the
+# Kitty protocol, so naming an emulator that does too upgrades their previews
+# from sixel to full-color images.
+# [env]
+# TERM_PROGRAM = Ghostty
 `
 
 func writeConfigStub(path string) error {

@@ -216,11 +216,13 @@ invariant is one-directional — the bound may be too high, never too low — so
 paths that move origins downward (`shiftGraphics`, `remapGraphics`) just set
 `occludeBoundUnknown` and let the next scan recompute it exactly.
 
-All of this is needed for yazi, which picks its image protocol from
-`TERM_PROGRAM`. `startPTY` scrubs the host terminal's identity variables
+All of this is needed for yazi and superfile, which pick their image protocol
+from `TERM_PROGRAM`. `startPTY` scrubs the host terminal's identity variables
 (`hostTerminalEnvKeys`) so that choice reflects go-term's own advertised
-capabilities rather than whichever emulator launched the app; `cfg.Env` is
-applied after the scrub, so an embedder can still declare an identity.
+capabilities rather than whichever emulator launched the app; `cfg.Identity`
+names this terminal in their place (default "go-term", falcon sets
+"Falcon"), and `cfg.Env` is applied after the scrub, so an embedder or the
+config file's `[env]` section can still declare (or override) an identity.
 
 When extending: add cases in the appropriate `parser_*.go` file.
 Don't let parser code reach into go-gui — it must stay grid-only.

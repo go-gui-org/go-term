@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -62,6 +63,30 @@ func TestTermCfg_CarriesMinimumContrast(t *testing.T) {
 	// treats anything at or below 1 as off, and 0 is what an absent key means.
 	if got := tab.termCfg(&gui.Window{}, Cfg{}, "tab-0-pane-0", "", hooks).MinimumContrast; got != 0 {
 		t.Errorf("termCfg().MinimumContrast = %v with no config, want 0", got)
+	}
+}
+
+// The same chain for the two spawn-time knobs: Identity names the terminal
+// and the config file's [env] section rides on term.Cfg.Env. Both are fixed
+// at spawn, so termCfg is the only hop that matters.
+func TestTermCfg_CarriesIdentityAndEnv(t *testing.T) {
+	tab := &Tab{id: "tab-0"}
+	hooks := paneHooks{
+		onExit:  func(string) {},
+		onFocus: func(string) {},
+		onTitle: func(string, string) {},
+		onInput: func(string, []byte, term.InputKind) {},
+	}
+	cfg := Cfg{
+		Identity: "Falcon",
+		opts:     termOpts{env: []string{"TERM_PROGRAM=Ghostty", "PATH=/bin"}},
+	}
+	tc := tab.termCfg(&gui.Window{}, cfg, "tab-0-pane-0", "", hooks)
+	if tc.Identity != "Falcon" {
+		t.Errorf("termCfg().Identity = %q, want Falcon", tc.Identity)
+	}
+	if !slices.Equal(tc.Env, []string{"TERM_PROGRAM=Ghostty", "PATH=/bin"}) {
+		t.Errorf("termCfg().Env = %q", tc.Env)
 	}
 }
 

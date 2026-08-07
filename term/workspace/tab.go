@@ -88,6 +88,8 @@ func (t *Tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHoo
 		TextStyle:       cfg.TextStyle,
 		Themes:          paneThemes(cfg),
 		Dir:             dir,
+		Identity:        cfg.Identity,
+		Env:             cfg.opts.env,
 		RecordInput:     cfg.RecordInput,
 		DownloadDir:     cfg.DownloadDir,
 		ScrollbackRows:  cfg.opts.scrollback,

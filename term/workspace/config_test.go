@@ -575,6 +575,80 @@ func TestApplySettings_UnknownThemeKeepsDefault(t *testing.T) {
 	}
 }
 
+// The [env] section rides on term.Cfg.Env, which is applied after the
+// identity scrub — that ordering is what lets a user name a known emulator
+// to get superfile/yazi onto the Kitty protocol.
+func TestApplySettings_EnvSection(t *testing.T) {
+	base := Cfg{Themes: testThemes(t)}
+	fc, errs := parseConfig(strings.NewReader(`
+[env]
+TERM_PROGRAM = Ghostty
+LANG         = C.UTF-8
+TERM_PROGRAM = Kitty
+`))
+	if len(errs) != 0 {
+		t.Fatalf("parse errors: %v", errs)
+	}
+	got := applySettings(base, fc, nil)
+	// Sorted by name regardless of file order; a later duplicate wins.
+	want := []string{"LANG=C.UTF-8", "TERM_PROGRAM=Kitty"}
+	if !slices.Equal(got.opts.env, want) {
+		t.Errorf("opts.env = %q, want %q", got.opts.env, want)
+	}
+	if base.opts.env != nil {
+		t.Error("applySettings mutated the base Cfg")
+	}
+}
+
+func TestApplySettings_EnvAbsentStaysNil(t *testing.T) {
+	got := applySettings(Cfg{}, workspaceConfig{}, nil)
+	if got.opts.env != nil {
+		t.Errorf("opts.env = %q, want nil", got.opts.env)
+	}
+}
+
+func TestParseConfig_EnvSectionEmptyValue(t *testing.T) {
+	// "KEY=" is the documented way to unset an inherited variable.
+	fc, errs := parseConfig(strings.NewReader("[env]\nITERM_SESSION_ID =\n"))
+	if len(errs) != 0 {
+		t.Fatalf("parse errors: %v", errs)
+	}
+	if got := fc.env["ITERM_SESSION_ID"]; got != "" {
+		t.Errorf("env value = %q, want empty", got)
+	}
+}
+
+func TestParseConfig_EnvSectionRejectsNUL(t *testing.T) {
+	// A NUL would truncate the entry when the environment block is built at
+	// exec time, so the child would inherit a variable that is not what the
+	// config says — reject the line instead of lying.
+	cases := []string{"A\x00B = x", "A = x\x00y"}
+	for _, line := range cases {
+		fc, errs := parseConfig(strings.NewReader("[env]\n" + line + "\n"))
+		if len(errs) != 1 {
+			t.Errorf("%q: errors = %v, want 1", line, errs)
+		}
+		if len(fc.env) != 0 {
+			t.Errorf("%q: accepted a NUL-carrying entry", line)
+		}
+	}
+}
+
+func TestParseConfig_EnvSectionLimitReached(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("[env]\n")
+	for i := 0; i <= maxEnvEntries; i++ {
+		fmt.Fprintf(&sb, "VAR%d = v\n", i)
+	}
+	cfg, errs := parseConfig(strings.NewReader(sb.String()))
+	if len(errs) == 0 {
+		t.Error("expected error when env limit is exceeded, got none")
+	}
+	if len(cfg.env) > maxEnvEntries {
+		t.Errorf("env count %d exceeds limit %d", len(cfg.env), maxEnvEntries)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // term.* / workspace.* keybinding routing
 // ---------------------------------------------------------------------------

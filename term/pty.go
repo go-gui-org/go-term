@@ -52,8 +52,9 @@ var hostTerminalEnvKeys = [...]string{
 	"ITERM_SESSION_ID",
 }
 
-// selfIdentityEnv names this terminal to children, replacing the host identity
-// the scrub above removed. Scrubbing alone left TERM_PROGRAM unset, which reads
+// selfIdentity names this terminal to children, replacing the host identity
+// the scrub above removed. name is the embedder's chosen identity (Cfg.Identity,
+// default "go-term"). Scrubbing alone left TERM_PROGRAM unset, which reads
 // as "no information" rather than "a terminal that is not the one that launched
 // me" — and every value here is true, unlike the alternative of answering to
 // some other emulator's name to inherit its capability profile.
@@ -63,18 +64,26 @@ var hostTerminalEnvKeys = [...]string{
 // asking the terminal instead (chafa, for one, detects sixel from DA1 but
 // detects the Kitty protocol only from TERM_PROGRAM/TERM, never sending the
 // a=q query go-term already answers). Advertising an honest name is what makes
-// growing that support possible; claiming a false one is not.
-var selfIdentityEnv = [...]string{
-	"TERM_PROGRAM=go-term",
-	"TERM_PROGRAM_VERSION=" + termVersion,
+// growing that support possible; claiming a false one is not. A name set to
+// that of a real emulator ("Ghostty") is still an honest one when it is the
+// embedder's own: yazi and superfile pick their image protocol from
+// TERM_PROGRAM, so a host that implements the Kitty protocol can say so.
+func selfIdentity(name string) []string {
+	if name == "" {
+		name = "go-term"
+	}
+	return []string{
+		"TERM_PROGRAM=" + name,
+		"TERM_PROGRAM_VERSION=" + termVersion,
+	}
 }
 
 // setTerminalIdentity drops the host emulator's identity variables and names
 // this terminal in their place. The two halves belong together — a scrub
 // without the replacement leaves TERM_PROGRAM unset — so every startPTY goes
 // through here rather than pairing dropEnv with an append of its own.
-func setTerminalIdentity(env []string) []string {
-	return append(dropEnv(env, hostTerminalEnvKeys[:]), selfIdentityEnv[:]...)
+func setTerminalIdentity(env []string, name string) []string {
+	return append(dropEnv(env, hostTerminalEnvKeys[:]), selfIdentity(name)...)
 }
 
 // colorFGBGEnv builds the COLORFGBG value describing the theme the child is
