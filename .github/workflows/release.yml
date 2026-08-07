@@ -1,0 +1,183 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: go-term
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsdl2-dev \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libpango1.0-dev \
+            libfontconfig1-dev \
+            libglib2.0-dev \
+            libhunspell-dev
+
+      - name: Build falcon
+        working-directory: go-term
+        run: |
+          VERSION=$(git describe --tags --always 2>/dev/null || echo dev)
+          go build -tags prod \
+            -ldflags "-X main.version=${VERSION}" \
+            -o falcon ./examples/falcon
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Package
+        working-directory: go-term
+        run: |
+          mkdir -p stage
+          cp falcon stage/
+          cp packaging/falcon.desktop stage/
+          cp packaging/install.txt stage/
+          cp examples/falcon/icon/falcon.png stage/
+          tar czf "falcon-${VERSION}-linux-amd64.tar.gz" -C stage .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-asset
+          path: go-term/falcon-*-linux-amd64.tar.gz
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: go-term
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
+
+      - name: Install system deps
+        run: |
+          brew install \
+            sdl2 \
+            freetype \
+            harfbuzz \
+            pango \
+            fontconfig \
+            glib \
+            hunspell
+
+      - name: Build falcon
+        working-directory: go-term
+        run: |
+          VERSION=$(git describe --tags --always 2>/dev/null || echo dev)
+          go build -tags prod \
+            -ldflags "-X main.version=${VERSION}" \
+            -o falcon ./examples/falcon
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Bundle .app
+        working-directory: go-term
+        run: |
+          go build -o buildapp github.com/go-gui-org/go-gui/cmd/buildapp
+          ./buildapp -bundle-deps -name Falcon \
+            -id github.com.go-gui-org.go-term \
+            -icon examples/falcon/icon/falcon.icns \
+            -version "${VERSION#v}" falcon
+
+      - name: Package
+        working-directory: go-term
+        run: |
+          hdiutil create -srcfolder "Falcon.app" \
+            -volname "Falcon ${VERSION}" \
+            -format UDZO "falcon-${VERSION}-macos.dmg"
+          # Ad-hoc sign for now — notarized Developer ID signing is a
+          # follow-up once an Apple Developer account exists (issue #105).
+          codesign -s - --force "falcon-${VERSION}-macos.dmg"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-asset
+          path: go-term/falcon-*-macos.dmg
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: go-term
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          release: false
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkg-config
+            zip
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go-term/go.sum
+
+      - name: Build falcon
+        working-directory: go-term
+        run: |
+          VERSION=$(git describe --tags --always 2>/dev/null || echo dev)
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=gcc \
+            go build -tags prod \
+            -ldflags "-X main.version=${VERSION}" \
+            -o falcon.exe ./examples/falcon
+
+      - name: Package
+        working-directory: go-term
+        run: |
+          VERSION=$(git describe --tags --always 2>/dev/null || echo dev)
+          zip "falcon-${VERSION}-windows-amd64.zip" falcon.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-asset
+          path: go-term/falcon-*-windows-amd64.zip
+
+  release:
+    name: Attach to GitHub Release
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: '*-asset'
+          merge-multiple: true
+          path: assets
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: assets/*
+          generate_release_notes: true

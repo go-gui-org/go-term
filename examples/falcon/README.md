@@ -12,7 +12,34 @@ macOS. Targets macOS, Linux, and Windows (ConPTY).
 
 ![screenshot](../../screenshot.png)
 
-## Run
+## Install
+
+Prebuilt binaries attach to each [go-term release](https://github.com/go-gui-org/go-term/releases):
+a macOS DMG, a Linux tarball, and a Windows zip.
+
+### macOS
+
+```sh
+brew install go-gui-org/tap/falcon
+```
+
+Until Falcon is Developer ID signed and notarized, Gatekeeper blocks the
+first launch: right-click the app in Finder and choose Open. Releases are
+ad-hoc signed.
+
+### Linux
+
+Download `falcon-<version>-linux-amd64.tar.gz` from the release page — it
+contains the binary, a `.desktop` entry, the icon, and install instructions
+(`packaging/install.txt` in the repo). Requires SDL2, FreeType, HarfBuzz,
+Pango, fontconfig, and GLib at runtime.
+
+### Windows
+
+Download `falcon-<version>-windows-amd64.zip` from the release page and
+unzip it anywhere. No runtime dependencies beyond a stock Windows 10/11.
+
+## Run from the source tree
 
 ```bash
 cd examples/falcon
@@ -20,7 +47,7 @@ go run .
 ```
 
 Build a versioned binary from the repo root (stamps `git describe --tags` into
-the About dialog):
+the About dialog; excludes the go-gui F12 inspector):
 
 ```bash
 make build-falcon    # ./falcon
@@ -42,8 +69,8 @@ make app          # → Falcon.app, using examples/falcon/icon/falcon.icns
 make clean-app
 ```
 
-Bundling requires the `buildapp` tool from a sibling `../go-gui` checkout (see
-the root `Makefile`). Icon sources and regeneration steps live in
+Bundling builds the `buildapp` tool from the go-gui module in `go.mod` — no
+sibling checkout needed. Icon sources and regeneration steps live in
 [`icon/README.md`](icon/README.md).
 
 ## Command-line flags

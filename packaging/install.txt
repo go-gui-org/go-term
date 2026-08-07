@@ -1,0 +1,64 @@
+# Falcon — Linux install notes
+
+The tarball contains four files:
+
+| File          | Install to                                             |
+| ------------- | ------------------------------------------------------ |
+| `falcon`      | `/usr/local/bin/falcon` (or any `$PATH` directory)     |
+| `falcon.desktop` | `/usr/share/applications/falcon.desktop`            |
+| `falcon.png`  | `/usr/share/icons/hicolor/512x512/apps/falcon.png`     |
+| `install.txt` | this file                                              |
+
+## Install
+
+```sh
+sudo install -Dm755 falcon /usr/local/bin/falcon
+sudo install -Dm644 falcon.desktop /usr/share/applications/falcon.desktop
+sudo install -Dm644 falcon.png /usr/share/icons/hicolor/512x512/apps/falcon.png
+sudo update-desktop-database /usr/share/applications 2>/dev/null || true
+```
+
+User-only install works too: `~/.local/bin`, `~/.local/share/applications`,
+`~/.local/share/icons/hicolor/512x512/apps/`.
+
+## Runtime dependencies
+
+Falcon is a Go binary linking SDL2 and the go-glyph text stack, so it needs
+these shared libraries at runtime:
+
+- SDL2 (`libsdl2-2.0.so`)
+- FreeType (`libfreetype6.so`)
+- HarfBuzz (`libharfbuzz.so`)
+- Pango (`libpango-1.0.so`)
+- fontconfig (`libfontconfig.so`)
+- GLib (`libglib-2.0.so`)
+
+Ubuntu/Debian:
+
+```sh
+sudo apt install libsdl2-2.0-0 libfreetype6 libharfbuzz0b libpango-1.0-0 libfontconfig1 libglib2.0-0
+```
+
+Fedora:
+
+```sh
+sudo dnf install SDL2 freetype harfbuzz pango fontconfig glib2
+```
+
+Arch:
+
+```sh
+sudo pacman -S sdl2 freetype2 harfbuzz pango fontconfig glib2
+```
+
+## Run
+
+```sh
+falcon
+```
+
+Without installing, run straight from the tarball:
+
+```sh
+./falcon
+```

@@ -42,7 +42,7 @@ jobs:
 
       - name: Build falcon
         working-directory: go-term
-        run: go build ./examples/falcon
+        run: go build -tags prod ./examples/falcon
 
       - name: Test
         working-directory: go-term
@@ -80,7 +80,7 @@ jobs:
 
       - name: Build falcon
         working-directory: go-term
-        run: go build ./examples/falcon
+        run: go build -tags prod ./examples/falcon
 
       - name: Test
         working-directory: go-term
@@ -100,6 +100,18 @@ jobs:
           go-version: "1.26"
           cache: true
           cache-dependency-path: go-term/go.sum
+
+      # msys2 provides the mingw gcc the GUI backend's cgo needs; without it
+      # the falcon build depends on whatever the runner image happens to ship.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          release: false
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkg-config
 
       # No system deps step: unlike the Linux/macOS jobs, nothing below the GUI
       # backend needs SDL2/freetype/harfbuzz. The ConPTY layer (pty_windows.go)
@@ -129,13 +141,12 @@ jobs:
           CGO_ENABLED: "0"
         run: go test -count=1 ./term/... ./internal/...
 
-      # The GUI backend needs cgo (go-gl) and is unproven on windows-latest, so
-      # it reports without gating merges. Once it has been green for a while,
-      # drop continue-on-error and fold it into the required steps.
-      - name: Build falcon (informational)
-        continue-on-error: true
+      # The GUI backend needs cgo (go-gl); gcc comes from the msys2 step
+      # above. Gates merges — falcon ships Windows binaries in the release
+      # workflow, so this build must stay green per PR.
+      - name: Build falcon
         working-directory: go-term
-        run: go build ./examples/falcon
+        run: go build -tags prod ./examples/falcon
 
   lint:
     runs-on: ubuntu-latest
