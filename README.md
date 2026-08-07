@@ -2,6 +2,8 @@
 
 ![screenshot](screenshot.png)
 
+Project wiki — <https://github.com/go-gui-org/go-term/wiki>.
+
 A full-featured, embeddable terminal-emulator widget for the
 [`go-gui`](https://github.com/go-gui-org/go-gui) framework. Spawns a real
 shell over a PTY, renders through a GPU-accelerated `gui.DrawCanvas`, and
