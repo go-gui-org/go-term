@@ -69,3 +69,31 @@ func TestPTY_WindowsEcho(t *testing.T) {
 		t.Fatal("timed out waiting for console output")
 	}
 }
+
+// TestPTY_CloseBounded pins the teardown invariant: Close must return
+// promptly even when the child ignores the console teardown. Regression for
+// the intermittent workspace-test hang where closeOutput blocked forever in
+// CancelIoEx: a child still alive at its prompt kept conhost holding the
+// output pipe's write end, so the reader goroutine stayed parked in Read,
+// and CancelIoEx cannot cancel a synchronous read issued from another
+// goroutine. Close must force-kill the child rather than trust console
+// close to terminate it.
+func TestPTY_CloseBounded(t *testing.T) {
+	p, err := startPTY(24, 80, Cfg{})
+	if err != nil {
+		t.Skipf("startPTY failed: %v", err)
+	}
+	// Feed nothing: the child stays at its interactive prompt, alive and
+	// holding the console, which is exactly the state that used to hang.
+
+	done := make(chan struct{})
+	go func() {
+		_ = p.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("pty.Close blocked longer than 10s with a live child")
+	}
+}

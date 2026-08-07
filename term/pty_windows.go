@@ -19,6 +19,12 @@ import (
 // does not wait on this — that is driven by the reader reaching EOF.
 const pipeDrainGrace = 5 * time.Second
 
+// closeGrace bounds Close's wait for the child to exit — once after the
+// console goes down, once after a forced kill. A well-behaved child exits on
+// console close in milliseconds, so the first wait usually returns
+// immediately; the two-stage split keeps Close's worst case near 2s.
+const closeGrace = 1 * time.Second
+
 // ptyDev drives a child shell through a Windows pseudoconsole (ConPTY).
 // ConPTY does not expose a single bidirectional fd like a Unix master, so
 // input and output are separate anonymous pipes wired into the console at
@@ -243,14 +249,38 @@ func (p *ptyDev) Resize(rows, cols int) error {
 	return windows.ResizePseudoConsole(p.hpc, coordSize(rows, cols))
 }
 
-// Close tears down the console, which terminates the child, and closes the
-// output pipe. Unlike the child-exit path this does not wait to drain: the
-// caller is discarding the terminal, so pending output has nowhere to go.
-// Safe to call repeatedly; the wait goroutine reaps the process and thread
-// handles once WaitForSingleObject returns.
+// Close tears down the console, terminates the child, and closes the output
+// pipe. Unlike the child-exit path this does not wait to drain: the caller
+// is discarding the terminal, so pending output has nowhere to go. Safe to
+// call repeatedly; the wait goroutine reaps the process and thread handles
+// once WaitForSingleObject returns.
 func (p *ptyDev) Close() error {
 	p.shutdownConsole()
-	p.closeOutput()
+	// Closing the console does not reliably terminate an attached child,
+	// and a child that survives keeps conhost holding the write end of the
+	// output pipe: the reader goroutine parks in Read, and closing the read
+	// end then blocks forever in CancelIoEx, which cannot cancel a
+	// synchronous read issued from another goroutine. (That is the hang
+	// behind the intermittent "test timed out" failures in the workspace
+	// tests.) So wait for the child to die first — force-kill it if it
+	// lingers — and only then close the read end, by which time the reader
+	// has already hit EOF and the close cannot block.
+	if w, err := windows.WaitForSingleObject(p.proc, uint32(closeGrace/time.Millisecond)); err != nil || w == windows.WAIT_OBJECT_0 {
+		// The child exited on console close, or the wait goroutine already
+		// reaped it (which only happens after the child died): no read can
+		// be in flight, so closing the read end is immediate.
+		p.closeOutput()
+		return nil
+	}
+	_ = windows.TerminateProcess(p.proc, 1)
+	if w, err := windows.WaitForSingleObject(p.proc, uint32(closeGrace/time.Millisecond)); err == nil && w == windows.WAIT_OBJECT_0 {
+		p.closeOutput()
+		return nil
+	}
+	// Unreapable child: skip closeOutput rather than block forever. The
+	// wait goroutine's drain backstop closes the read end once the process
+	// finally dies, and Term.Close's readDone timeout covers the degraded
+	// case.
 	return nil
 }
 
