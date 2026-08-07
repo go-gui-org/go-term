@@ -394,17 +394,17 @@ func (t *Term) FocusID() string { return t.focusID }
 var termSeq atomic.Uint64
 
 // onAmendLayout updates the Term's recorded absolute position when layout changes.
-func (t *Term) onAmendLayout(l *gui.Layout, _ *gui.Window) {
-	if l == nil {
+func (t *Term) onAmendLayout(ctx gui.EventCtx) {
+	if ctx.Layout == nil {
 		return
 	}
 	var x, y float32
-	if len(l.Children) > 0 && l.Children[0].Shape != nil {
-		x = l.Children[0].Shape.X
-		y = l.Children[0].Shape.Y
-	} else if l.Shape != nil {
-		x = l.Shape.X
-		y = l.Shape.Y
+	if len(ctx.Layout.Children) > 0 && ctx.Layout.Children[0].Shape != nil {
+		x = ctx.Layout.Children[0].Shape.X
+		y = ctx.Layout.Children[0].Shape.Y
+	} else if ctx.Layout.Shape != nil {
+		x = ctx.Layout.Shape.X
+		y = ctx.Layout.Shape.Y
 	}
 	if realNumber(x) {
 		t.ime.layoutX = x

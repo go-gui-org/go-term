@@ -379,9 +379,9 @@ func TestOnClick_MiddleClickGatedOnConfig(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		tm, buf := newMouseTerm(4, 20)
 		tm.cfg.MiddleClickPaste = on
-		tm.onClick(nil, &gui.Event{
+		tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{
 			MouseX: 15, MouseY: 10, MouseButton: gui.MouseMiddle,
-		}, newPrimaryWindow("pasted", ""))
+		}, Window: newPrimaryWindow("pasted", "")})
 		got := string(*buf)
 		if on && got != "pasted" {
 			t.Errorf("enabled: pasted %q, want %q", got, "pasted")
@@ -399,9 +399,9 @@ func TestOnClick_MiddleClickReportsWhenTracking(t *testing.T) {
 	tm.cfg.MiddleClickPaste = true
 	tm.grid.MouseTrack = true
 	tm.grid.MouseSGR = true
-	tm.onClick(nil, &gui.Event{
+	tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{
 		MouseX: 15, MouseY: 10, MouseButton: gui.MouseMiddle,
-	}, newPrimaryWindow("pasted", ""))
+	}, Window: newPrimaryWindow("pasted", "")})
 	got := string(*buf)
 	if strings.Contains(got, "pasted") {
 		t.Errorf("pasted %q while mouse reporting is on", got)

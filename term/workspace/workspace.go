@@ -716,14 +716,13 @@ func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 
 		closeBtn := tight(gui.FitFit)
 		closeBtn.Padding = gui.SomeP(0, 0, 0, 4)
-		closeBtn.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+		closeBtn.OnClick = func(ctx gui.EventCtx) {
 			ws.closeTabAt(idx)
-			e.IsHandled = true
 		}
 		// Direct hover over × brightens it to the high-contrast title color.
-		closeBtn.OnHover = func(layout *gui.Layout, _ *gui.Event, w *gui.Window) {
-			w.SetMouseCursorPointingHand()
-			setTextColorByID(layout, closeID, style.Color)
+		closeBtn.OnHover = func(ctx gui.EventCtx) {
+			ctx.Window.SetMouseCursorPointingHand()
+			setTextColorByID(ctx.Layout, closeID, style.Color)
 		}
 		closeBtn.Content = []gui.View{
 			gui.Text(gui.TextCfg{
@@ -738,9 +737,8 @@ func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 
 	outer := tight(gui.FillFit)
 	outer.Color = bg
-	outer.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	outer.OnClick = func(ctx gui.EventCtx) {
 		ws.activateTab(idx)
-		e.IsHandled = true
 	}
 	// Hovering anywhere on an inactive tab reveals a muted "×" — the title
 	// text color at reduced opacity, so it stays legible against the panel.
@@ -748,8 +746,8 @@ func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 	// is directly on the glyph, brightening it to full opacity.
 	if len(ws.tabs) > 1 && !isActive {
 		revealColor := theme.M5.Color.WithOpacity(0.6)
-		outer.OnHover = func(layout *gui.Layout, _ *gui.Event, w *gui.Window) {
-			setTextColorByID(layout, closeID, revealColor)
+		outer.OnHover = func(ctx gui.EventCtx) {
+			setTextColorByID(ctx.Layout, closeID, revealColor)
 		}
 	}
 	outer.Content = []gui.View{gui.Row(inner)}

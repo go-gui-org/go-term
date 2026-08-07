@@ -39,7 +39,7 @@ func clipTerm(cols int, rows ...string) (*Term, *gui.Window, *string) {
 // key feeds one non-printable key (arrows, Escape, Ctrl+letter, the entry
 // chord) through onKeyDown, the event a real backend delivers for those.
 func key(tm *Term, w *gui.Window, k gui.KeyCode, mods gui.Modifier) {
-	tm.onKeyDown(nil, &gui.Event{KeyCode: k, Modifiers: mods}, w)
+	tm.onKeyDown(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: k, Modifiers: mods}, Window: w})
 }
 
 // press types a printable character, the *only* event macOS delivers for an
@@ -48,7 +48,7 @@ func key(tm *Term, w *gui.Window, k gui.KeyCode, mods gui.Modifier) {
 // this way, so tests must too — driving them through onKeyDown tests a path
 // that does not exist on the platform.
 func press(tm *Term, w *gui.Window, r rune) {
-	tm.onChar(nil, &gui.Event{CharCode: uint32(r)}, w)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: uint32(r)}, Window: w})
 }
 
 // enterKey is the mode-entry chord as a real event would carry it.
@@ -118,7 +118,7 @@ func TestCopyMode_OnCharSwallowed(t *testing.T) {
 	tm, buf := copyTerm(8, "hello")
 	key(tm, nil, gui.KeySpace, copyModeMods)
 	e := &gui.Event{CharCode: 'j'}
-	tm.onChar(nil, e, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: e, Window: nil})
 	if !e.IsHandled {
 		t.Error("onChar should mark the event handled in copy mode")
 	}
@@ -132,7 +132,7 @@ func TestCopyMode_ExitRestoresPtyInput(t *testing.T) {
 	tm, buf := copyTerm(8, "hello")
 	key(tm, nil, gui.KeySpace, copyModeMods)
 	key(tm, nil, gui.KeyEscape, 0)
-	tm.onChar(nil, &gui.Event{CharCode: 'x'}, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'x'}, Window: nil})
 	if string(*buf) != "x" {
 		t.Errorf("after exit, pty got %q, want %q", *buf, "x")
 	}
@@ -184,7 +184,7 @@ func TestCopyMode_PrintableKeysComeFromOnCharOnly(t *testing.T) {
 
 	// onKeyDown with a bare 'l': ignored, but still consumed.
 	e := &gui.Event{KeyCode: gui.KeyL}
-	tm.onKeyDown(nil, e, nil)
+	tm.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: nil})
 	if !e.IsHandled {
 		t.Error("copy mode must consume the key even when it defers to onChar")
 	}
@@ -408,7 +408,7 @@ func TestCopyMode_ClickExits(t *testing.T) {
 	tm, _ := copyTerm(8, "hello")
 	w := &gui.Window{}
 	key(tm, w, gui.KeySpace, copyModeMods)
-	tm.onClick(nil, &gui.Event{MouseButton: gui.MouseLeft}, w)
+	tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseButton: gui.MouseLeft}, Window: w})
 	if tm.copy.active {
 		t.Error("a click should exit copy mode")
 	}
@@ -426,7 +426,7 @@ func TestCopyMode_SearchMovesCursor(t *testing.T) {
 		t.Fatal("'/' should open the search bar for copy mode")
 	}
 	for _, r := range "bravo" {
-		tm.onChar(nil, &gui.Event{CharCode: uint32(r)}, nil)
+		tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: uint32(r)}, Window: nil})
 	}
 	if tm.search.query != "bravo" {
 		t.Fatalf("query = %q, want %q", tm.search.query, "bravo")
@@ -495,7 +495,7 @@ func TestCopyMode_nNAfterSearch(t *testing.T) {
 	press(tm, nil, 'j')
 	press(tm, nil, '/')
 	for _, r := range "bravo" {
-		tm.onChar(nil, &gui.Event{CharCode: uint32(r)}, nil)
+		tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: uint32(r)}, Window: nil})
 	}
 	key(tm, nil, gui.KeyEnter, 0) // jump to row 1 (first "bravo")
 	if got := tm.copy.cursor.Row; got != 1 {
@@ -794,7 +794,7 @@ func TestCopyMode_SearchNoMatchKeepsCursor(t *testing.T) {
 	want := tm.copy.cursor
 	press(tm, nil, '/')
 	for _, r := range "zzz" {
-		tm.onChar(nil, &gui.Event{CharCode: uint32(r)}, nil)
+		tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: uint32(r)}, Window: nil})
 	}
 	key(tm, nil, gui.KeyEnter, 0)
 	if !tm.copy.active {

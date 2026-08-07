@@ -174,8 +174,8 @@ func showAbout(w *gui.Window) {
 					gui.Button(gui.ButtonCfg{
 						ID:      aboutOKID,
 						Content: []gui.View{gui.Text(gui.TextCfg{Text: "OK"})},
-						OnClick: func(_ *gui.Layout, _ *gui.Event, w *gui.Window) {
-							w.DialogDismiss()
+						OnClick: func(ctx gui.EventCtx) {
+							ctx.Window.DialogDismiss()
 						},
 					}),
 				},

@@ -360,17 +360,18 @@ func (ws *Workspace) paletteBackdrop(ww, wh int) gui.View {
 	b.FloatTieOff = gui.FloatTopLeft
 	b.FloatZIndex = 999
 	b.Color = gui.RGBA(0, 0, 0, 120)
-	b.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	b.OnClick = func(ctx gui.EventCtx) {
 		// macOS dispatches MouseDown to the content view even when the user is
 		// starting a window-resize drag at an edge; without this guard the
 		// palette would dismiss on the first touch of a resize.
 		const edgePx = float32(30)
-		if e.MouseX < edgePx || e.MouseX > float32(ww)-edgePx ||
-			e.MouseY < edgePx || e.MouseY > float32(wh)-edgePx {
+		if ctx.Event.MouseX < edgePx || ctx.Event.MouseX > float32(ww)-edgePx ||
+			ctx.Event.MouseY < edgePx || ctx.Event.MouseY > float32(wh)-edgePx {
+			// A resize drag, not a dismiss: let it through.
+			ctx.Bubble()
 			return
 		}
 		ws.closePalette()
-		e.IsHandled = true
 	}
 	return gui.Column(b)
 }
@@ -391,7 +392,7 @@ func (ws *Workspace) palettePanel(ww, wh int) gui.View {
 			Text:          ws.palette.filter,
 			Placeholder:   "Type to filter…",
 			Sizing:        gui.FillFit,
-			OnTextChanged: func(_ *gui.Layout, s string, _ *gui.Window) { ws.setPaletteFilter(s) },
+			OnTextChanged: func(s string, ctx gui.EventCtx) { ws.setPaletteFilter(s) },
 		}),
 		ws.paletteRows(theme, float32(wh)),
 	}
@@ -408,7 +409,7 @@ func (ws *Workspace) palettePanel(ww, wh int) gui.View {
 	panel.Padding = gui.SomeP(palettePad, palettePad, palettePad, palettePad)
 	// Swallow clicks so they don't fall through to the backdrop, which would
 	// dismiss the palette when clicking inside it.
-	panel.OnClick = func(_ *gui.Layout, e *gui.Event, _ *gui.Window) { e.IsHandled = true }
+	panel.OnClick = func(ctx gui.EventCtx) {}
 	panel.Content = []gui.View{gui.Column(inner)}
 	return gui.Column(panel)
 }
@@ -458,17 +459,16 @@ func (ws *Workspace) paletteRows(theme gui.Theme, wh float32) gui.View {
 		// click. Two-stage is coherent there because the first click repaints
 		// the preview; here it would move a highlight and nothing else, which
 		// reads as a click that was ignored.
-		row.OnClick = func(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
+		row.OnClick = func(ctx gui.EventCtx) {
 			ws.paletteClick(pos)
-			e.IsHandled = true
 		}
 		// Hover is affordance only — deliberately not a selection change. With
 		// a single click running the entry, letting the pointer drive idx would
 		// mean a nudged mouse followed by Enter fires whatever the pointer
 		// happens to rest on. The cursor shape says "clickable"; the keyboard
 		// keeps ownership of what Enter targets.
-		row.OnHover = func(_ *gui.Layout, _ *gui.Event, w *gui.Window) {
-			w.SetMouseCursorPointingHand()
+		row.OnHover = func(ctx gui.EventCtx) {
+			ctx.Window.SetMouseCursorPointingHand()
 		}
 		fill := tight(gui.FillFit)
 		row.Content = []gui.View{

@@ -461,7 +461,7 @@ func (ws *Workspace) themeListColumn(theme gui.Theme, w, h float32) gui.View {
 			Text:          ws.browser.filter,
 			Placeholder:   "Type to filter…  (try dark: or light:)",
 			Sizing:        gui.FillFit,
-			OnTextChanged: func(_ *gui.Layout, s string, _ *gui.Window) { ws.setThemeFilter(s) },
+			OnTextChanged: func(s string, ctx gui.EventCtx) { ws.setThemeFilter(s) },
 		}),
 		ws.themeListRows(theme, h),
 	}
@@ -532,7 +532,7 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 			row.Color = theme.ColorActive
 		}
 		pos := j // capture
-		row.OnClick = func(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
+		row.OnClick = func(ctx gui.EventCtx) {
 			// First click moves the cursor (and so the preview); a click on the
 			// already-selected row commits. Applying on any click would make a
 			// mis-click a theme change.
@@ -542,7 +542,6 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 				ws.browser.idx = pos
 				ws.refresh()
 			}
-			e.IsHandled = true
 		}
 
 		mark := "  "

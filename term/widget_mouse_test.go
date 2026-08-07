@@ -121,7 +121,7 @@ func TestOnClick_LeftButtonSelectionAnchor(t *testing.T) {
 	tm, buf := newMouseTerm(4, 8)
 	// MouseX=15 is the center of cell 1 (cellW=10); nearest boundary is 2.
 	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
-	tm.onClick(nil, e, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if !tm.mouse.dragging || tm.mouse.dragReport {
 		t.Error("expected local drag, not report drag")
 	}
@@ -143,7 +143,7 @@ func TestOnClick_LeftButtonSelectionAnchor(t *testing.T) {
 func TestOnClick_RightButtonNoSelection(t *testing.T) {
 	tm, buf := newMouseTerm(4, 8)
 	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseRight}
-	tm.onClick(nil, e, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if e.IsHandled {
 		t.Error("right button without reporting should not be handled")
 	}
@@ -162,7 +162,7 @@ func TestOnClick_SGRLeftPress(t *testing.T) {
 		MouseX: 15, MouseY: 25,
 		MouseButton: gui.MouseLeft,
 	}
-	tm.onClick(nil, e, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	got := string(*buf)
 	if !strings.HasPrefix(got, "\x1b[<0;2;2M") {
 		t.Errorf("got %q, want \\x1b[<0;2;2M", got)
@@ -186,7 +186,7 @@ func TestOnClick_SGRWithModifiers(t *testing.T) {
 		MouseButton: gui.MouseLeft,
 		Modifiers:   gui.ModShift | gui.ModCtrl,
 	}
-	tm.onClick(nil, e, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	got := string(*buf)
 	// shift=4, ctrl=16, base=0 → cb=20
 	if !strings.HasPrefix(got, "\x1b[<20;2;2M") {
@@ -204,7 +204,7 @@ func TestOnClick_UnsupportedButton(t *testing.T) {
 		MouseX: 15, MouseY: 25,
 		MouseButton: gui.MouseInvalid,
 	}
-	tm.onClick(nil, e, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if len(*buf) != 0 {
 		t.Errorf("expected no output for unsupported button, got %q", *buf)
 	}
@@ -218,7 +218,7 @@ func TestOnClick_OnClickFocusCallbackFires(t *testing.T) {
 	called := false
 	tm.cfg.OnClickFocus = func() { called = true }
 	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
-	tm.onClick(nil, e, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if !called {
 		t.Error("OnClickFocus callback was not called")
 	}
@@ -230,7 +230,7 @@ func TestOnClick_NilOnClickFocusNoPanic(t *testing.T) {
 	tm, _ := newMouseTerm(4, 8)
 	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
 	// Should not panic.
-	tm.onClick(nil, e, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +249,7 @@ func TestOnMouseMove_SelectionExtend(t *testing.T) {
 	// Move to row 3 (65/20=3); MouseX=55 is the center of cell 5, nearest
 	// boundary 6.
 	e := &gui.Event{MouseX: 55, MouseY: 65}
-	tm.onMouseMove(nil, e, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if len(*buf) != 0 {
 		t.Errorf("local drag should not write to pty, got %q", *buf)
 	}
@@ -278,10 +278,10 @@ func TestOnMouseMove_SingleCharSelect(t *testing.T) {
 
 	// Press near the left edge of cell 0 → boundary 0.
 	down := &gui.Event{MouseX: 2, MouseY: 5, MouseButton: gui.MouseLeft}
-	tm.onClick(nil, down, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: down, Window: &gui.Window{}})
 	// Drag to the left part of cell 1 → boundary 1. Half-open [0,1) = cell 0.
 	move := &gui.Event{MouseX: 12, MouseY: 5}
-	tm.onMouseMove(nil, move, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: move, Window: &gui.Window{}})
 
 	tm.grid.Mu.Lock()
 	got := tm.grid.SelectedText()
@@ -300,7 +300,7 @@ func TestOnMouseMove_AutoScrollUp(t *testing.T) {
 	tm.mouse.dragging = true
 	// Mouse above widget → negative Y triggers auto-scroll up.
 	e := &gui.Event{MouseX: 10, MouseY: -10}
-	tm.onMouseMove(nil, e, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if tm.autoScrollDir.Load() != 1 {
 		t.Errorf("autoScrollDir = %d, want 1", tm.autoScrollDir.Load())
 	}
@@ -313,7 +313,7 @@ func TestOnMouseMove_CancelMomentum(t *testing.T) {
 	tm.momentum.vel = 100
 	tm.momentum.mu.Unlock()
 	e := &gui.Event{MouseX: 10, MouseY: 10}
-	tm.onMouseMove(nil, e, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	tm.momentum.mu.Lock()
 	if tm.momentum.coasting || tm.momentum.vel != 0 {
 		t.Error("momentum should be cancelled on mouse move")
@@ -328,7 +328,7 @@ func TestOnMouseMove_SGRAnyMotionReport(t *testing.T) {
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{MouseX: 35, MouseY: 45}
-	tm.onMouseMove(nil, e, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	got := string(*buf)
 	// cb=35 (motion, no button), col=3+1=4, row=2+1=3
 	if !strings.HasPrefix(got, "\x1b[<35;4;3M") {
@@ -348,7 +348,7 @@ func TestOnMouseMove_SGRDragReport(t *testing.T) {
 	tm.mouse.lastR = 0
 	tm.mouse.lastC = 0
 	e := &gui.Event{MouseX: 35, MouseY: 45}
-	tm.onMouseMove(nil, e, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	got := string(*buf)
 	// base=0, +32 = 32, col=3+1=4, row=2+1=3
 	if !strings.HasPrefix(got, "\x1b[<32;4;3M") {
@@ -371,7 +371,7 @@ func TestOnMouseUp_SGRReleaseReport(t *testing.T) {
 	tm.mouse.lastR = 2
 	tm.mouse.lastC = 3
 	e := &gui.Event{MouseX: 35, MouseY: 45}
-	tm.onMouseUp(nil, e, &gui.Window{})
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	got := string(*buf)
 	if !strings.Contains(got, "m") {
 		t.Errorf("release should end with 'm', got %q", got)
@@ -387,7 +387,7 @@ func TestOnMouseUp_SGRReleaseReport(t *testing.T) {
 func TestOnMouseUp_NotDraggingNoOp(t *testing.T) {
 	tm, buf := newMouseTerm(4, 8)
 	e := &gui.Event{MouseX: 15, MouseY: 25}
-	tm.onMouseUp(nil, e, &gui.Window{})
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if len(*buf) != 0 {
 		t.Errorf("expected no output, got %q", *buf)
 	}
@@ -410,7 +410,7 @@ func TestOnMouseUp_LocalReleaseClearsSelection(t *testing.T) {
 	tm.mouse.dragging = true
 	tm.mouse.dragReport = false
 	e := &gui.Event{MouseX: 35, MouseY: 5, MouseButton: gui.MouseLeft}
-	tm.onMouseUp(nil, e, &gui.Window{})
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if !e.IsHandled {
 		t.Error("event should be handled")
 	}
@@ -427,9 +427,9 @@ func TestOnMouseUp_PlainClickPreservesAnchor(t *testing.T) {
 	tm, _ := newMouseTerm(4, 8)
 	// MouseX=15 → cell boundary 2; MouseY=25 → row 1.
 	down := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
-	tm.onClick(nil, down, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: down, Window: &gui.Window{}})
 	up := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
-	tm.onMouseUp(nil, up, &gui.Window{})
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: up, Window: &gui.Window{}})
 
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
@@ -448,14 +448,14 @@ func TestOnMouseUp_PlainClickPreservesAnchor(t *testing.T) {
 // only the head moves, activating the selection — xterm/iTerm2 behavior.
 func TestOnClick_ShiftExtendFromAnchor(t *testing.T) {
 	tm, _ := newMouseTerm(4, 8)
-	tm.onClick(nil, &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, &gui.Window{})
-	tm.onMouseUp(nil, &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, Window: &gui.Window{}})
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, Window: &gui.Window{}})
 
 	// MouseX=55 → boundary 6; MouseY=65 → row 3.
 	shift := &gui.Event{
 		MouseX: 55, MouseY: 65, MouseButton: gui.MouseLeft, Modifiers: gui.ModShift,
 	}
-	tm.onClick(nil, shift, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: shift, Window: &gui.Window{}})
 
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
@@ -477,7 +477,7 @@ func TestOnClick_ShiftClickNoPriorAnchorReanchors(t *testing.T) {
 	e := &gui.Event{
 		MouseX: 55, MouseY: 65, MouseButton: gui.MouseLeft, Modifiers: gui.ModShift,
 	}
-	tm.onClick(nil, e, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
@@ -497,14 +497,14 @@ func TestOnClick_ShiftClickNoPriorAnchorReanchors(t *testing.T) {
 // than extending from a now-meaningless content position.
 func TestOnClick_ShiftExtendAfterClearReanchors(t *testing.T) {
 	tm, _ := newMouseTerm(4, 8)
-	tm.onClick(nil, &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, &gui.Window{})
+	tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, Window: &gui.Window{}})
 	tm.grid.Mu.Lock()
 	tm.grid.ClearSelection()
 	tm.grid.Mu.Unlock()
 
-	tm.onClick(nil, &gui.Event{
+	tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{
 		MouseX: 55, MouseY: 65, MouseButton: gui.MouseLeft, Modifiers: gui.ModShift,
-	}, &gui.Window{})
+	}, Window: &gui.Window{}})
 
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
@@ -535,7 +535,7 @@ func TestOnMouseMove_CanvasOffset(t *testing.T) {
 
 	// Absolute Y=25 → canvas Y=5 → row 0. Without fix: r=1 (one row off).
 	e := &gui.Event{MouseX: 10, MouseY: 25}
-	tm.onMouseMove(nil, e, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
@@ -564,7 +564,7 @@ func TestOnMouseMove_CanvasOffset_ReportingDragIsRelative(t *testing.T) {
 	// Relative Y=25 → r=1 → SGR row=2. Pre-fix: absolute-coord translation
 	// dropped it to r=0 → row=1, one line off.
 	e := &gui.Event{MouseX: 10, MouseY: 25}
-	tm.onMouseMove(nil, e, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 
 	got := string(*buf)
 	if !strings.Contains(got, ";2M") {
@@ -586,7 +586,7 @@ func TestOnMouseUp_CanvasOffset(t *testing.T) {
 
 	// Absolute Y=25 → canvas Y=5 → r=0 → SGR row=1. Without fix: r=1 → row=2.
 	e := &gui.Event{MouseX: 10, MouseY: 25}
-	tm.onMouseUp(nil, e, &gui.Window{})
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 
 	got := string(*buf)
 	if !strings.Contains(got, ";1m") {
@@ -608,7 +608,7 @@ func TestOnMouseUp_CanvasOffset_ReportingDragIsRelative(t *testing.T) {
 
 	// Relative Y=25 → r=1 → SGR row=2. Pre-fix: row=1.
 	e := &gui.Event{MouseX: 10, MouseY: 25}
-	tm.onMouseUp(nil, e, &gui.Window{})
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 
 	got := string(*buf)
 	if !strings.Contains(got, ";2m") {
@@ -695,7 +695,7 @@ func TestOnMouseScroll_ZeroDeltaCancelsMomentum(t *testing.T) {
 	tm.momentum.vel = 50
 	tm.momentum.mu.Unlock()
 	e := &gui.Event{ScrollY: 0}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	tm.momentum.mu.Lock()
 	if tm.momentum.coasting || tm.momentum.vel != 0 {
 		t.Error("momentum should be cancelled on zero delta")
@@ -710,7 +710,7 @@ func TestOnMouseScroll_SGRWheelUp(t *testing.T) {
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 1}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	got := string(*buf)
 	// wheel up → base=64, col=3+1=4, row=2+1=3
 	if !strings.HasPrefix(got, "\x1b[<64;4;3M") {
@@ -728,7 +728,7 @@ func TestOnMouseScroll_SGRWheelDown(t *testing.T) {
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: -1}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	got := string(*buf)
 	// wheel down → base=65, col=3+1=4, row=2+1=3
 	if !strings.HasPrefix(got, "\x1b[<65;4;3M") {
@@ -752,7 +752,7 @@ func TestOnMouseScroll_LocalScrollBack(t *testing.T) {
 	tm.grid.Mu.Unlock()
 	prevVer := tm.drawVersion.Load()
 	e := &gui.Event{ScrollY: 1} // integer = mouse wheel
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	func() {
 		tm.grid.Mu.Lock()
 		defer tm.grid.Mu.Unlock()
@@ -769,7 +769,7 @@ func TestOnMouseScroll_LocalScrollBack(t *testing.T) {
 func TestOnMouseScroll_FractionalDeltaStartsMomentum(t *testing.T) {
 	tm, _ := newMouseTerm(4, 8)
 	e := &gui.Event{ScrollY: 2.5, ScrollPrecise: true} // trackpad
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	tm.momentum.mu.Lock()
 	defer tm.momentum.mu.Unlock()
 	if tm.momentum.vel <= 0 {
@@ -801,7 +801,7 @@ func TestOnMouseScroll_NonPreciseIsMouseWheel(t *testing.T) {
 	tm.momentum.vel = 50
 	tm.momentum.mu.Unlock()
 	e := &gui.Event{ScrollY: 2.5} // fractional but non-precise = wheel
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
 	// Wheel deltas are lines: 2.5 × cellH=20 → 50px → 2 rows + 10px.
@@ -824,7 +824,7 @@ func TestOnMouseScroll_NonPreciseReverse(t *testing.T) {
 	tm.momentum.vel = -50
 	tm.momentum.mu.Unlock()
 	e := &gui.Event{ScrollY: -1.0001}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	tm.momentum.mu.Lock()
 	defer tm.momentum.mu.Unlock()
 	if tm.momentum.coasting || tm.momentum.vel != 0 {
@@ -848,7 +848,7 @@ func TestOnMouseScroll_TrackpadSensitivity(t *testing.T) {
 	}
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{ScrollY: 0.5, ScrollPrecise: true}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
 	if got := tm.grid.ViewSubPx; got != 5 {
@@ -873,7 +873,7 @@ func TestOnMouseScroll_SGRWheelDeltaMultiplier(t *testing.T) {
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 2 {
 		t.Errorf("ticks = %d, want 2 (buf %q)", got, *buf)
 	}
@@ -889,9 +889,9 @@ func TestOnMouseScroll_SGRWheelResidualAccumulates(t *testing.T) {
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	e = &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 5 {
 		t.Errorf("ticks = %d, want 5 (buf %q)", got, *buf)
 	}
@@ -917,7 +917,7 @@ func TestOnMouseScroll_WheelNotchTravelsThreeRows(t *testing.T) {
 	tm.grid.Mu.Unlock()
 
 	// One notch, as every backend now reports it.
-	tm.onMouseScroll(nil, &gui.Event{ScrollY: 3}, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: &gui.Event{ScrollY: 3}, Window: &gui.Window{}})
 
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
@@ -936,7 +936,7 @@ func TestOnMouseScroll_SGRWheelMinOneTick(t *testing.T) {
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 1}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 1 {
 		t.Errorf("ticks = %d, want 1 (buf %q)", got, *buf)
 	}
@@ -953,9 +953,9 @@ func TestOnMouseScroll_SGRWheelDirectionResetsResidual(t *testing.T) {
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	e = &gui.Event{MouseX: 35, MouseY: 45, ScrollY: -2.5}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := countReports(*buf, "\x1b[<65;4;3M"); got != 2 {
 		t.Errorf("down ticks = %d, want 2 (buf %q)", got, *buf)
 	}
@@ -970,7 +970,7 @@ func TestOnMouseScroll_SGRWheelTickCap(t *testing.T) {
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 1e6}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := countReports(*buf, "\x1b[<64;4;3M"); got != maxWheelTicks {
 		t.Errorf("ticks = %d, want cap %d", got, maxWheelTicks)
 	}
@@ -986,7 +986,7 @@ func TestOnMouseScroll_SGRTrackpadTicks(t *testing.T) {
 	tm.grid.MouseSGR = true
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 4, ScrollPrecise: true}
-	tm.onMouseScroll(nil, e, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 2 {
 		t.Errorf("ticks = %d, want 2 (buf %q)", got, *buf)
 	}
@@ -1153,11 +1153,11 @@ func writeRowText(g *grid, r int, s string) {
 // clickAt presses the left button at the given pixel position. Cells are
 // 10x20 in newMouseTerm, so column n spans x = [10n, 10n+10).
 func clickAt(tm *Term, x, y float32, mods gui.Modifier) {
-	tm.onClick(nil, &gui.Event{
+	tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{
 		MouseX: x, MouseY: y,
 		MouseButton: gui.MouseLeft,
 		Modifiers:   mods,
-	}, &gui.Window{})
+	}, Window: &gui.Window{}})
 }
 
 func TestNextClickCount_Cycles(t *testing.T) {
@@ -1261,7 +1261,7 @@ func TestOnMouseMove_WordDragExtends(t *testing.T) {
 
 	clickAt(tm, 15, 10, 0) // inside "alpha"
 	clickAt(tm, 15, 10, 0)
-	tm.onMouseMove(nil, &gui.Event{MouseX: 125, MouseY: 10}, &gui.Window{}) // "gamma"
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 125, MouseY: 10}, Window: &gui.Window{}}) // "gamma"
 
 	tm.grid.Mu.Lock()
 	if got, want := tm.grid.SelectedText(), "alpha beta gamma"; got != want {
@@ -1271,7 +1271,7 @@ func TestOnMouseMove_WordDragExtends(t *testing.T) {
 
 	// Drag back onto the origin word: the selection collapses to it rather
 	// than inverting.
-	tm.onMouseMove(nil, &gui.Event{MouseX: 15, MouseY: 10}, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 10}, Window: &gui.Window{}})
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
 	if got, want := tm.grid.SelectedText(), "alpha"; got != want {
@@ -1287,7 +1287,7 @@ func TestOnMouseMove_WordDragBackwards(t *testing.T) {
 
 	clickAt(tm, 125, 10, 0) // inside "gamma"
 	clickAt(tm, 125, 10, 0)
-	tm.onMouseMove(nil, &gui.Event{MouseX: 15, MouseY: 10}, &gui.Window{}) // "alpha"
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 10}, Window: &gui.Window{}}) // "alpha"
 
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
@@ -1309,7 +1309,7 @@ func TestOnMouseMove_LineDragExtends(t *testing.T) {
 	clickAt(tm, 15, 30, 0) // row 1, inside "line two"
 	clickAt(tm, 15, 30, 0)
 	clickAt(tm, 15, 30, 0)
-	tm.onMouseMove(nil, &gui.Event{MouseX: 15, MouseY: 70}, &gui.Window{}) // row 3
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 70}, Window: &gui.Window{}}) // row 3
 
 	tm.grid.Mu.Lock()
 	if got, want := tm.grid.SelectedText(), "line two\nline three\nline four"; got != want {
@@ -1318,7 +1318,7 @@ func TestOnMouseMove_LineDragExtends(t *testing.T) {
 	tm.grid.Mu.Unlock()
 
 	// Drag back to the origin line: collapses to the origin line alone.
-	tm.onMouseMove(nil, &gui.Event{MouseX: 15, MouseY: 30}, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 30}, Window: &gui.Window{}})
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
 	if got, want := tm.grid.SelectedText(), "line two"; got != want {
@@ -1338,7 +1338,7 @@ func TestOnMouseMove_LineDragBackwards(t *testing.T) {
 	clickAt(tm, 15, 70, 0) // inside "line four" (row 3)
 	clickAt(tm, 15, 70, 0)
 	clickAt(tm, 15, 70, 0)
-	tm.onMouseMove(nil, &gui.Event{MouseX: 15, MouseY: 30}, &gui.Window{}) // row 1
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 30}, Window: &gui.Window{}}) // row 1
 
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
@@ -1354,7 +1354,7 @@ func TestOnClick_AltDragSelectsBlock(t *testing.T) {
 	writeRowText(tm.grid, 2, "uvwxyzABCD")
 
 	clickAt(tm, 20, 10, gui.ModAlt) // boundary col 2, row 0
-	tm.onMouseMove(nil, &gui.Event{MouseX: 50, MouseY: 50}, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 50, MouseY: 50}, Window: &gui.Window{}})
 
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
@@ -1401,7 +1401,7 @@ func TestOnMouseScroll_AltScreenSynthesizesArrows(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tm, buf := newMouseTerm(24, 80)
 			tm.grid.AltActive = true
-			tm.onMouseScroll(nil, &gui.Event{ScrollY: tc.scrollY}, &gui.Window{})
+			tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: &gui.Event{ScrollY: tc.scrollY}, Window: &gui.Window{}})
 			if got := string(*buf); !strings.HasPrefix(got, tc.want) {
 				t.Errorf("wrote %q, want a prefix of %q", got, tc.want)
 			}
@@ -1418,7 +1418,7 @@ func TestOnMouseScroll_AltScreenAppCursorKeys(t *testing.T) {
 	tm, buf := newMouseTerm(24, 80)
 	tm.grid.AltActive = true
 	tm.grid.AppCursorKeys = true
-	tm.onMouseScroll(nil, &gui.Event{ScrollY: -4}, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: &gui.Event{ScrollY: -4}, Window: &gui.Window{}})
 	if got := string(*buf); !strings.HasPrefix(got, "\x1bOB") {
 		t.Errorf("wrote %q, want the SS3 form \\x1bOB", got)
 	}
@@ -1430,7 +1430,7 @@ func TestOnMouseScroll_AltScreenReportingWins(t *testing.T) {
 	tm.grid.AltActive = true
 	tm.grid.MouseTrack = true
 	tm.grid.MouseSGR = true
-	tm.onMouseScroll(nil, &gui.Event{ScrollY: -4}, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: &gui.Event{ScrollY: -4}, Window: &gui.Window{}})
 	got := string(*buf)
 	if strings.Contains(got, "\x1b[B") || strings.Contains(got, "\x1bOB") {
 		t.Errorf("wrote arrows %q while mouse reporting is on", got)
@@ -1444,7 +1444,7 @@ func TestOnMouseScroll_AltScreenReportingWins(t *testing.T) {
 // sent to a shell that never asked for them.
 func TestOnMouseScroll_MainScreenDoesNotSynthesize(t *testing.T) {
 	tm, buf := newMouseTerm(24, 80)
-	tm.onMouseScroll(nil, &gui.Event{ScrollY: -4}, &gui.Window{})
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: &gui.Event{ScrollY: -4}, Window: &gui.Window{}})
 	if got := string(*buf); got != "" {
 		t.Errorf("main screen wrote %q, want nothing", got)
 	}
@@ -1466,7 +1466,7 @@ func TestOSC22AppliesCursorInMouseReportingMode(t *testing.T) {
 	tm.grid.Mu.Unlock()
 
 	w := &gui.Window{}
-	tm.onMouseMove(nil, &gui.Event{MouseX: 35, MouseY: 45}, w)
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 35, MouseY: 45}, Window: w})
 	if got := w.MouseCursorState(); got != gui.CursorCrosshair {
 		t.Fatalf("cursor = %v, want CursorCrosshair", got)
 	}
@@ -1474,7 +1474,7 @@ func TestOSC22AppliesCursorInMouseReportingMode(t *testing.T) {
 	// Second move onto the same cell takes the dedupe early return; the
 	// shape must survive go-gui's per-event reset there too.
 	w.SetMouseCursorArrow()
-	tm.onMouseMove(nil, &gui.Event{MouseX: 35, MouseY: 45}, w)
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 35, MouseY: 45}, Window: w})
 	if got := w.MouseCursorState(); got != gui.CursorCrosshair {
 		t.Fatalf("cursor after same-cell move = %v, want CursorCrosshair", got)
 	}
