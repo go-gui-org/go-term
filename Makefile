@@ -14,8 +14,15 @@ BUNDLE_VER   := $(patsubst v%,%,$(VERSION))
 # Pre-built .icns (see examples/falcon/icon/README.md); buildapp copies it
 # into the bundle verbatim, so no sips/iconutil conversion runs here.
 APP_ICON     := examples/falcon/icon/falcon.icns
-BUILDAPP_DIR := ../go-gui/cmd/buildapp
-BUILDAPP_BIN := $(BUILDAPP_DIR)/buildapp
+# buildapp comes from the go-gui module graph (go.mod's pin), not a sibling
+# checkout, so `make app` works without go.work or CI-side workarounds. With a
+# go.work active the workspace resolution wins, but the module pin is always a
+# valid fallback.
+BUILDAPP_PKG := github.com/go-gui-org/go-gui/cmd/buildapp
+BUILDAPP_BIN := build/buildapp
+# Shipping builds exclude the go-gui F12 inspector overlay. Dev builds
+# (`go run .`, plain `go build`) keep it.
+PROD_TAGS    := -tags prod
 
 # Default benchmark run — quick pass over all benchmarks.
 # -run=^$ skips tests so stale timers don't fire during benchmark runs.
@@ -57,20 +64,22 @@ lint:
 build:
 	go build ./...
 
-# Build the falcon binary (ensures it compiles).
+# Build the falcon binary (ensures it compiles). Shipping path: excludes the
+# go-gui inspector via the prod tag.
 build-falcon:
-	go build -ldflags '$(LDFLAGS)' ./examples/falcon
+	go build $(PROD_TAGS) -ldflags '$(LDFLAGS)' ./examples/falcon
 
 # Package falcon as a macOS .app bundle.
 app: $(APP_NAME).app
 
 $(BUILDAPP_BIN):
-	cd $(BUILDAPP_DIR) && go build -o buildapp .
+	mkdir -p build
+	go build -o $@ $(BUILDAPP_PKG)
 
 # Depends on the icon so swapping artwork forces a rebundle; Go source
 # changes are caught by go build itself, not by make's timestamp check.
 $(APP_NAME).app: $(BUILDAPP_BIN) $(APP_ICON)
-	cd examples/falcon && go build -ldflags '$(LDFLAGS)' -o $(CURDIR)/$(DEMO_BIN) .
+	cd examples/falcon && go build $(PROD_TAGS) -ldflags '$(LDFLAGS)' -o $(CURDIR)/$(DEMO_BIN) .
 	$(BUILDAPP_BIN) -bundle-deps -o . -name $(APP_NAME) \
 		-id github.com.go-gui-org.go-term -icon $(APP_ICON) \
 		-version $(BUNDLE_VER) $(DEMO_BIN)
@@ -78,7 +87,7 @@ $(APP_NAME).app: $(BUILDAPP_BIN) $(APP_ICON)
 clean-app:
 	rm -f $(DEMO_BIN)
 	rm -rf $(APP_NAME).app
-	cd $(BUILDAPP_DIR) && rm -f buildapp
+	rm -rf build
 
 # Clean test cache and built binaries.
 clean:

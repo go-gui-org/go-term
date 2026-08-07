@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Falcon
+Comment=Terminal emulator built on go-term
+Exec=falcon
+Icon=falcon
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=terminal;shell;console;pty;
+StartupWMClass=Falcon
