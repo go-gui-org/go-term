@@ -77,6 +77,6 @@ func (t *Term) RunAction(a Action, w *gui.Window) bool {
 		t.handleCopyModeKey(e, w)
 		return true
 	}
-	t.onKeyDown(nil, e, w)
+	t.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: w})
 	return true
 }

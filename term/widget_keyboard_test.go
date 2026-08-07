@@ -505,7 +505,7 @@ func TestOnKeyUp_KittyFlagsDisabled_NoOutput(t *testing.T) {
 	term, buf := newKeyboardTerm(24, 80)
 	// KittyKeyFlags & 2 == 0 → no release events.
 	e := &gui.Event{KeyCode: gui.KeyEnter}
-	term.onKeyUp(nil, e, nil)
+	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: nil})
 	if len(*buf) > 0 {
 		t.Errorf("onKeyUp with flags=0 should not write, wrote %q", *buf)
 	}
@@ -515,7 +515,7 @@ func TestOnKeyUp_KittyFlagsRelease_EmitsSequence(t *testing.T) {
 	term, buf := newKeyboardTerm(24, 80)
 	term.grid.KittyKeyFlags = 1 | 2 // bits 0+1: disambiguate + release
 	e := &gui.Event{KeyCode: gui.KeyEnter}
-	term.onKeyUp(nil, e, nil)
+	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: nil})
 	if len(*buf) == 0 {
 		t.Fatal("onKeyUp with release flag should write sequence")
 	}
@@ -546,8 +546,8 @@ func TestOnInput_FiresForTypedKeys(t *testing.T) {
 		kinds = append(kinds, kind)
 	}
 
-	tm.onChar(nil, &gui.Event{CharCode: 'x'}, nil)
-	tm.onKeyDown(nil, &gui.Event{KeyCode: gui.KeyC, Modifiers: gui.ModCtrl}, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'x'}, Window: nil})
+	tm.onKeyDown(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: gui.KeyC, Modifiers: gui.ModCtrl}, Window: nil})
 
 	if len(kinds) != 2 {
 		t.Fatalf("OnInput fired %d times; want 2", len(kinds))
@@ -594,7 +594,7 @@ func TestOnInput_NotFiredByMouseReport(t *testing.T) {
 	tm.mouse.dragReport = true
 	tm.mouse.dragButton = gui.MouseLeft
 	tm.mouse.lastR, tm.mouse.lastC = -1, -1
-	tm.onMouseMove(nil, &gui.Event{MouseX: 10, MouseY: 25}, &gui.Window{})
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 10, MouseY: 25}, Window: &gui.Window{}})
 
 	if len(*buf) == 0 {
 		t.Fatal("expected a mouse report on the pty")
@@ -607,7 +607,7 @@ func TestOnInput_NotFiredByMouseReport(t *testing.T) {
 // A nil OnInput is the common case (standalone Term) and must not panic.
 func TestOnInput_NilIsSafe(t *testing.T) {
 	tm, _ := newKeyboardTerm(24, 80)
-	tm.onChar(nil, &gui.Event{CharCode: 'x'}, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'x'}, Window: nil})
 }
 
 // --- IME commit tests ---
@@ -620,7 +620,7 @@ func TestOnInput_NilIsSafe(t *testing.T) {
 // A multi-rune commit reaches the pty whole.
 func TestOnChar_IMECommitWritesFullText(t *testing.T) {
 	tm, buf := newKeyboardTerm(24, 80)
-	tm.onChar(nil, &gui.Event{CharCode: uint32('日'), IMEText: "日本語"}, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: uint32('日'), IMEText: "日本語"}, Window: nil})
 	if got, want := string(*buf), "日本語"; got != want {
 		t.Errorf("pty saw %q, want %q", got, want)
 	}
@@ -630,7 +630,7 @@ func TestOnChar_IMECommitWritesFullText(t *testing.T) {
 // so the single-rune path must behave exactly as before.
 func TestOnChar_SingleRuneUnaffectedByIMEText(t *testing.T) {
 	tm, buf := newKeyboardTerm(24, 80)
-	tm.onChar(nil, &gui.Event{CharCode: 'x', IMEText: "x"}, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'x', IMEText: "x"}, Window: nil})
 	if got, want := string(*buf), "x"; got != want {
 		t.Errorf("pty saw %q, want %q", got, want)
 	}
@@ -639,7 +639,7 @@ func TestOnChar_SingleRuneUnaffectedByIMEText(t *testing.T) {
 // Backends that never populate IMEText must still deliver the keystroke.
 func TestOnChar_EmptyIMETextFallsBackToCharCode(t *testing.T) {
 	tm, buf := newKeyboardTerm(24, 80)
-	tm.onChar(nil, &gui.Event{CharCode: uint32('é')}, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: uint32('é')}, Window: nil})
 	if got, want := string(*buf), "é"; got != want {
 		t.Errorf("pty saw %q, want %q", got, want)
 	}
@@ -661,7 +661,7 @@ func TestOnChar_ModifierChordWritesNothing(t *testing.T) {
 	}
 	for _, m := range mods {
 		tm, buf := newKeyboardTerm(24, 80)
-		tm.onChar(nil, &gui.Event{CharCode: 'V', Modifiers: m}, nil)
+		tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'V', Modifiers: m}, Window: nil})
 		if len(*buf) != 0 {
 			t.Errorf("mods %v: pty saw %q, want nothing", m, *buf)
 		}
@@ -672,8 +672,8 @@ func TestOnChar_ModifierChordWritesNothing(t *testing.T) {
 // same letter's uppercase form, and plain chars pass untouched.
 func TestOnChar_PlainAndShiftedCharsStillType(t *testing.T) {
 	tm, buf := newKeyboardTerm(24, 80)
-	tm.onChar(nil, &gui.Event{CharCode: 'v'}, nil)
-	tm.onChar(nil, &gui.Event{CharCode: 'V', Modifiers: gui.ModShift}, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'v'}, Window: nil})
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'V', Modifiers: gui.ModShift}, Window: nil})
 	if got, want := string(*buf), "vV"; got != want {
 		t.Errorf("pty saw %q, want %q", got, want)
 	}
@@ -693,8 +693,8 @@ func TestOnChar_PasteChordCharDropped(t *testing.T) {
 		w := &gui.Window{}
 		w.SetClipboardGetFn(func() string { return "hello" })
 
-		tm.onKeyDown(nil, &gui.Event{KeyCode: gui.KeyV, Modifiers: mods}, w)
-		tm.onChar(nil, &gui.Event{CharCode: 'V', Modifiers: mods | gui.ModShift}, nil)
+		tm.onKeyDown(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: gui.KeyV, Modifiers: mods}, Window: w})
+		tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'V', Modifiers: mods | gui.ModShift}, Window: nil})
 
 		if got, want := string(*buf), "hello"; got != want {
 			t.Errorf("mods %v: pty saw %q, want %q (no trailing letter)", mods, got, want)
@@ -711,14 +711,14 @@ func TestOnChar_IMECommitBypassesKittyEncoding(t *testing.T) {
 	tm.grid.KittyKeyFlags = 8
 	tm.grid.Mu.Unlock()
 
-	tm.onChar(nil, &gui.Event{CharCode: uint32('日'), IMEText: "日本語"}, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: uint32('日'), IMEText: "日本語"}, Window: nil})
 	if got, want := string(*buf), "日本語"; got != want {
 		t.Errorf("pty saw %q, want %q", got, want)
 	}
 
 	// A single-rune event still takes the KKP path.
 	*buf = (*buf)[:0]
-	tm.onChar(nil, &gui.Event{CharCode: 'a', IMEText: "a"}, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'a', IMEText: "a"}, Window: nil})
 	if got, want := string(*buf), "\x1b[97u"; got != want {
 		t.Errorf("pty saw %q, want %q", got, want)
 	}
@@ -730,7 +730,7 @@ func TestOnChar_IMECommitReachesSearchBar(t *testing.T) {
 	tm, _ := newKeyboardTerm(24, 80)
 	tm.cmd = &gui.Window{} // the search path schedules a redraw
 	tm.search.active = true
-	tm.onChar(nil, &gui.Event{CharCode: uint32('日'), IMEText: "日本語"}, nil)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: uint32('日'), IMEText: "日本語"}, Window: nil})
 	if got, want := tm.search.query, "日本語"; got != want {
 		t.Errorf("search query = %q, want %q", got, want)
 	}

@@ -62,7 +62,7 @@ func (ws *Workspace) helpBackdrop(ww, wh int) gui.View {
 	b.FloatTieOff = gui.FloatTopLeft
 	b.FloatZIndex = 999
 	b.Color = gui.RGBA(0, 0, 0, 120)
-	b.OnClick = func(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+	b.OnClick = func(ctx gui.EventCtx) {
 		// Ignore clicks near window edges — the platform (notably
 		// macOS) dispatches MouseDown to the content view even when
 		// the user is starting a window-resize drag at a corner or
@@ -70,13 +70,14 @@ func (ws *Workspace) helpBackdrop(ww, wh int) gui.View {
 		// first touch of a resize instead of on an intentional
 		// click-outside-to-dismiss.
 		const edgePx = float32(30)
-		if e.MouseX < edgePx || e.MouseX > float32(ww)-edgePx ||
-			e.MouseY < edgePx || e.MouseY > float32(wh)-edgePx {
+		if ctx.Event.MouseX < edgePx || ctx.Event.MouseX > float32(ww)-edgePx ||
+			ctx.Event.MouseY < edgePx || ctx.Event.MouseY > float32(wh)-edgePx {
+			// A resize drag, not a dismiss: let it through.
+			ctx.Bubble()
 			return
 		}
 		ws.helpVisible = false
 		ws.refresh()
-		e.IsHandled = true
 	}
 	return gui.Column(b)
 }
@@ -282,7 +283,7 @@ func (ws *Workspace) helpPanel(ww, wh int) gui.View {
 	panel.Spacing = gui.SomeF(1)
 	// Swallow clicks so they don't fall through to the backdrop, which
 	// would dismiss the overlay when clicking inside the panel.
-	panel.OnClick = func(_ *gui.Layout, e *gui.Event, _ *gui.Window) { e.IsHandled = true }
+	panel.OnClick = func(ctx gui.EventCtx) {}
 	panel.Content = []gui.View{gui.Column(inner)}
 	return gui.Column(panel)
 }

@@ -321,7 +321,7 @@ func (t *Term) extendUnitSelection(cp contentPos) {
 // onClick handles a button-down event. Under mouse reporting, encodes
 // a press report for any supported button and arms drag tracking.
 // Otherwise (the default) starts a left-button selection anchor.
-func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+func (t *Term) onClick(ctx gui.EventCtx) {
 	if t.cfg.OnClickFocus != nil {
 		t.cfg.OnClickFocus()
 	}
@@ -329,65 +329,65 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// rather than letting a keyboard copy cursor and a drag fight over the
 	// same SelAnchor/SelHead.
 	if t.copy.active {
-		t.exitCopyMode(w)
+		t.exitCopyMode(ctx.Window)
 	}
 	// Same reasoning for hints: reaching for the mouse means Cmd+click is the
 	// gesture now, so the labels have no reason to stay up.
 	if t.hints.active {
-		t.exitHints(w)
+		t.exitHints(ctx.Window)
 	}
 	// Scrollbar takes priority over selection and host mouse reporting: it is
 	// a local overlay drawn on top of the grid. Only interactive while the
 	// thumb is visible, so a faded scrollbar never swallows clicks.
-	if e.MouseButton == gui.MouseLeft && t.scrollbarClick(e, w) {
-		e.IsHandled = true
+	if ctx.Event.MouseButton == gui.MouseLeft && t.scrollbarClick(ctx.Event, ctx.Window) {
+		ctx.Consume()
 		return
 	}
-	r, c := t.posToCell(e.MouseX, e.MouseY)
+	r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
 	snap := t.mouseSnap()
 	if snap.shouldReport() {
-		base, ok := mouseSGRBaseButton(e.MouseButton)
+		base, ok := mouseSGRBaseButton(ctx.Event.MouseButton)
 		if !ok {
 			return
 		}
-		cb := base + mouseModBits(e.Modifiers)
-		t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+		cb := base + mouseModBits(ctx.Event.Modifiers)
+		t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
 		t.mouse.dragging = true
-		t.mouse.dragButton = e.MouseButton
+		t.mouse.dragButton = ctx.Event.MouseButton
 		t.mouse.dragReport = true
 		t.mouse.lastR, t.mouse.lastC = r, c
-		e.IsHandled = true
+		ctx.Consume()
 		return
 	}
 	// Middle-click paste. Below shouldReport(), so a child that enabled mouse
 	// reporting still gets the button rather than having pastes injected.
-	if e.MouseButton == gui.MouseMiddle {
-		if t.cfg.MiddleClickPaste && t.pasteFromPrimary(w) {
-			e.IsHandled = true
+	if ctx.Event.MouseButton == gui.MouseMiddle {
+		if t.cfg.MiddleClickPaste && t.pasteFromPrimary(ctx.Window) {
+			ctx.Consume()
 		}
 		return
 	}
-	if e.MouseButton != gui.MouseLeft {
+	if ctx.Event.MouseButton != gui.MouseLeft {
 		return
 	}
-	selCol := t.posToSelCol(e.MouseX)
+	selCol := t.posToSelCol(ctx.Event.MouseX)
 	// Shift+click extends the existing selection from its fixed anchor instead
 	// of starting a new one — matching xterm/iTerm2/kitty. Only extends when a
 	// prior anchor exists (hasSelAnchor); a Shift+click with no prior selection
 	// falls through to the normal re-anchor below.
-	shiftExtend := e.Modifiers.Has(gui.ModShift)
+	shiftExtend := ctx.Event.Modifiers.Has(gui.ModShift)
 	// Shift+click is an extend gesture, not a repeat of the previous click, so
 	// it neither advances nor inherits the click count.
 	count := 1
 	if !shiftExtend {
-		count = t.nextClickCount(e.MouseX, e.MouseY)
+		count = t.nextClickCount(ctx.Event.MouseX, ctx.Event.MouseY)
 	} else {
 		t.resetClickCount()
 	}
 	// Alt+drag selects a rectangle. Only reachable here, past the
 	// shouldReport() return above, so an app that asked for mouse events
 	// still receives Alt+drag as ordinary reports.
-	block := e.Modifiers.Has(gui.ModAlt)
+	block := ctx.Event.Modifiers.Has(gui.ModAlt)
 	func() {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
@@ -418,42 +418,42 @@ func (t *Term) onClick(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		t.grid.hasSelAnchor = true
 	}()
 	t.mouse.dragging = true
-	t.mouse.dragButton = e.MouseButton
+	t.mouse.dragButton = ctx.Event.MouseButton
 	t.mouse.dragReport = false
-	t.lockMouse(w)
+	t.lockMouse(ctx.Window)
 	t.bumpVersion()
-	w.UpdateWindow()
-	e.IsHandled = true
+	ctx.Window.UpdateWindow()
+	ctx.Consume()
 }
 
 // onMouseMove handles pointer motion. Under ?1002 with a button held,
 // emits a drag report; under ?1003 even with no button, emits an
 // any-motion report. Falls through to selection extension when this
 // drag was started outside of a reporting mode.
-func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-	t.toCanvasRel(e)
+func (t *Term) onMouseMove(ctx gui.EventCtx) {
+	t.toCanvasRel(ctx.Event)
 	// Track Cmd state for hyperlink styling. When it changes, the next
 	// frame will reflect the new state via cmdHeld in the draw pass.
-	cmd := e.Modifiers.Has(gui.ModSuper)
+	cmd := ctx.Event.Modifiers.Has(gui.ModSuper)
 	prevCmd := t.mouse.cmdHeld.Swap(cmd)
 	if cmd != prevCmd {
 		t.bumpVersion()
 	}
 	// Track scrollbar hover for thumb brightness.
-	if t.scrollbar.active && realNumber(e.MouseX) && realNumber(e.MouseY) {
-		inHit := e.MouseX >= t.scrollbar.hitX0 &&
-			e.MouseY >= 0 && e.MouseY < t.scrollbar.viewH
+	if t.scrollbar.active && realNumber(ctx.Event.MouseX) && realNumber(ctx.Event.MouseY) {
+		inHit := ctx.Event.MouseX >= t.scrollbar.hitX0 &&
+			ctx.Event.MouseY >= 0 && ctx.Event.MouseY < t.scrollbar.viewH
 		if inHit != t.scrollbar.hovered {
 			t.scrollbar.hovered = inHit
 			t.bumpVersion()
-			w.UpdateWindow()
+			ctx.Window.UpdateWindow()
 		}
 	}
 
 	// Scrollbar thumb drag: repositions the viewport, independent of the
 	// selection / mouse-report paths below.
 	if t.scrollbar.dragging {
-		t.scrollbarDrag(e, w)
+		t.scrollbarDrag(ctx.Event, ctx.Window)
 		return
 	}
 	// Any pointer motion means the user's hand is on the input device again;
@@ -474,10 +474,10 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// updateHover re-applies it afterwards on the paths that do reach it,
 	// which is what lets a hovered link outrank the shape.
 	if shape := t.pointerShapeSnap(); shape != pointerDefault {
-		applyPointerShape(w, shape)
+		applyPointerShape(ctx.Window, shape)
 	}
 
-	r, c := t.posToCell(e.MouseX, e.MouseY)
+	r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
 	snap := t.mouseSnap()
 	if snap.sgr && snap.live {
 		// Dedupe: only emit when crossing a cell boundary.
@@ -494,23 +494,23 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 			if !ok {
 				return
 			}
-			cb := base + mouseModBits(e.Modifiers) + 32
-			t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+			cb := base + mouseModBits(ctx.Event.Modifiers) + 32
+			t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
 			t.mouse.lastR, t.mouse.lastC = r, c
 			return
 		case !t.mouse.dragging && snap.any:
-			cb := 35 + mouseModBits(e.Modifiers) // 3+32 = motion, no button
-			t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+			cb := 35 + mouseModBits(ctx.Event.Modifiers) // 3+32 = motion, no button
+			t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
 			t.mouse.lastR, t.mouse.lastC = r, c
 			return
 		}
 	}
 	if !t.mouse.dragging || t.mouse.dragReport {
 		// Update hover for hyperlink highlighting even when not dragging.
-		t.updateHover(r, c, w)
+		t.updateHover(r, c, ctx.Window)
 		return
 	}
-	selCol := t.posToSelCol(e.MouseX)
+	selCol := t.posToSelCol(ctx.Event.MouseX)
 	func() {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
@@ -518,10 +518,10 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		widgetH := float32(rows) * t.cellH
 		if t.cellH > 0 {
 			switch {
-			case e.MouseY < 0:
+			case ctx.Event.MouseY < 0:
 				t.grid.ScrollView(1)
 				t.autoScrollDir.Store(1)
-			case e.MouseY > widgetH:
+			case ctx.Event.MouseY > widgetH:
 				t.grid.ScrollView(-1)
 				t.autoScrollDir.Store(-1)
 			default:
@@ -541,8 +541,8 @@ func (t *Term) onMouseMove(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		}
 	}()
 	t.bumpVersion()
-	w.UpdateWindow()
-	t.updateHover(r, c, w)
+	ctx.Window.UpdateWindow()
+	t.updateHover(r, c, ctx.Window)
 }
 
 // pointerShapeSnap copies the OSC 22 shape out from under g.Mu so the caller
@@ -649,35 +649,35 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 // onMouseUp handles button-release. A drag started under reporting
 // emits a release report regardless of whether the mode is still on
 // (the host expects every press to be paired with a release).
-func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-	t.toCanvasRel(e)
+func (t *Term) onMouseUp(ctx gui.EventCtx) {
+	t.toCanvasRel(ctx.Event)
 	// Scrollbar thumb drag release: unlock and stop dragging. The scrollbar
 	// drag path never sets t.mouse.dragging, so handle it before that guard.
 	if t.scrollbar.dragging {
 		t.scrollbar.dragging = false
-		t.unlockMouse(w)
-		t.scheduleViewUpdate(w)
-		e.IsHandled = true
+		t.unlockMouse(ctx.Window)
+		t.scheduleViewUpdate(ctx.Window)
+		ctx.Consume()
 		return
 	}
 	if !t.mouse.dragging {
 		return
 	}
 	t.autoScrollDir.Store(0)
-	t.unlockMouse(w)
-	r, c := t.posToCell(e.MouseX, e.MouseY)
+	t.unlockMouse(ctx.Window)
+	r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
 	if t.mouse.dragReport {
 		snap := t.mouseSnap()
 		if snap.sgr {
 			base, ok := mouseSGRBaseButton(t.mouse.dragButton)
 			if ok {
-				cb := base + mouseModBits(e.Modifiers)
-				t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, false)
+				cb := base + mouseModBits(ctx.Event.Modifiers)
+				t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, false)
 			}
 		}
 		t.mouse.dragging = false
 		t.mouse.dragReport = false
-		e.IsHandled = true
+		ctx.Consume()
 		return
 	}
 	t.mouse.dragging = false
@@ -685,7 +685,7 @@ func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// explicit OSC 8 link wins; otherwise fall back to implicit URL detection
 	// at the click cell, matching the Cmd-hover highlight.
 	if !t.grid.SelActive {
-		if e.Modifiers&gui.ModSuper != 0 || e.Modifiers&gui.ModCtrl != 0 {
+		if ctx.Event.Modifiers&gui.ModSuper != 0 || ctx.Event.Modifiers&gui.ModCtrl != 0 {
 			url := func() string {
 				t.grid.Mu.Lock()
 				defer t.grid.Mu.Unlock()
@@ -699,12 +699,12 @@ func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 			}()
 			if url != "" {
 				openURL(url)
-				e.IsHandled = true
+				ctx.Consume()
 				return
 			}
 		}
 	}
-	if !t.copySelection(w) {
+	if !t.copySelection(ctx.Window) {
 		// Nothing selected (plain click, or a drag too small to span a cell).
 		// Deactivate the selection but keep SelAnchor and hasSelAnchor so a
 		// following Shift+click extends from this click point — a full
@@ -718,8 +718,8 @@ func (t *Term) onMouseUp(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		}()
 	}
 	t.bumpVersion()
-	w.UpdateWindow()
-	e.IsHandled = true
+	ctx.Window.UpdateWindow()
+	ctx.Event.IsHandled = true
 }
 
 // openURL opens url with the OS default browser/handler.
@@ -847,28 +847,28 @@ func (t *Term) wheelArrows(scrollY float32, precise bool) {
 // reveals older content (wheel-up); negative reveals newer (down).
 // Each event also feeds the momentum EMA so that releasing the trackpad
 // produces a brief coast rather than an abrupt stop.
-func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+func (t *Term) onMouseScroll(ctx gui.EventCtx) {
 	// Zero-delta: macOS sends this when a finger touches the trackpad during
 	// a momentum coast. Cancel immediately so the user gets instant control.
-	if e.ScrollY == 0 {
+	if ctx.Event.ScrollY == 0 {
 		t.cancelMomentum()
 		return
 	}
 	snap := t.mouseSnap()
 	if snap.shouldReport() {
-		r, c := t.posToCell(e.MouseX, e.MouseY)
+		r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
 		base := 64
-		if e.ScrollY < 0 {
+		if ctx.Event.ScrollY < 0 {
 			base = 65
 		}
-		cb := base + mouseModBits(e.Modifiers)
-		for range t.wheelReportTicks(e.ScrollY, e.ScrollPrecise) {
-			t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+		cb := base + mouseModBits(ctx.Event.Modifiers)
+		for range t.wheelReportTicks(ctx.Event.ScrollY, ctx.Event.ScrollPrecise) {
+			t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
 		}
-		e.IsHandled = true
+		ctx.Event.IsHandled = true
 		return
 	}
-	if !realNumber(e.ScrollY) || !finite(t.cellH) {
+	if !realNumber(ctx.Event.ScrollY) || !finite(t.cellH) {
 		return
 	}
 
@@ -879,8 +879,8 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// kitty, iTerm2, and Ghostty do. Gated on the literal alt screen rather
 	// than on viewport state, so a scrolled-back main screen still scrolls.
 	if snap.alt && !snap.report {
-		t.wheelArrows(e.ScrollY, e.ScrollPrecise)
-		e.IsHandled = true
+		t.wheelArrows(ctx.Event.ScrollY, ctx.Event.ScrollPrecise)
+		ctx.Consume()
 		return
 	}
 
@@ -888,11 +888,11 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// high-res) deltas via ScrollPrecise. Non-precise deltas are discrete
 	// wheel notches — no momentum. Backends that never set the flag get
 	// wheel behavior throughout, matching the pre-flag feel.
-	isMouseWheel := !e.ScrollPrecise
+	isMouseWheel := !ctx.Event.ScrollPrecise
 
 	// Pixel-perfect scroll: pass the raw scaled delta directly to ScrollViewPx
 	// which accumulates it into ViewOffset + ViewSubPx. No integer truncation.
-	deltaPx := e.ScrollY * t.scrollSensitivity(e.ScrollPrecise)
+	deltaPx := ctx.Event.ScrollY * t.scrollSensitivity(ctx.Event.ScrollPrecise)
 	changed := func() bool {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
@@ -901,13 +901,13 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		return t.grid.ViewOffset != prevOff || t.grid.ViewSubPx != prevSub
 	}()
 	if changed {
-		t.scheduleViewUpdate(w)
+		t.scheduleViewUpdate(ctx.Window)
 	}
 
 	// Mouse wheel: no momentum. Cancel any in-progress coast and return.
 	if isMouseWheel {
 		t.cancelMomentum()
-		e.IsHandled = true
+		ctx.Consume()
 		return
 	}
 
@@ -923,7 +923,7 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	func() {
 		t.momentum.mu.Lock()
 		defer t.momentum.mu.Unlock()
-		newVel := math.Max(-momentumCap, math.Min(momentumCap, float64(e.ScrollY)*momentumScale))
+		newVel := math.Max(-momentumCap, math.Min(momentumCap, float64(ctx.Event.ScrollY)*momentumScale))
 		if math.Abs(newVel) >= math.Abs(t.momentum.vel) || (t.momentum.vel > 0) != (newVel > 0) {
 			t.momentum.vel = newVel
 		}
@@ -935,7 +935,7 @@ func (t *Term) onMouseScroll(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	} else {
 		t.momentum.timer.Reset(coastDelay)
 	}
-	e.IsHandled = true
+	ctx.Consume()
 }
 
 // cancelMomentum stops any in-progress momentum coast immediately.

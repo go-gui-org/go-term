@@ -568,7 +568,7 @@ func TestTerm_OnKeyDown_AppCursor(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.AppCursorKeys = true
 	e := &gui.Event{KeyCode: gui.KeyUp}
-	term.onKeyDown(nil, e, &gui.Window{})
+	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1bOA" {
 		t.Fatalf("app cursor = %q, want %q", got, "\x1bOA")
 	}
@@ -581,7 +581,7 @@ func TestTerm_OnKeyDown_AppKeypad(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.AppKeypad = true
 	e := &gui.Event{KeyCode: gui.KeyKP1}
-	term.onKeyDown(nil, e, &gui.Window{})
+	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1bOq" {
 		t.Fatalf("app keypad = %q, want %q", got, "\x1bOq")
 	}
@@ -926,7 +926,7 @@ func TestTerm_OnKeyDown_AltLetter(t *testing.T) {
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		e := &gui.Event{KeyCode: c.key, Modifiers: gui.ModAlt}
-		term.onKeyDown(nil, e, &gui.Window{})
+		term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("Alt+%v = %q, want %q", c.key, got, c.want)
 		}
@@ -949,7 +949,7 @@ func TestTerm_OnKeyDown_AltArrow(t *testing.T) {
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		e := &gui.Event{KeyCode: c.key, Modifiers: gui.ModAlt}
-		term.onKeyDown(nil, e, &gui.Window{})
+		term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("Alt+%v = %q, want %q", c.key, got, c.want)
 		}
@@ -960,7 +960,7 @@ func TestTerm_OnKeyDown_AltCtrlLetter(t *testing.T) {
 	term, buf := newTestTermCapture()
 	// Alt+Ctrl+B → ESC + 0x02
 	e := &gui.Event{KeyCode: gui.KeyB, Modifiers: gui.ModAlt | gui.ModCtrl}
-	term.onKeyDown(nil, e, &gui.Window{})
+	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	want := "\x1b\x02"
 	if got := string(*buf); got != want {
 		t.Fatalf("Alt+Ctrl+B = %q, want %q", got, want)
@@ -1053,7 +1053,7 @@ func TestTerm_OnKeyDown_FuncKeys(t *testing.T) {
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		e := &gui.Event{KeyCode: c.key, Modifiers: c.mods}
-		term.onKeyDown(nil, e, &gui.Window{})
+		term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("key=%v mods=%v: got %q want %q", c.key, c.mods, got, c.want)
 		}
@@ -1122,7 +1122,7 @@ func TestTerm_OnChar_SearchMode_AppendAndCap(t *testing.T) {
 	term.search.active = true
 
 	e := &gui.Event{CharCode: 'a'}
-	term.onChar(nil, e, nil)
+	term.onChar(gui.EventCtx{Layout: nil, Event: e, Window: nil})
 	if term.search.query != "a" {
 		t.Fatalf("query = %q, want \"a\"", term.search.query)
 	}
@@ -1132,14 +1132,14 @@ func TestTerm_OnChar_SearchMode_AppendAndCap(t *testing.T) {
 
 	// Fill to exactly MaxGridDim runes (already have 1 'a').
 	for i := 1; i < MaxGridDim; i++ {
-		term.onChar(nil, &gui.Event{CharCode: 'x'}, nil)
+		term.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'x'}, Window: nil})
 	}
 	if utf8.RuneCountInString(term.search.query) != MaxGridDim {
 		t.Fatalf("query rune count = %d, want %d", utf8.RuneCountInString(term.search.query), MaxGridDim)
 	}
 	// Next char must be rejected (at cap).
 	before := term.search.query
-	term.onChar(nil, &gui.Event{CharCode: 'z'}, nil)
+	term.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: 'z'}, Window: nil})
 	if term.search.query != before {
 		t.Errorf("query grew past MaxGridDim cap: len now %d", utf8.RuneCountInString(term.search.query))
 	}
@@ -1216,7 +1216,7 @@ func TestTerm_OnKeyDown_ModifiedCursorKeys(t *testing.T) {
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		e := &gui.Event{KeyCode: c.key, Modifiers: c.mods}
-		term.onKeyDown(nil, e, &gui.Window{})
+		term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("key=%v mods=%v: got %q want %q", c.key, c.mods, got, c.want)
 		}
@@ -1249,7 +1249,7 @@ func TestTerm_OnKeyDown_CtrlShiftHomeEndPassthrough(t *testing.T) {
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		e := &gui.Event{KeyCode: c.key, Modifiers: c.mods}
-		term.onKeyDown(nil, e, &gui.Window{})
+		term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 		got := string(*buf)
 		if got != c.want {
 			t.Errorf("key=%v mods=%v: got %q want %q", c.key, c.mods, got, c.want)
@@ -1308,7 +1308,7 @@ func TestTerm_KittyKey_Backspace(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.KittyKeyFlags = 1
 	e := &gui.Event{KeyCode: gui.KeyBackspace}
-	term.onKeyDown(nil, e, &gui.Window{})
+	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[127u" {
 		t.Fatalf("KKP backspace: got %q, want %q", got, "\x1b[127u")
 	}
@@ -1318,7 +1318,7 @@ func TestTerm_KittyKey_Enter(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.KittyKeyFlags = 1
 	e := &gui.Event{KeyCode: gui.KeyEnter}
-	term.onKeyDown(nil, e, &gui.Window{})
+	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[13u" {
 		t.Fatalf("KKP enter: got %q, want %q", got, "\x1b[13u")
 	}
@@ -1328,7 +1328,7 @@ func TestTerm_KittyKey_Tab(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.KittyKeyFlags = 1
 	e := &gui.Event{KeyCode: gui.KeyTab}
-	term.onKeyDown(nil, e, &gui.Window{})
+	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[9u" {
 		t.Fatalf("KKP tab: got %q, want %q", got, "\x1b[9u")
 	}
@@ -1338,7 +1338,7 @@ func TestTerm_KittyKey_Escape(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.KittyKeyFlags = 1
 	e := &gui.Event{KeyCode: gui.KeyEscape}
-	term.onKeyDown(nil, e, &gui.Window{})
+	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[27u" {
 		t.Fatalf("KKP escape: got %q, want %q", got, "\x1b[27u")
 	}
@@ -1349,7 +1349,7 @@ func TestTerm_KittyKey_CtrlC(t *testing.T) {
 	term.grid.KittyKeyFlags = 1
 	// Ctrl+C: KeyCode=KeyC, Modifiers=ModCtrl. Codepoint for 'c' is 99.
 	e := &gui.Event{KeyCode: gui.KeyC, Modifiers: gui.ModCtrl}
-	term.onKeyDown(nil, e, &gui.Window{})
+	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[99;5u" {
 		t.Fatalf("KKP Ctrl+C: got %q, want %q", got, "\x1b[99;5u")
 	}
@@ -1382,7 +1382,7 @@ func TestTerm_KittyKey_Release(t *testing.T) {
 
 	// Test Enter key release
 	e := &gui.Event{KeyCode: gui.KeyEnter}
-	term.onKeyUp(nil, e, &gui.Window{})
+	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[13;1:3u" {
 		t.Fatalf("KKP Enter release: got %q, want %q", got, "\x1b[13;1:3u")
 	}
@@ -1392,7 +1392,7 @@ func TestTerm_KittyKey_Release(t *testing.T) {
 
 	// Test Shift+Tab release
 	e = &gui.Event{KeyCode: gui.KeyTab, Modifiers: gui.ModShift}
-	term.onKeyUp(nil, e, &gui.Window{})
+	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[9;2:3u" {
 		t.Fatalf("KKP Shift+Tab release: got %q, want %q", got, "\x1b[9;2:3u")
 	}
@@ -1404,7 +1404,7 @@ func TestTerm_KittyKey_ModifierOnly(t *testing.T) {
 
 	// Test Shift key release
 	e := &gui.Event{KeyCode: gui.KeyLeftShift}
-	term.onKeyUp(nil, e, &gui.Window{})
+	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[57441;1:3u" {
 		t.Fatalf("KKP Shift release: got %q, want %q", got, "\x1b[57441;1:3u")
 	}
@@ -1414,7 +1414,7 @@ func TestTerm_KittyKey_ModifierOnly(t *testing.T) {
 
 	// Test Ctrl key release
 	e = &gui.Event{KeyCode: gui.KeyLeftControl}
-	term.onKeyUp(nil, e, &gui.Window{})
+	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[57442;1:3u" {
 		t.Fatalf("KKP Ctrl release: got %q, want %q", got, "\x1b[57442;1:3u")
 	}
@@ -1424,7 +1424,7 @@ func TestTerm_KittyKey_ModifierOnly(t *testing.T) {
 
 	// Test Alt key release
 	e = &gui.Event{KeyCode: gui.KeyLeftAlt}
-	term.onKeyUp(nil, e, &gui.Window{})
+	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[57443;1:3u" {
 		t.Fatalf("KKP Alt release: got %q, want %q", got, "\x1b[57443;1:3u")
 	}
@@ -1436,7 +1436,7 @@ func TestTerm_KittyKey_ReleaseDisabled(t *testing.T) {
 
 	// Test that no release events are generated when flag bit 2 is not set
 	e := &gui.Event{KeyCode: gui.KeyEnter}
-	term.onKeyUp(nil, e, &gui.Window{})
+	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if len(*buf) != 0 {
 		t.Fatalf("KKP release with flag bit 2 disabled: got %q, want empty", string(*buf))
 	}
@@ -1471,7 +1471,7 @@ func TestTerm_KittyKey_RightModifiers(t *testing.T) {
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		term.grid.KittyKeyFlags = 2
-		term.onKeyUp(nil, &gui.Event{KeyCode: c.key}, &gui.Window{})
+		term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: c.key}, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("key=%v: got %q, want %q", c.key, got, c.want)
 		}
@@ -1497,7 +1497,7 @@ func TestTerm_KittyKey_NavRelease(t *testing.T) {
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		term.grid.KittyKeyFlags = 2
-		term.onKeyUp(nil, &gui.Event{KeyCode: c.key}, &gui.Window{})
+		term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: c.key}, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("key=%v: got %q, want %q", c.key, got, c.want)
 		}
@@ -1525,7 +1525,7 @@ func TestTerm_KittyKey_FKeyRelease(t *testing.T) {
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		term.grid.KittyKeyFlags = 2
-		term.onKeyUp(nil, &gui.Event{KeyCode: c.key}, &gui.Window{})
+		term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: c.key}, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("key=%v: got %q, want %q", c.key, got, c.want)
 		}
@@ -1545,7 +1545,7 @@ func TestTerm_KittyKey_PrintableRelease(t *testing.T) {
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		term.grid.KittyKeyFlags = 2
-		term.onKeyUp(nil, &gui.Event{KeyCode: c.key}, &gui.Window{})
+		term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: c.key}, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("key=%v: got %q, want %q", c.key, got, c.want)
 		}
@@ -1555,7 +1555,7 @@ func TestTerm_KittyKey_PrintableRelease(t *testing.T) {
 func TestTerm_KittyKey_KPEnterRelease(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.KittyKeyFlags = 2
-	term.onKeyUp(nil, &gui.Event{KeyCode: gui.KeyKPEnter}, &gui.Window{})
+	term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: gui.KeyKPEnter}, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[13;1:3u" {
 		t.Fatalf("KPEnter release: got %q, want %q", got, "\x1b[13;1:3u")
 	}
@@ -1565,7 +1565,7 @@ func TestTerm_KittyKey_UnknownKeyNoOutput(t *testing.T) {
 	term, buf := newTestTermCapture()
 	term.grid.KittyKeyFlags = 2
 	// KeyF13 is not in the switch; should produce no output.
-	term.onKeyUp(nil, &gui.Event{KeyCode: gui.KeyF13}, &gui.Window{})
+	term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: gui.KeyF13}, Window: &gui.Window{}})
 	if len(*buf) != 0 {
 		t.Fatalf("unknown key: got %q, want empty", string(*buf))
 	}
@@ -1586,7 +1586,7 @@ func TestTerm_KittyKey_LegacyFallback(t *testing.T) {
 		term, buf := newTestTermCapture()
 		// flags=0 by default
 		e := &gui.Event{KeyCode: c.key}
-		term.onKeyDown(nil, e, &gui.Window{})
+		term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("legacy key=%v: got %q, want %q", c.key, got, c.want)
 		}
@@ -2705,7 +2705,7 @@ func TestTerm_onAmendLayout(t *testing.T) {
 	t.Run("nil layout", func(t *testing.T) {
 		term.ime.layoutX = 42
 		term.ime.layoutY = 99
-		term.onAmendLayout(nil, win)
+		term.onAmendLayout(gui.EventCtx{Layout: nil, Event: nil, Window: win})
 		if term.ime.layoutX != 42 || term.ime.layoutY != 99 {
 			t.Errorf("nil layout should not mutate position, got (%.1f, %.1f)",
 				term.ime.layoutX, term.ime.layoutY)
@@ -2719,7 +2719,7 @@ func TestTerm_onAmendLayout(t *testing.T) {
 		l := &gui.Layout{
 			Children: []gui.Layout{{Shape: childShape}},
 		}
-		term.onAmendLayout(l, win)
+		term.onAmendLayout(gui.EventCtx{Layout: l, Event: nil, Window: win})
 		if term.ime.layoutX != 100 || term.ime.layoutY != 200 {
 			t.Errorf("expected (100, 200), got (%.1f, %.1f)",
 				term.ime.layoutX, term.ime.layoutY)
@@ -2731,7 +2731,7 @@ func TestTerm_onAmendLayout(t *testing.T) {
 		ownShape.X = 300
 		ownShape.Y = 400
 		l := &gui.Layout{Shape: ownShape}
-		term.onAmendLayout(l, win)
+		term.onAmendLayout(gui.EventCtx{Layout: l, Event: nil, Window: win})
 		if term.ime.layoutX != 300 || term.ime.layoutY != 400 {
 			t.Errorf("expected (300, 400), got (%.1f, %.1f)",
 				term.ime.layoutX, term.ime.layoutY)
@@ -2746,7 +2746,7 @@ func TestTerm_onAmendLayout(t *testing.T) {
 			Shape:    ownShape,
 			Children: []gui.Layout{{Shape: nil}},
 		}
-		term.onAmendLayout(l, win)
+		term.onAmendLayout(gui.EventCtx{Layout: l, Event: nil, Window: win})
 		if term.ime.layoutX != 500 || term.ime.layoutY != 600 {
 			t.Errorf("expected fallback to own (500, 600), got (%.1f, %.1f)",
 				term.ime.layoutX, term.ime.layoutY)
@@ -2760,7 +2760,7 @@ func TestTerm_onAmendLayout(t *testing.T) {
 		nanShape.X = float32(math.NaN())
 		nanShape.Y = 700
 		l := &gui.Layout{Children: []gui.Layout{{Shape: nanShape}}}
-		term.onAmendLayout(l, win)
+		term.onAmendLayout(gui.EventCtx{Layout: l, Event: nil, Window: win})
 		if term.ime.layoutX == float32(math.NaN()) || math.IsNaN(float64(term.ime.layoutX)) {
 			t.Error("NaN X should have been rejected")
 		}
@@ -2776,7 +2776,7 @@ func TestTerm_onAmendLayout(t *testing.T) {
 		infShape.X = 800
 		infShape.Y = float32(math.Inf(1))
 		l := &gui.Layout{Children: []gui.Layout{{Shape: infShape}}}
-		term.onAmendLayout(l, win)
+		term.onAmendLayout(gui.EventCtx{Layout: l, Event: nil, Window: win})
 		if term.ime.layoutX != 800 {
 			t.Errorf("expected X=800, got %.1f", term.ime.layoutX)
 		}

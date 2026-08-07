@@ -59,8 +59,8 @@ func (t *Term) recompileSearchRE() {
 }
 
 // onChar receives printable character input from the OS.
-func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
-	if e.CharCode == 0 {
+func (t *Term) onChar(ctx gui.EventCtx) {
+	if ctx.Event.CharCode == 0 {
 		return
 	}
 	// A chord holding Cmd/Ctrl/Alt produces no text: AppKit suppresses
@@ -71,16 +71,16 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// Ctrl+C would send its control byte *and* the letter. Drop the
 	// duplicate char; keep Shift, which is just the same letter's
 	// uppercase form.
-	if e.Modifiers&(gui.ModCtrl|gui.ModAlt|gui.ModSuper) != 0 {
-		e.IsHandled = true
+	if ctx.Event.Modifiers&(gui.ModCtrl|gui.ModAlt|gui.ModSuper) != 0 {
+		ctx.Consume()
 		return
 	}
 	// Hints: label characters arrive here for the same reason copy mode's
 	// motions do, and are swallowed under the same rule — an unmatched label
 	// letter must not reach the shell's command line.
 	if t.hints.active {
-		t.handleHintsChar(rune(e.CharCode), w)
-		e.IsHandled = true
+		t.handleHintsChar(rune(ctx.Event.CharCode), ctx.Window)
+		ctx.Consume()
 		return
 	}
 	// Copy mode: bare printable keys (the vim motions) arrive here, not in
@@ -89,8 +89,8 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// matched or not: a leaked 'j' would land in the shell's command line. The
 	// search bar, which copy mode can open, still needs its characters.
 	if t.copy.active && !t.copy.searching {
-		t.handleCopyModeChar(rune(e.CharCode), w)
-		e.IsHandled = true
+		t.handleCopyModeChar(rune(ctx.Event.CharCode), ctx.Window)
+		ctx.Event.IsHandled = true
 		return
 	}
 	// An IME commit delivers the whole composed string in IMEText; CharCode
@@ -98,22 +98,22 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	// to 日. For ordinary typing IMEText is that same single character, so the
 	// two agree and the fast paths below stay on the single-rune branch.
 	// IMEText is empty on backends that do not populate it — fall back then.
-	text := e.IMEText
+	text := ctx.Event.IMEText
 	if text == "" {
-		text = string(rune(e.CharCode))
+		text = string(rune(ctx.Event.CharCode))
 	}
 	if t.search.active {
 		if utf8.RuneCountInString(t.search.query) < MaxGridDim {
 			t.search.query += text
 			t.recompileSearchRE()
 		}
-		e.IsHandled = true
+		ctx.Consume()
 		t.bumpVersion()
 		t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
 		return
 	}
 	t.snapToLive()
-	r := rune(e.CharCode)
+	r := rune(ctx.Event.CharCode)
 	// A commit longer than one rune is composed text, not a keystroke. Skip
 	// the KKP encoder for it: there is no single codepoint to report, and the
 	// modifiers held during composition describe the IME's own keys, not the
@@ -125,12 +125,12 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	kkpFlags := t.keyModes().kittyKeyFlags
 	if singleRune && kkpFlags&8 != 0 {
 		cp := int(r)
-		if r >= 'A' && r <= 'Z' && e.Modifiers.Has(gui.ModShift) {
+		if r >= 'A' && r <= 'Z' && ctx.Event.Modifiers.Has(gui.ModShift) {
 			cp = int(r-'A') + 'a'
 		}
-		if seq := kittyKeySeq(cp, e.Modifiers, kkpFlags, false); seq != nil {
+		if seq := kittyKeySeq(cp, ctx.Event.Modifiers, kkpFlags, false); seq != nil {
 			t.writeBytes(seq)
-			e.IsHandled = true
+			ctx.Consume()
 			return
 		}
 	}
@@ -145,7 +145,7 @@ func (t *Term) onChar(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 	} else {
 		t.writeBytes([]byte(text))
 	}
-	e.IsHandled = true
+	ctx.Consume()
 }
 
 // kittyKeySeq encodes a key in Kitty Keyboard Protocol format: CSI codepoint u
@@ -390,52 +390,52 @@ func funcKeySeq(k gui.KeyCode, shift, ctrl bool) []byte {
 // byte sequence. Scrollback navigation keys (PgUp/PgDn, Shift+Home/End)
 // move the viewport instead of writing to the pty; any other key snaps
 // the viewport back to live.
-func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
+func (t *Term) onKeyDown(ctx gui.EventCtx) {
 	// Hints first, ahead of copy mode: the entry chords must work from inside
 	// copy mode (a link you scrolled back to find is exactly the one you want
 	// to open), and while hints is up it owns the keyboard outright.
 	verb, isHintChord := hintOpen, false
 	switch {
-	case t.binds(ActionHints, e):
+	case t.binds(ActionHints, ctx.Event):
 		isHintChord = true
-	case t.binds(ActionHintsCopy, e):
+	case t.binds(ActionHintsCopy, ctx.Event):
 		verb, isHintChord = hintCopy, true
 	}
 	if isHintChord {
 		switch {
 		case !t.hints.active:
-			t.enterHints(w, verb)
+			t.enterHints(ctx.Window, verb)
 		case t.hints.verb == verb:
-			t.exitHints(w) // same chord toggles back out
+			t.exitHints(ctx.Window) // same chord toggles back out
 		default:
 			// The *other* chord switches what committing does. Dropping a set
 			// of labels the user is already reading, only to relabel the same
 			// links a keystroke later, would be the worse answer.
 			t.hints.verb = verb
-			t.scheduleViewUpdate(w)
+			t.scheduleViewUpdate(ctx.Window)
 		}
-		e.IsHandled = true
+		ctx.Consume()
 		return
 	}
 	if t.hints.active {
 		// Bare printable chords belong to onChar, exactly as in copy mode.
 		// Swallowed either way: a leaked label letter would land in the shell's
 		// command line.
-		if !producesChar(e) {
-			t.handleHintsKey(e, w)
+		if !producesChar(ctx.Event) {
+			t.handleHintsKey(ctx.Event, ctx.Window)
 		}
-		e.IsHandled = true
+		ctx.Consume()
 		return
 	}
 	// Copy mode next: while it is active it owns the keyboard, and its entry
 	// chord must be seen even when a search bar is open.
-	if t.binds(ActionCopyMode, e) {
+	if t.binds(ActionCopyMode, ctx.Event) {
 		if t.copy.active {
-			t.exitCopyMode(w)
+			t.exitCopyMode(ctx.Window)
 		} else {
-			t.enterCopyMode(w)
+			t.enterCopyMode(ctx.Window)
 		}
-		e.IsHandled = true
+		ctx.Consume()
 		return
 	}
 	// While copy mode has the search bar open, the search handlers run as
@@ -445,33 +445,33 @@ func (t *Term) onKeyDown(_ *gui.Layout, e *gui.Event, w *gui.Window) {
 		// here at all, and on backends that deliver both events dispatching in
 		// both places would double-apply every motion. Still swallowed, so
 		// nothing leaks to the child either way.
-		if !producesChar(e) {
-			t.handleCopyModeKey(e, w)
+		if !producesChar(ctx.Event) {
+			t.handleCopyModeKey(ctx.Event, ctx.Window)
 		}
-		e.IsHandled = true
+		ctx.Consume()
 		return
 	}
-	if t.handleSearchKey(e, w) {
+	if t.handleSearchKey(ctx.Event, ctx.Window) {
 		return
 	}
-	if t.handleClipboardKey(e, w) {
+	if t.handleClipboardKey(ctx.Event, ctx.Window) {
 		return
 	}
-	shift := e.Modifiers.Has(gui.ModShift)
-	ctrl := e.Modifiers.Has(gui.ModCtrl)
-	if t.scrollbackIntercept(e, w, shift) {
+	shift := ctx.Event.Modifiers.Has(gui.ModShift)
+	ctrl := ctx.Event.Modifiers.Has(gui.ModCtrl)
+	if t.scrollbackIntercept(ctx.Event, ctx.Window, shift) {
 		return
 	}
-	if t.handleDisplayKey(e, w) {
+	if t.handleDisplayKey(ctx.Event, ctx.Window) {
 		return
 	}
-	out := t.encodeKeyEvent(e, w, shift, ctrl)
+	out := t.encodeKeyEvent(ctx.Event, ctx.Window, shift, ctrl)
 	if len(out) == 0 {
 		return
 	}
 	t.snapToLive()
 	t.writeBytes(out)
-	e.IsHandled = true
+	ctx.Consume()
 }
 
 // handleSearchKey handles the search bar lifecycle: Cmd+F opens it,
@@ -817,17 +817,17 @@ func (t *Term) encodeKeyEvent(e *gui.Event, w *gui.Window, shift, ctrl bool) []b
 }
 
 // onKeyUp generates KKP key-release sequences (event-type 3) when flag bit 2 is set.
-func (t *Term) onKeyUp(_ *gui.Layout, e *gui.Event, _ *gui.Window) {
+func (t *Term) onKeyUp(ctx gui.EventCtx) {
 	modes := t.keyModes()
 	if modes.kittyKeyFlags&2 == 0 {
 		return
 	}
-	cp, ok := kittyKeyCodepoint(e.KeyCode)
+	cp, ok := kittyKeyCodepoint(ctx.Event.KeyCode)
 	if !ok {
 		return
 	}
-	if seq := kittyKeySeq(cp, e.Modifiers, modes.kittyKeyFlags, true); seq != nil {
+	if seq := kittyKeySeq(cp, ctx.Event.Modifiers, modes.kittyKeyFlags, true); seq != nil {
 		t.writeBytes(seq)
-		e.IsHandled = true
+		ctx.Consume()
 	}
 }
