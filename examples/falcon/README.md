@@ -1,4 +1,4 @@
-# Falcon
+# <img src="icon/falcon-icon.png" width="32" alt="Falcon icon" style="vertical-align: middle;"> Falcon
 
 Falcon is a full-featured terminal emulator built on
 [`go-term`](../../) and the [`go-gui`](https://github.com/go-gui-org/go-gui)

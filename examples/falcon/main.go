@@ -54,7 +54,7 @@ func run() int {
 	a := &app{
 		wc: workspace.Cfg{
 			TextStyle:              defaultTextStyle(),
-			Identity:               "Falcon",
+			Identity:               "falcon",
 			ExitWhenLastShellExits: true,
 			DownloadDir:            defaultDownloadDir(),
 			Themes:                 themes,

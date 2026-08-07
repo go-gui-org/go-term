@@ -109,7 +109,7 @@ distinction, and the `Ctrl+I` vs `Tab` / `Ctrl+M` vs `Enter` collisions that
 `modifyOtherKeys` level 2 exists to resolve. Supporting both would mean two
 encoders for the same keystrokes and a precedence rule between them.
 
-**What this costs.** An application that probes *only* `modifyOtherKeys` and
+**What this costs.** An application that probes _only_ `modifyOtherKeys` and
 never tries KKP falls back to legacy encoding, so chords that legacy encoding
 cannot express — `Ctrl+Shift+<letter>`, most `Ctrl+<digit>` and
 `Ctrl+<punctuation>` combinations — arrive as their unmodified or

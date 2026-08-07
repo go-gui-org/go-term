@@ -66,15 +66,15 @@ Mono appears as `JetBrainsMono NFM`.
 
 ## `[general]`
 
-| Key                  | Type    | Default                | Meaning                                                                         |
-| -------------------- | ------- | ---------------------- | ------------------------------------------------------------------------------- |
-| `theme`              | string  | embedder's first theme | Color theme, by display name (case-insensitive)                                 |
-| `scrollback`         | integer | `5000`                 | Scrollback rows. `0` restores the default; a negative value disables scrollback |
-| `bell`               | enum    | `auto`                 | `auto`, `audible`, `visual`, `both`, `none`                                     |
-| `scrollbar`          | number  | `4`                    | Scrollbar thumb width in px. Negative hides the scrollbar                       |
-| `minimum-contrast`   | number  | `1` (off)              | WCAG contrast ratio, `1`–`21`, that text is forced to reach against its cell background |
-| `middle-click-paste` | boolean | on for Linux, else off | Paste with the middle mouse button — see [Selection and mouse](#selection-and-mouse) |
-| `notify-after`       | duration | `0` (off)             | Notify when a command that ran this long finishes while you are looking elsewhere — see [Shell integration](#shell-integration) |
+| Key                  | Type     | Default                | Meaning                                                                                                                         |
+| -------------------- | -------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `theme`              | string   | embedder's first theme | Color theme, by display name (case-insensitive)                                                                                 |
+| `scrollback`         | integer  | `5000`                 | Scrollback rows. `0` restores the default; a negative value disables scrollback                                                 |
+| `bell`               | enum     | `auto`                 | `auto`, `audible`, `visual`, `both`, `none`                                                                                     |
+| `scrollbar`          | number   | `4`                    | Scrollbar thumb width in px. Negative hides the scrollbar                                                                       |
+| `minimum-contrast`   | number   | `1` (off)              | WCAG contrast ratio, `1`–`21`, that text is forced to reach against its cell background                                         |
+| `middle-click-paste` | boolean  | on for Linux, else off | Paste with the middle mouse button — see [Selection and mouse](#selection-and-mouse)                                            |
+| `notify-after`       | duration | `0` (off)              | Notify when a command that ran this long finishes while you are looking elsewhere — see [Shell integration](#shell-integration) |
 
 ```ini
 [general]
@@ -123,12 +123,12 @@ white or black — whichever direction has room against that cell's background �
 until it clears. The color is blended rather than replaced, so a red that fails
 by a little stays recognizably red. Useful values:
 
-| Value | Effect                                                              |
-| ----- | ------------------------------------------------------------------- |
-| `1`   | Off (the default). A color against itself is 1:1                     |
-| `3`   | Fixes the worst dark-tuned colors, leaves most palettes alone        |
-| `4.5` | The WCAG floor for body text                                         |
-| `7`   | WCAG AAA. Expect most colors to be visibly adjusted                  |
+| Value | Effect                                                        |
+| ----- | ------------------------------------------------------------- |
+| `1`   | Off (the default). A color against itself is 1:1              |
+| `3`   | Fixes the worst dark-tuned colors, leaves most palettes alone |
+| `4.5` | The WCAG floor for body text                                  |
+| `7`   | WCAG AAA. Expect most colors to be visibly adjusted           |
 
 The clamp is render-only: the grid keeps the color the app sent, so copy,
 search and session recordings are unaffected. It costs about 11 ns per cell
@@ -148,8 +148,8 @@ host terminal's identity scrubbed and the pane's own `TERM`, `COLORTERM` and
 `COLORFGBG` set; entries here are applied last, so they win over all of it —
 including `TERM_PROGRAM`.
 
-| Key        | Type   | Default  | Meaning                                              |
-| ---------- | ------ | -------- | ---------------------------------------------------- |
+| Key        | Type   | Default   | Meaning                                                                |
+| ---------- | ------ | --------- | ---------------------------------------------------------------------- |
 | any `NAME` | string | inherited | `NAME=value` added to every child's environment; an empty value unsets |
 
 ```ini
@@ -175,13 +175,13 @@ out by looking at the text — the shell has to say so, by printing OSC 133
 marks around each command. Until you install the hooks below, these do
 nothing:
 
-| Feature                              | Shortcut                              |
-| ------------------------------------ | ------------------------------------- |
-| Jump to the previous / next prompt   | <kbd>Cmd</kbd>+<kbd>Up</kbd> / <kbd>Down</kbd> |
-| Jump to the last failed command      | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> |
-| Select a command's whole output      | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> |
-| Failure ticks in the scrollbar       | —                                     |
-| `notify-after` (below)               | —                                     |
+| Feature                            | Shortcut                                       |
+| ---------------------------------- | ---------------------------------------------- |
+| Jump to the previous / next prompt | <kbd>Cmd</kbd>+<kbd>Up</kbd> / <kbd>Down</kbd> |
+| Jump to the last failed command    | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>   |
+| Select a command's whole output    | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>   |
+| Failure ticks in the scrollbar     | —                                              |
+| `notify-after` (below)             | —                                              |
 
 Open a new pane in the current directory also depends on the OSC 7 report the
 same hooks emit.
@@ -244,11 +244,11 @@ unit mix-up.
 
 A tab you are not looking at shows a marker to the left of its title:
 
-| Marker | Meaning                                                       |
-| ------ | ------------------------------------------------------------- |
-| `●`    | The pane produced output                                      |
-| `○`    | It produced output, then went quiet for 10 seconds            |
-| `!`    | The pane rang the bell                                        |
+| Marker | Meaning                                            |
+| ------ | -------------------------------------------------- |
+| `●`    | The pane produced output                           |
+| `○`    | It produced output, then went quiet for 10 seconds |
+| `!`    | The pane rang the bell                             |
 
 Switching to the tab clears whichever marker it was showing. These need no
 shell integration — they follow raw output, not marks.
@@ -258,15 +258,15 @@ shell integration — they follow raw output, not marks.
 Mouse gestures are fixed, not rebindable — they are pointer behavior rather
 than commands, and every terminal spells them the same way.
 
-| Gesture              | Effect                                                                    |
-| -------------------- | ------------------------------------------------------------------------- |
-| Drag                 | Select by character                                                       |
-| Double click         | Select the word under the pointer; drag to extend word by word            |
-| Triple click         | Select the whole logical line; drag to extend line by line                |
-| <kbd>Alt</kbd>+drag  | Rectangular (block) selection — one column band across every row it spans |
-| <kbd>Shift</kbd>+click | Extend the existing selection to the click point                        |
-| Middle click         | Paste (see `middle-click-paste` above)                                    |
-| <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+click | Open the URL under the pointer                            |
+| Gesture                              | Effect                                                                    |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| Drag                                 | Select by character                                                       |
+| Double click                         | Select the word under the pointer; drag to extend word by word            |
+| Triple click                         | Select the whole logical line; drag to extend line by line                |
+| <kbd>Alt</kbd>+drag                  | Rectangular (block) selection — one column band across every row it spans |
+| <kbd>Shift</kbd>+click               | Extend the existing selection to the click point                          |
+| Middle click                         | Paste (see `middle-click-paste` above)                                    |
+| <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+click | Open the URL under the pointer                                            |
 
 Releasing a selection copies it, so there is no separate copy step for the
 mouse. On X11 the selection is also published as PRIMARY, the buffer
@@ -315,7 +315,7 @@ Pagers such as `less` and `man` take the alternate screen but never enable
 mouse reporting, so there is nothing to scroll and nothing to report. The
 wheel there sends <kbd>↑</kbd>/<kbd>↓</kbd> instead, one key per row of
 scroll distance, matching kitty, iTerm2, and Ghostty. Full-screen applications
-that *do* enable mouse reporting (vim with `mouse=a`, tmux) receive real wheel
+that _do_ enable mouse reporting (vim with `mouse=a`, tmux) receive real wheel
 events unchanged.
 
 ## `[keybindings]`
@@ -377,34 +377,34 @@ Both forms are listed: macOS/Linux first, then the Windows chord the
 remapping above produces. Windows has no `Cmd`, and `Super+…` is never
 registered there — press the second form.
 
-| Command                                        | Default (macOS / Linux) / Windows                             |
-| ---------------------------------------------- | ------------------------------------------------------------- |
-| `workspace.splitVertical`                      | `Cmd+D` / `Ctrl+Shift+D`                                      |
-| `workspace.splitHorizontal`                    | `Cmd+Shift+D` / `Ctrl+Alt+D`                                  |
-| `workspace.closePane`                          | `Cmd+Shift+W` / `Ctrl+Alt+W`                                  |
-| `workspace.nextPane`                           | `Cmd+]` / `Ctrl+Shift+]`                                      |
-| `workspace.prevPane`                           | `Cmd+[` / `Ctrl+Shift+[`                                      |
-| `workspace.resizeLeft`                         | `Cmd+Ctrl+Left` / `Ctrl+Alt+Shift+Left`                       |
-| `workspace.resizeRight`                        | `Cmd+Ctrl+Right` / `Ctrl+Alt+Shift+Right`                     |
-| `workspace.resizeUp`                           | `Cmd+Ctrl+Up` / `Ctrl+Alt+Shift+Up`                           |
-| `workspace.resizeDown`                         | `Cmd+Ctrl+Down` / `Ctrl+Alt+Shift+Down`                       |
-| `workspace.newTab`                             | `Cmd+T` / `Ctrl+Shift+T`                                      |
-| `workspace.closeTab`                           | `Cmd+Ctrl+W` / `Ctrl+Alt+Shift+W`                             |
-| `workspace.moveTabLeft`                        | `Cmd+Alt+[` / `Alt+Shift+[`                                   |
-| `workspace.moveTabRight`                       | `Cmd+Alt+]` / `Alt+Shift+]`                                   |
-| `workspace.nextTab`                            | `Cmd+Shift+]` / `Ctrl+Alt+]`                                  |
-| `workspace.prevTab`                            | `Cmd+Shift+[` / `Ctrl+Alt+[`                                  |
-| `workspace.tab1` … `workspace.tab9`            | `Cmd+1` … `Cmd+9` / `Ctrl+Shift+1` … `Ctrl+Shift+9`           |
-| `workspace.toggleRecording`                    | `Cmd+Shift+R` / `Ctrl+Alt+R`                                  |
-| `workspace.toggleBroadcast`                    | `Cmd+Shift+I` / `Ctrl+Alt+I`                                  |
-| `workspace.chooseTheme`                        | `Cmd+Shift+T` / `Ctrl+Alt+T`                                  |
-| `workspace.reloadConfig`                       | `Cmd+Shift+,` / `Ctrl+Alt+,`                                  |
-| `workspace.toggleHelp`                         | `Cmd+/` / `Ctrl+Shift+/`                                      |
-| `workspace.commandPalette`                     | `Cmd+Shift+P` / `Ctrl+Alt+P`                                  |
-| `workspace.dismissOverlay`                     | `Escape` (only while an overlay is open)                      |
-| `workspace.overlayUp` / `overlayDown`          | `Up` / `Down` (only while a list overlay is open)             |
-| `workspace.overlayPageUp` / `overlayPageDown`  | `PageUp` / `PageDown` (only while a list overlay is open)     |
-| `workspace.overlayConfirm`                     | `Enter` (only while a list overlay is open)                   |
+| Command                                       | Default (macOS / Linux) / Windows                         |
+| --------------------------------------------- | --------------------------------------------------------- |
+| `workspace.splitVertical`                     | `Cmd+D` / `Ctrl+Shift+D`                                  |
+| `workspace.splitHorizontal`                   | `Cmd+Shift+D` / `Ctrl+Alt+D`                              |
+| `workspace.closePane`                         | `Cmd+Shift+W` / `Ctrl+Alt+W`                              |
+| `workspace.nextPane`                          | `Cmd+]` / `Ctrl+Shift+]`                                  |
+| `workspace.prevPane`                          | `Cmd+[` / `Ctrl+Shift+[`                                  |
+| `workspace.resizeLeft`                        | `Cmd+Ctrl+Left` / `Ctrl+Alt+Shift+Left`                   |
+| `workspace.resizeRight`                       | `Cmd+Ctrl+Right` / `Ctrl+Alt+Shift+Right`                 |
+| `workspace.resizeUp`                          | `Cmd+Ctrl+Up` / `Ctrl+Alt+Shift+Up`                       |
+| `workspace.resizeDown`                        | `Cmd+Ctrl+Down` / `Ctrl+Alt+Shift+Down`                   |
+| `workspace.newTab`                            | `Cmd+T` / `Ctrl+Shift+T`                                  |
+| `workspace.closeTab`                          | `Cmd+Ctrl+W` / `Ctrl+Alt+Shift+W`                         |
+| `workspace.moveTabLeft`                       | `Cmd+Alt+[` / `Alt+Shift+[`                               |
+| `workspace.moveTabRight`                      | `Cmd+Alt+]` / `Alt+Shift+]`                               |
+| `workspace.nextTab`                           | `Cmd+Shift+]` / `Ctrl+Alt+]`                              |
+| `workspace.prevTab`                           | `Cmd+Shift+[` / `Ctrl+Alt+[`                              |
+| `workspace.tab1` … `workspace.tab9`           | `Cmd+1` … `Cmd+9` / `Ctrl+Shift+1` … `Ctrl+Shift+9`       |
+| `workspace.toggleRecording`                   | `Cmd+Shift+R` / `Ctrl+Alt+R`                              |
+| `workspace.toggleBroadcast`                   | `Cmd+Shift+I` / `Ctrl+Alt+I`                              |
+| `workspace.chooseTheme`                       | `Cmd+Shift+T` / `Ctrl+Alt+T`                              |
+| `workspace.reloadConfig`                      | `Cmd+Shift+,` / `Ctrl+Alt+,`                              |
+| `workspace.toggleHelp`                        | `Cmd+/` / `Ctrl+Shift+/`                                  |
+| `workspace.commandPalette`                    | `Cmd+Shift+P` / `Ctrl+Alt+P`                              |
+| `workspace.dismissOverlay`                    | `Escape` (only while an overlay is open)                  |
+| `workspace.overlayUp` / `overlayDown`         | `Up` / `Down` (only while a list overlay is open)         |
+| `workspace.overlayPageUp` / `overlayPageDown` | `PageUp` / `PageDown` (only while a list overlay is open) |
+| `workspace.overlayConfirm`                    | `Enter` (only while a list overlay is open)               |
 
 The `overlay*` commands are shared by every list overlay — the theme browser
 and the command palette — and route to whichever one is open. They are one
@@ -505,7 +505,7 @@ clipboard instead. Both remove the need to reach for `Cmd+click`.
   never a mix: a uniform width is what lets a keypress be unambiguous without
   a disambiguation timeout.
 - `Escape` leaves, `Backspace` un-types, and pressing the same entry chord
-  again toggles back out. Pressing the *other* one switches what the label
+  again toggles back out. Pressing the _other_ one switches what the label
   does — open becomes copy and back — keeping the labels you are already
   reading. A key matching no label also leaves — every key is swallowed while
   hints are up either way, so nothing reaches the shell.
