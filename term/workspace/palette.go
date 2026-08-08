@@ -368,10 +368,12 @@ func (ws *Workspace) paletteBackdrop(ww, wh int) gui.View {
 		if ctx.Event.MouseX < edgePx || ctx.Event.MouseX > float32(ww)-edgePx ||
 			ctx.Event.MouseY < edgePx || ctx.Event.MouseY > float32(wh)-edgePx {
 			// A resize drag, not a dismiss: let it through.
-			ctx.Bubble()
 			return
 		}
 		ws.closePalette()
+		// The dismiss is the whole click; nothing behind the backdrop
+		// should also see it.
+		ctx.Consume()
 	}
 	return gui.Column(b)
 }
