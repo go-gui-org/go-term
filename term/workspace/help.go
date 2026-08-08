@@ -73,11 +73,12 @@ func (ws *Workspace) helpBackdrop(ww, wh int) gui.View {
 		if ctx.Event.MouseX < edgePx || ctx.Event.MouseX > float32(ww)-edgePx ||
 			ctx.Event.MouseY < edgePx || ctx.Event.MouseY > float32(wh)-edgePx {
 			// A resize drag, not a dismiss: let it through.
-			ctx.Bubble()
 			return
 		}
 		ws.helpVisible = false
 		ws.refresh()
+		// As in palette.go: dismissing is the click.
+		ctx.Consume()
 	}
 	return gui.Column(b)
 }
