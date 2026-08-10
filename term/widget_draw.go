@@ -23,6 +23,56 @@ func realNumber[T ~float32 | ~float64](f T) bool {
 // garbage row/col counts in OnDraw.
 func finite(f float32) bool { return realNumber(f) && f > 0 }
 
+// snapPx rounds a logical coordinate to the physical pixel grid.
+//
+// Cell metrics are fractional (cellW comes from TextWidth("M"), cellH from
+// FontHeight), so a cell origin computed as col*cellW lands on a different
+// sub-pixel phase in every column, and row*cellH likewise in every row.
+// go-glyph rasterizes each glyph into one of four horizontal sub-pixel bins
+// and rounds vertically to a whole pixel — but it does that on the *layout*
+// origin only, and the widget-supplied x/y is added afterwards
+// (draw_atlas.go emitGlyphQuad / the fill path). A fractional x therefore
+// puts a 1px stem fully inside one pixel column in some cells and splits it
+// across two in others, which is what makes long box-drawing runs look
+// banded: bright where the stroke is whole, dim where it is halved.
+//
+// Snapping the origin here restores go-glyph's own alignment and costs one
+// round per emitted run. Advances inside a coalesced run are still
+// fractional, but a run is a single layout that go-glyph already snaps.
+func (t *Term) snapPx(v float32) float32 {
+	s := t.draw.pxScale
+	if s <= 0 {
+		return v
+	}
+	// finite() admits an absurdly large cell metric (it only rejects NaN, Inf
+	// and non-positive), and v*s can then overflow float32 to Inf. That would
+	// be survivable on its own, but spanW/rowH subtract two snapped
+	// coordinates, and Inf-Inf is NaN — which reaches dc.FilledRect as a
+	// dimension. Fall back to the unsnapped value instead.
+	snapped := float32(math.Round(float64(v)*float64(s))) / s
+	if !realNumber(snapped) {
+		return v
+	}
+	return snapped
+}
+
+// colX returns the pixel-snapped x origin of column c.
+func (t *Term) colX(c int) float32 { return t.snapPx(float32(c) * t.cellW) }
+
+// rowY returns the pixel-snapped y origin of viewport row r, including the
+// smooth-scroll sub-cell offset. Snapping still leaves smooth scrolling
+// smooth — it just quantizes it to whole device pixels, which is the finest
+// step the display can show anyway.
+func (t *Term) rowY(r int, yOff float32) float32 {
+	return t.snapPx(float32(r)*t.cellH + yOff)
+}
+
+// spanW returns the snapped width of columns [c0, c1) — the difference of two
+// snapped origins, so adjacent spans tile exactly with no seam or overlap.
+// Row heights follow the same rule but have no helper: every caller has the
+// row's own snapped origin in hand already and subtracts from rowY(r+1).
+func (t *Term) spanW(c0, c1 int) float32 { return t.colX(c1) - t.colX(c0) }
+
 // searchOverlap returns the number of grid rows whose text footprint
 // overlaps the search bar's pixel region. Row r's text footprint spans
 // [r*cellH+renderYOff, (r+1)*cellH+renderYOff). The search bar occupies
@@ -149,6 +199,11 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	}
 	if !finite(dc.Width) || !finite(dc.Height) {
 		return
+	}
+	// Captured before any pass: every cell origin is snapped against it.
+	t.draw.pxScale = 1
+	if s := dc.Scale; s > 0 && realNumber(s) {
+		t.draw.pxScale = s
 	}
 	cols := clampDim(int(dc.Width / t.cellW))
 	rows := clampDim(int(dc.Height / t.cellH))
@@ -290,12 +345,9 @@ func (t *Term) prepareResize(ds *drawState) {
 	}
 	// Publish cell size in device pixels so image footprint math matches the
 	// device-pixel dimensions stored in image files.
-	scale := ds.dc.Scale
-	if scale == 0 || !realNumber(scale) {
-		scale = 1
-	}
-	t.grid.CellPxW = t.cellW * scale
-	t.grid.CellPxH = t.cellH * scale
+	// pxScale is sanitized once, in onDraw, which is this phase's only caller.
+	t.grid.CellPxW = t.cellW * t.draw.pxScale
+	t.grid.CellPxH = t.cellH * t.draw.pxScale
 	// Hint labels address fixed grid positions captured on entry, so any
 	// content change — pty output, a scroll, a resize — leaves them pointing at
 	// rows that moved. Dropping the mode is the honest response: silently

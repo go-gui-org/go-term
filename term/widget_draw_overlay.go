@@ -212,24 +212,28 @@ func (t *Term) drawIME(ds *drawState) {
 		g.ViewOffset != 0 || ds.renderYOff != 0 {
 		return
 	}
-	startX := float32(g.CursorC) * t.cellW
-	rowY := float32(g.CursorR)*t.cellH + ds.renderYOff
+	startX := t.colX(g.CursorC)
+	rowY := t.rowY(g.CursorR, ds.renderYOff)
+	stripW := t.colX(g.CursorC+totalCols) - startX
+	stripH := t.rowY(g.CursorR+1, ds.renderYOff) - rowY
 
 	// DECSCNM-aware: the composition strip sits on top of terminal cells, so
 	// it has to follow the same reversal they do.
 	bgCol := g.defaultBG()
-	ds.dc.FilledRect(startX, rowY, float32(totalCols)*t.cellW, t.cellH, bgCol)
+	ds.dc.FilledRect(startX, rowY, stripW, stripH, bgCol)
 
 	cs := ds.style
 	cs.Color = g.defaultFG()
 	cs.Underline = false
 
-	currX := startX
+	// Column-accurate rather than accumulating a fractional advance: each
+	// composition glyph starts on a snapped cell origin, like the text pass.
+	col := g.CursorC
 	for i, r := range ds.imeRunes {
-		ds.dc.Text(currX, rowY, t.termRuneStr(r), cs)
-		currX += float32(ds.imeWidths[i]) * t.cellW
+		ds.dc.Text(t.colX(col), rowY, t.termRuneStr(r), cs)
+		col += ds.imeWidths[i]
 	}
-	t.drawUnderlineDecor(ds.dc, startX, rowY, float32(totalCols)*t.cellW, ulSingle, cs.Color)
+	t.drawUnderlineDecor(ds.dc, startX, rowY, stripW, ulSingle, cs.Color)
 }
 
 // drawCursor renders the text cursor at the current grid position, honoring
@@ -470,8 +474,12 @@ func (t *Term) cursorBlinkOff(now time.Time) bool {
 // regular foreground glyph already drawn in the foreground pass.
 func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 	shape cursorShape, style gui.TextStyle) {
-	x := float32(col) * t.cellW
-	y := float32(row) * t.cellH
+	// Pixel-snapped like the text passes, so the cursor box lines up with the
+	// cell it inverts instead of straddling a pixel boundary.
+	x := t.colX(col)
+	y := t.rowY(row, 0)
+	cw := t.colX(col+1) - x
+	ch := t.rowY(row+1, 0) - y
 
 	// Dim the cursor to 40% when the terminal doesn't have pane focus.
 	opacity := float32(1.0)
@@ -483,28 +491,28 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 	case cursorUnderline:
 		// Bottom-aligned bar 1/8th of the cell height (min 2px) so it
 		// stays visible at smaller font sizes.
-		h := t.cellH / 8
+		h := t.snapPx(ch / 8)
 		if h < 2 {
 			h = 2
 		}
-		dc.FilledRect(x, y+t.cellH-h, t.cellW, h,
+		dc.FilledRect(x, y+ch-h, cw, h,
 			t.grid.fgOf(cell).WithOpacity(opacity))
 	case cursorBar:
-		w := t.cellW / 6
+		w := t.snapPx(cw / 6)
 		if w < 2 {
 			w = 2
 		}
-		dc.FilledRect(x, y, w, t.cellH,
+		dc.FilledRect(x, y, w, ch,
 			t.grid.fgOf(cell).WithOpacity(opacity))
 	default: // cursorBlock
 		fillColor := t.grid.fgOf(cell)
 		if t.grid.CursorColor != DefaultColor {
 			fillColor = rgbToGUIColor(t.grid.CursorColor)
 		}
-		dc.FilledRect(x, y, t.cellW, t.cellH, fillColor.WithOpacity(opacity))
+		dc.FilledRect(x, y, cw, ch, fillColor.WithOpacity(opacity))
 		cs := style
 		cs.Color = t.grid.bgOf(cell)
-		cs.EmojiBoxWidth = float32(cell.Width) * t.cellW
+		cs.EmojiBoxWidth = t.spanW(col, col+int(cell.Width))
 		dc.Text(x, y, t.cellText(cell), cs)
 	}
 }
@@ -700,17 +708,18 @@ func (t *Term) drawCopyCursor(ds *drawState) {
 		return
 	}
 	cc := clamp(t.copy.cursor.Col, 0, max(ds.cols-1, 0))
-	x := float32(cc) * t.cellW
-	y := float32(vr)*t.cellH + ds.renderYOff
+	x := t.colX(cc)
+	y := t.rowY(vr, ds.renderYOff)
 
 	// Steady, never blinking: it marks a position the user is aiming with, and
 	// a blinking target is harder to track than a still one.
-	ds.dc.FilledRect(x, y, t.cellW, t.cellH, g.ov.copyCurFill)
+	ds.dc.FilledRect(x, y, t.colX(cc+1)-x, t.rowY(vr+1, ds.renderYOff)-y,
+		g.ov.copyCurFill)
 
 	cell := maskGlyph(g.ViewCellAt(vr, cc), ds.blinkOff)
 	cs := ds.style
 	cs.Color = g.Theme.DefaultBG
-	cs.EmojiBoxWidth = float32(cell.Width) * t.cellW
+	cs.EmojiBoxWidth = t.spanW(cc, cc+int(cell.Width))
 	ds.dc.Text(x, y, t.cellText(cell), cs)
 }
 

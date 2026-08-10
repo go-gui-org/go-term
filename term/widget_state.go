@@ -246,6 +246,10 @@ type mouseState struct {
 // drawBufs holds per-frame scratch buffers reused across onDraw calls.
 // All fields are main-thread only.
 type drawBufs struct {
+	// pxScale is the device-pixel ratio captured at the top of the current
+	// onDraw (dc.Scale, sanitized). Cell origins are snapped to that grid —
+	// see Term.snapPx — so it must be set before any pass runs.
+	pxScale     float32
 	runBuf      strings.Builder
 	runeCache   map[rune]string // caches string(r) for non-ASCII runes
 	vMatchBuf   [][]vMatch      // pre-allocated search-highlight rows
