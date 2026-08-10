@@ -351,21 +351,21 @@ func TestOnDraw_CursorUnderline(t *testing.T) {
 	tm.onDraw(dc)
 	batches := dc.Batches()
 	// Underline cursor: FilledRect at bottom of cell.
-	// cellH=20 → h = 20/8 = 2.5 → min 2 = 2.5, so h=2.5.
-	// y = 0 + 20 - 2.5 = 17.5.
+	// cellH=20 → h = round(20/8) = 3 (thickness is pixel-snapped so both
+	// edges land on the pixel grid). y = 0 + 20 - 3 = 17.
 	found := false
 	for _, b := range batches {
 		if len(b.Triangles) < 6 {
 			continue
 		}
 		y0 := b.Triangles[1]
-		if y0 > 17 && y0 < 18 {
+		if y0 >= 17 && y0 < 18 {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("no underline cursor batch at y≈17.5 found")
+		t.Error("no underline cursor batch at y≈17 found")
 	}
 }
 
@@ -711,7 +711,7 @@ func TestEmitCell_Plain(t *testing.T) {
 	tm, dc := newDrawTerm(4, 8, 10, 20)
 	cell := cell{Ch: 'Z', Width: 1}
 	k := runKey{color: gui.RGB(255, 255, 255)}
-	tm.emitCell(dc, 0, 0, cell, k, gui.TextStyle{})
+	tm.emitCell(dc, 0, 0, 10, cell, k, gui.TextStyle{})
 	texts := dc.Texts()
 	if len(texts) != 1 {
 		t.Fatalf("expected 1 text entry, got %d", len(texts))
@@ -729,7 +729,7 @@ func TestEmitCell_WithUnderline(t *testing.T) {
 		ulStyle: ulSingle,
 		ulColor: gui.RGB(255, 255, 255),
 	}
-	tm.emitCell(dc, 0, 0, cell, k, gui.TextStyle{})
+	tm.emitCell(dc, 0, 0, 10, cell, k, gui.TextStyle{})
 	if len(dc.Texts()) != 1 {
 		t.Error("expected 1 text entry for underline cell")
 	}
@@ -1068,4 +1068,200 @@ func TestFillRun_BleedsIntoEdgeRemainder(t *testing.T) {
 			t.Errorf("default-bg run drew %d batches, want 0", len(dc.Batches()))
 		}
 	})
+}
+
+// Cell origins must land on the physical pixel grid, and adjacent spans must
+// tile exactly — that is what keeps a column of box-drawing glyphs from
+// alternating between crisp and half-lit down the screen (see Term.snapPx).
+func TestSnapPx_CellOriginsAlignToPixelGrid(t *testing.T) {
+	// Deliberately fractional metrics, the normal case for a real font.
+	tm, _ := newDrawTerm(4, 8, 8.43, 19.2)
+
+	for _, scale := range []float32{1, 2} {
+		tm.draw.pxScale = scale
+		for c := range 8 {
+			x := tm.colX(c)
+			if got := x * scale; got != float32(math.Round(float64(got))) {
+				t.Errorf("scale %v col %d: x=%v not on pixel grid", scale, c, x)
+			}
+			// Spans tile: this cell's right edge is the next cell's origin.
+			if got, want := x+tm.spanW(c, c+1), tm.colX(c+1); got != want {
+				t.Errorf("scale %v col %d: right edge %v != next origin %v",
+					scale, c, got, want)
+			}
+		}
+		for r := range 4 {
+			y := tm.rowY(r, 0)
+			if got := y * scale; got != float32(math.Round(float64(got))) {
+				t.Errorf("scale %v row %d: y=%v not on pixel grid", scale, r, y)
+			}
+			// Rows tile by construction — the height is a difference of two
+			// snapped origins — so the check is that neither origin drifts.
+			if next := tm.rowY(r+1, 0); next <= y {
+				t.Errorf("scale %v row %d: next origin %v not below %v",
+					scale, r, next, y)
+			}
+		}
+	}
+
+	// Snapped origins stay within half a pixel of the unsnapped ideal, so no
+	// accumulated drift: column 7 must not slide into column 8's cell.
+	tm.draw.pxScale = 2
+	for c := range 8 {
+		ideal := float32(c) * tm.cellW
+		if d := math.Abs(float64(tm.colX(c) - ideal)); d > 0.5 {
+			t.Errorf("col %d drifted %v from ideal %v", c, d, ideal)
+		}
+	}
+
+	// Unset scale (tests driving phases directly) must be a no-op.
+	tm.draw.pxScale = 0
+	if got, want := tm.colX(3), 3*tm.cellW; got != want {
+		t.Errorf("pxScale 0: colX(3)=%v, want unsnapped %v", got, want)
+	}
+}
+
+// The smooth-scroll sub-cell offset rides through the snap: rows shift with it
+// instead of freezing, they just quantize to whole device pixels.
+func TestSnapPx_SmoothScrollOffsetMoves(t *testing.T) {
+	tm, _ := newDrawTerm(4, 8, 8.43, 19.2)
+	tm.draw.pxScale = 2
+
+	base := tm.rowY(1, 0)
+	if shifted := tm.rowY(1, 5); shifted <= base {
+		t.Errorf("yOff 5 did not move row 1: %v -> %v", base, shifted)
+	}
+	// Every intermediate offset still lands on a whole *device* pixel, which
+	// at scale 2 is half a logical pixel — the finest step the display has.
+	for _, off := range []float32{0.1, 0.37, 1.9, 7.25} {
+		y := tm.rowY(1, off) * tm.draw.pxScale
+		if y != float32(math.Round(float64(y))) {
+			t.Errorf("yOff %v: row 1 at %v not on the device pixel grid", off, y)
+		}
+	}
+}
+
+// The bleed decision has to be made on unsnapped geometry. Snapping moves the
+// run's right edge up to half a pixel either way, and on a canvas whose
+// remainder is just under one cell that is enough to make the remainder read
+// as *over* a cell — so the bleed is skipped and the rim it exists to prevent
+// comes back.
+func TestBleedSnapped_SnappedEdgeStillReachesCanvasEdge(t *testing.T) {
+	t.Parallel()
+
+	const cell float32 = 8.43
+	const cols = 10
+	ideal := float32(cols) * cell // 84.3 — the true right edge
+	const snapped float32 = 84    // what snapping rounds it to
+	const extent float32 = 92.7   // canvas: an 8.4px remainder, just under a cell
+
+	// Sanity: deciding on the snapped edge reads the remainder as 8.7 — over a
+	// full cell — and declines to bleed. That is the regression.
+	if got := bleedToEdge(0, snapped, extent, cell); got != snapped {
+		t.Fatalf("premise broken: naive bleed returned %v, want %v", got, snapped)
+	}
+
+	if got := bleedSnapped(0, snapped, 0, ideal, extent, cell); got != extent {
+		t.Errorf("bleedSnapped = %v, want %v (the canvas edge)", got, extent)
+	}
+}
+
+func TestBleedSnapped_InteriorRunKeepsSnappedWidth(t *testing.T) {
+	t.Parallel()
+
+	const cell float32 = 8.43
+	// Columns 2..4 of a 10-column canvas: nowhere near the edge.
+	if got, want := bleedSnapped(17, 17, 2*cell, 2*cell, 92.7, cell), float32(17); got != want {
+		t.Errorf("interior run = %v, want %v (unchanged)", got, want)
+	}
+}
+
+// A degenerate sub-pixel cell metric can put the snapped origin past the edge
+// the unsnapped one sat inside. Bleeding to the edge from there is negative;
+// no bleed is the safer answer.
+func TestBleedSnapped_NeverReturnsNegativeSize(t *testing.T) {
+	t.Parallel()
+
+	if got := bleedSnapped(100, 5, 99.6, 0.2, 100, 0.3); got < 0 {
+		t.Errorf("bleedSnapped = %v, want a non-negative size", got)
+	}
+}
+
+// finite() admits an absurd cell metric, and v*scale can then overflow float32
+// to Inf. spanW subtracts two snapped coordinates, so an Inf would become a
+// NaN width handed straight to FilledRect.
+func TestSnapPx_OverflowFallsBackToUnsnapped(t *testing.T) {
+	t.Parallel()
+
+	tm, _ := newDrawTerm(4, 8, 3e38, 20)
+	tm.draw.pxScale = 2
+
+	if got := tm.snapPx(3e38); got != 3e38 {
+		t.Errorf("snapPx(3e38) = %v, want the unsnapped input back", got)
+	}
+	if w := tm.spanW(0, 1); !realNumber(w) {
+		t.Errorf("spanW with an overflowing cell metric = %v, want a real number", w)
+	}
+	if h := tm.rowY(1, 0) - tm.rowY(0, 0); !realNumber(h) {
+		t.Errorf("row height with an overflowing cell metric = %v, want a real number", h)
+	}
+}
+
+// Background runs must tile exactly under fractional metrics: run k's right
+// edge is run k+1's left edge. Rounding each run's width independently would
+// leave a half-lit seam between two background colors.
+func TestFillRun_FractionalMetricsTileWithoutSeam(t *testing.T) {
+	t.Parallel()
+
+	const cellW, cellH = 8.43, 19.2
+	tm, _ := newDrawTerm(4, 8, cellW, cellH)
+	tm.draw.pxScale = 2
+	fill := gui.RGB(16, 20, 29)
+
+	var prevX1 float32
+	for c := range 6 {
+		dc := gui.NewDrawContext(1000, 1000,
+			testTextMeasurer{cellW: cellW, cellH: cellH})
+		tm.fillRun(dc, 0, c, c+1, fill, 0, false)
+		x0, _, x1, _, ok := batchBounds(dc, fill)
+		if !ok {
+			t.Fatalf("col %d: no fill drawn", c)
+		}
+		if c > 0 && x0 != prevX1 {
+			t.Errorf("col %d starts at %v, but col %d ended at %v (seam)",
+				c, x0, c-1, prevX1)
+		}
+		if x0*2 != float32(math.Round(float64(x0*2))) {
+			t.Errorf("col %d starts at %v, off the device pixel grid", c, x0)
+		}
+		prevX1 = x1
+	}
+}
+
+// Each composition glyph starts on its own snapped cell origin. Accumulating a
+// fractional advance instead would drift the tail of a long composition off
+// the cells its background strip covers.
+func TestDrawIME_GlyphsSitOnSnappedCellOrigins(t *testing.T) {
+	t.Parallel()
+
+	const cellW, cellH = 8.43, 19.2
+	tm, dc := newDrawTerm(4, 8, cellW, cellH)
+	tm.draw.pxScale = 2
+	tm.ime.composing = true
+	tm.ime.compText = "abcd"
+	tm.grid.CursorR, tm.grid.CursorC = 0, 1
+
+	ds := drawState{dc: dc, g: tm.grid, cols: 8, rows: 4, renderRows: 4}
+	tm.drawIME(&ds)
+
+	texts := dc.Texts()
+	if len(texts) != 4 {
+		t.Fatalf("drew %d composition glyphs, want 4", len(texts))
+	}
+	for i, te := range texts {
+		if want := tm.colX(1 + i); te.X != want {
+			t.Errorf("glyph %d at x=%v, want the snapped origin of col %d (%v)",
+				i, te.X, 1+i, want)
+		}
+	}
 }

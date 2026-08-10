@@ -254,7 +254,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 
 	// Partial top row: per-cell emit, no run coalescing.
 	if ds.partialRow != nil {
-		partialY := -t.cellH + yOff
+		partialY := t.rowY(-1, yOff)
 		for c := range cols {
 			cell := ds.partialRow[c]
 			if cell.Width == 0 && cell.Ch == 0 {
@@ -268,7 +268,8 @@ func (t *Term) drawFgPass(ds *drawState) {
 			// The partial top row sits above viewport row 0; hover coords never
 			// land there (posToCell clamps to 0..Rows-1), so no URL highlight.
 			k := cellRunKey(cell, style, g, hR, hC, cmdHeld, false)
-			t.emitCell(dc, float32(c)*t.cellW, partialY, cell, k, style)
+			t.emitCell(dc, t.colX(c), partialY,
+				t.spanW(c, c+int(cell.Width)), cell, k, style)
 		}
 	}
 
@@ -294,7 +295,8 @@ func (t *Term) drawFgPass(ds *drawState) {
 			isPlainSpace := cell.Ch == ' ' && cell.Attrs&attrVisual == 0 && cell.LinkID == 0
 			if cell.Width == 2 {
 				t.flushRun(dc, r, style, yOff, &fr)
-				t.emitCell(dc, float32(c)*t.cellW, float32(r)*t.cellH+yOff, cell, k, style)
+				t.emitCell(dc, t.colX(c), t.rowY(r, yOff),
+					t.spanW(c, c+int(cell.Width)), cell, k, style)
 				continue
 			}
 			// Non-ASCII glyphs may trigger font fallback with metrics
@@ -306,7 +308,8 @@ func (t *Term) drawFgPass(ds *drawState) {
 			// full cluster string is drawn even when the base rune is ASCII.
 			if cell.Ch > 0x7F || cell.clusterID != 0 {
 				t.flushRun(dc, r, style, yOff, &fr)
-				t.emitCell(dc, float32(c)*t.cellW, float32(r)*t.cellH+yOff, cell, k, style)
+				t.emitCell(dc, t.colX(c), t.rowY(r, yOff),
+					t.spanW(c, c+int(cell.Width)), cell, k, style)
 				continue
 			}
 			if isPlainSpace {
@@ -360,25 +363,30 @@ func (t *Term) flushRun(dc *gui.DrawContext, r int, style gui.TextStyle, yOff fl
 	cs.Typeface = fr.key.typeface
 	cs.Underline = false
 	cs.Strikethrough = fr.key.strikethrough
-	rowY := float32(r)*t.cellH + yOff
-	dc.Text(float32(fr.start)*t.cellW, rowY, text, cs)
-	if fr.key.ulStyle != ulNone {
-		t.drawUnderlineDecor(dc,
-			float32(fr.start)*t.cellW, rowY,
-			float32(fr.cols)*t.cellW,
-			fr.key.ulStyle, fr.key.ulColor)
-	}
-	if fr.key.overline {
-		t.drawOverlineDecor(dc,
-			float32(fr.start)*t.cellW, rowY,
-			float32(fr.cols)*t.cellW, fr.key.color)
+	rowY := t.rowY(r, yOff)
+	runX := t.colX(fr.start)
+	dc.Text(runX, rowY, text, cs)
+	// Run width is only needed by the decorations, which most runs don't have.
+	if fr.key.ulStyle != ulNone || fr.key.overline {
+		runW := t.colX(fr.start+fr.cols) - runX
+		if fr.key.ulStyle != ulNone {
+			t.drawUnderlineDecor(dc, runX, rowY, runW,
+				fr.key.ulStyle, fr.key.ulColor)
+		}
+		if fr.key.overline {
+			t.drawOverlineDecor(dc, runX, rowY, runW, fr.key.color)
+		}
 	}
 	fr.open = false
 	t.draw.runBuf.Reset()
 	fr.cols = 0
 }
 
-func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell cell, k runKey, base gui.TextStyle) {
+// emitCell draws one cell's glyph at the pixel-snapped origin (x, y). w is the
+// snapped width of the cell box (cell.Width columns), passed in rather than
+// recomputed here so it is the difference of two snapped column origins and
+// therefore tiles exactly with the neighbouring cells' boxes.
+func (t *Term) emitCell(dc *gui.DrawContext, x, y, w float32, cell cell, k runKey, base gui.TextStyle) {
 	cs := base
 	cs.Color = k.color
 	cs.Typeface = k.typeface
@@ -387,13 +395,13 @@ func (t *Term) emitCell(dc *gui.DrawContext, x, y float32, cell cell, k runKey, 
 	// Tell go-glyph the cell box this glyph occupies so color/emoji fill the
 	// full reserved width (e.g. a width-2 emoji fills 2 cells) instead of the
 	// font's narrower natural emoji advance. Ignored for non-color glyphs.
-	cs.EmojiBoxWidth = float32(cell.Width) * t.cellW
+	cs.EmojiBoxWidth = w
 	dc.Text(x, y, t.cellText(cell), cs)
 	if k.ulStyle != ulNone {
-		t.drawUnderlineDecor(dc, x, y, float32(cell.Width)*t.cellW, k.ulStyle, k.ulColor)
+		t.drawUnderlineDecor(dc, x, y, w, k.ulStyle, k.ulColor)
 	}
 	if k.overline {
-		t.drawOverlineDecor(dc, x, y, float32(cell.Width)*t.cellW, k.color)
+		t.drawOverlineDecor(dc, x, y, w, k.color)
 	}
 }
 
@@ -403,15 +411,22 @@ func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yO
 	if color == t.grid.defaultBG() {
 		return // canvas already painted with default bg.
 	}
-	x := float32(c0) * t.cellW
-	y := float32(row)*t.cellH + yOff
+	// Snapped like the text so a run's edges land on the same pixel columns
+	// as the glyphs drawn over it — an unsnapped fill leaves a half-lit seam
+	// between adjacent background colors.
+	x := t.colX(c0)
+	y := t.rowY(row, yOff)
+	// Sizes are differences against the origins already computed above, which
+	// is both cheaper than spanW/rowH here and the same value.
 	// Both axes bleed into the sub-cell remainder — see bleedToEdge. A run
 	// whose color *is* the default returned above, so the remainder correctly
 	// keeps the canvas fill in the case where the two agree.
-	w := bleedToEdge(x, float32(c1-c0)*t.cellW, dc.Width, t.cellW)
-	h := t.cellH
+	w := bleedSnapped(x, t.colX(c1)-x,
+		float32(c0)*t.cellW, float32(c1-c0)*t.cellW, dc.Width, t.cellW)
+	h := t.rowY(row+1, yOff) - y
 	if lastRow {
-		h = bleedToEdge(y, h, dc.Height, t.cellH)
+		h = bleedSnapped(y, h,
+			float32(row)*t.cellH+yOff, t.cellH, dc.Height, t.cellH)
 	}
 	dc.FilledRect(x, y, w, h, color)
 }
@@ -439,6 +454,30 @@ func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yO
 // ends within a cell of the bottom while a row still sits below it. fillRun
 // therefore gates the vertical call on the row index, and this function only
 // decides how far the bleed reaches.
+// bleedSnapped applies bleedToEdge to a pixel-snapped run: it decides on the
+// *unsnapped* geometry and measures the extension from the snapped origin.
+//
+// The decision cannot use the snapped edge. Snapping moves it up to half a
+// pixel either way, so on a canvas whose remainder is just under one cell —
+// roughly one window width in cell-width/0.5, which is common enough to see —
+// a snap in the shrinking direction pushes the remainder past a full cell and
+// the test stops firing. The result is the unpainted rim bleedToEdge exists to
+// prevent. Snapping in the growing direction is harmless by comparison: the
+// remainder goes slightly negative, the `rest > size` guard rejects it, and
+// the run keeps its own width.
+func bleedSnapped(snapStart, snapSize, idealStart, idealSize, extent, cell float32) float32 {
+	if bleedToEdge(idealStart, idealSize, extent, cell) == idealSize {
+		return snapSize
+	}
+	// Only reachable with a degenerate (sub-half-pixel) cell metric, where the
+	// snapped origin can land past the canvas edge the ideal one sat inside.
+	// A negative dimension is worse than no bleed.
+	if extent-snapStart < snapSize {
+		return snapSize
+	}
+	return extent - snapStart
+}
+
 func bleedToEdge(start, size, extent, cell float32) float32 {
 	if rest := extent - start; rest > size && extent-(start+size) < cell {
 		return rest
