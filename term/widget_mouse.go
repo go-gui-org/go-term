@@ -751,8 +751,16 @@ func openURL(rawURL string) {
 
 // trackpadSensitivity converts a precise (trackpad / high-res) delta
 // into scroll pixels. The Metal backend pre-scales precise deltas by
-// 0.075; at 10 the effective finger-travel multiplier is ~0.75×.
-const trackpadSensitivity float32 = 10
+// 0.075 (kPreciseScrollScale in gui/backend/metal), so this factor
+// lands the effective finger-travel multiplier at ~2.0x raw points —
+// the same ratio Ghostty arrives at with its 2x AppKit pre-scale and a
+// mouse-scroll-multiplier.precision of 1.0. The previous value of 10
+// gave 0.75x, so a line took ~2.7x the finger travel Ghostty needed,
+// which read as laggy next to it. wheelReportTicks completes the parity
+// by accumulating against a cellH x backingScale threshold (physical
+// pixels, like Ghostty's), so on a 2x display a line takes one logical
+// cell of finger travel — Ghostty's exact retina behavior.
+const trackpadSensitivity float32 = 2.0 / 0.075
 
 // scrollSensitivity selects the delta→pixel factor for a scroll event.
 //
@@ -780,15 +788,27 @@ const maxWheelTicks = 32
 
 // wheelReportTicks converts a wheel delta into the number of SGR wheel
 // reports to emit. The delta is scaled to pixels (wheel or trackpad
-// factor per the precise flag) and divided by the cell height, so one
-// report is sent per row of scroll distance — matching how far the
-// local scrollback viewport would move. The fractional remainder
-// accumulates in mouse.wheelResidual across events (reset on direction
-// change) so trackpad pans add up instead of being truncated. Always at
-// least 1 tick, so a single slow notch never feels dead. Main-thread only.
+// factor per the precise flag) and divided by the accumulation
+// threshold, so one report is sent per row of scroll distance —
+// matching how far the local scrollback viewport would move. The
+// fractional remainder accumulates in mouse.wheelResidual across events
+// (reset on direction change) so trackpad pans add up instead of being
+// truncated. The precise threshold is cellH x backingScale — physical
+// pixels, like Ghostty's — so on a 2x Retina display a sub-cell delta
+// needs double the travel to emit; this is what keeps ~1pt trailing
+// inertia events (wheel coast-down, trackpad jitter) from crossing a
+// logical cell and emitting a spurious report where Ghostty emits
+// nothing. A precise delta below the threshold emits nothing and
+// carries the residual forward; a discrete wheel delta below one row
+// still emits a single tick, so a slow notch never feels dead.
+// Main-thread only.
 func (t *Term) wheelReportTicks(scrollY float32, precise bool) int {
 	if !realNumber(scrollY) || !finite(t.cellH) {
 		return 1
+	}
+	threshold := float64(t.cellH)
+	if precise {
+		threshold *= t.backingScale()
 	}
 	dir := 1
 	if scrollY < 0 {
@@ -800,20 +820,41 @@ func (t *Term) wheelReportTicks(scrollY float32, precise bool) int {
 	}
 	total := float64(t.mouse.wheelResidual) +
 		math.Abs(float64(scrollY))*float64(t.scrollSensitivity(precise))
-	ticks := int(total / float64(t.cellH))
+	// Pre-cap: converting a quotient beyond maxWheelTicks to int could
+	// overflow (a pathological delta makes total/threshold exceed the
+	// int range), and the cap below runs only after that conversion.
+	if total >= float64(maxWheelTicks)*threshold {
+		t.mouse.wheelResidual = 0
+		return maxWheelTicks
+	}
+	ticks := int(total / threshold)
 	if ticks < 1 {
-		// Below one row of travel: emit a single tick and drop the
-		// residual so slow continuous pans stay at one tick per event
-		// (the pre-multiplier behavior) rather than bursting later.
+		if precise {
+			// Trackpad pan below one row of travel: keep the residual
+			// so a slow pan accumulates and scrolls once it crosses a
+			// full row, instead of emitting one report per event (the
+			// pre-threshold behavior scrolled on the slightest touch).
+			t.mouse.wheelResidual = float32(total)
+			return 0
+		}
+		// Discrete wheel: emit a single tick and drop the residual so a
+		// slow notch never feels dead and sub-line notches don't burst
+		// later.
 		t.mouse.wheelResidual = 0
 		return 1
 	}
-	if ticks > maxWheelTicks {
-		ticks = maxWheelTicks
-		total = float64(maxWheelTicks) * float64(t.cellH)
-	}
-	t.mouse.wheelResidual = float32(total - float64(ticks)*float64(t.cellH))
+	t.mouse.wheelResidual = float32(total - float64(ticks)*threshold)
 	return ticks
+}
+
+// backingScale returns the window's device pixel ratio for scroll
+// threshold math, defaulting to 1 when unset (tests, or a window before
+// its first backend frame) or non-finite.
+func (t *Term) backingScale() float64 {
+	if t.win == nil || !realNumber(t.win.BackingScale) || t.win.BackingScale <= 0 {
+		return 1
+	}
+	return float64(t.win.BackingScale)
 }
 
 // wheelArrows sends one Up/Down cursor key per row of scroll distance,

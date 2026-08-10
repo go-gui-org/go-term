@@ -833,8 +833,9 @@ func TestOnMouseScroll_NonPreciseReverse(t *testing.T) {
 }
 
 // TestOnMouseScroll_TrackpadSensitivity verifies that precise deltas use
-// the trackpad factor: ScrollY=0.5 precise → 0.5*10=5px at cellH=20 →
-// ViewSubPx=5 (a wheel delta of 0.5 would only move 2.5px).
+// the trackpad factor: ScrollY=0.5 precise → 0.5*trackpadSensitivity ≈
+// 13.3px at cellH=20 → ViewSubPx≈13.3 (a wheel delta of 0.5 would only
+// move 10px).
 func TestOnMouseScroll_TrackpadSensitivity(t *testing.T) {
 	tm, _ := newMouseTerm(4, 8)
 	tm.grid.Mu.Lock()
@@ -851,8 +852,8 @@ func TestOnMouseScroll_TrackpadSensitivity(t *testing.T) {
 	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
-	if got := tm.grid.ViewSubPx; got != 5 {
-		t.Errorf("ViewSubPx = %v, want 5", got)
+	if got, want := tm.grid.ViewSubPx, 0.5*trackpadSensitivity; got != want {
+		t.Errorf("ViewSubPx = %v, want %v", got, want)
 	}
 }
 
@@ -977,8 +978,8 @@ func TestOnMouseScroll_SGRWheelTickCap(t *testing.T) {
 }
 
 // TestOnMouseScroll_SGRTrackpadTicks verifies that precise deltas use the
-// trackpad factor in the report path: ScrollY=4 precise → 4*10=40px at
-// cellH=20 → 2 ticks (a wheel delta of 4 would emit only 1).
+// trackpad factor in the report path: ScrollY=4 precise → 4*26.7≈107px at
+// cellH=20 → 5 ticks (a wheel delta of 4 would emit only 4).
 func TestOnMouseScroll_SGRTrackpadTicks(t *testing.T) {
 	tm, buf := newMouseTerm(4, 8)
 	tm.grid.Mu.Lock()
@@ -987,8 +988,8 @@ func TestOnMouseScroll_SGRTrackpadTicks(t *testing.T) {
 	tm.grid.Mu.Unlock()
 	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 4, ScrollPrecise: true}
 	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
-	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 2 {
-		t.Errorf("ticks = %d, want 2 (buf %q)", got, *buf)
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 5 {
+		t.Errorf("ticks = %d, want 5 (buf %q)", got, *buf)
 	}
 }
 
@@ -1020,6 +1021,153 @@ func TestWheelReportTicks_ZeroCellHReturnsOne(t *testing.T) {
 	got := tm.wheelReportTicks(10, false)
 	if got != 1 {
 		t.Errorf("ticks = %d, want 1", got)
+	}
+}
+
+// TestWheelReportTicks_PreciseBelowCellAccumulates verifies that precise
+// (trackpad) deltas below one row emit 0 ticks and carry the remainder
+// forward: two ScrollY=0.5 events are ~13.3px then ~26.7px total at
+// cellH=20 → 0 ticks then 1 tick. The old min-1 rule emitted one tick
+// per event.
+func TestWheelReportTicks_PreciseBelowCellAccumulates(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.wheelReportTicks(0.5, true); got != 0 {
+		t.Fatalf("first tick = %d, want 0 (accumulating)", got)
+	}
+	if got := tm.wheelReportTicks(0.5, true); got != 1 {
+		t.Errorf("second tick = %d, want 1 after residual crosses a row", got)
+	}
+}
+
+// TestWheelReportTicks_SubRowWheelStillEmits verifies that a discrete
+// (non-precise) delta below one row keeps the guaranteed single tick, so
+// a slow mouse notch never feels dead.
+func TestWheelReportTicks_SubRowWheelStillEmits(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.wheelReportTicks(0.25, false); got != 1 {
+		t.Errorf("ticks = %d, want 1 for a sub-row wheel notch", got)
+	}
+}
+
+// TestOnMouseScroll_SGRTrackpadSlightTouchNoReport verifies that a
+// precise delta below one row emits no SGR report at all: ScrollY=0.5
+// precise → ~13.3px at cellH=20 < one row, so a leaf-style app sees no
+// scroll from a light touch. Only once accumulated travel crosses a
+// full row does a report appear.
+func TestOnMouseScroll_SGRTrackpadSlightTouchNoReport(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 0.5, ScrollPrecise: true}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if got := countReports(*buf, "\x1b[<64;"); got != 0 {
+		t.Fatalf("reports = %d, want 0 for a sub-row touch (buf %q)", got, *buf)
+	}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if got := countReports(*buf, "\x1b[<64;"); got != 1 {
+		t.Errorf("reports = %d, want 1 after residual crosses a row (buf %q)", got, *buf)
+	}
+}
+
+// TestWheelReportTicks_PreciseThresholdScalesWithBacking verifies that
+// precise accumulation uses a cellH x backingScale threshold, matching
+// Ghostty's physical-pixel math: on a 2x display a sub-cell precise
+// delta needs double the travel to emit. ScrollY=1 precise is ~26.7px
+// of travel: below one logical cell at 2x (40px) → 0 ticks, then the
+// second event crosses it → 1.
+func TestWheelReportTicks_PreciseThresholdScalesWithBacking(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.win = &gui.Window{BackingScale: 2}
+	if got := tm.wheelReportTicks(1, true); got != 0 {
+		t.Fatalf("first tick = %d, want 0 at 2x threshold", got)
+	}
+	if got := tm.wheelReportTicks(1, true); got != 1 {
+		t.Errorf("second tick = %d, want 1 after crossing the 2x threshold", got)
+	}
+}
+
+// TestWheelReportTicks_RetinaSwallowsInertiaStream is the captured
+// symptom: an ~1pt precise inertia stream (0.075 per event, the
+// wheel-coast tail from the GOTERM_WHEEL_DEBUG log) accumulates to
+// ~22px. At 1x that crosses the 20px logical cell → 1 report; at 2x
+// Retina the threshold is 40px → the stream never emits (Ghostty
+// parity, where the physical-pixel threshold swallows it).
+func TestWheelReportTicks_RetinaSwallowsInertiaStream(t *testing.T) {
+	stream := func(scale float32) int {
+		tm, _ := newMouseTerm(4, 8)
+		tm.win = &gui.Window{BackingScale: scale}
+		ticks := 0
+		for range 11 {
+			ticks += tm.wheelReportTicks(0.075, true)
+		}
+		return ticks
+	}
+	if got := stream(1); got != 1 {
+		t.Errorf("1x ticks = %d, want 1 (stream crosses the logical cell)", got)
+	}
+	if got := stream(2); got != 0 {
+		t.Errorf("2x ticks = %d, want 0 (stream stays under the physical threshold)", got)
+	}
+}
+
+// TestWheelReportTicks_PreciseDirectionChangeResetsResidual verifies
+// that a direction change zeroes the accumulated residual before the new
+// travel is added: +0.5 (13.3px, no tick), then -0.5 must NOT cross the
+// cell by combining with the old residual (it would emit 1 tick if the
+// residual were carried), then a second -0.5 crosses → 1.
+func TestWheelReportTicks_PreciseDirectionChangeResetsResidual(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.wheelReportTicks(0.5, true); got != 0 {
+		t.Fatalf("first tick = %d, want 0", got)
+	}
+	if got := tm.wheelReportTicks(-0.5, true); got != 0 {
+		t.Fatalf("tick after direction change = %d, want 0 (residual reset)", got)
+	}
+	if got := tm.wheelReportTicks(-0.5, true); got != 1 {
+		t.Errorf("third tick = %d, want 1 after reset travel crosses a row", got)
+	}
+}
+
+// TestWheelReportTicks_PreciseHugeDeltaCapped verifies the pre-cap:
+// a pathological precise delta returns maxWheelTicks without converting
+// an overflowing quotient to int, leaving no residual behind.
+func TestWheelReportTicks_PreciseHugeDeltaCapped(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.wheelReportTicks(1e6, true); got != maxWheelTicks {
+		t.Errorf("ticks = %d, want cap %d", got, maxWheelTicks)
+	}
+	if got := tm.wheelReportTicks(0.5, true); got != 0 {
+		t.Errorf("tick after cap = %d, want 0 (no stale residual)", got)
+	}
+}
+
+// TestBackingScale_Guards verifies backingScale defaults to 1 for a nil
+// window, non-finite, zero, and negative scales, and passes through
+// valid values.
+func TestBackingScale_Guards(t *testing.T) {
+	cases := []struct {
+		name string
+		win  *gui.Window
+		want float64
+	}{
+		{"nil window", nil, 1},
+		{"unset", &gui.Window{}, 1},
+		{"zero", &gui.Window{BackingScale: 0}, 1},
+		{"negative", &gui.Window{BackingScale: -2}, 1},
+		{"nan", &gui.Window{BackingScale: float32(math.NaN())}, 1},
+		{"inf", &gui.Window{BackingScale: float32(math.Inf(1))}, 1},
+		{"retina", &gui.Window{BackingScale: 2}, 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tm, _ := newMouseTerm(4, 8)
+			tm.win = c.win
+			if got := tm.backingScale(); got != c.want {
+				t.Errorf("backingScale() = %v, want %v", got, c.want)
+			}
+		})
 	}
 }
 
