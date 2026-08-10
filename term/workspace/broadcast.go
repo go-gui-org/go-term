@@ -59,7 +59,7 @@ func (ws *Workspace) broadcastPill() gui.View {
 	pill.FloatZIndex = 998
 	pill.Color = broadcastTint
 	pill.Radius = gui.SomeF(10)
-	pill.Padding = gui.SomeP(3, broadcastPillPad+4, 3, broadcastPillPad+4)
+	pill.Padding = gui.NewPadding(3, broadcastPillPad+4, 3, broadcastPillPad+4)
 	pill.Content = []gui.View{
 		gui.Text(gui.TextCfg{Text: "⌁ BROADCAST", TextStyle: style}),
 	}

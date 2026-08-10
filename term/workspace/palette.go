@@ -408,7 +408,7 @@ func (ws *Workspace) palettePanel(ww, wh int) gui.View {
 	panel.ColorBorder = theme.ColorBorder
 	panel.SizeBorder = gui.SomeF(1)
 	panel.Radius = gui.SomeF(6)
-	panel.Padding = gui.SomeP(palettePad, palettePad, palettePad, palettePad)
+	panel.Padding = gui.NewPadding(palettePad, palettePad, palettePad, palettePad)
 	// Swallow clicks so they don't fall through to the backdrop, which would
 	// dismiss the palette when clicking inside it.
 	panel.OnClick = func(ctx gui.EventCtx) {}
@@ -451,7 +451,7 @@ func (ws *Workspace) paletteRows(theme gui.Theme, wh float32) gui.View {
 		it := p.items[p.matches[j]]
 		row := tight(gui.FillFixed)
 		row.Height = rowH
-		row.Padding = gui.SomeP(paletteRowPadV, paletteRowPadH, paletteRowPadV, paletteRowPadH)
+		row.Padding = gui.NewPadding(paletteRowPadV, paletteRowPadH, paletteRowPadV, paletteRowPadH)
 		row.Radius = gui.SomeF(3)
 		if j == p.idx {
 			row.Color = theme.ColorActive
@@ -504,7 +504,7 @@ func paletteViewport(list gui.ContainerCfg, h float32) gui.View {
 	scroll.Clip = true
 	// Reserve the scrollbar's lane; otherwise the thumb paints over the key
 	// column on the right of every row.
-	scroll.Padding = gui.SomeP(0, scrollGutter(), 0, 0)
+	scroll.Padding = gui.NewPadding(0, scrollGutter(), 0, 0)
 	scroll.Content = []gui.View{gui.Column(list)}
 	return gui.Column(scroll)
 }

@@ -466,7 +466,7 @@ func (t *Term) View(w *gui.Window) gui.View {
 		OnMouseUp:     t.onMouseUp,
 	})
 	colCfg := gui.ContainerCfg{
-		Padding:     gui.Some(gui.Padding{}),
+		Padding:     gui.PaddingNone,
 		Spacing:     gui.SomeF(0),
 		Color:       bgColor,
 		OnChar:      t.onChar,
