@@ -268,7 +268,7 @@ func (ws *Workspace) helpPanel(ww, wh int) gui.View {
 		inner.Clip = true
 		// Reserve the scrollbar's lane; the last column's key text runs to the
 		// right edge, exactly where the thumb would otherwise land.
-		inner.Padding = gui.SomeP(0, scrollGutter(), 0, 0)
+		inner.Padding = gui.NewPadding(0, scrollGutter(), 0, 0)
 	}
 
 	panel := tight(gui.FitFit)
@@ -280,7 +280,7 @@ func (ws *Workspace) helpPanel(ww, wh int) gui.View {
 	panel.ColorBorder = theme.ColorBorder
 	panel.SizeBorder = gui.SomeF(1)
 	panel.Radius = gui.SomeF(6)
-	panel.Padding = gui.SomeP(10, 14, 10, 14)
+	panel.Padding = gui.NewPadding(10, 14, 10, 14)
 	panel.Spacing = gui.SomeF(1)
 	// Swallow clicks so they don't fall through to the backdrop, which
 	// would dismiss the overlay when clicking inside the panel.
@@ -294,7 +294,7 @@ func (ws *Workspace) helpPanel(ww, wh int) gui.View {
 // which shares this helper.
 func (ws *Workspace) helpHeader(text string, theme gui.Theme, style gui.TextStyle) gui.View {
 	headerRow := tight(gui.FillFit)
-	headerRow.Padding = gui.SomeP(3, 0, 1, 0)
+	headerRow.Padding = gui.NewPadding(3, 0, 1, 0)
 	headerRow.Content = []gui.View{gui.Text(gui.TextCfg{Text: text, TextStyle: style})}
 
 	col := tight(gui.FillFit)

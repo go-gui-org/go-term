@@ -448,7 +448,7 @@ func (ws *Workspace) themeDivider(theme gui.Theme) gui.View {
 func (ws *Workspace) themeListColumn(theme gui.Theme, w, h float32) gui.View {
 	col := tight(gui.FixedFill)
 	col.Width = w
-	col.Padding = gui.SomeP(browserPad, browserPad, browserPad, browserPad)
+	col.Padding = gui.NewPadding(browserPad, browserPad, browserPad, browserPad)
 	col.Spacing = gui.SomeF(10)
 
 	head := theme.M5
@@ -525,7 +525,7 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 
 		row := tight(gui.FillFixed)
 		row.Height = rowH
-		row.Padding = gui.SomeP(browserRowPadV, browserRowPadH, browserRowPadV, browserRowPadH)
+		row.Padding = gui.NewPadding(browserRowPadV, browserRowPadH, browserRowPadV, browserRowPadH)
 		row.Radius = gui.SomeF(3)
 		row.Spacing = gui.SomeF(8)
 		if j == b.idx {
@@ -567,7 +567,7 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 	scroll.MaxHeight = listH
 	scroll.Clip = true
 	// Reserve the scrollbar's lane so the thumb doesn't paint over theme names.
-	scroll.Padding = gui.SomeP(0, scrollGutter(), 0, 0)
+	scroll.Padding = gui.NewPadding(0, scrollGutter(), 0, 0)
 	scroll.Content = []gui.View{gui.Column(list)}
 	return gui.Column(scroll)
 }
@@ -648,7 +648,7 @@ func themeChip(th term.Theme) gui.View {
 	outer.Radius = gui.SomeF(3)
 	outer.ColorBorder = th.ANSI[8]
 	outer.SizeBorder = gui.SomeF(1)
-	outer.Padding = gui.SomeP(4, 4, 4, 4)
+	outer.Padding = gui.NewPadding(4, 4, 4, 4)
 	outer.Content = []gui.View{gui.Rectangle(gui.RectangleCfg{
 		Sizing: gui.FillFill,
 		Color:  th.DefaultFG,
@@ -702,11 +702,11 @@ func (ws *Workspace) themePreviewColumn(theme gui.Theme) gui.View {
 	inner.ScrollMode = gui.ScrollVerticalOnly
 	inner.Clip = true
 	// Reserve the scrollbar's lane so the thumb doesn't paint over the sample.
-	inner.Padding = gui.SomeP(0, scrollGutter(), 0, 0)
+	inner.Padding = gui.NewPadding(0, scrollGutter(), 0, 0)
 
 	col := tight(gui.FillFill)
 	col.Color = th.DefaultBG
-	col.Padding = gui.SomeP(browserPad, browserPad, browserPad, browserPad)
+	col.Padding = gui.NewPadding(browserPad, browserPad, browserPad, browserPad)
 	col.Content = []gui.View{gui.Column(inner)}
 	return gui.Column(col)
 }
@@ -967,7 +967,7 @@ func (ws *Workspace) themeCountText() string {
 // themeBrowserFooter is the key-hint strip.
 func (ws *Workspace) themeBrowserFooter(theme gui.Theme) gui.View {
 	bar := tight(gui.FillFit)
-	bar.Padding = gui.SomeP(8, browserPad, 8, browserPad)
+	bar.Padding = gui.NewPadding(8, browserPad, 8, browserPad)
 	bar.Spacing = gui.SomeF(18)
 
 	hint := func(s string) gui.View {

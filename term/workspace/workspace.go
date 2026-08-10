@@ -682,7 +682,7 @@ func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 	title := tab.focusedTitle()
 	title = truncateTitle(title, 30)
 	inner := tight(gui.FillFit)
-	inner.Padding = gui.SomeP(1, 6, 1, 6)
+	inner.Padding = gui.NewPadding(1, 6, 1, 6)
 
 	content := make([]gui.View, 0, 4)
 	// The activity marker leads the title. Only background tabs carry one —
@@ -715,7 +715,7 @@ func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
 		}
 
 		closeBtn := tight(gui.FitFit)
-		closeBtn.Padding = gui.SomeP(0, 0, 0, 4)
+		closeBtn.Padding = gui.NewPadding(0, 0, 0, 4)
 		closeBtn.OnClick = func(ctx gui.EventCtx) {
 			ws.closeTabAt(idx)
 		}
