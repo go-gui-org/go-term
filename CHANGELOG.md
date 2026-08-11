@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `term`: `GOTERM_LATENCY` keystroke-to-frame instrumentation. Set it to `1` (or
+  to a sample-batch size) and every 25 keystrokes logs percentiles for the spans
+  a keystroke passes through: `key→echo` (the child's round-trip), `echo→wake`
+  (reader goroutine to the main thread picking the repaint up), `wake→paint`
+  (the frame itself), and their total, alongside how long `onDraw` ran and how
+  many PTY reads landed while the keystroke was outstanding — a shell echo is
+  one, a full-screen TUI frame is many, and each one takes `grid.Mu`. Plus
+  go-gui's own view-generation / layout / render-build split when the embedder
+  enables `WindowCfg.Timings` (falcon does so under the same variable). Off by
+  default and inert when off. It measures up to the end of `onDraw` only — GPU
+  submit, compositor and vsync are invisible from inside the process and add
+  another 8–17 ms on a 60 Hz display, so the numbers are a lower bound.
+
 ### Changed
 
 - **BREAKING: event callbacks take a single `gui.EventCtx`.** Bump go-gui

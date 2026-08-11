@@ -279,6 +279,9 @@ func (t *Term) readLoop() {
 // cluster; the reader passes false while the input burst is still draining
 // so a cluster split across reads is not committed half-assembled.
 func (t *Term) applyChunk(data []byte, flush bool) bool {
+	// Counted before the lock: a read that waits for grid.Mu is exactly the
+	// delay this number exists to expose.
+	t.lat.noteChunk()
 	t.grid.Mu.Lock()
 	if flush {
 		t.parser.Feed(data)
@@ -312,6 +315,11 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 		t.overlayVersion = overlayVer
 		t.bumpVersion()
 		needUpdate = true
+		// Screen-changing output while a keystroke is outstanding: this is the
+		// echo that keystroke was waiting for. Stamped under grid.Mu with the
+		// rest of the decision, so the timestamp cannot precede the parse that
+		// justified it.
+		t.lat.markEcho()
 	}
 	// This chunk left a sync block open: arm the watchdog so a stalled or
 	// dead application cannot suppress repaints past syncUpdateTimeout.
@@ -363,6 +371,10 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 	if needUpdate && !t.redrawPending.Swap(true) {
 		t.queueCommand(func(w *gui.Window) {
 			t.redrawPending.Store(false)
+			// First thing on the main thread: the stamp must not include the
+			// UpdateWindow it precedes, or the wake/paint split moves work from
+			// one side to the other.
+			t.lat.markWake()
 			w.UpdateWindow()
 		})
 	}
@@ -430,6 +442,7 @@ func (t *Term) onSyncTimeout() {
 	if !t.redrawPending.Swap(true) {
 		t.queueCommand(func(w *gui.Window) {
 			t.redrawPending.Store(false)
+			t.lat.markWake() // same split as applyChunk's repaint
 			w.UpdateWindow()
 		})
 	}

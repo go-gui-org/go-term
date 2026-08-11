@@ -189,6 +189,13 @@ type flushState struct {
 // reflows the grid + pty when the canvas size changes, then paints the
 // grid as a sequence of background rects + per-cell text + cursor.
 func (t *Term) onDraw(dc *gui.DrawContext) {
+	// Frame start for the latency instrumentation (zero and unused unless
+	// GOTERM_LATENCY is set). The early returns below draw nothing, so they
+	// deliberately close no measurement.
+	var drawStart time.Time
+	if latencyEnabled {
+		drawStart = time.Now()
+	}
 	style := t.style()
 	if t.cellW == 0 {
 		t.cellW = dc.TextWidth("M", style)
@@ -288,6 +295,10 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		default:
 		}
 	}
+
+	// Closes the outstanding keystroke measurement, if its echo has landed.
+	// Last in the function so the recorded span covers every draw pass.
+	t.lat.sample(drawStart, t.win)
 }
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,15 @@ Capture and replay procedures — `.gtr` session recording (`--record`/`--replay
 live in the `capture-terminal-bug` skill. Prefer a `.gtr` recording for anything
 a user should be able to produce and send you.
 
+### Measuring input latency
+
+`GOTERM_LATENCY=1 go run .` in `examples/falcon` logs percentiles every 25
+keystrokes, splitting keystroke-to-frame into the child's echo round-trip and
+go-term's own scheduling + paint. See `term/latency.go` for what each span
+covers. It stops at the end of `onDraw`: GPU submit, compositor and vsync are
+not observable in-process, so compare against an external measurement (a
+240 fps camera) before concluding the widget is at fault.
+
 There are automated tests for the grid, parser, PTY, widget helpers,
 and replay-style emulator behavior. The widget itself is still partly
 GUI-bound, so keep validating visually by running `examples/falcon` and trying

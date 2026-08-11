@@ -628,6 +628,10 @@ func (t *Term) writeBytes(out []byte) {
 // writeRaw records out and pushes it to the pty. Split out of writeBytes so
 // SendInput can reuse the write without re-firing the tap it came from.
 func (t *Term) writeRaw(out []byte) {
+	// Opens a latency measurement (no-op unless GOTERM_LATENCY is set). Stamped
+	// before the write so the pty hand-off counts against the child's span, not
+	// against nothing.
+	t.lat.markKey()
 	t.rec.Load().Input(out)
 	if _, err := t.pw.Write(out); err != nil {
 		log.Printf("term: pty write: %v", err)

@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-term/term"
@@ -48,7 +50,24 @@ func (a *app) windowCfg() gui.WindowCfg {
 		WMClass:        appName,
 		OnCloseRequest: a.onCloseRequest,
 		OnInit:         a.onInit,
+		// Frame-pipeline timings feed the GOTERM_LATENCY report, which pairs
+		// them with the keystroke spans to say how much of a repaint is view
+		// generation and layout versus the terminal's own draw passes. Off
+		// unless the instrumentation is on: it timestamps every frame.
+		Timings: latencyInstrumented(),
 	}
+}
+
+// latencyInstrumented reports whether GOTERM_LATENCY asks for keystroke-to-frame
+// instrumentation. The variable is parsed properly inside term/; falcon only
+// needs to know whether to hand the window its timing switch, so it tests for a
+// meaningfully-set value rather than importing a debug knob into the public API.
+func latencyInstrumented() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GOTERM_LATENCY"))) {
+	case "", "0", "false", "off", "no":
+		return false
+	}
+	return true
 }
 
 // onInit creates or restores the workspace and installs its view.
