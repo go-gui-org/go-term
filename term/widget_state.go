@@ -511,4 +511,9 @@ type Term struct {
 	// pile up redundant closures on the command queue. Cleared by the
 	// queued callback before it asks for the repaint.
 	redrawPending atomic.Bool
+
+	// lat measures keystroke-to-frame latency when GOTERM_LATENCY is set.
+	// Inert (three atomic loads per keystroke and per frame) otherwise.
+	// See latency.go for what the spans mean.
+	lat latencyTracker
 }
