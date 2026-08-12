@@ -1,7 +1,7 @@
 # go-term: Roadmap
 
 `go-term` is a full-featured terminal-emulator widget for
-[go-gui](https://github.com/go-gui-org/go-gui). The API is frozen at v0.8.0
+[go-gui](https://github.com/go-gui-org/go-gui). The API is frozen at v0.9.0
 (the export audit + Godoc pass of Phases 54–56 landed there); the road to
 v1.0.0 below is only the remaining gate. The pre-freeze phase history lives
 in `ROADMAP-v0.md`.
@@ -13,7 +13,7 @@ platform-agnostic.
 
 ## Current state
 
-- **v0.8.0** — API freeze: export audit, Godoc pass, `RunAction` dispatch
+- **v0.9.0** — API freeze: export audit, Godoc pass, `RunAction` dispatch
   table (unbound actions stay palette-invocable), Cmd+S workspace save,
   CHANGELOG narrative. Deprecation shims were not needed (nothing moved).
 - The exported surface after the audit: `term` keeps the small public API
@@ -31,12 +31,12 @@ Unshipped work only.
 When go-gui ships v1.0.0:
 
 - Bump go-gui and go-glyph to v1.0.0 final
-- Remove any deprecation shims left over from the v0.8.0 freeze
+- Remove any deprecation shims left over from the v0.9.0 freeze
 - `git tag v1.0.0` with release notes from CHANGELOG.md
-- CI: add `apidiff` check against the v0.8.0 baseline
+- CI: add `apidiff` check against the v0.9.0 baseline
 
-Until then, v0.8.0 is the stable surface users build against. Breaking
-changes to it require a v0.9.0.
+Until then, v0.9.0 is the stable surface users build against. Breaking
+changes to it require a v0.10.0.
 
 ### Post-1.0 backlog
 
@@ -88,9 +88,9 @@ term/gotermrec/          CLI over a recording: info/cat/play/fixture/export.
 
 | #   | Description        | Unlocked                                          |
 | --- | ------------------ | ------------------------------------------------- |
-| 54–56 | API freeze at v0.8.0 | Frozen, documented surface; runnable actions    |
+| 54–56 | API freeze at v0.9.0 | Frozen, documented surface; runnable actions    |
 
 ## Version policy
 
 SemVer pre-1.0: the frozen surface is stable until v1.0.0, but breaking
-changes (should any slip through) ship as v0.9.0, not into v0.8.x patches.
+changes (should any slip through) ship as v0.10.0, not into v0.9.x patches.

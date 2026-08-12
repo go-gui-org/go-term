@@ -50,9 +50,9 @@ full list of rebindable actions.
 ## Embedding
 
 `term` is a library; falcon is its proof. The public surface is frozen at
-v0.8.0 — the export audit and Godoc pass landed there, so what is documented
-is what v1.0.0 will keep. Build against v0.8.0; breaking changes before 1.0
-would ship as v0.9.0.
+v0.9.0 — the export audit and Godoc pass landed there, so what is documented
+is what v1.0.0 will keep. Build against v0.9.0; breaking changes before 1.0
+would ship as v0.10.0.
 
 ```go
 import "github.com/go-gui-org/go-term/term"

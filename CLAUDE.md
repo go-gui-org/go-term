@@ -2,7 +2,7 @@
 
 ## Roadmap
 
-`ROADMAP.md` is thin now: the API froze at v0.8.0, and the only remaining
+`ROADMAP.md` is thin now: the API froze at v0.9.0, and the only remaining
 phase is the v1.0.0 tag, blocked on go-gui v1.0. Pre-1.0 phase history lives
 in `ROADMAP-v0.md` and is not maintained — do not edit it to add entries.
 

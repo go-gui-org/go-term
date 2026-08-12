@@ -6,11 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-08-12
+## [0.9.0] - 2026-08-12
 
 ### API freeze
 
-v0.8.0 fixes the public surface that v1.0.0 will inherit. Every exported
+v0.9.0 fixes the public surface that v1.0.0 will inherit. Every exported
 symbol now has a deliberate reason and a complete doc comment; what had no
 external consumer is unexported. This is the release to build against — the
 intent is that v1.0.0 (when go-gui reaches it) changes nothing here except
