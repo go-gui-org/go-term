@@ -8,7 +8,7 @@ APP_NAME     := Falcon
 # bare hash); --dirty marks uncommitted trees so a local build can't be
 # mistaken for the release it was cut from.
 VERSION      := $(shell git describe --tags --always --dirty 2>/dev/null)
-LDFLAGS      := -X main.version=$(VERSION)
+LDFLAGS      := -X main.version=$(VERSION) -w
 # CFBundleShortVersionString wants a bare number, so drop the tag's leading v.
 BUNDLE_VER   := $(patsubst v%,%,$(VERSION))
 # Pre-built .icns (see examples/falcon/icon/README.md); buildapp copies it
