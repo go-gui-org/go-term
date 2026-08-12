@@ -352,7 +352,7 @@ func (g *grid) addGraphicCells(src string, widthPx, heightPx, cols, rows int) (i
 		WidthPx:  widthPx,
 		HeightPx: heightPx,
 	})
-	blank := blankCell(DefaultColor, DefaultColor, 0)
+	blank := blankCell(defaultColor, defaultColor, 0)
 	for r := range rows {
 		lr := g.CursorR + r
 		if lr < 0 || lr >= g.Rows {

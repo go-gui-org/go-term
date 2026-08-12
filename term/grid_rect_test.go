@@ -8,8 +8,8 @@ func fillGrid(g *grid, ch rune) {
 	for r := range g.Rows {
 		for c := range g.Cols {
 			g.Cells[r*g.Cols+c] = cell{
-				Ch: ch, FG: DefaultColor, BG: DefaultColor,
-				ULColor: DefaultColor, Width: 1,
+				Ch: ch, FG: defaultColor, BG: defaultColor,
+				ULColor: defaultColor, Width: 1,
 			}
 		}
 	}
@@ -66,7 +66,7 @@ func TestGrid_EraseRect_UsesCurrentBackground(t *testing.T) {
 			t.Errorf("col %d bg = %#x, want BCE background", c, got)
 		}
 	}
-	if got := g.At(0, 2).BG; got != DefaultColor {
+	if got := g.At(0, 2).BG; got != defaultColor {
 		t.Errorf("cell outside the rect was repainted: bg %#x", got)
 	}
 }
@@ -257,8 +257,8 @@ func TestGrid_CopyRect_NonOverlapping(t *testing.T) {
 func TestGrid_CopyRect_OverlapReadsPreCopyContent(t *testing.T) {
 	g := newGrid(1, 6)
 	for i, ch := range "abcdef" {
-		g.Cells[i] = cell{Ch: ch, FG: DefaultColor, BG: DefaultColor,
-			ULColor: DefaultColor, Width: 1}
+		g.Cells[i] = cell{Ch: ch, FG: defaultColor, BG: defaultColor,
+			ULColor: defaultColor, Width: 1}
 	}
 	// Shift cols 1..4 one column right; the destination overlaps the source.
 	g.CopyRect(1, 1, 1, 4, 1, 2)
@@ -269,8 +269,8 @@ func TestGrid_CopyRect_OverlapReadsPreCopyContent(t *testing.T) {
 	// Same in the other direction.
 	g = newGrid(1, 6)
 	for i, ch := range "abcdef" {
-		g.Cells[i] = cell{Ch: ch, FG: DefaultColor, BG: DefaultColor,
-			ULColor: DefaultColor, Width: 1}
+		g.Cells[i] = cell{Ch: ch, FG: defaultColor, BG: defaultColor,
+			ULColor: defaultColor, Width: 1}
 	}
 	g.CopyRect(1, 3, 1, 6, 1, 2)
 	if got := rowText(g, 0); got != "acdeff" {

@@ -88,7 +88,7 @@ size = 18
 [keybindings]
 workspace.splitVertical = Cmd+E
 `)
-	ws.ReloadConfig()
+	ws.reloadConfig()
 
 	if ws.cfg.TextStyle.Size != 18 {
 		t.Errorf("size = %v, want 18", ws.cfg.TextStyle.Size)
@@ -119,7 +119,7 @@ scrollback = 777
 workspace.splitVertical = Cmd+E
 `)
 	writeConfig(t, path, "")
-	ws.ReloadConfig()
+	ws.reloadConfig()
 
 	if ws.cfg.TextStyle != (gui.TextStyle{Family: "Menlo", Size: 12}) {
 		t.Errorf("TextStyle = %+v, want the embedder's Menlo/12", ws.cfg.TextStyle)
@@ -153,7 +153,7 @@ func TestReloadConfig_EnvFollowsFile(t *testing.T) {
 		t.Errorf("opts.env = %q, want %q", ws.cfg.opts.env, want)
 	}
 	writeConfig(t, path, "")
-	ws.ReloadConfig()
+	ws.reloadConfig()
 	if ws.cfg.opts.env != nil {
 		t.Errorf("opts.env = %q, want nil after the section was removed", ws.cfg.opts.env)
 	}
@@ -165,7 +165,7 @@ func TestReloadConfig_EnvFollowsFile(t *testing.T) {
 func TestReloadConfig_BrokenFileKeepsRunning(t *testing.T) {
 	ws, path := newConfiguredWorkspace(t, "[font]\nsize = 15\n")
 	writeConfig(t, path, "not an ini\n[font\nsize = = =\n[general]\nbell = klaxon\n")
-	ws.ReloadConfig()
+	ws.reloadConfig()
 
 	if ws.cfg.TextStyle.Size != 12 {
 		t.Errorf("size = %v, want the embedder's 12", ws.cfg.TextStyle.Size)
@@ -187,7 +187,7 @@ func TestReloadConfig_MissingFileIsFine(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("remove config: %v", err)
 	}
-	ws.ReloadConfig()
+	ws.reloadConfig()
 	if ws.cfg.TextStyle.Size != 12 {
 		t.Errorf("size = %v, want the embedder's 12", ws.cfg.TextStyle.Size)
 	}

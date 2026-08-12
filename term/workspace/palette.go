@@ -112,8 +112,8 @@ func (ws *Workspace) paletteFilterID() string {
 	return paletteFilterID + strconv.Itoa(ws.palette.gen)
 }
 
-// TogglePalette opens or closes the command palette. Bound to Cmd+Shift+P.
-func (ws *Workspace) TogglePalette() {
+// togglePalette opens or closes the command palette. Bound to Cmd+Shift+P.
+func (ws *Workspace) togglePalette() {
 	if ws.palette.visible {
 		ws.closePalette()
 		return
@@ -144,7 +144,7 @@ func (ws *Workspace) TogglePalette() {
 // the terminal stays deaf afterwards — the same failure closeThemeBrowser
 // documents.
 func (ws *Workspace) closePalette() {
-	ws.palette = palette{gen: ws.palette.gen} // gen must survive; see TogglePalette
+	ws.palette = palette{gen: ws.palette.gen} // gen must survive; see togglePalette
 	if p := ws.ActivePane(); p != nil {
 		ws.w.SetFocus(p.FocusID())
 	}

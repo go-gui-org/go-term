@@ -82,7 +82,7 @@ func TestParser_DECSTR_SoftReset(t *testing.T) {
 	g, p := newParserGrid(4, 8)
 	feed(t, g, p, []byte("\x1b[1;31m\x1b[?6h\x1b[?25l\x1b[2;3r\x1b[4h"))
 	feed(t, g, p, []byte("\x1b[!p"))
-	if g.CurAttrs != 0 || g.CurFG != DefaultColor {
+	if g.CurAttrs != 0 || g.CurFG != defaultColor {
 		t.Errorf("SGR survived DECSTR: attrs=%d fg=%d", g.CurAttrs, g.CurFG)
 	}
 	if g.OriginMode || !g.CursorVisible || g.InsertMode {

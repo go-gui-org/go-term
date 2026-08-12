@@ -402,18 +402,7 @@ func (t *Term) onKeyDown(ctx gui.EventCtx) {
 		verb, isHintChord = hintCopy, true
 	}
 	if isHintChord {
-		switch {
-		case !t.hints.active:
-			t.enterHints(ctx.Window, verb)
-		case t.hints.verb == verb:
-			t.exitHints(ctx.Window) // same chord toggles back out
-		default:
-			// The *other* chord switches what committing does. Dropping a set
-			// of labels the user is already reading, only to relabel the same
-			// links a keystroke later, would be the worse answer.
-			t.hints.verb = verb
-			t.scheduleViewUpdate(ctx.Window)
-		}
+		t.toggleHints(verb, ctx.Window)
 		ctx.Consume()
 		return
 	}
@@ -474,6 +463,20 @@ func (t *Term) onKeyDown(ctx gui.EventCtx) {
 	ctx.Consume()
 }
 
+// openSearchBar resets and opens the search bar. Shared by the keyboard path
+// and direct action dispatch; both must start from the same clean state.
+// Main-thread only.
+func (t *Term) openSearchBar(w *gui.Window) {
+	t.search.active = true
+	t.search.query = ""
+	t.search.matches = nil
+	t.search.idx = 0
+	t.bumpVersion()
+	if w != nil {
+		w.UpdateWindow()
+	}
+}
+
 // handleSearchKey handles the search bar lifecycle: Cmd+F opens it,
 // Cmd+Up/Down jumps between prompt marks, and while active, editing and
 // navigation keys are intercepted. Returns true when the event was consumed.
@@ -503,13 +506,8 @@ func (t *Term) binds(a Action, e *gui.Event) bool {
 func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 	// Primary+F opens the search bar (Cmd+F on macOS, Ctrl+Shift+F on Windows).
 	if t.binds(ActionFind, e) {
-		t.search.active = true
-		t.search.query = ""
-		t.search.matches = nil
-		t.search.idx = 0
+		t.openSearchBar(w)
 		e.IsHandled = true
-		t.bumpVersion()
-		w.UpdateWindow()
 		return true
 	}
 

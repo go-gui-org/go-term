@@ -7,7 +7,7 @@ import (
 	"github.com/go-gui-org/go-term/term"
 )
 
-// Tab activity indicators. A background tab collects three states from the
+// tab activity indicators. A background tab collects three states from the
 // output of its panes — something happened, the bell rang, it has gone quiet
 // again — and the tab bar renders whichever is most interesting.
 //
@@ -86,7 +86,7 @@ func (ws *Workspace) onPaneActivity(leafID string, kind term.ActivityKind) {
 // active tab never carries one — activateTab clears the state of whichever tab
 // the user switches to, and the check short-circuits ahead of resolving an
 // indicator that would be discarded.
-func (ws *Workspace) tabGlyph(tab *Tab, isActive bool) string {
+func (ws *Workspace) tabGlyph(tab *tab, isActive bool) string {
 	if isActive {
 		return ""
 	}
@@ -97,7 +97,7 @@ func (ws *Workspace) tabGlyph(tab *Tab, isActive bool) string {
 // rather than read here so the tab bar and the activity handler cannot
 // disagree about the current time, and so a test can move it. Caller is on
 // the main thread.
-func (t *Tab) indicatorAt(now time.Time) tabIndicator {
+func (t *tab) indicatorAt(now time.Time) tabIndicator {
 	switch {
 	case t.bell:
 		return indicatorBell
@@ -112,7 +112,7 @@ func (t *Tab) indicatorAt(now time.Time) tabIndicator {
 
 // clearActivity drops a tab's accumulated indicator state. Called when the
 // tab becomes active — the user is now looking at whatever it was reporting.
-func (t *Tab) clearActivity() {
+func (t *tab) clearActivity() {
 	t.lastActivity = time.Time{}
 	t.bell = false
 }

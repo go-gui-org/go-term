@@ -7,7 +7,9 @@ import (
 // Fixture is a replay-test scenario used by the emulator conformance
 // test harness and the script2fixture CLI tool. It is public so that
 // external test packages (term_test) can use it, but it is not part of
-// the widget's public API — embedders should not depend on it.
+// the widget's public API — embedders should not depend on it, and it
+// carries no compatibility guarantee: it can change or move to
+// term/termtest without a major-version bump.
 //
 // Input bytes are base64-encoded so control characters survive any text
 // editor round-trip.
@@ -44,7 +46,8 @@ func gridLines(g *grid) []string {
 // CaptureFixture feeds raw terminal bytes through a fresh Grid+Parser and
 // returns a Fixture representing the final state. This is test
 // infrastructure — used by the script2fixture CLI tool and the
-// fixture_capture test helper — and is not part of the widget's public API.
+// fixture_capture test helper — and is not part of the widget's public API:
+// no compatibility guarantee (see Fixture).
 func CaptureFixture(name string, rows, cols int, input []byte) Fixture {
 	g := newGrid(rows, cols)
 	p := newParser(g)

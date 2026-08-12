@@ -15,13 +15,13 @@ import (
 // when Cfg.RecordDir is unset.
 const recordingsDirName = "recordings"
 
-// ToggleRecording starts a session recording on the focused pane, or stops
+// toggleRecording starts a session recording on the focused pane, or stops
 // the one already running there. Bound to Cmd+Shift+R.
 //
 // Recording is per-pane, not per-workspace: the interesting session is the
 // one the user is looking at, and a workspace-wide recording would interleave
 // unrelated byte streams into a file that could not be replayed.
-func (ws *Workspace) ToggleRecording() {
+func (ws *Workspace) toggleRecording() {
 	tm := ws.ActivePane()
 	if tm == nil {
 		return

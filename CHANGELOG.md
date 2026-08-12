@@ -6,6 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-12
+
+### API freeze
+
+v0.8.0 fixes the public surface that v1.0.0 will inherit. Every exported
+symbol now has a deliberate reason and a complete doc comment; what had no
+external consumer is unexported. This is the release to build against — the
+intent is that v1.0.0 (when go-gui reaches it) changes nothing here except
+removing the remaining deprecation shims.
+
+**Unexported in `term`:** `DefaultColor` (internal packed-color encoding).
+`Fixture`/`CaptureFixture` stay public but are explicitly marked test
+infrastructure with no compatibility guarantee.
+
+**Unexported in `term/workspace`:** `Tab`, `SplitDir`/`SplitVertical`/
+`SplitHorizontal`, and the keyboard-command methods an embedder never called —
+`AddTab`, `CloseTab`, `ClosePane`, `SplitPane`, `NextPane`, `PrevPane`,
+`GoToTab`, `MoveTabLeft/Right`, `NextTab`, `PrevTab`, `FocusPane`,
+`ToggleHelp`, `TogglePalette`, `ToggleThemeBrowser`, `ToggleRecording`,
+`ToggleBroadcast`, `Broadcasting`, `ReloadConfig`. The workspace keeps
+`Workspace`, `New`, `Restore`, `Close`, `View`, `Cfg`, `Save`,
+`DefaultWorkspacePath`, `DefaultConfigPath`, `LiveTermCount` and `ActivePane`
+(the last two because falcon, the reference embedder, uses them).
+
+**`RunAction` reaches every action.** It dispatches through a real
+`Action → handler` table instead of synthesizing the action's chord, so an
+action a user unbinds from the keyboard is still invocable from a command
+palette. The copy-mode, search-bar and alt-screen mode gates move into the
+dispatch path, byte-for-byte the same rules the keyboard applies; the
+copy-mode key handlers now share one operation table with direct dispatch, so
+the two cannot diverge.
+
 ### Added
 
 - `term`: `GOTERM_LATENCY` keystroke-to-frame instrumentation. Set it to `1` (or
@@ -20,49 +52,54 @@ adheres to [Semantic Versioning](https://semver.org/).
   default and inert when off. It measures up to the end of `onDraw` only — GPU
   submit, compositor and vsync are invisible from inside the process and add
   another 8–17 ms on a 60 Hz display, so the numbers are a lower bound.
+- `term`: `[env]` section in the config file plus `Cfg.Identity`: the host
+  terminal's identity variables are scrubbed from each child's environment and
+  `TERM_PROGRAM` names this terminal (`go-term`, or whatever the config says),
+  so image-picking apps (yazi, superfile) choose a protocol go-term actually
+  speaks.
+- `term/workspace`: **Cmd+S saves the workspace.** New `workspace.save` command
+  bound to Super+S (rebindable like every command); it writes the layout to the
+  new `Cfg.SavePath` field, falling back to the default workspace path. Falcon
+  sets `SavePath` to its effective save target, so Cmd+S and quit save to the
+  same file.
+- `falcon`: window icon and `WM_CLASS` on Linux/Windows; release workflow with
+  packaging and a Homebrew tap.
 
 ### Changed
 
 - **BREAKING: event callbacks take a single `gui.EventCtx`.** Bump go-gui
-  v0.51.1 → v0.52.0. `(*gui.Layout, *gui.Event, *gui.Window)` becomes
+  v0.51.1 → v0.59.0. `(*gui.Layout, *gui.Event, *gui.Window)` becomes
   `func(gui.EventCtx)`, exposing the three as `ctx.Layout`, `ctx.Event` and
-  `ctx.Window`.
+  `ctx.Window`; go-gui then migrated to the one-event rule (v0.55.0), removed
+  `Padding` self-flags and `SomeP` (v0.57.0), and shipped per-scope IDs and
+  debug categories (v0.56.0). `go-glyph` follows to v1.20.0. Migration guides
+  for the go-gui side live in go-gui's `docs/`.
 - **Consume-class callbacks are handled by default.** `OnClick` and `OnChar` are
   marked handled by dispatch before the callback runs. The help and palette
   backdrops gained an explicit `ctx.Bubble()` on their window-edge guard: that
   path exists so a resize drag starting near the window edge is not mistaken for
   a click-outside-to-dismiss, and it has to keep passing the press through
   rather than swallowing it.
-- Migration guide upstream: `docs/migration-eventctx.md` in go-gui.
-
-### Changed
-
-- `deps`: `go-glyph` v1.18.2 → v1.18.3. Batches atlas uploads to the frame
-  boundary: the v1.18.2 one-frame-lag fix uploaded the whole atlas page per draw
-  call, so a terminal frame's hundreds of per-glyph text calls turned any
+- `term`: `Fixtures`-class recording bytes now stream through the same
+  frame-boundary batching as glyph uploads — go-glyph v1.18.3 fixed a
+  one-frame-lag that uploaded the whole atlas page per draw call, turning any
   glyph-cold frame (scrolling into scrollback rows the screen never painted)
-  into GB-scale main-thread texture uploads — measured 355 ms per frame for 1500
-  fresh glyphs. Frame-boundary batching costs 17 ms / 43 MB. The issue-#89
-  ordering guarantee is preserved.
-- `deps`: `go-gui` v0.50.0 → v0.51.0. Gives `gui.Event.ScrollY` a defined unit —
-  lines of text for discrete wheel deltas — and makes the Win32 backend honour
-  the user's `SPI_GETWHEELSCROLLLINES` setting, which it had been discarding.
-  Required by the wheel fix below.
+  into GB-scale main-thread texture uploads (measured 355 ms per frame for 1500
+  fresh glyphs; frame-boundary batching costs 17 ms / 43 MB).
 
 ### Fixed
 
-- `term`: mouse-wheel scrolling was far too slow on Windows and Linux. A wheel
-  delta is now measured in lines and scaled by the cell height, so one reported
-  line moves exactly one grid row and a notch travels three — the xterm / kitty
-  / Windows Terminal convention. It was a flat 5px per unit, tuned against the
-  Metal backend's old 2.5-per-notch pre-scale; the Win32 and X11 backends
-  reported a bare 1.0 for the same notch, landing them at 5px against a ~18px
-  cell — barely a quarter of a row. Requires go-gui's defined `Event.ScrollY`
-  unit. `wheelReportTicks` picks the new distance up unchanged, so the SGR wheel
-  reports sent to `vim` and `tmux` now match how far the local viewport moves
-  instead of being floored at one tick per event. Trackpad panning is
-  unaffected.
-
+- `term`: mouse-wheel scrolling was far too slow on Windows and Linux, and
+  mismatched Ghostty on retina displays. A wheel delta is now measured in lines
+  and scaled by the cell height (and the retina sensitivity matched), so one
+  reported line moves exactly one grid row and a notch travels three — the
+  xterm / kitty / Windows Terminal convention.
+- `term`: Super+Shift+V paste no longer types a trailing `V` on Linux (the
+  synth char event duplicated the paste).
+- `term`: Windows pty teardown is bounded, so a live child cannot hang `Close`.
+- `term`: the bottom-row background only bleeds when the row is uniform.
+- `term`: cell origins snap to the device pixel grid, eliminating half-pixel
+  seams on scaled displays.
 - `docs`: `config.md` listed only the `Cmd` chord for every `workspace.*`
   command, so a Windows user reading the table saw shortcuts that cannot fire
   there — Super is OS-reserved and the defaults are remapped. Both forms are now

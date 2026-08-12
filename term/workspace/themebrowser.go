@@ -129,9 +129,9 @@ func (ws *Workspace) browserFilterID() string {
 	return browserFilterID + strconv.Itoa(ws.browser.gen)
 }
 
-// ToggleThemeBrowser opens or closes the full-window theme browser. Bound to
+// toggleThemeBrowser opens or closes the full-window theme browser. Bound to
 // Cmd+Shift+T. No-op when no themes are configured.
-func (ws *Workspace) ToggleThemeBrowser() {
+func (ws *Workspace) toggleThemeBrowser() {
 	if len(ws.cfg.Themes) == 0 {
 		return
 	}
@@ -140,7 +140,7 @@ func (ws *Workspace) ToggleThemeBrowser() {
 		return
 	}
 	// Bump the generation on every open, never resetting it — same reason the
-	// palette does (see TogglePalette): refresh no longer wipes go-gui's state
+	// palette does (see togglePalette): refresh no longer wipes go-gui's state
 	// registry, so an Input ID a previous open typed into still holds that text.
 	ws.browser = themeBrowser{visible: true, gen: ws.browser.gen + 1}
 	active := ws.activeThemeIdx()
@@ -176,7 +176,7 @@ func (ws *Workspace) ToggleThemeBrowser() {
 func (ws *Workspace) closeThemeBrowser(cancel bool) {
 	revert := cancel && ws.browser.applied && ws.browser.prevOK
 	prev := ws.browser.prev
-	ws.browser = themeBrowser{gen: ws.browser.gen} // gen must survive; see ToggleThemeBrowser
+	ws.browser = themeBrowser{gen: ws.browser.gen} // gen must survive; see toggleThemeBrowser
 	if revert {
 		ws.applyThemeImpl(prev)
 	}

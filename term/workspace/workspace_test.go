@@ -78,7 +78,7 @@ func TestNew_NilWindowReturnsError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tab navigation no-op paths
+// tab navigation no-op paths
 //
 // These exercise the early-return guards that do not touch the window, so a
 // Workspace can be hand-built with a nil window. Index changes that would
@@ -87,43 +87,43 @@ func TestNew_NilWindowReturnsError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGoToTab_OutOfRangeNoop(t *testing.T) {
-	ws := &Workspace{tabs: []*Tab{{}, {}}, activeTab: 1}
-	ws.GoToTab(-1)
+	ws := &Workspace{tabs: []*tab{{}, {}}, activeTab: 1}
+	ws.goToTab(-1)
 	if ws.activeTab != 1 {
 		t.Errorf("negative index changed activeTab to %d, want 1", ws.activeTab)
 	}
-	ws.GoToTab(5)
+	ws.goToTab(5)
 	if ws.activeTab != 1 {
 		t.Errorf("too-large index changed activeTab to %d, want 1", ws.activeTab)
 	}
 }
 
 func TestGoToTab_SameIndexNoop(t *testing.T) {
-	ws := &Workspace{tabs: []*Tab{{}, {}}, activeTab: 1}
-	ws.GoToTab(1) // activateTab returns early when idx == activeTab
+	ws := &Workspace{tabs: []*tab{{}, {}}, activeTab: 1}
+	ws.goToTab(1) // activateTab returns early when idx == activeTab
 	if ws.activeTab != 1 {
-		t.Errorf("same-index GoToTab changed activeTab to %d, want 1", ws.activeTab)
+		t.Errorf("same-index goToTab changed activeTab to %d, want 1", ws.activeTab)
 	}
 }
 
 func TestNextTab_SingleTabNoop(t *testing.T) {
-	ws := &Workspace{tabs: []*Tab{{}}, activeTab: 0}
-	ws.NextTab()
+	ws := &Workspace{tabs: []*tab{{}}, activeTab: 0}
+	ws.nextTab()
 	if ws.activeTab != 0 {
-		t.Errorf("NextTab with one tab changed activeTab to %d, want 0", ws.activeTab)
+		t.Errorf("nextTab with one tab changed activeTab to %d, want 0", ws.activeTab)
 	}
 }
 
 func TestPrevTab_SingleTabNoop(t *testing.T) {
-	ws := &Workspace{tabs: []*Tab{{}}, activeTab: 0}
-	ws.PrevTab()
+	ws := &Workspace{tabs: []*tab{{}}, activeTab: 0}
+	ws.prevTab()
 	if ws.activeTab != 0 {
-		t.Errorf("PrevTab with one tab changed activeTab to %d, want 0", ws.activeTab)
+		t.Errorf("prevTab with one tab changed activeTab to %d, want 0", ws.activeTab)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// MoveTabLeft / MoveTabRight — no-op guard paths
+// moveTabLeft / moveTabRight — no-op guard paths
 //
 // The active paths (swapping then calling refresh()) need a live *gui.Window
 // and are covered visually via examples/falcon. These exercise the early-return
@@ -131,8 +131,8 @@ func TestPrevTab_SingleTabNoop(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMoveTabLeft_SingleTabNoop(t *testing.T) {
-	ws := &Workspace{tabs: []*Tab{{id: "a"}}, activeTab: 0}
-	ws.MoveTabLeft()
+	ws := &Workspace{tabs: []*tab{{id: "a"}}, activeTab: 0}
+	ws.moveTabLeft()
 	if ws.activeTab != 0 {
 		t.Errorf("activeTab = %d, want 0", ws.activeTab)
 	}
@@ -142,8 +142,8 @@ func TestMoveTabLeft_SingleTabNoop(t *testing.T) {
 }
 
 func TestMoveTabLeft_FirstTabNoop(t *testing.T) {
-	ws := &Workspace{tabs: []*Tab{{id: "a"}, {id: "b"}}, activeTab: 0}
-	ws.MoveTabLeft()
+	ws := &Workspace{tabs: []*tab{{id: "a"}, {id: "b"}}, activeTab: 0}
+	ws.moveTabLeft()
 	if ws.activeTab != 0 {
 		t.Errorf("activeTab = %d, want 0", ws.activeTab)
 	}
@@ -154,23 +154,23 @@ func TestMoveTabLeft_FirstTabNoop(t *testing.T) {
 
 func TestMoveTabLeft_EmptyTabsNoop(t *testing.T) {
 	ws := &Workspace{tabs: nil, activeTab: 0}
-	ws.MoveTabLeft()
+	ws.moveTabLeft()
 	if ws.activeTab != 0 {
 		t.Errorf("activeTab = %d, want 0", ws.activeTab)
 	}
 }
 
 func TestMoveTabLeft_NegativeActiveTabNoop(t *testing.T) {
-	ws := &Workspace{tabs: []*Tab{{id: "a"}, {id: "b"}}, activeTab: -1}
-	ws.MoveTabLeft()
+	ws := &Workspace{tabs: []*tab{{id: "a"}, {id: "b"}}, activeTab: -1}
+	ws.moveTabLeft()
 	if ws.activeTab != -1 {
 		t.Errorf("activeTab = %d, want -1", ws.activeTab)
 	}
 }
 
 func TestMoveTabRight_SingleTabNoop(t *testing.T) {
-	ws := &Workspace{tabs: []*Tab{{id: "a"}}, activeTab: 0}
-	ws.MoveTabRight()
+	ws := &Workspace{tabs: []*tab{{id: "a"}}, activeTab: 0}
+	ws.moveTabRight()
 	if ws.activeTab != 0 {
 		t.Errorf("activeTab = %d, want 0", ws.activeTab)
 	}
@@ -180,8 +180,8 @@ func TestMoveTabRight_SingleTabNoop(t *testing.T) {
 }
 
 func TestMoveTabRight_LastTabNoop(t *testing.T) {
-	ws := &Workspace{tabs: []*Tab{{id: "a"}, {id: "b"}}, activeTab: 1}
-	ws.MoveTabRight()
+	ws := &Workspace{tabs: []*tab{{id: "a"}, {id: "b"}}, activeTab: 1}
+	ws.moveTabRight()
 	if ws.activeTab != 1 {
 		t.Errorf("activeTab = %d, want 1", ws.activeTab)
 	}
@@ -192,15 +192,15 @@ func TestMoveTabRight_LastTabNoop(t *testing.T) {
 
 func TestMoveTabRight_EmptyTabsNoop(t *testing.T) {
 	ws := &Workspace{tabs: nil, activeTab: 0}
-	ws.MoveTabRight()
+	ws.moveTabRight()
 	if ws.activeTab != 0 {
 		t.Errorf("activeTab = %d, want 0", ws.activeTab)
 	}
 }
 
 func TestMoveTabRight_NegativeActiveTabNoop(t *testing.T) {
-	ws := &Workspace{tabs: []*Tab{{id: "a"}, {id: "b"}}, activeTab: -1}
-	ws.MoveTabRight()
+	ws := &Workspace{tabs: []*tab{{id: "a"}, {id: "b"}}, activeTab: -1}
+	ws.moveTabRight()
 	if ws.activeTab != -1 {
 		t.Errorf("activeTab = %d, want -1", ws.activeTab)
 	}
@@ -218,7 +218,7 @@ func TestLiveTermCount_NoTabsAndEmptyTermsReturnsZero(t *testing.T) {
 	if n := (&Workspace{}).LiveTermCount(); n != 0 {
 		t.Errorf("empty workspace: got %d, want 0", n)
 	}
-	ws := &Workspace{tabs: []*Tab{
+	ws := &Workspace{tabs: []*tab{
 		{terms: map[string]*term.Term{}}, // non-nil empty map
 		{},                               // nil terms map
 	}}
@@ -239,7 +239,7 @@ func TestToggleThemeBrowser_ZeroThemesNoop(t *testing.T) {
 	ws := &Workspace{cfg: Cfg{}}
 	// Must not panic, and it must not open — the guard runs before ws.w is
 	// touched, which matters because ws.w is nil here.
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	if ws.browser.visible {
 		t.Error("browser unexpectedly visible with zero themes")
 	}
@@ -294,7 +294,7 @@ func TestApplyThemeByName_CaseInsensitiveMatch(t *testing.T) {
 
 func TestApplyThemeByName_SetsTheme(t *testing.T) {
 	ws := &Workspace{
-		tabs: []*Tab{{terms: make(map[string]*term.Term)}},
+		tabs: []*tab{{terms: make(map[string]*term.Term)}},
 		cfg: Cfg{
 			Themes: []term.NamedTheme{
 				{Name: "Default", Theme: term.DefaultTheme},
@@ -321,7 +321,7 @@ func TestApplyThemeByName_SetsTheme(t *testing.T) {
 func TestNotifyColorScheme(t *testing.T) {
 	var got []bool
 	ws := &Workspace{
-		tabs: []*Tab{{terms: make(map[string]*term.Term)}},
+		tabs: []*tab{{terms: make(map[string]*term.Term)}},
 		cfg: Cfg{
 			Themes: []term.NamedTheme{
 				{Name: "Default", Theme: term.DefaultTheme},

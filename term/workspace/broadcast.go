@@ -33,7 +33,7 @@ const broadcastPillPad = 8
 // pane is what keeps toggling free: an inset border would shrink every pane's
 // draw box, which can cross a cell boundary and reflow every shell in the tab
 // through a SIGWINCH.
-func dividerColor(tab *Tab) gui.Color {
+func dividerColor(tab *tab) gui.Color {
 	if tab != nil && tab.broadcast {
 		return broadcastTint
 	}
@@ -66,7 +66,7 @@ func (ws *Workspace) broadcastPill() gui.View {
 	return gui.Column(pill)
 }
 
-// ToggleBroadcast turns input broadcast on or off for the active tab.
+// toggleBroadcast turns input broadcast on or off for the active tab.
 // Bound to Cmd+Shift+I by default.
 //
 // Deliberately unconditional — it toggles on a single-pane tab and survives a
@@ -74,7 +74,7 @@ func (ws *Workspace) broadcastPill() gui.View {
 // the toggle, or auto-clearing it on pane close, would trade one visible state
 // for a rule the user has to remember; the pill is the safety mechanism here,
 // and it is on screen the whole time the mode is armed.
-func (ws *Workspace) ToggleBroadcast() {
+func (ws *Workspace) toggleBroadcast() {
 	tab := ws.activeTabPtr()
 	if tab == nil {
 		return
@@ -83,16 +83,16 @@ func (ws *Workspace) ToggleBroadcast() {
 	ws.refresh()
 }
 
-// Broadcasting reports whether the active tab is mirroring input. Drives the
+// broadcasting reports whether the active tab is mirroring input. Drives the
 // divider tint and the status pill.
-func (ws *Workspace) Broadcasting() bool {
+func (ws *Workspace) broadcasting() bool {
 	tab := ws.activeTabPtr()
 	return tab != nil && tab.broadcast
 }
 
 // activeTabPtr returns the active tab, or nil when the workspace is empty or
 // the index is out of range (both happen transiently while tabs are closing).
-func (ws *Workspace) activeTabPtr() *Tab {
+func (ws *Workspace) activeTabPtr() *tab {
 	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs) {
 		return nil
 	}
@@ -125,7 +125,7 @@ func (ws *Workspace) onPaneInput(srcID string, p []byte, kind term.InputKind) {
 // broadcastSource returns the tab whose input should be mirrored, or nil when
 // this callback must be ignored: no active tab, broadcast off, or the source
 // pane belongs to some other tab.
-func (ws *Workspace) broadcastSource(srcID string) *Tab {
+func (ws *Workspace) broadcastSource(srcID string) *tab {
 	tab := ws.activeTabPtr()
 	if tab == nil || !tab.broadcast {
 		return nil

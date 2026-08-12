@@ -48,18 +48,18 @@ func TestKGPDiacriticValue(t *testing.T) {
 func TestDecodePlaceholder_SpecExample(t *testing.T) {
 	fg := paletteColor(42)
 	var prev placeholderCell
-	pc, ok := decodePlaceholder(ph(dia0, dia0), fg, DefaultColor, prev)
+	pc, ok := decodePlaceholder(ph(dia0, dia0), fg, defaultColor, prev)
 	if !ok {
 		t.Fatal("(0,0) did not decode")
 	}
 	if pc.imageID != 42 || pc.row != 0 || pc.col != 0 {
 		t.Fatalf("(0,0) decoded as id=%d row=%d col=%d", pc.imageID, pc.row, pc.col)
 	}
-	pc, ok = decodePlaceholder(ph(dia0, dia1), fg, DefaultColor, pc)
+	pc, ok = decodePlaceholder(ph(dia0, dia1), fg, defaultColor, pc)
 	if !ok || pc.row != 0 || pc.col != 1 {
 		t.Fatalf("(0,1) decoded as row=%d col=%d ok=%v", pc.row, pc.col, ok)
 	}
-	pc, ok = decodePlaceholder(ph(dia1, dia0), fg, DefaultColor, placeholderCell{})
+	pc, ok = decodePlaceholder(ph(dia1, dia0), fg, defaultColor, placeholderCell{})
 	if !ok || pc.row != 1 || pc.col != 0 {
 		t.Fatalf("(1,0) decoded as row=%d col=%d ok=%v", pc.row, pc.col, ok)
 	}
@@ -69,7 +69,7 @@ func TestDecodePlaceholder_SpecExample(t *testing.T) {
 // the spec's 33554474 = 42 + (2 << 24).
 func TestDecodePlaceholder_MostSignificantByte(t *testing.T) {
 	pc, ok := decodePlaceholder(ph(dia0, dia0, dia2),
-		paletteColor(42), DefaultColor, placeholderCell{})
+		paletteColor(42), defaultColor, placeholderCell{})
 	if !ok {
 		t.Fatal("did not decode")
 	}
@@ -81,7 +81,7 @@ func TestDecodePlaceholder_MostSignificantByte(t *testing.T) {
 // True-color foreground carries a 24-bit image id directly.
 func TestDecodePlaceholder_TrueColorID(t *testing.T) {
 	pc, ok := decodePlaceholder(ph(dia0, dia0),
-		rgbColor(0x01, 0x02, 0x03), DefaultColor, placeholderCell{})
+		rgbColor(0x01, 0x02, 0x03), defaultColor, placeholderCell{})
 	if !ok || pc.imageID != 0x010203 {
 		t.Fatalf("imageID = %#x ok=%v; want 0x010203", pc.imageID, ok)
 	}
@@ -142,7 +142,7 @@ func TestDecodePlaceholder_InheritanceNeedsSameColors(t *testing.T) {
 
 // A bare placeholder with no run to its left cannot be resolved.
 func TestDecodePlaceholder_BareWithoutRun(t *testing.T) {
-	if _, ok := decodePlaceholder(ph(), paletteColor(42), DefaultColor,
+	if _, ok := decodePlaceholder(ph(), paletteColor(42), defaultColor,
 		placeholderCell{}); ok {
 		t.Error("bare placeholder decoded with no preceding run")
 	}
@@ -157,13 +157,13 @@ func TestDecodePlaceholder_Rejects(t *testing.T) {
 	}{
 		{"ordinary text", "a", paletteColor(42)},
 		{"empty", "", paletteColor(42)},
-		{"default foreground", ph(dia0, dia0), DefaultColor},
+		{"default foreground", ph(dia0, dia0), defaultColor},
 		{"palette index 0", ph(dia0, dia0), paletteColor(0)},
 		{"non-table combining mark", ph(dia0) + "́", paletteColor(42)},
 		{"four diacritics", ph(dia0, dia0, dia0, dia0), paletteColor(42)},
 	}
 	for _, tc := range cases {
-		if _, ok := decodePlaceholder(tc.text, tc.fg, DefaultColor,
+		if _, ok := decodePlaceholder(tc.text, tc.fg, defaultColor,
 			placeholderCell{}); ok {
 			t.Errorf("%s: decoded as a placeholder", tc.name)
 		}

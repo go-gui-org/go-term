@@ -24,7 +24,7 @@ func TestGrid_Resize_Grow(t *testing.T) {
 	if g.At(0, 0).Ch != 'x' {
 		t.Errorf("grow should preserve content: %v", g.At(0, 0).Ch)
 	}
-	if g.At(3, 4).Ch != ' ' || g.At(3, 4).FG != DefaultColor {
+	if g.At(3, 4).Ch != ' ' || g.At(3, 4).FG != defaultColor {
 		t.Errorf("new cell not default: %+v", *g.At(3, 4))
 	}
 }
@@ -82,7 +82,7 @@ func TestGrid_Resize_ReflowsScrollback(t *testing.T) {
 		t.Errorf("grow: live[0] = %v%v%v%v, want abcd",
 			g.At(0, 0).Ch, g.At(0, 1).Ch, g.At(0, 2).Ch, g.At(0, 3).Ch)
 	}
-	if c := g.At(0, 4); c.Ch != ' ' || c.FG != DefaultColor || c.BG != DefaultColor {
+	if c := g.At(0, 4); c.Ch != ' ' || c.FG != defaultColor || c.BG != defaultColor {
 		t.Errorf("grow: live[0][4] not default blank: %+v", *c)
 	}
 }
@@ -626,7 +626,7 @@ func TestLogicalReflow_ShortCellBufferTruncates(t *testing.T) {
 	// rows that are really there and drop the phantom ones.
 	cells := make([]cell, 10) // 2 rows of 5
 	for i, r := range "helloworld" {
-		cells[i] = cell{Ch: r, Width: 1, FG: DefaultColor, BG: DefaultColor}
+		cells[i] = cell{Ch: r, Width: 1, FG: defaultColor, BG: defaultColor}
 	}
 	cfg := reflowConfig{
 		cells:      cells,

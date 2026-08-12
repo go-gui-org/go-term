@@ -38,7 +38,7 @@ func TestParser_SGR_Reset(t *testing.T) {
 	g.CurBG = 6
 	g.CurAttrs = attrBold | attrUnderline
 	feed(t, g, p, []byte("\x1b[m"))
-	if g.CurFG != DefaultColor || g.CurBG != DefaultColor || g.CurAttrs != 0 {
+	if g.CurFG != defaultColor || g.CurBG != defaultColor || g.CurAttrs != 0 {
 		t.Errorf("SGR reset failed: fg=%d bg=%d attrs=%d",
 			g.CurFG, g.CurBG, g.CurAttrs)
 	}
@@ -63,7 +63,7 @@ func TestParser_SGR_FG_BG(t *testing.T) {
 		t.Errorf("fg/bg: %d %d", g.CurFG, g.CurBG)
 	}
 	feed(t, g, p, []byte("\x1b[39;49m"))
-	if g.CurFG != DefaultColor || g.CurBG != DefaultColor {
+	if g.CurFG != defaultColor || g.CurBG != defaultColor {
 		t.Errorf("default: %d %d", g.CurFG, g.CurBG)
 	}
 }
@@ -886,7 +886,7 @@ func TestParser_ModifyOtherKeys_Inert(t *testing.T) {
 			if g.CurAttrs != 0 {
 				t.Errorf("%q leaked into SGR state: attrs=%09b", seq, g.CurAttrs)
 			}
-			if g.CurFG != DefaultColor || g.CurBG != DefaultColor {
+			if g.CurFG != defaultColor || g.CurBG != defaultColor {
 				t.Errorf("%q disturbed colors: fg=%08x bg=%08x", seq, g.CurFG, g.CurBG)
 			}
 			// Silence is the contract: a reply would tell the client the mode
@@ -963,8 +963,8 @@ func TestParser_SGR24_ClearsUnderline(t *testing.T) {
 	if g.CurULStyle != ulNone {
 		t.Errorf("SGR 24: CurULStyle = %d, want 0", g.CurULStyle)
 	}
-	if g.CurULColor != DefaultColor {
-		t.Errorf("SGR 24: CurULColor = %#x, want DefaultColor", g.CurULColor)
+	if g.CurULColor != defaultColor {
+		t.Errorf("SGR 24: CurULColor = %#x, want defaultColor", g.CurULColor)
 	}
 }
 
@@ -990,8 +990,8 @@ func TestParser_SGR59_ResetsULColor(t *testing.T) {
 	g, p := newParserGrid(2, 10)
 	g.CurULColor = rgbColor(0, 255, 0)
 	feed(t, g, p, []byte("\x1b[59m"))
-	if g.CurULColor != DefaultColor {
-		t.Errorf("SGR 59: CurULColor = %#x, want DefaultColor", g.CurULColor)
+	if g.CurULColor != defaultColor {
+		t.Errorf("SGR 59: CurULColor = %#x, want defaultColor", g.CurULColor)
 	}
 }
 
@@ -1004,8 +1004,8 @@ func TestParser_SGRReset_ClearsULState(t *testing.T) {
 	if g.CurULStyle != ulNone {
 		t.Errorf("SGR 0: CurULStyle = %d, want 0", g.CurULStyle)
 	}
-	if g.CurULColor != DefaultColor {
-		t.Errorf("SGR 0: CurULColor = %#x, want DefaultColor", g.CurULColor)
+	if g.CurULColor != defaultColor {
+		t.Errorf("SGR 0: CurULColor = %#x, want defaultColor", g.CurULColor)
 	}
 	if g.CurAttrs&attrUnderline != 0 {
 		t.Error("SGR 0: attrUnderline should be cleared")
@@ -1309,8 +1309,8 @@ func TestParser_RectOps_Dispatch(t *testing.T) {
 			g, p := newParserGrid(3, 4)
 			fillGrid(g, 'X')
 			// A protected 'P' at (0,1) so the selective forms are observable.
-			g.Cells[1] = cell{Ch: 'P', FG: DefaultColor, BG: DefaultColor,
-				ULColor: DefaultColor, Width: 1, Attrs: attrProtected}
+			g.Cells[1] = cell{Ch: 'P', FG: defaultColor, BG: defaultColor,
+				ULColor: defaultColor, Width: 1, Attrs: attrProtected}
 			feed(t, g, p, []byte(tt.input))
 			wantRows(t, g, tt.want)
 		})

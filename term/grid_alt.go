@@ -86,9 +86,9 @@ func (g *grid) EnterAlt() {
 	g.Cells = cells
 	g.RowWrapped = make([]bool, g.Rows)
 	g.CursorR, g.CursorC = 0, 0
-	g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, 0
+	g.CurFG, g.CurBG, g.CurAttrs = defaultColor, defaultColor, 0
 	g.CurULStyle = 0
-	g.CurULColor = DefaultColor
+	g.CurULColor = defaultColor
 	g.CharsetG0 = charsetASCII
 	g.CharsetG1 = charsetASCII
 	g.ActiveG = 0

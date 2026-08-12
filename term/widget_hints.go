@@ -102,6 +102,23 @@ func (t *Term) exitHints(w *gui.Window) {
 	t.scheduleViewUpdate(w)
 }
 
+// toggleHints is the shared entry-chord handler for both the keyboard path
+// (onKeyDown) and direct action dispatch (actionDispatch). The same chord
+// toggles back out; the *other* chord switches what committing does —
+// dropping a set of labels the user is already reading, only to relabel the
+// same links a keystroke later, would be the worse answer. Main-thread only.
+func (t *Term) toggleHints(verb hintVerb, w *gui.Window) {
+	switch {
+	case !t.hints.active:
+		t.enterHints(w, verb)
+	case t.hints.verb == verb:
+		t.exitHints(w)
+	default:
+		t.hints.verb = verb
+		t.scheduleViewUpdate(w)
+	}
+}
+
 // handleHintsChar feeds one typed character to the label matcher. Every rune is
 // consumed by the mode whether or not it matches; see the swallow rule in
 // onChar. Main-thread only.

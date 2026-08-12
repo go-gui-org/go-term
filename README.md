@@ -47,6 +47,51 @@ term.find               = Cmd+G
 See [docs/config.md](docs/config.md) for every section, key, default, and the
 full list of rebindable actions.
 
+## Embedding
+
+`term` is a library; falcon is its proof. The public surface is frozen at
+v0.8.0 — the export audit and Godoc pass landed there, so what is documented
+is what v1.0.0 will keep. Build against v0.8.0; breaking changes before 1.0
+would ship as v0.9.0.
+
+```go
+import "github.com/go-gui-org/go-term/term"
+
+func embed(win *gui.Window) error {
+	t, err := term.New(win, term.Cfg{
+		ScrollbackRows: 10000,
+		Themes: append(
+			[]term.NamedTheme{{Name: "Default", Theme: term.DefaultTheme}},
+			term.BundledThemes()...,
+		),
+	})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = t.Close() }()
+
+	win.UpdateView(t.View)
+	return nil
+}
+```
+
+`term.NewReplay` plays a recorded session back in a widget; `StartRecording`
+captures one. For a multi-pane window — tabs, splits, save/restore — embed
+`term/workspace` instead and let it own the `Term`s:
+
+```go
+ws, err := workspace.New(win, workspace.Cfg{
+	TextStyle: gui.TextStyle{Family: "JetBrainsMono NFM", Size: 13},
+	Themes:    themes,
+	SavePath:  defaultSavePath, // where Cmd+S writes the layout
+})
+```
+
+The kept surface is deliberately small — widget, themes, actions,
+recording/replay, the live setters, and the activity/input taps. Everything
+documented on `pkg.go.dev` is stable; names not documented there are
+internal.
+
 ## Shell integration
 
 Prompt jumping, jump-to-last-failure, whole-output selection, and the

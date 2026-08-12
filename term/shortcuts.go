@@ -92,9 +92,10 @@ var actionSet = func() map[Action]struct{} {
 	return m
 }()
 
-// copyActionSet is membership in copyActionOrder alone. RunAction needs to know
-// which actions only mean something inside copy mode, and which therefore have
-// to be dispatched to the mode's handler rather than through onKeyDown.
+// copyActionSet is membership in copyActionOrder alone. runActionDirect needs
+// to know which actions only mean something inside copy mode, and which
+// therefore have to be dispatched through copyModeOps rather than their
+// ordinary actionDispatch entry.
 var copyActionSet = func() map[Action]struct{} {
 	m := make(map[Action]struct{}, len(copyActionOrder))
 	for _, a := range copyActionOrder {

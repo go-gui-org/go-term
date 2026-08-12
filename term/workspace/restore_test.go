@@ -28,7 +28,7 @@ func shapeOf(n *splitNode) string {
 		return "L"
 	}
 	d := "V"
-	if n.Dir == SplitHorizontal {
+	if n.Dir == splitHorizontal {
 		d = "H"
 	}
 	return "(" + d + " " + shapeOf(n.First) + " " + shapeOf(n.Second) + ")"
@@ -40,9 +40,9 @@ func TestSaveRestore_PreservesStructure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace.json")
 
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false) // tab 0: two panes side by side
-	ws.SplitPane(true)  // tab 0: nested split in the focused pane
-	ws.AddTab()         // tab 1: single pane
+	ws.splitPane(false) // tab 0: two panes side by side
+	ws.splitPane(true)  // tab 0: nested split in the focused pane
+	ws.addTab()         // tab 1: single pane
 	wantTabs := len(ws.tabs)
 	wantActive := ws.activeTab
 	wantShapes := make([]string, 0, len(ws.tabs))
@@ -79,7 +79,7 @@ func TestSaveRestore_EveryLeafHasATerm(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace.json")
 
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	if err := ws.Save(path); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -112,11 +112,11 @@ func TestSaveRestore_PreservesFocusedPanePosition(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace.json")
 
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	tab := activeTabOf(t, ws)
-	// Focus the first leaf, which is not the one SplitPane just focused.
+	// Focus the first leaf, which is not the one splitPane just focused.
 	want := leavesOf(tab.root)[0]
-	ws.FocusPane(want)
+	ws.focusPane(want)
 	wantIdx := 0
 	for i, id := range leavesOf(tab.root) {
 		if id == tab.focused {
@@ -229,7 +229,7 @@ func TestSave_ProducesRestorableFile(t *testing.T) {
 	_ = restored.Close()
 }
 
-// ToggleRecording starts a recording on the focused pane and stops it again,
+// toggleRecording starts a recording on the focused pane and stops it again,
 // leaving a file behind.
 func TestToggleRecording_StartsAndStops(t *testing.T) {
 	dir := t.TempDir()
@@ -242,17 +242,17 @@ func TestToggleRecording_StartsAndStops(t *testing.T) {
 		t.Fatal("no active pane")
 	}
 	if pane.Recording() {
-		t.Fatal("pane is recording before ToggleRecording")
+		t.Fatal("pane is recording before toggleRecording")
 	}
 
-	ws.ToggleRecording()
+	ws.toggleRecording()
 	if !pane.Recording() {
-		t.Fatal("pane is not recording after ToggleRecording")
+		t.Fatal("pane is not recording after toggleRecording")
 	}
 
-	ws.ToggleRecording()
+	ws.toggleRecording()
 	if pane.Recording() {
-		t.Error("pane still recording after second ToggleRecording")
+		t.Error("pane still recording after second toggleRecording")
 	}
 
 	entries, err := os.ReadDir(dir)
@@ -276,10 +276,10 @@ func TestToggleRecording_OnlyFocusedPane(t *testing.T) {
 	cfg := hermeticCfg(t)
 	cfg.RecordDir = t.TempDir()
 	ws := newLiveWorkspaceCfg(t, cfg)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	tab := activeTabOf(t, ws)
 
-	ws.ToggleRecording()
+	ws.toggleRecording()
 
 	recording := 0
 	for _, tm := range tab.terms {
@@ -305,8 +305,8 @@ func TestApplyTheme_ReachesAllPanesInAllTabs(t *testing.T) {
 		{Name: "Dracula", Theme: testTheme(t, "Dracula")},
 	}
 	ws := newLiveWorkspaceCfg(t, cfg)
-	ws.SplitPane(false)
-	ws.AddTab()
+	ws.splitPane(false)
+	ws.addTab()
 
 	before := ws.ActivePane().Theme()
 	ws.applyThemeImpl(ws.cfg.Themes[1])
@@ -426,7 +426,7 @@ func TestThemeBrowser_NavigationWraps(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
 	n := len(ws.cfg.Themes)
 
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	if !ws.browser.visible {
 		t.Fatal("browser not visible after toggle")
 	}
@@ -464,7 +464,7 @@ func TestThemeBrowser_NavigationWraps(t *testing.T) {
 // mode-2031 reports and OnColorScheme calls for something nobody can see.
 func TestThemeBrowser_NavigationDoesNotTouchPanes(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	before := ws.ActivePane().Theme()
 	ws.themeBrowserMove(1)
@@ -480,7 +480,7 @@ func TestThemeBrowser_NavigationDoesNotTouchPanes(t *testing.T) {
 // Enter applies the highlighted theme to the panes and closes the browser.
 func TestThemeBrowser_ConfirmAppliesTheme(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	ws.themeBrowserMove(1)
 	want, _ := ws.browserSelected()
 
@@ -502,21 +502,21 @@ func TestThemeBrowser_EscapeRevertsAppliedTheme(t *testing.T) {
 
 	// Establish a non-default starting theme, so a revert to it is
 	// distinguishable from "never changed anything".
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	ws.themeBrowserMove(1)
 	ws.themeBrowserConfirm()
 	settled := ws.ActivePane().Theme()
 
 	// Reopen, commit something else, then cancel the same session. The
 	// browser reopens on the settled theme, so one move lands elsewhere.
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	ws.themeBrowserMove(1)
 	ws.themeBrowserConfirm()
 	if ws.ActivePane().Theme() == settled {
 		t.Fatal("the second confirm did not change the theme; test proves nothing")
 	}
 
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	opened := ws.ActivePane().Theme()
 	ws.themeBrowserMove(1)
 	ws.themeBrowserConfirm() // applies, and closes
@@ -526,7 +526,7 @@ func TestThemeBrowser_EscapeRevertsAppliedTheme(t *testing.T) {
 	}
 
 	// Now cancel a session that applied something.
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	before := ws.ActivePane().Theme()
 	ws.themeBrowserMove(1)
 	if sel, ok := ws.browserSelected(); ok {
@@ -547,7 +547,7 @@ func TestThemeBrowser_EscapeRevertsAppliedTheme(t *testing.T) {
 // than re-applying and emitting a spurious mode-2031 report.
 func TestThemeBrowser_EscapeWithoutChangesLeavesTheme(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	before := ws.ActivePane().Theme()
 
 	ws.themeBrowserMove(1) // moves the cursor only
@@ -563,12 +563,12 @@ func TestThemeBrowser_EscapeWithoutChangesLeavesTheme(t *testing.T) {
 // the theme out from under the user.
 func TestThemeBrowser_OpensOnActiveTheme(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	ws.themeBrowserMove(1)
 	ws.themeBrowserConfirm()
 	settled := ws.ActivePane().Theme()
 
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	sel, ok := ws.browserSelected()
 	if !ok {
@@ -583,7 +583,7 @@ func TestThemeBrowser_OpensOnActiveTheme(t *testing.T) {
 // point Escape reads as "undo my search".
 func TestThemeBrowser_EscapeClearsFilterFirst(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	ws.setThemeFilter("dracula")
 
 	if len(ws.browser.matches) != 1 {
@@ -612,7 +612,7 @@ func TestThemeBrowser_EscapeClearsFilterFirst(t *testing.T) {
 // row that was filtered out.
 func TestThemeBrowser_FilterMatching(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	ws.setThemeFilter("DRAC")
 	if len(ws.browser.matches) != 1 {
@@ -634,7 +634,7 @@ func TestThemeBrowser_FilterMatching(t *testing.T) {
 // Enter with no matches must not commit an arbitrary theme.
 func TestThemeBrowser_ConfirmWithNoMatchesIsNoOp(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	before := ws.ActivePane().Theme()
 	ws.setThemeFilter("no such theme")
 
@@ -657,7 +657,7 @@ func TestThemeBrowser_CharacterFilter(t *testing.T) {
 		{Name: "Mocha", Theme: testTheme(t, "Catppuccin Mocha")},
 	}
 	ws := newLiveWorkspaceCfg(t, cfg)
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	ws.setThemeFilter("light:")
 	for _, ti := range ws.browser.matches {
@@ -682,7 +682,7 @@ func TestThemeBrowser_CharacterFilter(t *testing.T) {
 func TestThemeBrowser_NoThemesStaysHidden(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, hermeticCfg(t))
 
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	if ws.browser.visible {
 		t.Error("browser opened with no configured themes")
@@ -742,9 +742,9 @@ func TestSaveRestore_BroadcastStartsOff(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace.json")
 
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
-	ws.ToggleBroadcast()
-	if !ws.Broadcasting() {
+	ws.splitPane(false)
+	ws.toggleBroadcast()
+	if !ws.broadcasting() {
 		t.Fatal("precondition: broadcast should be on before saving")
 	}
 	if err := ws.Save(path); err != nil {
@@ -769,7 +769,7 @@ func TestSaveRestore_BroadcastStartsOff(t *testing.T) {
 // before anything scans with it.
 func TestThemeBrowser_FilterTextIsCapped(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	ws.setThemeFilter(strings.Repeat("x", 64*1024))
 	if got := len(ws.browser.filter); got > browserFilterMax {
@@ -797,7 +797,7 @@ func TestThemeBrowser_FilterFoldsAccents(t *testing.T) {
 		{Name: "Café Noir", Theme: testTheme(t, "Dracula")},
 	}
 	ws := newLiveWorkspaceCfg(t, cfg)
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	for _, tc := range []struct{ query, want string }{
 		{"rose", "Rosé Pine"},

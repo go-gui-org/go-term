@@ -17,7 +17,7 @@ func TestGrid_EnterAlt_BlanksAndSwaps(t *testing.T) {
 	if g.CursorR != 0 || g.CursorC != 0 {
 		t.Errorf("alt cursor not homed: %d,%d", g.CursorR, g.CursorC)
 	}
-	if g.CurAttrs != 0 || g.CurFG != DefaultColor || g.CurBG != DefaultColor {
+	if g.CurAttrs != 0 || g.CurFG != defaultColor || g.CurBG != defaultColor {
 		t.Errorf("alt SGR not reset: attrs=%d fg=%#x bg=%#x",
 			g.CurAttrs, g.CurFG, g.CurBG)
 	}

@@ -386,8 +386,14 @@ func (t *Term) SetFocused(v bool) {
 }
 
 // FocusID returns the go-gui focus ID for this terminal.
-// Multi-Term embedders use this to detect which pane has focus
-// after a mouse click.
+//
+// Multi-Term contract: every Term has a unique, stable focus ID for the
+// lifetime of its view tree. In a window hosting several Terms, the embedder
+// calls SetFocused to route gui focus to the active pane and can read this
+// ID after a click to learn which pane the user actually hit. The ID is
+// unique per Term — never compare two Terms' IDs for equality to detect
+// identity; use pointer equality instead. Only valid while the Term is
+// alive and its View has been added to a window.
 func (t *Term) FocusID() string { return t.focusID }
 
 // termSeq provides unique per-Term identifiers (canvas IDs etc.).

@@ -13,7 +13,7 @@ import (
 // trust. A relative dir would resolve against the process CWD — the shell
 // would silently open somewhere the user never chose.
 func TestTermCfg_RejectsRelativeDir(t *testing.T) {
-	tab := &Tab{id: "tab-0"}
+	tab := &tab{id: "tab-0"}
 	hooks := paneHooks{
 		onExit:  func(string) {},
 		onFocus: func(string) {},
@@ -48,7 +48,7 @@ func TestTermCfg_RejectsRelativeDir(t *testing.T) {
 // only sees it if termCfg copies it across. A break here is silent — the key
 // parses, the reload path fires, and nothing on screen changes.
 func TestTermCfg_CarriesMinimumContrast(t *testing.T) {
-	tab := &Tab{id: "tab-0"}
+	tab := &tab{id: "tab-0"}
 	hooks := paneHooks{
 		onExit:  func(string) {},
 		onFocus: func(string) {},
@@ -70,7 +70,7 @@ func TestTermCfg_CarriesMinimumContrast(t *testing.T) {
 // and the config file's [env] section rides on term.Cfg.Env. Both are fixed
 // at spawn, so termCfg is the only hop that matters.
 func TestTermCfg_CarriesIdentityAndEnv(t *testing.T) {
-	tab := &Tab{id: "tab-0"}
+	tab := &tab{id: "tab-0"}
 	hooks := paneHooks{
 		onExit:  func(string) {},
 		onFocus: func(string) {},

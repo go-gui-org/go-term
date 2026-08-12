@@ -103,7 +103,7 @@ func snapshotNode(n *splitNode, terms map[string]*term.Term, defaultSize float32
 		return node
 	}
 	dir := "vertical"
-	if n.Dir == SplitHorizontal {
+	if n.Dir == splitHorizontal {
 		dir = "horizontal"
 	}
 	first := snapshotNode(n.First, terms, defaultSize)
@@ -189,7 +189,7 @@ func Restore(w *gui.Window, cfg Cfg, path string) (*Workspace, error) {
 			return nil, err
 		}
 		ws.selectThemeByName(pw.Theme)
-		if _, err := ws.addTab(""); err != nil {
+		if _, err := ws.addTabIn(""); err != nil {
 			return nil, err
 		}
 		return ws, nil
@@ -284,7 +284,7 @@ func restoreWorkspace(w *gui.Window, cfg Cfg, pw persistedWorkspace) (*Workspace
 	return ws, nil
 }
 
-// newTabFromPersisted builds a Tab from persisted data, spawning each
+// newTabFromPersisted builds a tab from persisted data, spawning each
 // pane with its saved CWD. Leaf IDs are regenerated deterministically
 // (tabID-pane-N in depth-first order); the persisted activeLeaf is
 // mapped to the new ID via oldID→newID.
@@ -294,8 +294,8 @@ func newTabFromPersisted(
 	tabID string,
 	pt persistedTab,
 	hooks paneHooks,
-) (*Tab, error) {
-	t := &Tab{
+) (*tab, error) {
+	t := &tab{
 		id:     tabID,
 		terms:  make(map[string]*term.Term),
 		titles: make(map[string]string),
@@ -360,9 +360,9 @@ func buildSplitTree(
 		if pn.First == nil || pn.Second == nil {
 			return nil
 		}
-		dir := SplitVertical
+		dir := splitVertical
 		if pn.Dir == "horizontal" {
-			dir = SplitHorizontal
+			dir = splitHorizontal
 		}
 		ratio := clampRatio(pn.Ratio)
 		first := recurse(pn.First, depth+1)

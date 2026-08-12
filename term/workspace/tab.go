@@ -9,8 +9,8 @@ import (
 	"github.com/go-gui-org/go-term/term"
 )
 
-// Tab is a single workspace tab containing a split tree of terminals.
-type Tab struct {
+// tab is a single workspace tab containing a split tree of terminals.
+type tab struct {
 	id      string
 	root    *splitNode            // split tree within this tab
 	terms   map[string]*term.Term // leafID → Term
@@ -35,7 +35,7 @@ type Tab struct {
 	broadcast bool
 }
 
-// paneHooks bundles the per-pane callbacks handed to every Term a Tab builds.
+// paneHooks bundles the per-pane callbacks handed to every Term a tab builds.
 // Grouped rather than passed individually because every construction path
 // (new tab, split, restore) needs the whole set, and threading them one at a
 // time grew each signature with the feature list.
@@ -47,11 +47,11 @@ type paneHooks struct {
 	onActivity func(leafID string, kind term.ActivityKind)
 }
 
-// newTab creates a Tab with a single leaf running a shell. dir sets the
+// newTab creates a tab with a single leaf running a shell. dir sets the
 // shell's working directory (empty = inherit the process CWD).
-func newTab(w *gui.Window, cfg Cfg, tabID, dir string, hooks paneHooks) (*Tab, error) {
+func newTab(w *gui.Window, cfg Cfg, tabID, dir string, hooks paneHooks) (*tab, error) {
 	leafID := tabID + "-pane-0"
-	t := &Tab{
+	t := &tab{
 		id:     tabID,
 		root:   leaf(leafID),
 		terms:  make(map[string]*term.Term),
@@ -79,7 +79,7 @@ func newTab(w *gui.Window, cfg Cfg, tabID, dir string, hooks paneHooks) (*Tab, e
 // *process* CWD, spawning the shell somewhere the user never named, so only
 // absolute paths survive. A non-existent absolute path is left to term's own
 // os.Stat guard, which falls back to $HOME.
-func (t *Tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHooks) term.Cfg {
+func (t *tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHooks) term.Cfg {
 	if dir != "" && !filepath.IsAbs(dir) {
 		dir = ""
 	}
@@ -133,7 +133,7 @@ func (t *Tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHoo
 // a per-pane zoom via Term.SetFontSize — an override layered over the workspace
 // default, so Cmd+0 in the pane still resets to that default (not the inherited
 // size). Zero inherits the default with no override.
-func (t *Tab) addPane(
+func (t *tab) addPane(
 	w *gui.Window,
 	cfg Cfg,
 	leafID string,
@@ -189,7 +189,7 @@ func applyPaneTheme(tm *term.Term, cfg Cfg) {
 }
 
 // removePane closes a Term and removes it from the tab's state.
-func (t *Tab) removePane(leafID string) {
+func (t *tab) removePane(leafID string) {
 	if tm, ok := t.terms[leafID]; ok {
 		_ = tm.Close()
 		delete(t.terms, leafID)
@@ -198,7 +198,7 @@ func (t *Tab) removePane(leafID string) {
 }
 
 // closeAll closes all Terms in the tab.
-func (t *Tab) closeAll() {
+func (t *tab) closeAll() {
 	for leafID := range t.terms {
 		t.removePane(leafID)
 	}
@@ -206,7 +206,7 @@ func (t *Tab) closeAll() {
 
 // focusedTitle returns the OSC title of the focused pane, or the tab's
 // fallback title.
-func (t *Tab) focusedTitle() string {
+func (t *tab) focusedTitle() string {
 	if title, ok := t.titles[t.focused]; ok && title != "" {
 		return title
 	}
@@ -214,7 +214,7 @@ func (t *Tab) focusedTitle() string {
 }
 
 // allocLeafID allocates a unique leaf ID within this tab.
-func (t *Tab) allocLeafID() string {
+func (t *tab) allocLeafID() string {
 	id := t.nextID
 	t.nextID++
 	return t.id + "-pane-" + strconv.Itoa(id)

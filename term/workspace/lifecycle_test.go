@@ -2,7 +2,7 @@ package workspace
 
 // Tests for the pane and tab lifecycle — the paths that build, focus, and
 // tear down real Terms. The rest of the package's tests assemble Workspace
-// literals with empty Tab values, which covers the pure tree and config
+// literals with empty tab values, which covers the pure tree and config
 // logic but leaves every user-facing command untested. These drive the real
 // thing: workspace.New against a zero-value Window spawns actual shells
 // headlessly, so nothing here needs a display.
@@ -57,7 +57,7 @@ func leavesOf(n *splitNode) []string {
 // activeTabOf returns the active tab, failing the test if the index is out
 // of range — a bad index is a bug worth reporting precisely rather than a
 // panic in the assertion itself.
-func activeTabOf(t *testing.T, ws *Workspace) *Tab {
+func activeTabOf(t *testing.T, ws *Workspace) *tab {
 	t.Helper()
 	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs) {
 		t.Fatalf("activeTab %d out of range (%d tabs)", ws.activeTab, len(ws.tabs))
@@ -90,13 +90,13 @@ func TestNew_SingleTabSinglePane(t *testing.T) {
 	}
 }
 
-// SplitPane adds a second leaf to the active tab and moves focus to it.
+// splitPane adds a second leaf to the active tab and moves focus to it.
 func TestSplitPane_AddsLeafAndFocusesIt(t *testing.T) {
 	ws := newLiveWorkspace(t)
 	tab := activeTabOf(t, ws)
 	before := tab.focused
 
-	ws.SplitPane(false)
+	ws.splitPane(false)
 
 	leaves := leavesOf(tab.root)
 	if len(leaves) != 2 {
@@ -119,16 +119,16 @@ func TestSplitPane_Direction(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		horizontal bool
-		want       SplitDir
+		want       splitDir
 	}{
-		{"vertical", false, SplitVertical},
-		{"horizontal", true, SplitHorizontal},
+		{"vertical", false, splitVertical},
+		{"horizontal", true, splitHorizontal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ws := newLiveWorkspace(t)
 			tab := activeTabOf(t, ws)
 
-			ws.SplitPane(tc.horizontal)
+			ws.splitPane(tc.horizontal)
 
 			if tab.root.isLeaf() {
 				t.Fatal("root is still a leaf after split")
@@ -140,10 +140,10 @@ func TestSplitPane_Direction(t *testing.T) {
 	}
 }
 
-// NextPane and PrevPane cycle focus across the tab's leaves and wrap.
+// nextPane and prevPane cycle focus across the tab's leaves and wrap.
 func TestNextPrevPane_CyclesAndWraps(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	tab := activeTabOf(t, ws)
 
 	leaves := leavesOf(tab.root)
@@ -152,29 +152,29 @@ func TestNextPrevPane_CyclesAndWraps(t *testing.T) {
 	}
 	start := tab.focused
 
-	ws.NextPane()
+	ws.nextPane()
 	if tab.focused == start {
-		t.Fatalf("NextPane did not move focus off %q", start)
+		t.Fatalf("nextPane did not move focus off %q", start)
 	}
-	ws.NextPane()
+	ws.nextPane()
 	if tab.focused != start {
-		t.Errorf("NextPane twice = %q, want wrap back to %q", tab.focused, start)
+		t.Errorf("nextPane twice = %q, want wrap back to %q", tab.focused, start)
 	}
 
-	ws.PrevPane()
+	ws.prevPane()
 	if tab.focused == start {
-		t.Fatalf("PrevPane did not move focus off %q", start)
+		t.Fatalf("prevPane did not move focus off %q", start)
 	}
-	ws.PrevPane()
+	ws.prevPane()
 	if tab.focused != start {
-		t.Errorf("PrevPane twice = %q, want wrap back to %q", tab.focused, start)
+		t.Errorf("prevPane twice = %q, want wrap back to %q", tab.focused, start)
 	}
 }
 
-// FocusPane targets a leaf by ID, wherever it lives, and ignores unknown IDs.
+// focusPane targets a leaf by ID, wherever it lives, and ignores unknown IDs.
 func TestFocusPane_ByID(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	tab := activeTabOf(t, ws)
 
 	leaves := leavesOf(tab.root)
@@ -183,13 +183,13 @@ func TestFocusPane_ByID(t *testing.T) {
 		target = leaves[1]
 	}
 
-	ws.FocusPane(target)
+	ws.focusPane(target)
 	if tab.focused != target {
 		t.Errorf("focused = %q, want %q", tab.focused, target)
 	}
 
 	// An unknown ID must not change focus or panic.
-	ws.FocusPane("no-such-leaf")
+	ws.focusPane("no-such-leaf")
 	if tab.focused != target {
 		t.Errorf("unknown ID changed focus to %q", tab.focused)
 	}
@@ -199,7 +199,7 @@ func TestFocusPane_ByID(t *testing.T) {
 // tree back to a single leaf.
 func TestClosePane_CollapsesToSurvivor(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	tab := activeTabOf(t, ws)
 
 	leaves := leavesOf(tab.root)
@@ -211,7 +211,7 @@ func TestClosePane_CollapsesToSurvivor(t *testing.T) {
 		}
 	}
 
-	ws.ClosePane()
+	ws.closePane()
 
 	if got := leavesOf(tab.root); len(got) != 1 || got[0] != survivor {
 		t.Errorf("leaves = %v, want exactly [%s]", got, survivor)
@@ -227,12 +227,12 @@ func TestClosePane_CollapsesToSurvivor(t *testing.T) {
 	}
 }
 
-// AddTab appends a tab, makes it active, and gives it its own live pane.
+// addTab appends a tab, makes it active, and gives it its own live pane.
 func TestAddTab_AppendsAndActivates(t *testing.T) {
 	ws := newLiveWorkspace(t)
 	firstTab := ws.tabs[0]
 
-	ws.AddTab()
+	ws.addTab()
 
 	if len(ws.tabs) != 2 {
 		t.Fatalf("tabs = %d, want 2", len(ws.tabs))
@@ -242,7 +242,7 @@ func TestAddTab_AppendsAndActivates(t *testing.T) {
 	}
 	newTab := activeTabOf(t, ws)
 	if newTab == firstTab {
-		t.Fatal("AddTab reused the existing tab")
+		t.Fatal("addTab reused the existing tab")
 	}
 	if newTab.id == firstTab.id {
 		t.Errorf("tab IDs collide: %q", newTab.id)
@@ -258,10 +258,10 @@ func TestAddTab_AppendsAndActivates(t *testing.T) {
 // Closing a tab when others remain drops it and keeps a valid active index.
 func TestCloseTab_WithOthersRemaining(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.AddTab()
+	ws.addTab()
 	closing := activeTabOf(t, ws)
 
-	ws.CloseTab()
+	ws.closeTab()
 
 	if len(ws.tabs) != 1 {
 		t.Fatalf("tabs = %d, want 1", len(ws.tabs))
@@ -283,7 +283,7 @@ func TestCloseTab_LastTabReplacedWithFresh(t *testing.T) {
 	ws := newLiveWorkspace(t)
 	original := ws.tabs[0]
 
-	ws.CloseTab()
+	ws.closeTab()
 
 	if len(ws.tabs) != 1 {
 		t.Fatalf("tabs = %d, want 1 (a replacement)", len(ws.tabs))
@@ -300,7 +300,7 @@ func TestCloseTab_LastTabReplacedWithFresh(t *testing.T) {
 // split exactly like an explicit close.
 func TestOnPaneExit_CollapsesSplit(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	tab := activeTabOf(t, ws)
 
 	leaves := leavesOf(tab.root)
@@ -333,7 +333,7 @@ func TestOnPaneExit_UnknownLeafIsNoOp(t *testing.T) {
 // onPaneFocus routes a click in an unfocused pane to that pane.
 func TestOnPaneFocus_MovesFocus(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	tab := activeTabOf(t, ws)
 
 	leaves := leavesOf(tab.root)
@@ -357,8 +357,8 @@ func TestClose_ClosesAllPanes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workspace.New: %v", err)
 	}
-	ws.SplitPane(false)
-	ws.AddTab()
+	ws.splitPane(false)
+	ws.addTab()
 	if n := ws.LiveTermCount(); n != 3 {
 		t.Fatalf("setup: LiveTermCount = %d, want 3", n)
 	}
@@ -379,7 +379,7 @@ func TestAllocLeafID_StaysUniqueAcrossChurn(t *testing.T) {
 
 	seen := map[string]bool{tab.focused: true}
 	for i := 0; i < 3; i++ {
-		ws.SplitPane(i%2 == 0)
+		ws.splitPane(i%2 == 0)
 		for _, id := range leavesOf(tab.root) {
 			seen[id] = true
 		}

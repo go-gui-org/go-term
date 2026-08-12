@@ -156,9 +156,9 @@ func (g *grid) SaveCursor() {
 func (g *grid) RestoreCursor() {
 	if !g.saved.valid {
 		g.MoveCursor(0, 0)
-		g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, 0
+		g.CurFG, g.CurBG, g.CurAttrs = defaultColor, defaultColor, 0
 		g.CurULStyle = 0
-		g.CurULColor = DefaultColor
+		g.CurULColor = defaultColor
 		return
 	}
 	g.MoveCursor(g.saved.r, g.saved.c)

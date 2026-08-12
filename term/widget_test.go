@@ -769,7 +769,7 @@ func TestIsGeometryGlyph_Boundaries(t *testing.T) {
 func TestCellRunKey_Underline(t *testing.T) {
 	g := newGrid(4, 8)
 	base := gui.TextStyle{}
-	cell := cell{Ch: 'C', Width: 1, Attrs: attrUnderline, ULStyle: ulSingle, ULColor: DefaultColor}
+	cell := cell{Ch: 'C', Width: 1, Attrs: attrUnderline, ULStyle: ulSingle, ULColor: defaultColor}
 	k := cellRunKey(cell, base, g, -1, -1, false, false)
 	if k.ulStyle != ulSingle {
 		t.Errorf("underline attr: expected ulSingle in key, got %d", k.ulStyle)

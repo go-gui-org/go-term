@@ -132,7 +132,7 @@ func TestParser_RestoreWithoutSaveResets(t *testing.T) {
 	if g.CursorR != 0 || g.CursorC != 0 {
 		t.Errorf("home: r=%d c=%d", g.CursorR, g.CursorC)
 	}
-	if g.CurFG != DefaultColor || g.CurAttrs != 0 {
+	if g.CurFG != defaultColor || g.CurAttrs != 0 {
 		t.Errorf("SGR not reset: fg=%#x attrs=%d", g.CurFG, g.CurAttrs)
 	}
 }
@@ -449,24 +449,24 @@ func TestCurrentSGRString_AllPaths(t *testing.T) {
 		attr uint16
 		want string
 	}{
-		{"default", DefaultColor, DefaultColor, 0, "0m"},
-		{"bold", DefaultColor, DefaultColor, attrBold, "1m"},
-		{"underline", DefaultColor, DefaultColor, attrUnderline, "4m"},
-		{"inverse", DefaultColor, DefaultColor, attrInverse, "7m"},
-		{"bold+underline", DefaultColor, DefaultColor, attrBold | attrUnderline, "1;4m"},
-		{"fg_pal0", paletteColor(0), DefaultColor, 0, "30m"},
-		{"fg_pal7", paletteColor(7), DefaultColor, 0, "37m"},
-		{"fg_pal8", paletteColor(8), DefaultColor, 0, "90m"},
-		{"fg_pal15", paletteColor(15), DefaultColor, 0, "97m"},
-		{"fg_256", paletteColor(200), DefaultColor, 0, "38;5;200m"},
-		{"fg_rgb", rgbColor(10, 20, 30), DefaultColor, 0, "38;2;10;20;30m"},
-		{"bg_pal0", DefaultColor, paletteColor(0), 0, "40m"},
-		{"bg_pal7", DefaultColor, paletteColor(7), 0, "47m"},
-		{"bg_pal8", DefaultColor, paletteColor(8), 0, "100m"},
-		{"bg_pal15", DefaultColor, paletteColor(15), 0, "107m"},
-		{"bg_256", DefaultColor, paletteColor(200), 0, "48;5;200m"},
-		{"bg_rgb", DefaultColor, rgbColor(10, 20, 30), 0, "48;2;10;20;30m"},
-		{"fg_rgb_bold", rgbColor(10, 20, 30), DefaultColor, attrBold, "1;38;2;10;20;30m"},
+		{"default", defaultColor, defaultColor, 0, "0m"},
+		{"bold", defaultColor, defaultColor, attrBold, "1m"},
+		{"underline", defaultColor, defaultColor, attrUnderline, "4m"},
+		{"inverse", defaultColor, defaultColor, attrInverse, "7m"},
+		{"bold+underline", defaultColor, defaultColor, attrBold | attrUnderline, "1;4m"},
+		{"fg_pal0", paletteColor(0), defaultColor, 0, "30m"},
+		{"fg_pal7", paletteColor(7), defaultColor, 0, "37m"},
+		{"fg_pal8", paletteColor(8), defaultColor, 0, "90m"},
+		{"fg_pal15", paletteColor(15), defaultColor, 0, "97m"},
+		{"fg_256", paletteColor(200), defaultColor, 0, "38;5;200m"},
+		{"fg_rgb", rgbColor(10, 20, 30), defaultColor, 0, "38;2;10;20;30m"},
+		{"bg_pal0", defaultColor, paletteColor(0), 0, "40m"},
+		{"bg_pal7", defaultColor, paletteColor(7), 0, "47m"},
+		{"bg_pal8", defaultColor, paletteColor(8), 0, "100m"},
+		{"bg_pal15", defaultColor, paletteColor(15), 0, "107m"},
+		{"bg_256", defaultColor, paletteColor(200), 0, "48;5;200m"},
+		{"bg_rgb", defaultColor, rgbColor(10, 20, 30), 0, "48;2;10;20;30m"},
+		{"fg_rgb_bold", rgbColor(10, 20, 30), defaultColor, attrBold, "1;38;2;10;20;30m"},
 	}
 	for _, tt := range tests {
 		g := newGrid(2, 10)

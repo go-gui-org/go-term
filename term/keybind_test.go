@@ -374,14 +374,16 @@ func TestAvailableShortcuts_CarryAction(t *testing.T) {
 	}
 }
 
-func TestRunAction_UnboundReturnsFalse(t *testing.T) {
+// RunAction dispatches by action name, not by chord, so an unbound action is
+// still invocable from a palette — the chord is only the keyboard's handle.
+func TestRunAction_UnboundStillRuns(t *testing.T) {
 	tm, _ := copyTerm(20, "hello")
 	tm.SetKeyBindings(KeyMap{ActionCopyMode: gui.Shortcut{}}) // unbind
-	if tm.RunAction(ActionCopyMode, nil) {
-		t.Error("RunAction ran an unbound action")
+	if !tm.RunAction(ActionCopyMode, nil) {
+		t.Error("RunAction did not run an unbound action")
 	}
-	if tm.copy.active {
-		t.Error("unbound action took effect anyway")
+	if !tm.copy.active {
+		t.Error("unbound action did not take effect")
 	}
 }
 
@@ -419,4 +421,95 @@ func TestRunAction_CopyModeActionInactiveIsNoOp(t *testing.T) {
 	if tm.RunAction(ActionCopyModeDown, nil) {
 		t.Error("RunAction ran a copy-mode action with the mode off")
 	}
+}
+
+// Inside copy mode, the Term-level actions with copy-mode meanings (Copy
+// yanks, mark actions jump) use their copy-mode behavior; the rest are
+// consumed as no-ops, exactly as the keyboard path swallows them.
+func TestRunAction_CopyModeOwnsKeyboard(t *testing.T) {
+	tm, _ := copyTerm(20, "hello", "world")
+	tm.enterCopyMode(nil)
+
+	if tm.RunAction(ActionFind, nil) {
+		t.Error("non-copy action ran while copy mode owns the keyboard")
+	}
+	if tm.search.active {
+		t.Error("search bar opened through copy mode")
+	}
+
+	// ActionCopy yanks inside copy mode: enterCopyMode anchors a selection at
+	// the cursor, so the yank must report success, and yanking leaves copy
+	// mode (the selection has been copied).
+	if !tm.RunAction(ActionCopy, nil) {
+		t.Error("ActionCopy did not yank inside copy mode")
+	}
+	if tm.copy.active {
+		t.Error("copy mode still active after yank")
+	}
+}
+
+// The search bar owns the keyboard while open: only its own actions run, and
+// copy-mode actions stay dormant even though the bar may have opened from
+// copy mode.
+func TestRunAction_SearchBarOwnsKeyboard(t *testing.T) {
+	tm, _ := copyTerm(20, "hello", "world")
+	tm.enterCopyMode(nil)
+	tm.openCopySearch(false, nil) // search bar open, copy mode still active
+	if !tm.copy.searching {
+		t.Fatal("copy search did not open")
+	}
+
+	if tm.RunAction(ActionCopyModeDown, nil) {
+		t.Error("copy-mode action ran while the search bar is open")
+	}
+	if tm.RunAction(ActionPaste, nil) {
+		t.Error("paste ran while the search bar is open")
+	}
+	// The mark actions still run while the search bar is open — the keyboard
+	// checks them before the bar's own key handling.
+	if !tm.RunAction(ActionJumpFailure, nil) {
+		t.Error("mark action did not run while the search bar is open")
+	}
+}
+
+// Copy is a no-op without a selection, and the alt screen keeps its page
+// keys — the direct path applies the same passthrough rules the keyboard
+// does.
+func TestRunAction_PassthroughRules(t *testing.T) {
+	tm, _ := copyTerm(20, "hello")
+	if tm.RunAction(ActionCopy, nil) {
+		t.Error("copy ran with no selection")
+	}
+
+	tm.enterAltScreenForTest()
+	if tm.RunAction(ActionScrollPageUp, nil) {
+		t.Error("PageUp scrolled on the alt screen")
+	}
+	if !tm.RunAction(ActionScrollTop, nil) {
+		t.Error("scroll-top refused to run on the alt screen")
+	}
+	tm.exitAltScreenForTest()
+	// Search-driven actions need the search bar open.
+	if tm.RunAction(ActionToggleRegex, nil) {
+		t.Error("regex toggle ran with the search bar closed")
+	}
+	tm.openSearchBar(nil)
+	if !tm.RunAction(ActionToggleRegex, nil) {
+		t.Error("regex toggle did not run with the search bar open")
+	}
+	if !tm.search.regex {
+		t.Error("regex flag not set")
+	}
+}
+
+func (tm *Term) enterAltScreenForTest() {
+	tm.grid.Mu.Lock()
+	tm.grid.EnterAlt()
+	tm.grid.Mu.Unlock()
+}
+
+func (tm *Term) exitAltScreenForTest() {
+	tm.grid.Mu.Lock()
+	tm.grid.ExitAlt()
+	tm.grid.Mu.Unlock()
 }

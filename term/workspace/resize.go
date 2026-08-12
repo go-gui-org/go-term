@@ -37,16 +37,16 @@ const (
 // params maps a direction to the split axis it acts on and the ratio delta.
 // Right/Down move the divider toward the high end of the axis (delta > 0);
 // Left/Up move it toward the low end (delta < 0).
-func (d resizeDir) params() (axis SplitDir, delta float32) {
+func (d resizeDir) params() (axis splitDir, delta float32) {
 	switch d {
 	case resizeRight:
-		return SplitVertical, resizeStep
+		return splitVertical, resizeStep
 	case resizeLeft:
-		return SplitVertical, -resizeStep
+		return splitVertical, -resizeStep
 	case resizeDown:
-		return SplitHorizontal, resizeStep
+		return splitHorizontal, resizeStep
 	default: // resizeUp
-		return SplitHorizontal, -resizeStep
+		return splitHorizontal, -resizeStep
 	}
 }
 
@@ -75,7 +75,7 @@ func (ws *Workspace) resizeActivePane(dir resizeDir) {
 // findResizeSplit returns the split node closest to leafID (deepest ancestor)
 // whose direction is axis and whose subtree contains leafID. Returns nil when
 // no split on that axis contains the leaf.
-func findResizeSplit(root *splitNode, leafID string, axis SplitDir) *splitNode {
+func findResizeSplit(root *splitNode, leafID string, axis splitDir) *splitNode {
 	var best *splitNode
 	var walk func(n *splitNode) bool // reports whether leafID is in n's subtree
 	walk = func(n *splitNode) bool {

@@ -32,31 +32,31 @@ func TestView_BuildsInEveryState(t *testing.T) {
 	}{
 		{"single pane", func(t *testing.T, ws *Workspace) {}},
 		{"vertical split", func(t *testing.T, ws *Workspace) {
-			ws.SplitPane(false)
+			ws.splitPane(false)
 		}},
 		{"horizontal split", func(t *testing.T, ws *Workspace) {
-			ws.SplitPane(true)
+			ws.splitPane(true)
 		}},
 		{"nested splits", func(t *testing.T, ws *Workspace) {
-			ws.SplitPane(false)
-			ws.SplitPane(true)
-			ws.SplitPane(false)
+			ws.splitPane(false)
+			ws.splitPane(true)
+			ws.splitPane(false)
 		}},
 		{"multiple tabs", func(t *testing.T, ws *Workspace) {
-			ws.AddTab()
-			ws.AddTab()
+			ws.addTab()
+			ws.addTab()
 		}},
 		{"tabs and splits", func(t *testing.T, ws *Workspace) {
-			ws.SplitPane(false)
-			ws.AddTab()
-			ws.SplitPane(true)
+			ws.splitPane(false)
+			ws.addTab()
+			ws.splitPane(true)
 		}},
 		{"help overlay", func(t *testing.T, ws *Workspace) {
-			ws.ToggleHelp()
+			ws.toggleHelp()
 		}},
 		{"help over a split", func(t *testing.T, ws *Workspace) {
-			ws.SplitPane(false)
-			ws.ToggleHelp()
+			ws.splitPane(false)
+			ws.toggleHelp()
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,7 +71,7 @@ func TestView_BuildsInEveryState(t *testing.T) {
 // reached by wrapping — an off-by-one in the index would panic the page.
 func TestView_ThemeBrowserAtEveryIndex(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	for range 2*len(ws.cfg.Themes) + 1 {
 		buildView(t, ws)
@@ -88,7 +88,7 @@ func TestView_ThemeBrowserAtEveryIndex(t *testing.T) {
 // rather than indexing into it.
 func TestView_ThemeBrowserWithNoMatches(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	ws.setThemeFilter("no theme is called this")
 
 	buildView(t, ws)
@@ -98,7 +98,7 @@ func TestView_ThemeBrowserWithNoMatches(t *testing.T) {
 // calculation that assumed the cursor moved by one would go out of bounds.
 func TestView_ThemeBrowserPaging(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	for range 5 {
 		ws.themeBrowserPage(1)
@@ -120,7 +120,7 @@ func TestView_ThemeBrowserWithFullCorpus(t *testing.T) {
 		term.BundledThemes()...,
 	)
 	ws := newLiveWorkspaceCfg(t, cfg)
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	buildView(t, ws)
 	ws.themeBrowserMove(-1) // wrap to the very end of ~600 entries
@@ -133,19 +133,19 @@ func TestView_ThemeBrowserWithFullCorpus(t *testing.T) {
 // likely to leave a dangling reference behind.
 func TestView_BuildsAfterTeardown(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
-	ws.AddTab()
+	ws.splitPane(false)
+	ws.addTab()
 	buildView(t, ws)
 
-	ws.ClosePane()
+	ws.closePane()
 	buildView(t, ws)
 
-	ws.CloseTab()
+	ws.closeTab()
 	buildView(t, ws)
 
 	// Down to the last tab: closing it yields a fresh replacement, which must
 	// also render.
-	ws.CloseTab()
+	ws.closeTab()
 	buildView(t, ws)
 }
 
@@ -153,17 +153,17 @@ func TestView_BuildsAfterTeardown(t *testing.T) {
 func TestView_OverlaysToggleBackOff(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
 
-	ws.ToggleHelp()
+	ws.toggleHelp()
 	buildView(t, ws)
-	ws.ToggleHelp()
+	ws.toggleHelp()
 	buildView(t, ws)
 
 	// Closing the browser must put the panes back in the tree — it replaces
 	// them rather than floating over them, so a toggle that left `visible` set
 	// would leave the terminal permanently hidden.
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	buildView(t, ws)
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	if ws.browser.visible {
 		t.Fatal("browser still visible after toggling off")
 	}
@@ -224,7 +224,7 @@ func TestBrowserVisibleRows_TypicalWindow(t *testing.T) {
 // propagate into every Fixed size on the page.
 func TestView_ThemeBrowserNonFiniteDimensions(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 
 	for _, d := range []float32{float32(math.NaN()), float32(math.Inf(1)), 0, -400} {
 		if v := ws.themeBrowserView(d, d); v == nil {

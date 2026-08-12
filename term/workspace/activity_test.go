@@ -78,7 +78,7 @@ func TestApplySettings_NotifyAfterRevertsWhenAbsent(t *testing.T) {
 func TestTermCfg_CarriesNotifyAfter(t *testing.T) {
 	ws := newTestWorkspace(t)
 	ws.cfg.opts.notifyAfter = 90 * time.Second
-	cfg := (&Tab{}).termCfg(&gui.Window{}, ws.cfg, "pane", "", ws.hooks())
+	cfg := (&tab{}).termCfg(&gui.Window{}, ws.cfg, "pane", "", ws.hooks())
 	if cfg.NotifyAfter != 90*time.Second {
 		t.Errorf("term.Cfg.NotifyAfter = %v; want 90s", cfg.NotifyAfter)
 	}
@@ -88,13 +88,13 @@ func TestTermCfg_CarriesNotifyAfter(t *testing.T) {
 // tab indicators
 // ---------------------------------------------------------------------------
 
-// activityWorkspace builds a two-tab workspace with a frozen clock. Tab 0 is
+// activityWorkspace builds a two-tab workspace with a frozen clock. tab 0 is
 // active, so tab 1 is the one that accumulates indicator state.
 func activityWorkspace(t *testing.T, now *time.Time) *Workspace {
 	t.Helper()
 	ws := newTestWorkspace(t)
 	ws.clock = func() time.Time { return *now }
-	ws.tabs = []*Tab{
+	ws.tabs = []*tab{
 		{id: "tab-0", terms: map[string]*term.Term{"pane-0": nil}},
 		{id: "tab-1", terms: map[string]*term.Term{"pane-1": nil}},
 	}
@@ -181,7 +181,7 @@ func TestTabIndicator_ClearedOnActivation(t *testing.T) {
 func TestSilenceDeadline_EarliestPendingTab(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	ws := activityWorkspace(t, &now)
-	ws.tabs = append(ws.tabs, &Tab{id: "tab-2", terms: map[string]*term.Term{"pane-2": nil}})
+	ws.tabs = append(ws.tabs, &tab{id: "tab-2", terms: map[string]*term.Term{"pane-2": nil}})
 
 	ws.tabs[1].lastActivity = now.Add(-3 * time.Second)
 	ws.tabs[2].lastActivity = now.Add(-1 * time.Second)
