@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"testing"
 )
 
-// loadFixtures reads all .json fixture files from testdata/.
-func loadFixtures(t *testing.T) []Fixture {
+// loadFixtures reads all .json fixture files from testdata/. seeder is
+// satisfied by *testing.T and *testing.F, so fuzz targets can seed their
+// corpus from the same fixtures the replay tests drive.
+func loadFixtures(t seeder) []Fixture {
 	t.Helper()
 	ents, err := os.ReadDir("testdata")
 	if err != nil {
@@ -44,7 +45,7 @@ func loadFixtures(t *testing.T) []Fixture {
 }
 
 // decodeFixtureInput returns the decoded input bytes for a fixture.
-func decodeFixtureInput(t *testing.T, f Fixture) []byte {
+func decodeFixtureInput(t seeder, f Fixture) []byte {
 	t.Helper()
 	input, err := base64.StdEncoding.DecodeString(f.InputB64)
 	if err != nil {

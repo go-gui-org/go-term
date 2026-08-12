@@ -262,7 +262,7 @@ jobs:
       - name: Fuzz
         working-directory: go-term
         run: |
-          for fuzz in FuzzParserFeed FuzzCSIDispatch FuzzOSCDispatch FuzzKittyAPC; do
+          for fuzz in FuzzParserFeed FuzzCSIDispatch FuzzOSCDispatch FuzzDCSDispatch FuzzKittyAPC; do
             go test -fuzz="^${fuzz}$" -fuzztime=120s ./term || exit 1
           done
 
@@ -295,12 +295,16 @@ jobs:
             libglib2.0-dev \
             libhunspell-dev
 
-      - name: Check parser changes
+      - name: Check parser/grid changes
         id: changed
         working-directory: go-term
         run: |
           git fetch origin main
-          if git diff --name-only origin/main...HEAD | grep -q '^term/parser'; then
+          # The fuzz corpus targets parser sequences, but the parser writes
+          # into the grid — the first fuzz run caught a putCell bug, not a
+          # parser one. Gate on both layers (grid, not just grid_*: grid.go
+          # itself is part of the layer).
+          if git diff --name-only origin/main...HEAD | grep -qE '^term/(parser|grid)'; then
             echo "fuzz=true" >> "$GITHUB_OUTPUT"
           else
             echo "fuzz=false" >> "$GITHUB_OUTPUT"
@@ -310,7 +314,7 @@ jobs:
         if: steps.changed.outputs.fuzz == 'true'
         working-directory: go-term
         run: |
-          for fuzz in FuzzParserFeed FuzzCSIDispatch FuzzOSCDispatch FuzzKittyAPC; do
+          for fuzz in FuzzParserFeed FuzzCSIDispatch FuzzOSCDispatch FuzzDCSDispatch FuzzKittyAPC; do
             go test -fuzz="^${fuzz}$" -fuzztime=30s ./term || exit 1
           done
 

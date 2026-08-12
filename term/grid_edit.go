@@ -336,6 +336,13 @@ func (g *grid) putCell(ch rune, clusterID uint16, w int) {
 	g.CursorC += w
 	if !g.AutoWrap && g.CursorC >= g.Cols {
 		g.CursorC = g.Cols - 1
+	} else if g.CursorC > g.Cols {
+		// A wide glyph on a grid narrower than itself (a 1-column pane):
+		// the wide-char wrap above reset CursorC to 0 and w overshoots the
+		// grid width. Wrap-pending is encoded as CursorC == Cols exactly
+		// (settledCol collapses it), so an overflow must land on Cols, not
+		// past it — eraseInLine and friends key off the exact encoding.
+		g.CursorC = g.Cols
 	}
 }
 
