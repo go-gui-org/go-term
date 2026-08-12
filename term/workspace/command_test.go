@@ -75,8 +75,11 @@ func TestSaveCommand_BoundToCmdS(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("workspace.save command not declared")
 	}
-	if cmd.Shortcut.Key != gui.KeyS || !cmd.Shortcut.Modifiers.Has(gui.ModSuper) {
-		t.Errorf("Cmd+S binding = %+v, want ModSuper+S", cmd.Shortcut)
+	// The default chord is Super+S, remapped to the platform's primary
+	// modifier before registration (Cmd→Ctrl+Shift on Windows).
+	want := gui.Shortcut{Key: gui.KeyS, Modifiers: remapMod(gui.ModSuper)}
+	if cmd.Shortcut != want {
+		t.Errorf("Cmd+S binding = %+v, want %+v", cmd.Shortcut, want)
 	}
 
 	path := filepath.Join(t.TempDir(), "sub", "workspace.json")
