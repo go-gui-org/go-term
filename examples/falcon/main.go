@@ -10,7 +10,11 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
+	"net/http"
+	_ "net/http/pprof" // registers handlers on http.DefaultServeMux at import
 	"os"
+	"strings"
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-gui/gui/backend"
@@ -25,6 +29,8 @@ func main() {
 }
 
 func run() int {
+	serveProfiling()
+
 	start, replay, err := parseFlags(flag.CommandLine, os.Args[1:])
 	if err != nil {
 		// flag.CommandLine is ExitOnError, so Parse has already exited on
@@ -82,6 +88,35 @@ func run() int {
 		return 1
 	}
 	return 0
+}
+
+// serveProfiling starts the runtime profiling server when GOTERM_PPROF is
+// set. The value is a port number, or "1" for the default 6060. The server
+// listens on 127.0.0.1 only, so the endpoints are never reachable from the
+// network. Off by default and inert when unset. A bad value or a busy port
+// is logged and the app continues unprofiled — this is a debug knob, not a
+// startup dependency.
+func serveProfiling() {
+	port := strings.TrimSpace(os.Getenv("GOTERM_PPROF"))
+	if port == "" {
+		return
+	}
+	if port == "1" {
+		port = "6060"
+	}
+	// Bind explicitly so the logged address is the one actually bound (port
+	// "0" picks an ephemeral port; ListenAndServe's log would say :0).
+	ln, err := net.Listen("tcp", "127.0.0.1:"+port)
+	if err != nil {
+		log.Printf("falcon: profiling server: %v", err)
+		return
+	}
+	go func() {
+		log.Printf("falcon: profiling server on http://%s/debug/pprof/", ln.Addr())
+		if err := http.Serve(ln, nil); err != nil {
+			log.Printf("falcon: profiling server: %v", err)
+		}
+	}()
 }
 
 // backendRunApp runs the multi-window app loop: only it honors an
