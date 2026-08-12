@@ -465,6 +465,18 @@ func TestGrid_Put_WideCharInOneColumnGrid_NoPanic(t *testing.T) {
 	}
 }
 
+// Regression: after the wide-char wrap in a 1-column grid, the cursor must
+// land on the wrap-pending encoding (CursorC == Cols), not past it. Before
+// the clamp in putCell, CursorC came out as Cols+1, which the exact-equality
+// wrap-pending checks in eraseInLine and friends read as "no wrap pending".
+func TestGrid_Put_WideCharOneColumn_CursorAtWrapPending(t *testing.T) {
+	g := newGrid(4, 1)
+	g.Put('你')
+	if g.CursorC != 1 {
+		t.Errorf("wide char in 1-col grid: cursor C=%d, want 1 (wrap-pending at Cols)", g.CursorC)
+	}
+}
+
 func TestGrid_Put_OverwriteWideHeadClearsContinuation(t *testing.T) {
 	g := newGrid(1, 5)
 	g.Put('好')
