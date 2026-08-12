@@ -1016,7 +1016,7 @@ func TestFillRun_BleedsIntoEdgeRemainder(t *testing.T) {
 
 	t.Run("last_row_reaches_the_bottom_edge", func(t *testing.T) {
 		dc := newDC()
-		tm.fillRun(dc, 3, 0, 2, fill, 0, true)
+		tm.fillRun(dc, 3, 0, 8, fill, 0, true)
 		_, _, _, y1, ok := batchBounds(dc, fill)
 		if !ok {
 			t.Fatal("no fill drawn")
@@ -1063,9 +1063,71 @@ func TestFillRun_BleedsIntoEdgeRemainder(t *testing.T) {
 		// the canvas fill already agrees, and drawing it again would cost a
 		// rect per row for no visible change.
 		dc := newDC()
-		tm.fillRun(dc, 3, 6, 8, tm.grid.defaultBG(), 0, true)
+		tm.fillRun(dc, 3, 0, 8, tm.grid.defaultBG(), 0, true)
 		if len(dc.Batches()) != 0 {
 			t.Errorf("default-bg run drew %d batches, want 0", len(dc.Batches()))
+		}
+	})
+}
+
+// TestDrawBgResolved_BottomBleedOnlyForAUniformRow pins the gate that keeps
+// fish's history-search highlight from smearing under the last line. When the
+// prompt sits on the bottom row, the highlighted span is a partial-width
+// colored run there; bleeding it into the sub-cell remainder below draws a
+// detached block of color that reads as a phantom highlight on a line that
+// does not exist. Only a last row that is one uniform color may bleed.
+func TestDrawBgResolved_BottomBleedOnlyForAUniformRow(t *testing.T) {
+	t.Parallel()
+
+	const cellW, cellH = 10, 20
+	const rows, cols = 4, 8
+	hl := gui.RGB(90, 90, 90) // fish's search-match background
+
+	// Canvas is 6 px taller than the 4 rows cover — the remainder no cell owns.
+	setup := func() (*Term, *gui.DrawContext, *drawState) {
+		tm, _ := newDrawTerm(rows, cols, cellW, cellH)
+		dc := gui.NewDrawContext(cols*cellW, rows*cellH+6,
+			testTextMeasurer{cellW: cellW, cellH: cellH})
+		ds := &drawState{
+			dc: dc, g: tm.grid, cells: tm.grid.Cells, live: true,
+			rows: rows, cols: cols, renderRows: rows,
+			bidiVisRows: make([][]cell, rows),
+		}
+		return tm, dc, ds
+	}
+	paint := func(g *grid, r, c0, c1 int, bg uint32) {
+		for c := c0; c < c1; c++ {
+			g.Cells[r*cols+c].BG = bg
+		}
+	}
+
+	t.Run("partial_run_stops_at_its_own_row", func(t *testing.T) {
+		tm, dc, ds := setup()
+		paint(tm.grid, rows-1, 2, 6, rgbColor(90, 90, 90))
+		tm.drawBgResolved(dc, rows-1, 0, ds)
+		_, _, _, y1, ok := batchBounds(dc, hl)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if want := float32(rows * cellH); y1 != want {
+			t.Errorf("highlight ends at y=%v, want %v (its own row, not the "+
+				"canvas edge at %v)", y1, want, dc.Height)
+		}
+	})
+
+	t.Run("uniform_row_still_covers_the_remainder", func(t *testing.T) {
+		// The rim case bleedToEdge exists for: a full-screen app whose own
+		// background disagrees with the theme must not leave a bright strip.
+		tm, dc, ds := setup()
+		paint(tm.grid, rows-1, 0, cols, rgbColor(90, 90, 90))
+		tm.drawBgResolved(dc, rows-1, 0, ds)
+		_, _, _, y1, ok := batchBounds(dc, hl)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if y1 != dc.Height {
+			t.Errorf("uniform row ends at y=%v, want %v (the canvas edge)",
+				y1, dc.Height)
 		}
 	})
 }

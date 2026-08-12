@@ -189,19 +189,21 @@ func (t *Term) drawBgResolved(dc *gui.DrawContext, r int, yOff float32, ds *draw
 	g := ds.g
 	cols := ds.cols
 	// Only the bottom-most drawn row may bleed into the sub-cell remainder
-	// below it — see bleedToEdge.
+	// below it, and only when that whole row is one color — see bleedToEdge.
+	// A row that ends as a single run (runStart still 0 at the final fill) is
+	// exactly that uniform case, so the flag costs no extra scan.
 	last := r == ds.renderRows-1
 	runStart := 0
 	runColor := g.bgOf(ds.resolveVisual(r, 0))
 	for c := 1; c < cols; c++ {
 		cur := g.bgOf(ds.resolveVisual(r, c))
 		if cur != runColor {
-			t.fillRun(dc, r, runStart, c, runColor, yOff, last)
+			t.fillRun(dc, r, runStart, c, runColor, yOff, false)
 			runStart = c
 			runColor = cur
 		}
 	}
-	t.fillRun(dc, r, runStart, cols, runColor, yOff, last)
+	t.fillRun(dc, r, runStart, cols, runColor, yOff, last && runStart == 0)
 }
 
 // textBlinkOff reports whether SGR 5/6 text is in the hidden half of its blink
@@ -405,8 +407,8 @@ func (t *Term) emitCell(dc *gui.DrawContext, x, y, w float32, cell cell, k runKe
 	}
 }
 
-// lastRow says this run belongs to the bottom-most drawn row, which is the
-// only one allowed to bleed downward — see bleedToEdge.
+// lastRow says this run covers the whole bottom-most drawn row, the only run
+// allowed to bleed downward — see bleedToEdge.
 func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yOff float32, lastRow bool) {
 	if color == t.grid.defaultBG() {
 		return // canvas already painted with default bg.
@@ -448,7 +450,16 @@ func (t *Term) fillRun(dc *gui.DrawContext, row, c0, c1 int, color gui.Color, yO
 // within one cell of the edge"; an interior run that stretched would paint
 // over its neighbour.
 //
-// That test alone identifies the last column, but not the last row: smooth
+// The vertical bleed carries one further restriction, matching Ghostty's
+// window-padding-color=extend: it applies only when the whole last row is a
+// single background color. A partial-width colored run — fish's history-search
+// highlight sitting on the bottom row, a shell prompt segment — would otherwise
+// paint a detached block of color into the strip under the text, which reads as
+// a phantom highlight on a line that does not exist. Falling back to the canvas
+// fill for a multi-colored last row costs at most a thin default-colored strip
+// under a status bar, which is what the other emulators show there anyway.
+//
+// The abutment test alone identifies the last column, but not the last row: smooth
 // scrolling shifts every row down by ViewSubPx (0 ≤ ViewSubPx < cellH), so
 // once the offset exceeds the canvas remainder the *second*-to-last row also
 // ends within a cell of the bottom while a row still sits below it. fillRun
