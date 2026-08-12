@@ -44,9 +44,9 @@ type helpSection struct {
 	rows  []term.ShortcutInfo // reuses the existing Label/Keys pair
 }
 
-// ToggleHelp shows or hides the keyboard-shortcut overlay and rebuilds
+// toggleHelp shows or hides the keyboard-shortcut overlay and rebuilds
 // the view. Bound to Cmd+/ (toggle) and Escape (close, when visible).
-func (ws *Workspace) ToggleHelp() {
+func (ws *Workspace) toggleHelp() {
 	ws.helpVisible = !ws.helpVisible
 	ws.refresh()
 }

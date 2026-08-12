@@ -396,6 +396,7 @@ registered there — press the second form.
 | `workspace.prevTab`                           | `Cmd+Shift+[` / `Ctrl+Alt+[`                              |
 | `workspace.tab1` … `workspace.tab9`           | `Cmd+1` … `Cmd+9` / `Ctrl+Shift+1` … `Ctrl+Shift+9`       |
 | `workspace.toggleRecording`                   | `Cmd+Shift+R` / `Ctrl+Alt+R`                              |
+| `workspace.save`                              | `Cmd+S` / `Ctrl+Shift+S`                                  |
 | `workspace.toggleBroadcast`                   | `Cmd+Shift+I` / `Ctrl+Alt+I`                              |
 | `workspace.chooseTheme`                       | `Cmd+Shift+T` / `Ctrl+Alt+T`                              |
 | `workspace.reloadConfig`                      | `Cmd+Shift+,` / `Ctrl+Alt+,`                              |

@@ -65,7 +65,7 @@ func TestGrid_SaveRestoreCursor_ULState(t *testing.T) {
 	g.SaveCursor()
 
 	g.CurULStyle = ulDotted
-	g.CurULColor = DefaultColor
+	g.CurULColor = defaultColor
 
 	g.RestoreCursor()
 	if g.CurULStyle != ulDouble {

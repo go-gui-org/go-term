@@ -102,13 +102,13 @@ func TestClampRatio_NonFinite(t *testing.T) {
 func TestResizeDirParams(t *testing.T) {
 	cases := []struct {
 		dir      resizeDir
-		axis     SplitDir
+		axis     splitDir
 		positive bool
 	}{
-		{resizeRight, SplitVertical, true},
-		{resizeLeft, SplitVertical, false},
-		{resizeDown, SplitHorizontal, true},
-		{resizeUp, SplitHorizontal, false},
+		{resizeRight, splitVertical, true},
+		{resizeLeft, splitVertical, false},
+		{resizeDown, splitHorizontal, true},
+		{resizeUp, splitHorizontal, false},
 	}
 	for _, c := range cases {
 		axis, delta := c.dir.params()
@@ -126,16 +126,16 @@ func TestFindResizeSplit_DirectSplit(t *testing.T) {
 	// [ [A] | [B] ]  vertical. Either pane resolves to the one vertical
 	// split regardless of arrow direction, so all four side/arrow combos
 	// stay live (the bug fix: B → Right used to be a dead key).
-	root := split(SplitVertical, 0.5, leaf("a"), leaf("b"))
+	root := split(splitVertical, 0.5, leaf("a"), leaf("b"))
 
-	if got := findResizeSplit(root, "a", SplitVertical); got != root {
+	if got := findResizeSplit(root, "a", splitVertical); got != root {
 		t.Errorf("a/vertical = %v, want root", got)
 	}
-	if got := findResizeSplit(root, "b", SplitVertical); got != root {
+	if got := findResizeSplit(root, "b", splitVertical); got != root {
 		t.Errorf("b/vertical = %v, want root", got)
 	}
 	// Wrong axis: no horizontal split contains A → nil.
-	if got := findResizeSplit(root, "a", SplitHorizontal); got != nil {
+	if got := findResizeSplit(root, "a", splitHorizontal); got != nil {
 		t.Errorf("a/horizontal = %v, want nil", got)
 	}
 }
@@ -144,46 +144,46 @@ func TestFindResizeSplit_NearestAncestorWins(t *testing.T) {
 	// [ [ [A] | [B] ] | [C] ]  — both inner and outer splits are vertical
 	// and contain A. The inner (deepest) must win: its divider is the one
 	// adjacent to A.
-	inner := split(SplitVertical, 0.5, leaf("a"), leaf("b"))
-	root := split(SplitVertical, 0.5, inner, leaf("c"))
+	inner := split(splitVertical, 0.5, leaf("a"), leaf("b"))
+	root := split(splitVertical, 0.5, inner, leaf("c"))
 
-	if got := findResizeSplit(root, "a", SplitVertical); got != inner {
+	if got := findResizeSplit(root, "a", splitVertical); got != inner {
 		t.Errorf("a/vertical = %v, want inner split", got)
 	}
-	if got := findResizeSplit(root, "b", SplitVertical); got != inner {
+	if got := findResizeSplit(root, "b", splitVertical); got != inner {
 		t.Errorf("b/vertical = %v, want inner split", got)
 	}
 	// C only sits under the outer vertical split → root.
-	if got := findResizeSplit(root, "c", SplitVertical); got != root {
+	if got := findResizeSplit(root, "c", splitVertical); got != root {
 		t.Errorf("c/vertical = %v, want root", got)
 	}
 }
 
 func TestFindResizeSplit_MixedAxes(t *testing.T) {
 	// [ [A] | ( [B] / [C] ) ]  outer vertical, inner horizontal.
-	innerH := split(SplitHorizontal, 0.5, leaf("b"), leaf("c"))
-	root := split(SplitVertical, 0.5, leaf("a"), innerH)
+	innerH := split(splitHorizontal, 0.5, leaf("b"), leaf("c"))
+	root := split(splitVertical, 0.5, leaf("a"), innerH)
 
 	// Up/Down for B or C act on the horizontal split.
-	if got := findResizeSplit(root, "b", SplitHorizontal); got != innerH {
+	if got := findResizeSplit(root, "b", splitHorizontal); got != innerH {
 		t.Errorf("b/horizontal = %v, want innerH", got)
 	}
-	if got := findResizeSplit(root, "c", SplitHorizontal); got != innerH {
+	if got := findResizeSplit(root, "c", splitHorizontal); got != innerH {
 		t.Errorf("c/horizontal = %v, want innerH", got)
 	}
 	// Left/Right for B act on the only vertical split → root.
-	if got := findResizeSplit(root, "b", SplitVertical); got != root {
+	if got := findResizeSplit(root, "b", splitVertical); got != root {
 		t.Errorf("b/vertical = %v, want root", got)
 	}
 	// A has no horizontal split above it → nil.
-	if got := findResizeSplit(root, "a", SplitHorizontal); got != nil {
+	if got := findResizeSplit(root, "a", splitHorizontal); got != nil {
 		t.Errorf("a/horizontal = %v, want nil", got)
 	}
 }
 
 func TestFindResizeSplit_SingleLeaf(t *testing.T) {
 	root := leaf("only")
-	if got := findResizeSplit(root, "only", SplitVertical); got != nil {
+	if got := findResizeSplit(root, "only", splitVertical); got != nil {
 		t.Errorf("single leaf = %v, want nil", got)
 	}
 }
@@ -205,17 +205,17 @@ func TestResizeActivePane_NoActiveTabNoop(t *testing.T) {
 		t.Errorf("tabs mutated: %d, want 0", len(ws.tabs))
 	}
 
-	ws = &Workspace{tabs: []*Tab{{root: leaf("a"), focused: "a"}}, activeTab: 5}
+	ws = &Workspace{tabs: []*tab{{root: leaf("a"), focused: "a"}}, activeTab: 5}
 	ws.resizeActivePane(resizeLeft) // out-of-range high index, no panic
 }
 
 func TestResizeActivePane_SinglePaneNoop(t *testing.T) {
 	// A lone leaf has no split on any axis → findResizeSplit nil → no-op,
 	// no nil-node deref.
-	tab := &Tab{root: leaf("a"), focused: "a"}
-	ws := &Workspace{tabs: []*Tab{tab}, activeTab: 0}
+	tb := &tab{root: leaf("a"), focused: "a"}
+	ws := &Workspace{tabs: []*tab{tb}, activeTab: 0}
 	ws.resizeActivePane(resizeRight)
-	if !tab.root.isLeaf() {
+	if !tb.root.isLeaf() {
 		t.Error("root unexpectedly changed from leaf")
 	}
 }
@@ -223,9 +223,9 @@ func TestResizeActivePane_SinglePaneNoop(t *testing.T) {
 func TestResizeActivePane_WrongAxisNoop(t *testing.T) {
 	// Vertical split, but Up/Down act on the horizontal axis → no matching
 	// split → ratio unchanged.
-	root := split(SplitVertical, 0.5, leaf("a"), leaf("b"))
-	tab := &Tab{root: root, focused: "a"}
-	ws := &Workspace{tabs: []*Tab{tab}, activeTab: 0}
+	root := split(splitVertical, 0.5, leaf("a"), leaf("b"))
+	tb := &tab{root: root, focused: "a"}
+	ws := &Workspace{tabs: []*tab{tb}, activeTab: 0}
 	ws.resizeActivePane(resizeUp)
 	if root.Ratio != 0.5 {
 		t.Errorf("Ratio changed on wrong-axis resize: %v, want 0.5", root.Ratio)
@@ -235,9 +235,9 @@ func TestResizeActivePane_WrongAxisNoop(t *testing.T) {
 func TestResizeActivePane_AtBoundNoMutation(t *testing.T) {
 	// Ratio already at maxRatio; growing further clamps back to the same
 	// value, so the method returns before refresh() (no window needed).
-	root := split(SplitVertical, maxRatio, leaf("a"), leaf("b"))
-	tab := &Tab{root: root, focused: "a"}
-	ws := &Workspace{tabs: []*Tab{tab}, activeTab: 0}
+	root := split(splitVertical, maxRatio, leaf("a"), leaf("b"))
+	tb := &tab{root: root, focused: "a"}
+	ws := &Workspace{tabs: []*tab{tb}, activeTab: 0}
 	ws.resizeActivePane(resizeRight) // delta +step → clamp → maxRatio
 	if root.Ratio != maxRatio {
 		t.Errorf("Ratio mutated at bound: %v, want %v", root.Ratio, maxRatio)

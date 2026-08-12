@@ -27,6 +27,13 @@ type Cfg struct {
 	// A missing file is silently ignored (defaults apply).
 	ConfigPath string
 
+	// SavePath is where the Cmd+S save command writes the workspace
+	// layout. When empty, the default workspace path is used (see
+	// DefaultWorkspacePath). It does not affect the quit-time save: the
+	// embedder owns that, typically with the same path (falcon saves
+	// here and on quit, so the two agree).
+	SavePath string
+
 	// RecordDir is where Cmd+Shift+R writes session recordings. When empty,
 	// a "recordings" subdirectory of the go-term config directory is used.
 	RecordDir string
@@ -85,7 +92,7 @@ type Workspace struct {
 	cfg     Cfg
 	baseCfg Cfg
 
-	tabs      []*Tab
+	tabs      []*tab
 	activeTab int
 	nextTabID int
 
@@ -153,7 +160,7 @@ func New(w *gui.Window, cfg Cfg) (*Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := ws.addTab(""); err != nil {
+	if _, err := ws.addTabIn(""); err != nil {
 		return nil, err
 	}
 	return ws, nil
@@ -183,7 +190,7 @@ func newWorkspace(w *gui.Window, cfg Cfg) (*Workspace, error) {
 
 // addTab creates a new tab and appends it. dir sets the shell's working
 // directory (empty = inherit the process CWD).
-func (ws *Workspace) addTab(dir string) (*Tab, error) {
+func (ws *Workspace) addTabIn(dir string) (*tab, error) {
 	tabID := "tab-" + strconv.Itoa(ws.nextTabID)
 	ws.nextTabID++
 	tab, err := newTab(ws.w, ws.cfg, tabID, dir, ws.hooks())
@@ -206,7 +213,7 @@ func (ws *Workspace) removeTab(idx int) bool {
 	ws.tabs[idx].closeAll()
 	ws.tabs = append(ws.tabs[:idx], ws.tabs[idx+1:]...)
 	if len(ws.tabs) == 0 {
-		if _, err := ws.addTab(""); err != nil {
+		if _, err := ws.addTabIn(""); err != nil {
 			ws.w.Close()
 			return false
 		}
@@ -271,7 +278,7 @@ func (ws *Workspace) onPaneExit(leafID string) {
 }
 
 // closePaneInTab closes a pane within a specific tab.
-func (ws *Workspace) closePaneInTab(tab *Tab, leafID string) {
+func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 	tab.removePane(leafID)
 	if tab.root.isLeaf() {
 		// Last pane in this tab — if it's also the only tab and we
@@ -300,7 +307,7 @@ func (ws *Workspace) closePaneInTab(tab *Tab, leafID string) {
 			}
 		}
 		if removed {
-			// Tab was removed — focus the surviving tab's pane
+			// tab was removed — focus the surviving tab's pane
 			// and rebuild the view.
 			tab := ws.tabs[ws.activeTab]
 			if t, ok := tab.terms[tab.focused]; ok {
@@ -618,7 +625,7 @@ func (ws *Workspace) selectThemeByName(name string) bool {
 // —————————————————————————————————————————————————————————————
 
 // focusPaneInTab switches focus to the given leaf.
-func (ws *Workspace) focusPaneInTab(tab *Tab, leafID string) {
+func (ws *Workspace) focusPaneInTab(tab *tab, leafID string) {
 	if leafID == "" || leafID == tab.focused {
 		return
 	}
@@ -670,7 +677,7 @@ func (ws *Workspace) tabBarView() gui.View {
 }
 
 // tabButton renders a single tab.
-func (ws *Workspace) tabButton(tab *Tab, isActive bool, idx int) gui.View {
+func (ws *Workspace) tabButton(tab *tab, isActive bool, idx int) gui.View {
 	theme := gui.CurrentTheme()
 	bg := theme.ColorPanel
 	style := theme.M5
@@ -802,10 +809,10 @@ func (ws *Workspace) activateTab(idx int) {
 // the split axis (its ratio share, floored by ratioSplit); the second child
 // Fills the remainder so rounding never leaves a gap. Window resize re-runs
 // View with new dimensions, redistributing space proportionally.
-func (ws *Workspace) splitView(node *splitNode, tab *Tab, boxW, boxH float32) gui.View {
+func (ws *Workspace) splitView(node *splitNode, tab *tab, boxW, boxH float32) gui.View {
 	if node.First != nil {
 		const borderPx = float32(1)
-		if node.Dir == SplitVertical {
+		if node.Dir == splitVertical {
 			avail := boxW - borderPx
 			firstW := ratioSplit(avail, node.Ratio)
 			first := ws.splitView(node.First, tab, firstW, boxH)
@@ -843,7 +850,7 @@ func (ws *Workspace) splitView(node *splitNode, tab *Tab, boxW, boxH float32) gu
 		return gui.Column(col)
 	}
 	// Leaf: FillFill so the enclosing Fixed slot determines actual size.
-	// Focus ID ensures Tab navigation reaches this pane.
+	// Focus ID ensures tab navigation reaches this pane.
 	tm, ok := tab.terms[node.LeafID]
 	if !ok {
 		return gui.Column(tight(gui.FillFill))

@@ -19,14 +19,14 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Label:    "Split Vertical",
 			Shortcut: gui.Shortcut{Key: gui.KeyD, Modifiers: gui.ModSuper},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.SplitPane(false) },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.splitPane(false) },
 		},
 		{
 			ID:       "workspace.splitHorizontal",
 			Label:    "Split Horizontal",
 			Shortcut: gui.Shortcut{Key: gui.KeyD, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.SplitPane(true) },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.splitPane(true) },
 		},
 		// Close pane.
 		{
@@ -34,7 +34,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Label:    "Close Pane",
 			Shortcut: gui.Shortcut{Key: gui.KeyW, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ClosePane() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.closePane() },
 		},
 		// Pane navigation.
 		{
@@ -42,14 +42,14 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Label:    "Next Pane",
 			Shortcut: gui.Shortcut{Key: gui.KeyRightBracket, Modifiers: gui.ModSuper},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.NextPane() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.nextPane() },
 		},
 		{
 			ID:       "workspace.prevPane",
 			Label:    "Previous Pane",
 			Shortcut: gui.Shortcut{Key: gui.KeyLeftBracket, Modifiers: gui.ModSuper},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.PrevPane() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.prevPane() },
 		},
 		// Pane resize: move the focused pane's nearest same-axis split
 		// divider toward the arrow direction.
@@ -81,48 +81,58 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Global:   true,
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.resizeActivePane(resizeDown) },
 		},
-		// Tab management.
+		// tab management.
 		{
 			ID:       "workspace.newTab",
-			Label:    "New Tab",
+			Label:    "New tab",
 			Shortcut: gui.Shortcut{Key: gui.KeyT, Modifiers: gui.ModSuper},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.AddTab() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.addTab() },
 		},
 		{
 			ID:       "workspace.closeTab",
-			Label:    "Close Tab",
+			Label:    "Close tab",
 			Shortcut: gui.Shortcut{Key: gui.KeyW, Modifiers: gui.ModSuper | gui.ModCtrl},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.CloseTab() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.closeTab() },
 		},
 		{
 			ID:       "workspace.moveTabLeft",
-			Label:    "Move Tab Left",
+			Label:    "Move tab Left",
 			Shortcut: gui.Shortcut{Key: gui.KeyLeftBracket, Modifiers: gui.ModSuper | gui.ModAlt},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.MoveTabLeft() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.moveTabLeft() },
 		},
 		{
 			ID:       "workspace.moveTabRight",
-			Label:    "Move Tab Right",
+			Label:    "Move tab Right",
 			Shortcut: gui.Shortcut{Key: gui.KeyRightBracket, Modifiers: gui.ModSuper | gui.ModAlt},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.MoveTabRight() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.moveTabRight() },
 		},
 		{
 			ID:       "workspace.nextTab",
-			Label:    "Next Tab",
+			Label:    "Next tab",
 			Shortcut: gui.Shortcut{Key: gui.KeyRightBracket, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.NextTab() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.nextTab() },
 		},
 		{
 			ID:       "workspace.prevTab",
-			Label:    "Previous Tab",
+			Label:    "Previous tab",
 			Shortcut: gui.Shortcut{Key: gui.KeyLeftBracket, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.PrevTab() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.prevTab() },
+		},
+		// Workspace save. Cmd+S is the conventional persist chord; the
+		// target is Cfg.SavePath, falling back to the default workspace
+		// path so the command works for an embedder that never set one.
+		{
+			ID:       "workspace.save",
+			Label:    "Save Workspace",
+			Shortcut: gui.Shortcut{Key: gui.KeyS, Modifiers: gui.ModSuper},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.saveWorkspace() },
 		},
 		// Session recording of the focused pane.
 		{
@@ -130,7 +140,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Label:    "Start / Stop Recording",
 			Shortcut: gui.Shortcut{Key: gui.KeyR, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleRecording() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.toggleRecording() },
 		},
 		// Broadcast input to every pane in the active tab.
 		{
@@ -138,7 +148,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Label:    "Broadcast Input to All Panes",
 			Shortcut: gui.Shortcut{Key: gui.KeyI, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleBroadcast() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.toggleBroadcast() },
 		},
 		// Theme.
 		{
@@ -146,7 +156,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Label:    "Choose Theme...",
 			Shortcut: gui.Shortcut{Key: gui.KeyT, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleThemeBrowser() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.toggleThemeBrowser() },
 		},
 		// List-overlay navigation — only active while one of the list overlays
 		// (theme browser, command palette) is open, so these bare keys still
@@ -198,7 +208,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Label:    "Command Palette",
 			Shortcut: gui.Shortcut{Key: gui.KeyP, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.TogglePalette() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.togglePalette() },
 		},
 		// Config reload. Cmd+, is deliberately left free for a future
 		// settings UI, so the reload lives on the Shift variant.
@@ -207,7 +217,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Label:    "Reload Config",
 			Shortcut: gui.Shortcut{Key: gui.KeyComma, Modifiers: gui.ModSuper | gui.ModShift},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ReloadConfig() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.reloadConfig() },
 		},
 		// Help overlay.
 		{
@@ -215,7 +225,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Label:    "Show / Hide Shortcuts",
 			Shortcut: gui.Shortcut{Key: gui.KeySlash, Modifiers: gui.ModSuper},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.ToggleHelp() },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.toggleHelp() },
 		},
 		{
 			// Escape dismisses whichever overlay is up. A *single* Escape
@@ -234,14 +244,14 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Execute: func(_ *gui.Event, w *gui.Window) { ws.dismissOverlay() },
 		},
 	}
-	// Tab 1–9 shortcuts.
+	// tab 1–9 shortcuts.
 	for i := 0; i < 9; i++ {
 		idx := i // capture
 		cmds = append(cmds, gui.Command{
 			ID:       "workspace.tab" + strconv.Itoa(i+1),
 			Shortcut: gui.Shortcut{Key: gui.KeyCode(uint16(gui.Key1) + uint16(i)), Modifiers: gui.ModSuper},
 			Global:   true,
-			Execute:  func(_ *gui.Event, w *gui.Window) { ws.GoToTab(idx) },
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.goToTab(idx) },
 		})
 	}
 	// Remap the Super-based defaults to platform-appropriate modifiers
@@ -258,7 +268,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 // from it: the workspace command table (registered on the window), the term.*
 // keybindings, and the effective Cfg used to build panes.
 //
-// It does not touch live panes — ReloadConfig does that, so New can call this
+// It does not touch live panes — reloadConfig does that, so New can call this
 // before any pane exists.
 func (ws *Workspace) loadAndApplyConfig() {
 	fc := loadConfig(ws.baseCfg)
@@ -273,7 +283,7 @@ func (ws *Workspace) loadAndApplyConfig() {
 	ws.notifyColorScheme()
 }
 
-// ReloadConfig re-reads the config file and applies it to the running
+// reloadConfig re-reads the config file and applies it to the running
 // workspace: command shortcuts are re-registered and every live pane is
 // updated in place. Bound to Cmd+Shift+, by default.
 //
@@ -281,11 +291,30 @@ func (ws *Workspace) loadAndApplyConfig() {
 // a malformed config must never wedge the app. Settings that did not change
 // are not pushed to panes, so a reload triggered for one key doesn't disturb
 // unrelated per-pane state (notably font zoom, which SetTextStyle resets).
-func (ws *Workspace) ReloadConfig() {
+func (ws *Workspace) reloadConfig() {
 	prev := ws.cfg
 	ws.loadAndApplyConfig()
 	ws.applyTermSettings(prev)
 	ws.refresh()
+}
+
+// saveWorkspace writes the current layout to Cfg.SavePath, or to the
+// default workspace path when none is configured. Failures are logged, never
+// fatal: a save is a convenience, and the window must not die over a disk
+// problem. Bound to Cmd+S. Main-thread only.
+func (ws *Workspace) saveWorkspace() {
+	path := ws.cfg.SavePath
+	if path == "" {
+		def, err := DefaultWorkspacePath()
+		if err != nil {
+			log.Printf("workspace: cannot determine save path: %v", err)
+			return
+		}
+		path = def
+	}
+	if err := ws.Save(path); err != nil {
+		log.Printf("workspace: save to %s: %v", path, err)
+	}
 }
 
 // applyTermSettings pushes the settings that changed between prev and the
@@ -418,25 +447,25 @@ func (ws *Workspace) overlayConfirm() {
 func (ws *Workspace) dismissOverlay() {
 	switch {
 	case ws.palette.visible:
-		// Not TogglePalette: Escape has its own two-stage meaning inside the
+		// Not togglePalette: Escape has its own two-stage meaning inside the
 		// palette (clear the filter, then close).
 		ws.paletteDismiss()
 	case ws.browser.visible:
-		// Not ToggleThemeBrowser: Escape has its own two-stage meaning inside
+		// Not toggleThemeBrowser: Escape has its own two-stage meaning inside
 		// the browser (clear the filter, then close-and-revert).
 		ws.themeBrowserDismiss()
 	case ws.helpVisible:
-		ws.ToggleHelp()
+		ws.toggleHelp()
 	}
 }
 
-// SplitPane splits the focused pane. If horizontal is true, splits top/bottom;
+// splitPane splits the focused pane. If horizontal is true, splits top/bottom;
 // otherwise splits left/right. Creates a new PTY with a fresh shell.
-func (ws *Workspace) SplitPane(horizontal bool) {
+func (ws *Workspace) splitPane(horizontal bool) {
 	tab := ws.tabs[ws.activeTab]
-	dir := SplitVertical
+	dir := splitVertical
 	if horizontal {
-		dir = SplitHorizontal
+		dir = splitHorizontal
 	}
 	// Unfocus the old pane so it stops asserting focus during layout.
 	// The new pane defaults to focused=true. Capture its effective font size so
@@ -464,23 +493,23 @@ func (ws *Workspace) SplitPane(horizontal bool) {
 	}
 }
 
-// ClosePane closes the focused pane in the active tab. Falls back to the
+// closePane closes the focused pane in the active tab. Falls back to the
 // nearest surviving pane. If the last pane, closes the tab.
-func (ws *Workspace) ClosePane() {
+func (ws *Workspace) closePane() {
 	tab := ws.tabs[ws.activeTab]
 	ws.closePaneInTab(tab, tab.focused)
 }
 
-// NextPane cycles focus to the next pane, wrapping to first after last.
-func (ws *Workspace) NextPane() {
+// nextPane cycles focus to the next pane, wrapping to first after last.
+func (ws *Workspace) nextPane() {
 	tab := ws.tabs[ws.activeTab]
 	if next := nextLeaf(tab.root, tab.focused); next != "" {
 		ws.focusPaneInTab(tab, next)
 	}
 }
 
-// PrevPane cycles focus to the previous pane, wrapping to last after first.
-func (ws *Workspace) PrevPane() {
+// prevPane cycles focus to the previous pane, wrapping to last after first.
+func (ws *Workspace) prevPane() {
 	tab := ws.tabs[ws.activeTab]
 	if prev := prevLeaf(tab.root, tab.focused); prev != "" {
 		ws.focusPaneInTab(tab, prev)
@@ -503,9 +532,9 @@ func (ws *Workspace) focusedCwd() string {
 	return cwdLocalPath(tm.Cwd())
 }
 
-// AddTab creates a new tab with a single terminal and switches to it. The new
+// addTab creates a new tab with a single terminal and switches to it. The new
 // tab's shell starts in the CWD of the pane the command was issued from.
-func (ws *Workspace) AddTab() {
+func (ws *Workspace) addTab() {
 	// Capture the source CWD before the active tab index moves.
 	cwd := ws.focusedCwd()
 	// Unfocus old tab's pane.
@@ -517,7 +546,7 @@ func (ws *Workspace) AddTab() {
 			t.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 		}
 	}
-	_, err := ws.addTab(cwd)
+	_, err := ws.addTabIn(cwd)
 	if err != nil {
 		return
 	}
@@ -530,15 +559,15 @@ func (ws *Workspace) AddTab() {
 	ws.refresh()
 }
 
-// CloseTab closes the active tab. If it's the last tab, replaces it with
+// closeTab closes the active tab. If it's the last tab, replaces it with
 // a fresh single-pane tab.
-func (ws *Workspace) CloseTab() {
+func (ws *Workspace) closeTab() {
 	ws.closeTabAt(ws.activeTab)
 }
 
-// MoveTabLeft swaps the active tab with the one to its left.
+// moveTabLeft swaps the active tab with the one to its left.
 // No-op when the active tab is already the first tab.
-func (ws *Workspace) MoveTabLeft() {
+func (ws *Workspace) moveTabLeft() {
 	if ws.activeTab <= 0 || len(ws.tabs) < 2 {
 		return
 	}
@@ -548,9 +577,9 @@ func (ws *Workspace) MoveTabLeft() {
 	ws.refresh()
 }
 
-// MoveTabRight swaps the active tab with the one to its right.
+// moveTabRight swaps the active tab with the one to its right.
 // No-op when the active tab is already the last tab.
-func (ws *Workspace) MoveTabRight() {
+func (ws *Workspace) moveTabRight() {
 	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs)-1 || len(ws.tabs) < 2 {
 		return
 	}
@@ -560,16 +589,16 @@ func (ws *Workspace) MoveTabRight() {
 	ws.refresh()
 }
 
-// NextTab switches to the next tab (wraps around).
-func (ws *Workspace) NextTab() {
+// nextTab switches to the next tab (wraps around).
+func (ws *Workspace) nextTab() {
 	if len(ws.tabs) < 2 {
 		return
 	}
 	ws.activateTab((ws.activeTab + 1) % len(ws.tabs))
 }
 
-// PrevTab switches to the previous tab (wraps around).
-func (ws *Workspace) PrevTab() {
+// prevTab switches to the previous tab (wraps around).
+func (ws *Workspace) prevTab() {
 	if len(ws.tabs) < 2 {
 		return
 	}
@@ -580,15 +609,15 @@ func (ws *Workspace) PrevTab() {
 	ws.activateTab(idx)
 }
 
-// GoToTab switches to the tab at the given 0-based index.
-func (ws *Workspace) GoToTab(idx int) {
+// goToTab switches to the tab at the given 0-based index.
+func (ws *Workspace) goToTab(idx int) {
 	if idx >= 0 && idx < len(ws.tabs) {
 		ws.activateTab(idx)
 	}
 }
 
-// FocusPane makes the given leaf the focused pane in its tab.
-func (ws *Workspace) FocusPane(leafID string) {
+// focusPane makes the given leaf the focused pane in its tab.
+func (ws *Workspace) focusPane(leafID string) {
 	for _, tab := range ws.tabs {
 		if _, ok := tab.terms[leafID]; ok {
 			ws.focusPaneInTab(tab, leafID)

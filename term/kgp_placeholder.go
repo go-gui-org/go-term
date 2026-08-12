@@ -71,7 +71,7 @@ func kgpDiacriticValue(r rune) (int, bool) {
 // placement id in the underline color — use the same encoding: in 256-color
 // mode the palette *index* is the id, not the color it resolves to (which is
 // why this reads the packed value rather than going through the theme), and in
-// true-color mode the RGB triple is the id. DefaultColor means the application
+// true-color mode the RGB triple is the id. defaultColor means the application
 // set no color, so there is no id to read.
 func kgpColorID(c uint32) uint32 {
 	switch c & 0xFF000000 {
@@ -86,7 +86,7 @@ func kgpColorID(c uint32) uint32 {
 
 // kgpImageIDLow24 extracts the low 24 bits of the image id from a cell
 // foreground color. Reports false when the color cannot name an image:
-// DefaultColor means the application never set one, and id 0 is reserved.
+// defaultColor means the application never set one, and id 0 is reserved.
 func kgpImageIDLow24(fg uint32) (uint32, bool) {
 	id := kgpColorID(fg)
 	return id, id != 0

@@ -57,6 +57,7 @@ func run() int {
 			Identity:               "falcon",
 			ExitWhenLastShellExits: true,
 			DownloadDir:            defaultDownloadDir(),
+			SavePath:               start.effectiveSavePath(),
 			Themes:                 themes,
 			OnColorScheme:          applyChrome,
 		},

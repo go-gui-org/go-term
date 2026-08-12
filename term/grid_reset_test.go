@@ -89,7 +89,7 @@ func TestGrid_SoftReset(t *testing.T) {
 
 	g.SoftReset()
 
-	if g.CurAttrs != 0 || g.CurFG != DefaultColor || g.CurULStyle != ulNone {
+	if g.CurAttrs != 0 || g.CurFG != defaultColor || g.CurULStyle != ulNone {
 		t.Errorf("SGR not reset: attrs=%d fg=%d ul=%d", g.CurAttrs, g.CurFG, g.CurULStyle)
 	}
 	if !g.CursorVisible || g.OriginMode || g.InsertMode || !g.AutoWrap {
@@ -162,7 +162,7 @@ func TestGrid_HardReset(t *testing.T) {
 		t.Errorf("kitty flags survived RIS: %d stack=%d",
 			g.KittyKeyFlags, len(g.kittyFlagStack))
 	}
-	if g.CursorColor != DefaultColor || g.CursorBlink || g.cursorShape != cursorBlock {
+	if g.CursorColor != defaultColor || g.CursorBlink || g.cursorShape != cursorBlock {
 		t.Error("cursor appearance survived RIS")
 	}
 	if !g.TabStops[8] || !g.TabStops[16] {

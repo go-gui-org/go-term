@@ -79,11 +79,11 @@ func init() {
 }
 
 // resolve decodes a packed color value. Indices 0–15 use th.ANSI;
-// indices 16–255 use the global xterm table. DefaultColor returns def.
+// indices 16–255 use the global xterm table. defaultColor returns def.
 // Unknown high-byte tags fall through to palette[low byte] so a corrupt
 // value renders as some valid color rather than panicking.
 func (th *Theme) resolve(c uint32, def gui.Color) gui.Color {
-	if c == DefaultColor {
+	if c == defaultColor {
 		return def
 	}
 	if c&0xFF000000 == colorRGB {
@@ -134,11 +134,11 @@ func (g *grid) setTheme(th Theme) {
 	g.rebuildPalette()
 }
 
-// resolveColor decodes a packed color value: DefaultColor yields def, an
+// resolveColor decodes a packed color value: defaultColor yields def, an
 // rgbColor-tagged value unpacks directly, and everything else indexes the
 // effective palette (so OSC 4 overrides need no extra branch here).
 func (g *grid) resolveColor(c uint32, def gui.Color) gui.Color {
-	if c == DefaultColor {
+	if c == defaultColor {
 		return def
 	}
 	if c&0xFF000000 == colorRGB {

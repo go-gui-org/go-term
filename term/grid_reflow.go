@@ -46,7 +46,7 @@ type physRow struct {
 // i.e., no content was ever written to it. Used by logicalReflow to trim
 // trailing padding from the last physical row of a logical line.
 func isDefaultBlank(c cell) bool {
-	return c.Ch == ' ' && c.FG == DefaultColor && c.BG == DefaultColor &&
+	return c.Ch == ' ' && c.FG == defaultColor && c.BG == defaultColor &&
 		c.Attrs&attrVisual == 0 && c.Width == 1 && c.LinkID == 0 && c.ULStyle == 0
 }
 

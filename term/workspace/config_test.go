@@ -47,7 +47,7 @@ func TestParseConfig_ValidKeybindings(t *testing.T) {
 [keybindings]
 splitVertical = Cmd+E
 closePane     = Cmd+Shift+W
-nextTab       = Ctrl+Tab
+nextTab       = Ctrl+tab
 `
 	cfg, errs := parseConfig(strings.NewReader(input))
 	if len(errs) != 0 {
@@ -59,8 +59,8 @@ nextTab       = Ctrl+Tab
 	if cfg.keybindings["closePane"] != "Cmd+Shift+W" {
 		t.Errorf("closePane = %q, want Cmd+Shift+W", cfg.keybindings["closePane"])
 	}
-	if cfg.keybindings["nextTab"] != "Ctrl+Tab" {
-		t.Errorf("nextTab = %q, want Ctrl+Tab", cfg.keybindings["nextTab"])
+	if cfg.keybindings["nextTab"] != "Ctrl+tab" {
+		t.Errorf("nextTab = %q, want Ctrl+tab", cfg.keybindings["nextTab"])
 	}
 }
 
@@ -102,9 +102,9 @@ splitVertical = Cmd+D
 // ---------------------------------------------------------------------------
 
 func TestParseShortcut_SingleKey(t *testing.T) {
-	sc, ok := parseShortcut("Tab")
+	sc, ok := parseShortcut("tab")
 	if !ok {
-		t.Fatal("parseShortcut(Tab) failed")
+		t.Fatal("parseShortcut(tab) failed")
 	}
 	if sc.Key != gui.KeyTab || sc.Modifiers != 0 {
 		t.Errorf("got %+v, want KeyTab mods=0", sc)

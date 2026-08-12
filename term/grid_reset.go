@@ -23,8 +23,8 @@ func (g *grid) SoftReset() {
 	// SGR + character sets back to defaults. Zeroing CurAttrs also drops
 	// DECSCA protection, which VT510's reset table requires ("character
 	// attribute → normal, erasable by DECSEL and DECSED").
-	g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, 0
-	g.CurULStyle, g.CurULColor = ulNone, DefaultColor
+	g.CurFG, g.CurBG, g.CurAttrs = defaultColor, defaultColor, 0
+	g.CurULStyle, g.CurULColor = ulNone, defaultColor
 	g.CurLinkID = 0
 	g.CharsetG0, g.CharsetG1, g.ActiveG = charsetASCII, charsetASCII, 0
 
@@ -170,7 +170,7 @@ func (g *grid) HardReset() {
 	// Cursor appearance (DECSCUSR / OSC 12).
 	g.cursorShape = cursorBlock
 	g.CursorBlink = false
-	g.CursorColor = DefaultColor
+	g.CursorColor = defaultColor
 
 	// OSC 4 palette overrides. Unlike OSC 10/11 these are unambiguously
 	// child-set, so a power-on reset drops them (xterm/kitty do the same).

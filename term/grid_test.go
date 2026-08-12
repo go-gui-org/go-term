@@ -29,7 +29,7 @@ func TestNewGrid_DefaultsAndClamping(t *testing.T) {
 	if g.Rows != 1 || g.Cols != 1 {
 		t.Errorf("zero dims not clamped: %dx%d", g.Rows, g.Cols)
 	}
-	if g.CurFG != DefaultColor || g.CurBG != DefaultColor {
+	if g.CurFG != defaultColor || g.CurBG != defaultColor {
 		t.Errorf("default colors wrong: fg=%d bg=%d", g.CurFG, g.CurBG)
 	}
 	g = newGrid(MaxGridDim+10, MaxGridDim+10)
@@ -38,7 +38,7 @@ func TestNewGrid_DefaultsAndClamping(t *testing.T) {
 	}
 	g = newGrid(2, 3)
 	for i, c := range g.Cells {
-		if c.Ch != ' ' || c.FG != DefaultColor || c.BG != DefaultColor {
+		if c.Ch != ' ' || c.FG != defaultColor || c.BG != defaultColor {
 			t.Fatalf("cell[%d] not default: %+v", i, c)
 		}
 	}
@@ -464,8 +464,8 @@ func TestGrid_DefaultCell_ULColor(t *testing.T) {
 	if c.ULStyle != ulNone {
 		t.Errorf("defaultCell: ULStyle = %d, want 0", c.ULStyle)
 	}
-	if c.ULColor != DefaultColor {
-		t.Errorf("defaultCell: ULColor = %#x, want DefaultColor", c.ULColor)
+	if c.ULColor != defaultColor {
+		t.Errorf("defaultCell: ULColor = %#x, want defaultColor", c.ULColor)
 	}
 }
 
@@ -611,7 +611,7 @@ func TestDynColorRGB_AllPaths(t *testing.T) {
 	}
 
 	// Unknown ps with CursorColor unset (not present — restore and re-test)
-	g.CursorColor = DefaultColor
+	g.CursorColor = defaultColor
 	r, gr, b = g.dynColorRGB(99)
 	if r != g.Theme.DefaultFG.R || gr != g.Theme.DefaultFG.G || b != g.Theme.DefaultFG.B {
 		t.Errorf("dynColorRGB(99) unset = (%d,%d,%d), want DefaultFG", r, gr, b)

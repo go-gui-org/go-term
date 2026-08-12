@@ -612,18 +612,18 @@ func (p *parser) applySGR() {
 	// the converse holds too — only DECSCA, DECSTR and RIS change protection.
 	if len(p.params) == 0 {
 
-		g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, g.CurAttrs&attrProtected
+		g.CurFG, g.CurBG, g.CurAttrs = defaultColor, defaultColor, g.CurAttrs&attrProtected
 		g.CurULStyle = 0
-		g.CurULColor = DefaultColor
+		g.CurULColor = defaultColor
 		return
 	}
 	for i := 0; i < len(p.params); i++ {
 		n := p.params[i]
 		switch {
 		case n == 0:
-			g.CurFG, g.CurBG, g.CurAttrs = DefaultColor, DefaultColor, g.CurAttrs&attrProtected
+			g.CurFG, g.CurBG, g.CurAttrs = defaultColor, defaultColor, g.CurAttrs&attrProtected
 			g.CurULStyle = 0
-			g.CurULColor = DefaultColor
+			g.CurULColor = defaultColor
 		case n == 1:
 			g.CurAttrs |= attrBold
 		case n == 2:
@@ -672,7 +672,7 @@ func (p *parser) applySGR() {
 		case n == 24:
 			g.CurAttrs &^= attrUnderline
 			g.CurULStyle = 0
-			g.CurULColor = DefaultColor
+			g.CurULColor = defaultColor
 		case n == 27:
 			g.CurAttrs &^= attrInverse
 		case n == 28:
@@ -689,11 +689,11 @@ func (p *parser) applySGR() {
 		case n >= 30 && n <= 37:
 			g.CurFG = paletteColor(uint8(n - 30))
 		case n == 39:
-			g.CurFG = DefaultColor
+			g.CurFG = defaultColor
 		case n >= 40 && n <= 47:
 			g.CurBG = paletteColor(uint8(n - 40))
 		case n == 49:
-			g.CurBG = DefaultColor
+			g.CurBG = defaultColor
 		case n >= 90 && n <= 97:
 			g.CurFG = paletteColor(uint8(n - 90 + 8))
 		case n >= 100 && n <= 107:
@@ -710,7 +710,7 @@ func (p *parser) applySGR() {
 			i = applyExtendedColor(p.params, i, &g.CurULColor)
 		case n == 59:
 
-			g.CurULColor = DefaultColor
+			g.CurULColor = defaultColor
 		}
 	}
 }

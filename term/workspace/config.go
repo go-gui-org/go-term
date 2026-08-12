@@ -310,7 +310,7 @@ func parseBellMode(s string) (term.BellMode, bool) {
 
 const maxShortcutLen = 64 // "Cmd+Ctrl+Alt+Shift+F25" is ~22 chars; 64 is generous
 
-// parseShortcut parses a chord string like "Cmd+D", "Ctrl+Shift+[", "Tab".
+// parseShortcut parses a chord string like "Cmd+D", "Ctrl+Shift+[", "tab".
 // Returns the Shortcut and true on success; Shortcut{}, false otherwise.
 // Canonical format: modifiers first (Cmd/Ctrl/Alt/Shift), then the key name,
 // all joined with "+".

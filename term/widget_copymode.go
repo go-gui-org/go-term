@@ -517,79 +517,18 @@ func (t *Term) handleCopyModeChar(r rune, w *gui.Window) {
 // consumed, matched or not — apart from the mode-entry chord, which the caller
 // handles first — so there is nothing for callers to branch on: copy mode must
 // not leak keystrokes to the child.
+//
+// The binds-switch is now an iteration over copyModeOrder, so the operations
+// live in one place (copyModeOps) with the direct-dispatch path. Order
+// decides a winner only if a user rebinds two actions onto the same chord,
+// where first-listed wins — copyModeOrder preserves the old case order.
 func (t *Term) handleCopyModeKey(e *gui.Event, w *gui.Window) {
-	switch {
-	case t.binds(ActionCopyModeExit, e):
-		t.exitCopyMode(w)
-
-	// Motion. The cases are grouped by kind, not ordered by precedence: every
-	// copy-mode binding is exact on the modifier bits (shiftOptional is false
-	// throughout — see defaultBindings), so the pairs that differ only by Shift
-	// (g/G, v/V, n/N) can't match each other's case and reordering them changes
-	// nothing. Order decides a winner only if a user rebinds two actions onto
-	// the same chord, where first-listed wins.
-	case t.binds(ActionCopyModeLeft, e):
-		t.moveCopyCols(-1, w)
-	case t.binds(ActionCopyModeDown, e):
-		t.moveCopyRows(+1, w)
-	case t.binds(ActionCopyModeUp, e):
-		t.moveCopyRows(-1, w)
-	case t.binds(ActionCopyModeRight, e):
-		t.moveCopyCols(+1, w)
-	case t.binds(ActionCopyModeWordFwd, e):
-		t.copyWordMotion(true, w)
-	case t.binds(ActionCopyModeWordBack, e):
-		t.copyWordMotion(false, w)
-	case t.binds(ActionCopyModeLineStart, e):
-		t.copy.cursor.Col = 0
-		t.revealCursor(w)
-	case t.binds(ActionCopyModeLineEnd, e):
-		t.copy.cursor.Col = t.copyLineEnd()
-		t.revealCursor(w)
-	case t.binds(ActionCopyModeBottom, e):
-		t.copy.cursor.Row = t.contentRows() - 1
-		t.revealCursor(w)
-	case t.binds(ActionCopyModeTop, e):
-		t.copy.cursor = contentPos{}
-		t.revealCursor(w)
-	case t.binds(ActionCopyModeHalfPageUp, e):
-		t.moveCopyRows(-t.copyHalfPageStep(), w)
-	case t.binds(ActionCopyModeHalfPageDown, e):
-		t.moveCopyRows(+t.copyHalfPageStep(), w)
-	case t.binds(ActionCopyModePageUp, e):
-		t.moveCopyRows(-t.copyPageStep(), w)
-	case t.binds(ActionCopyModePageDown, e):
-		t.moveCopyRows(+t.copyPageStep(), w)
-
-	// Selection and yank.
-	case t.binds(ActionCopyModeSelectLine, e):
-		t.startCopySelection(copySelLine, w)
-	case t.binds(ActionCopyModeSelectChar, e):
-		t.startCopySelection(copySelChar, w)
-	case t.binds(ActionCopyModeYank, e), t.binds(ActionCopy, e):
-		t.yankCopySelection(w)
-
-	// Search and marks.
-	case t.binds(ActionCopyModeSearchBack, e):
-		t.openCopySearch(true, w)
-	case t.binds(ActionCopyModeSearchFwd, e):
-		t.openCopySearch(false, w)
-	case t.binds(ActionCopyModePrevMatch, e):
-		t.copySearchJump(t.copy.backward, w)
-	case t.binds(ActionCopyModeNextMatch, e):
-		t.copySearchJump(!t.copy.backward, w)
-	case t.binds(ActionCopyModePrevMark, e):
-		t.copyMarkJump(true, w)
-	case t.binds(ActionCopyModeNextMark, e):
-		t.copyMarkJump(false, w)
-
-	// Copy mode's dispatch runs first and consumes everything, so the two
-	// Term-level mark chords need explicit cases here or they would die
-	// silently the moment copy mode is active.
-	case t.binds(ActionJumpFailure, e):
-		t.jumpToFailure(w)
-	case t.binds(ActionSelectOutput, e):
-		t.selectCommandOutput(w)
+	for _, a := range copyModeOrder {
+		if t.binds(a, e) {
+			copyModeOps[a](t, w)
+			e.IsHandled = true
+			return
+		}
 	}
 	// Consume unconditionally, matched or not: an unhandled letter reaching
 	// the shell is the one failure mode a modal keymap must never have.

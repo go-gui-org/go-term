@@ -47,7 +47,7 @@ func TestOnDraw_DefaultBGSkipsBackgroundPass(t *testing.T) {
 	g.CursorVisible = false
 	g.CursorR = -1
 	g.CursorC = -1
-	// Use defaultCell() so BG=DefaultColor (not ANSI 0=black).
+	// Use defaultCell() so BG=defaultColor (not ANSI 0=black).
 	for c := range g.Cols {
 		g.Cells[c] = defaultCell()
 	}

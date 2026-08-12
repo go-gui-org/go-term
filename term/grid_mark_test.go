@@ -80,7 +80,7 @@ func TestGrid_Marks_ShiftOnResize(t *testing.T) {
 
 	for i := range 3 {
 		for c := range 10 {
-			g.Cells[i*10+c] = cell{Ch: rune('a' + c), FG: DefaultColor, BG: DefaultColor, Width: 1}
+			g.Cells[i*10+c] = cell{Ch: rune('a' + c), FG: defaultColor, BG: defaultColor, Width: 1}
 		}
 		g.RowWrapped[i] = false
 	}

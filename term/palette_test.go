@@ -73,7 +73,7 @@ func TestPalette_TruecolorRoundtrip(t *testing.T) {
 
 func TestPalette_ResolveUnknownTagUsesPaletteByte(t *testing.T) {
 	// Tag 0x42 is neither colorPalette (0x00) nor colorRGB (0x01) nor
-	// DefaultColor (0xFF). Decoder must not panic; falls back to
+	// defaultColor (0xFF). Decoder must not panic; falls back to
 	// palette[low byte] which is in-bounds (palette has 256 entries).
 	bad := uint32(0x42)<<24 | uint32(5)
 	if got, want := DefaultTheme.resolve(bad, DefaultTheme.DefaultFG), DefaultTheme.ANSI[5]; got != want {
@@ -100,7 +100,7 @@ func TestPalette_TruecolorInverse(t *testing.T) {
 }
 
 func TestPalette_Inverse_DefaultsSwap(t *testing.T) {
-	c := cell{Ch: ' ', FG: DefaultColor, BG: DefaultColor, Attrs: attrInverse}
+	c := cell{Ch: ' ', FG: defaultColor, BG: defaultColor, Attrs: attrInverse}
 	if got := DefaultTheme.fg(c); got != DefaultTheme.DefaultBG {
 		t.Errorf("inverse default fg: %+v", got)
 	}
@@ -151,9 +151,9 @@ func TestPalette_OverrideBeatsThemeAndCube(t *testing.T) {
 func TestPalette_OverrideIgnoresTruecolorAndDefault(t *testing.T) {
 	g := newGrid(2, 4)
 	// Overriding index 1 must not touch cells whose color is a packed RGB
-	// triple or DefaultColor, even when their low byte happens to be 1.
+	// triple or defaultColor, even when their low byte happens to be 1.
 	g.SetPaletteColor(1, rgbColor(9, 9, 9))
-	c := cell{Ch: ' ', FG: rgbColor(0, 0, 1), BG: DefaultColor}
+	c := cell{Ch: ' ', FG: rgbColor(0, 0, 1), BG: defaultColor}
 	if got, want := g.fgOf(c), gui.RGB(0, 0, 1); got != want {
 		t.Errorf("truecolor fg: got %+v want %+v", got, want)
 	}
@@ -183,7 +183,7 @@ func TestPalette_NoOverrideMatchesTheme(t *testing.T) {
 	for _, c := range []cell{
 		{Ch: ' ', FG: 1, BG: 2},
 		{Ch: ' ', FG: paletteColor(196), BG: paletteColor(232)},
-		{Ch: ' ', FG: DefaultColor, BG: DefaultColor, Attrs: attrInverse},
+		{Ch: ' ', FG: defaultColor, BG: defaultColor, Attrs: attrInverse},
 	} {
 		if got, want := g.fgOf(c), g.Theme.fg(c); got != want {
 			t.Errorf("fgOf(%+v) = %+v, want %+v", c, got, want)

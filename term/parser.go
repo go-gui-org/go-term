@@ -198,7 +198,7 @@ func newParser(g *grid) *parser {
 }
 
 func (p *parser) currentSGRString() string {
-	if p.g.CurFG == DefaultColor && p.g.CurBG == DefaultColor &&
+	if p.g.CurFG == defaultColor && p.g.CurBG == defaultColor &&
 		p.g.CurAttrs&attrVisual == 0 {
 		return "0m"
 	}

@@ -13,23 +13,23 @@ import (
 func TestToggleBroadcast_AllowedWithOnePane(t *testing.T) {
 	ws := newLiveWorkspace(t)
 
-	ws.ToggleBroadcast()
+	ws.toggleBroadcast()
 
-	if !ws.Broadcasting() {
+	if !ws.broadcasting() {
 		t.Error("broadcast refused on a single-pane tab")
 	}
 }
 
 func TestToggleBroadcast_TogglesWithTwoPanes(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 
-	ws.ToggleBroadcast()
-	if !ws.Broadcasting() {
+	ws.toggleBroadcast()
+	if !ws.broadcasting() {
 		t.Fatal("broadcast did not turn on with two live panes")
 	}
-	ws.ToggleBroadcast()
-	if ws.Broadcasting() {
+	ws.toggleBroadcast()
+	if ws.broadcasting() {
 		t.Error("broadcast did not turn back off")
 	}
 }
@@ -38,13 +38,13 @@ func TestToggleBroadcast_TogglesWithTwoPanes(t *testing.T) {
 // active when it was created.
 func TestToggleBroadcast_IsPerTab(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
-	ws.ToggleBroadcast()
+	ws.splitPane(false)
+	ws.toggleBroadcast()
 	first := activeTabOf(t, ws)
 
-	ws.AddTab()
+	ws.addTab()
 
-	if ws.Broadcasting() {
+	if ws.broadcasting() {
 		t.Error("the new tab inherited broadcast")
 	}
 	if !first.broadcast {
@@ -57,11 +57,11 @@ func TestToggleBroadcast_IsPerTab(t *testing.T) {
 // pill says it will.
 func TestBroadcast_SurvivesPaneClose(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
-	ws.ToggleBroadcast()
+	ws.splitPane(false)
+	ws.toggleBroadcast()
 	tab := activeTabOf(t, ws)
 
-	ws.ClosePane()
+	ws.closePane()
 
 	if !tab.broadcast {
 		t.Error("broadcast cleared itself on the drop to a single pane")
@@ -71,8 +71,8 @@ func TestBroadcast_SurvivesPaneClose(t *testing.T) {
 // Same when the shell dies on its own rather than being closed.
 func TestBroadcast_SurvivesShellExit(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
-	ws.ToggleBroadcast()
+	ws.splitPane(false)
+	ws.toggleBroadcast()
 	tab := activeTabOf(t, ws)
 
 	ws.onPaneExit(leavesOf(tab.root)[0])
@@ -88,7 +88,7 @@ func TestBroadcast_SurvivesShellExit(t *testing.T) {
 // input actually came from one of its panes.
 func TestBroadcastSource_Gating(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	tab := activeTabOf(t, ws)
 	src := tab.focused
 
@@ -96,7 +96,7 @@ func TestBroadcastSource_Gating(t *testing.T) {
 		t.Error("mirrored while broadcast was off")
 	}
 
-	ws.ToggleBroadcast()
+	ws.toggleBroadcast()
 
 	if ws.broadcastSource(src) != tab {
 		t.Error("did not mirror input from a pane of the broadcasting tab")
@@ -110,12 +110,12 @@ func TestBroadcastSource_Gating(t *testing.T) {
 // must not be allowed to type into the tab the user is looking at.
 func TestBroadcastSource_IgnoresBackgroundTab(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
-	ws.ToggleBroadcast()
+	ws.splitPane(false)
+	ws.toggleBroadcast()
 	background := activeTabOf(t, ws)
 	backgroundPane := background.focused
 
-	ws.AddTab()
+	ws.addTab()
 
 	if got := ws.broadcastSource(backgroundPane); got != nil {
 		t.Errorf("broadcastSource = %v for a background-tab pane, want nil", got)
@@ -124,7 +124,7 @@ func TestBroadcastSource_IgnoresBackgroundTab(t *testing.T) {
 
 func TestBroadcastTarget(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	tab := activeTabOf(t, ws)
 	leaves := leavesOf(tab.root)
 	src, other := leaves[0], leaves[1]
@@ -152,8 +152,8 @@ func TestBroadcastTarget(t *testing.T) {
 // exercised here is the workspace-side dispatch that picks between them.
 func TestOnPaneInput_DispatchesBothKinds(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
-	ws.ToggleBroadcast()
+	ws.splitPane(false)
+	ws.toggleBroadcast()
 	tab := activeTabOf(t, ws)
 	src := tab.focused
 
@@ -171,13 +171,13 @@ func TestOnPaneInput_DispatchesBothKinds(t *testing.T) {
 // off, or from a pane this workspace does not own, nothing may be dispatched.
 func TestOnPaneInput_GatedWhenOff(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.SplitPane(false)
+	ws.splitPane(false)
 	tab := activeTabOf(t, ws)
 
 	// Broadcast off.
 	ws.onPaneInput(tab.focused, []byte("x"), term.InputKey)
 	// Broadcast on, but the source pane belongs to no tab.
-	ws.ToggleBroadcast()
+	ws.toggleBroadcast()
 	ws.onPaneInput("no-such-leaf", []byte("x"), term.InputPaste)
 
 	for id, tm := range tab.terms {
@@ -192,7 +192,7 @@ func TestOnPaneInput_GatedWhenOff(t *testing.T) {
 // The tint has to be visibly not the theme border, or broadcast looks like an
 // ordinary split.
 func TestDividerColor(t *testing.T) {
-	tab := &Tab{}
+	tab := &tab{}
 	if got := dividerColor(tab); got != gui.CurrentTheme().ColorBorder {
 		t.Errorf("idle divider = %v, want the theme border", got)
 	}
@@ -242,7 +242,7 @@ func TestToggleBroadcast_HasCommandAndLabel(t *testing.T) {
 // does nothing for panes created by that path.
 func TestPaneHooks_OnInputWired(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	cfg := (&Tab{}).termCfg(&gui.Window{}, ws.cfg, "pane", "", ws.hooks())
+	cfg := (&tab{}).termCfg(&gui.Window{}, ws.cfg, "pane", "", ws.hooks())
 	if cfg.OnInput == nil {
 		t.Fatal("termCfg left OnInput nil; broadcast would never see a keystroke")
 	}

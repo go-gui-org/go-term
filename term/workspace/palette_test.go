@@ -21,7 +21,7 @@ func labelsOf(ws *Workspace) []string {
 
 func TestPalette_OpensWithBothRegistries(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	if !ws.palette.visible {
 		t.Fatal("palette not visible after toggle")
 	}
@@ -30,14 +30,14 @@ func TestPalette_OpensWithBothRegistries(t *testing.T) {
 	var sawWorkspace, sawTerm bool
 	for _, l := range labelsOf(ws) {
 		switch l {
-		case "New Tab":
+		case "New tab":
 			sawWorkspace = true
 		case "Copy mode":
 			sawTerm = true
 		}
 	}
 	if !sawWorkspace {
-		t.Error("palette is missing workspace commands (New Tab)")
+		t.Error("palette is missing workspace commands (New tab)")
 	}
 	if !sawTerm {
 		t.Error("palette is missing terminal actions (Copy mode)")
@@ -59,7 +59,7 @@ func TestPalette_DoesNotListItself(t *testing.T) {
 		t.Fatal("the palette command has no Label; the fixture proves nothing")
 	}
 
-	ws.TogglePalette()
+	ws.togglePalette()
 	for _, l := range labelsOf(ws) {
 		if l == own {
 			t.Errorf("palette lists itself as %q", own)
@@ -73,7 +73,7 @@ func TestPalette_DoesNotListItself(t *testing.T) {
 // whose filter field is empty.
 func TestOverlayFilterID_ChangesOnEveryOpen(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	// ToggleThemeBrowser no-ops on an empty corpus, so give it one to open.
+	// toggleThemeBrowser no-ops on an empty corpus, so give it one to open.
 	ws.cfg.Themes = []term.NamedTheme{{Name: "Dark", Theme: term.DefaultTheme}}
 
 	for _, tc := range []struct {
@@ -81,8 +81,8 @@ func TestOverlayFilterID_ChangesOnEveryOpen(t *testing.T) {
 		toggle func()
 		id     func() string
 	}{
-		{"palette", ws.TogglePalette, ws.paletteFilterID},
-		{"themeBrowser", ws.ToggleThemeBrowser, ws.browserFilterID},
+		{"palette", ws.togglePalette, ws.paletteFilterID},
+		{"themeBrowser", ws.toggleThemeBrowser, ws.browserFilterID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.toggle()
@@ -115,7 +115,7 @@ func TestPalette_SkipsUnnamedAndGatedCommands(t *testing.T) {
 		t.Fatal("no eligible workspace commands; the fixture proves nothing")
 	}
 
-	ws.TogglePalette()
+	ws.togglePalette()
 	gotWS := 0
 	for _, l := range labelsOf(ws) {
 		if l == "" {
@@ -142,7 +142,7 @@ func TestPalette_SkipsUnnamedAndGatedCommands(t *testing.T) {
 
 func TestPalette_ViewBuilds(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	buildView(t, ws)
 
 	// And with a filter that matches nothing, which takes the empty-list branch.
@@ -164,7 +164,7 @@ func TestPalette_ViewBuilds(t *testing.T) {
 
 func TestPalette_FilterNarrows(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	all := len(ws.palette.matches)
 
 	ws.setPaletteFilter("split")
@@ -183,7 +183,7 @@ func TestPalette_FilterNarrows(t *testing.T) {
 
 func TestPalette_FilterIsCaseInsensitive(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	ws.setPaletteFilter("SPLIT")
 	if len(ws.palette.matches) == 0 {
 		t.Error("uppercase filter matched nothing; fold is not being applied")
@@ -194,7 +194,7 @@ func TestPalette_CursorSurvivesNarrowing(t *testing.T) {
 	// Narrowing a filter around the current selection must not move it —
 	// otherwise typing one more character silently retargets Enter.
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	ws.setPaletteFilter("split")
 
 	ws.paletteMove(1)
@@ -215,7 +215,7 @@ func TestPalette_CursorSurvivesNarrowing(t *testing.T) {
 
 func TestPalette_NavigationWraps(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	n := len(ws.palette.matches)
 	if n < 2 {
 		t.Fatalf("need at least 2 entries, got %d", n)
@@ -236,10 +236,10 @@ func TestPalette_ConfirmRunsEntryAndCloses(t *testing.T) {
 	ws := newLiveWorkspace(t)
 	before := len(ws.tabs)
 
-	ws.TogglePalette()
-	ws.setPaletteFilter("New Tab")
+	ws.togglePalette()
+	ws.setPaletteFilter("New tab")
 	if len(ws.palette.matches) != 1 {
-		t.Fatalf("got %d matches for 'New Tab', want 1: %v", len(ws.palette.matches), labelsOf(ws))
+		t.Fatalf("got %d matches for 'New tab', want 1: %v", len(ws.palette.matches), labelsOf(ws))
 	}
 	ws.paletteConfirm()
 
@@ -253,7 +253,7 @@ func TestPalette_ConfirmRunsEntryAndCloses(t *testing.T) {
 
 func TestPalette_ConfirmWithNoMatchIsNoOp(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	ws.setPaletteFilter("zzz-no-such-command")
 	ws.paletteConfirm()
 	if !ws.palette.visible {
@@ -263,7 +263,7 @@ func TestPalette_ConfirmWithNoMatchIsNoOp(t *testing.T) {
 
 func TestPalette_EscapeClearsFilterThenCloses(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	ws.setPaletteFilter("split")
 
 	ws.paletteDismiss()
@@ -283,8 +283,8 @@ func TestPalette_EscapeClearsFilterThenCloses(t *testing.T) {
 func TestPalette_ClosesThemeBrowser(t *testing.T) {
 	// Both overlays own Up/Down/Enter and focus; they must not be up together.
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
-	ws.TogglePalette()
+	ws.toggleThemeBrowser()
+	ws.togglePalette()
 
 	if ws.browser.visible {
 		t.Error("theme browser still visible after opening the palette")
@@ -296,7 +296,7 @@ func TestPalette_ClosesThemeBrowser(t *testing.T) {
 
 func TestPalette_FilterIsTruncated(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	ws.setPaletteFilter(strings.Repeat("x", paletteFilterMax*3))
 	if len(ws.palette.filter) > paletteFilterMax {
 		t.Errorf("filter length = %d, want <= %d", len(ws.palette.filter), paletteFilterMax)
@@ -340,7 +340,7 @@ func TestOverlayNav_RoutesToVisibleOverlay(t *testing.T) {
 		t.Error("listOverlayOpen is true with no overlay up")
 	}
 
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	if !ws.listOverlayOpen(nil) {
 		t.Fatal("listOverlayOpen is false with the browser up")
 	}
@@ -350,7 +350,7 @@ func TestOverlayNav_RoutesToVisibleOverlay(t *testing.T) {
 		t.Error("overlayMove did not move the theme browser cursor")
 	}
 
-	ws.TogglePalette() // closes the browser
+	ws.togglePalette() // closes the browser
 	paletteIdx := ws.palette.idx
 	ws.overlayMove(1)
 	if ws.palette.idx == paletteIdx {
@@ -365,17 +365,17 @@ func TestPalette_ClickRunsPointedRowNotSelected(t *testing.T) {
 	ws := newLiveWorkspace(t)
 	before := len(ws.tabs)
 
-	ws.TogglePalette()
-	ws.setPaletteFilter("Tab")
+	ws.togglePalette()
+	ws.setPaletteFilter("tab")
 	target := -1
 	for j, i := range ws.palette.matches {
-		if ws.palette.items[i].label == "New Tab" {
+		if ws.palette.items[i].label == "New tab" {
 			target = j
 			break
 		}
 	}
 	if target < 0 {
-		t.Fatalf("'New Tab' not among matches: %v", labelsOf(ws))
+		t.Fatalf("'New tab' not among matches: %v", labelsOf(ws))
 	}
 	// Park the keyboard cursor somewhere else, so running the selected entry
 	// instead of the clicked one would be visible.
@@ -393,7 +393,7 @@ func TestPalette_ClickRunsPointedRowNotSelected(t *testing.T) {
 
 func TestPalette_ClickOutOfRangeIsNoOp(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	ws.paletteClick(-1)
 	ws.paletteClick(len(ws.palette.matches))
 	if !ws.palette.visible {
@@ -407,7 +407,7 @@ func TestPalette_ClickOutOfRangeIsNoOp(t *testing.T) {
 // then must not scroll anything or panic.
 func TestPalette_RevealNoOpsWithoutGeometry(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	ws.palette.rowH, ws.palette.listH = 0, 0
 	ws.palette.idx = 5
 	ws.revealPaletteRow()
@@ -421,7 +421,7 @@ func TestPalette_RevealNoOpsWithoutGeometry(t *testing.T) {
 // one already inside does not move the list at all.
 func TestPalette_RevealScrollsMinimally(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	// Row pitch is rowH plus the inter-row gap, so rows sit 11px apart.
 	ws.palette.rowH, ws.palette.listH = 10, 100
 
@@ -451,7 +451,7 @@ func TestPalette_RevealScrollsMinimally(t *testing.T) {
 // follows. Only the arrows move the cursor.
 func TestPalette_WheelDoesNotMoveCursor(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	ws.palette.rowH, ws.palette.listH = 10, 100
 	before := ws.palette.idx
 
@@ -464,7 +464,7 @@ func TestPalette_WheelDoesNotMoveCursor(t *testing.T) {
 
 func TestThemeBrowser_RevealScrollsMinimally(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	ws.browser.rowH, ws.browser.listH = 10, 100
 
 	ws.browser.idx = 14
@@ -482,7 +482,7 @@ func TestThemeBrowser_RevealScrollsMinimally(t *testing.T) {
 
 func TestThemeBrowser_RevealNoOpsWithoutGeometry(t *testing.T) {
 	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
-	ws.ToggleThemeBrowser()
+	ws.toggleThemeBrowser()
 	ws.browser.rowH, ws.browser.listH = 0, 0
 	ws.browser.idx = 2
 	ws.revealBrowserRow()
@@ -497,7 +497,7 @@ func TestThemeBrowser_RevealNoOpsWithoutGeometry(t *testing.T) {
 // filter box — the box takes no input and the characters land in the shell.
 func TestPalette_FilterKeepsFocusAcrossViewBuild(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
+	ws.togglePalette()
 	if !ws.w.IsFocus(ws.paletteFilterID()) {
 		t.Fatal("filter box does not have focus right after open")
 	}
@@ -516,8 +516,8 @@ func TestPalette_FilterKeepsFocusAcrossViewBuild(t *testing.T) {
 // Closing hands the keyboard back, or the terminal stays deaf.
 func TestPalette_CloseReturnsFocusToPane(t *testing.T) {
 	ws := newLiveWorkspace(t)
-	ws.TogglePalette()
-	ws.TogglePalette()
+	ws.togglePalette()
+	ws.togglePalette()
 
 	p := ws.ActivePane()
 	if p == nil {

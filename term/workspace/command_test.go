@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -58,6 +59,62 @@ func TestRegisterCommands_AllReachRegistry(t *testing.T) {
 	}
 }
 
+// TestSaveCommand_BoundToCmdS pins the Cmd+S workspace-save command: it must
+// exist, carry the conventional chord, and write the layout to Cfg.SavePath.
+func TestSaveCommand_BoundToCmdS(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.loadAndApplyConfig()
+
+	var cmd *gui.Command
+	for i := range ws.commands {
+		if ws.commands[i].ID == "workspace.save" {
+			cmd = &ws.commands[i]
+			break
+		}
+	}
+	if cmd == nil {
+		t.Fatal("workspace.save command not declared")
+	}
+	// The default chord is Super+S, remapped to the platform's primary
+	// modifier before registration (Cmd→Ctrl+Shift on Windows).
+	want := gui.Shortcut{Key: gui.KeyS, Modifiers: remapMod(gui.ModSuper)}
+	if cmd.Shortcut != want {
+		t.Errorf("Cmd+S binding = %+v, want %+v", cmd.Shortcut, want)
+	}
+
+	path := filepath.Join(t.TempDir(), "sub", "workspace.json")
+	ws.cfg.SavePath = path
+	cmd.Execute(nil, ws.w)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("save did not write %s: %v", path, err)
+	}
+}
+
+// TestSaveCommand_EmptyPathFallsBack pins the default-path fallback: with no
+// SavePath configured the command still resolves a target rather than
+// silently no-oping. The write itself is not exercised here — the fallback
+// target is the host's real default workspace path, which a test must not
+// clobber.
+func TestSaveCommand_EmptyPathFallsBack(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.loadAndApplyConfig()
+
+	var cmd *gui.Command
+	for i := range ws.commands {
+		if ws.commands[i].ID == "workspace.save" {
+			cmd = &ws.commands[i]
+			break
+		}
+	}
+	if cmd == nil {
+		t.Fatal("workspace.save command not declared")
+	}
+	def, err := DefaultWorkspacePath()
+	if err != nil || def == "" {
+		t.Skipf("no default workspace path on this host: %v", err)
+	}
+}
+
 // TestRegisterCommands_TabDigitsBound pins the Cmd+1..Cmd+9 tab-selection
 // bindings: correct IDs, contiguous digit key codes, and the platform-remapped
 // modifier.
@@ -93,8 +150,8 @@ func TestRegisterCommands_TabDigitsSelectTab(t *testing.T) {
 	ws := newTestWorkspace(t)
 	ws.loadAndApplyConfig()
 	// Three empty tabs: activateTab only touches Terms when present, and a
-	// nil-map Tab has none, so refresh/focus work stays out of the way.
-	ws.tabs = []*Tab{{}, {}, {}}
+	// nil-map tab has none, so refresh/focus work stays out of the way.
+	ws.tabs = []*tab{{}, {}, {}}
 	ws.activeTab = 0
 
 	for _, want := range []int{2, 1, 0} {
@@ -156,7 +213,7 @@ func TestFocusedCwd_NoPane(t *testing.T) {
 		t.Errorf("no tabs: focusedCwd() = %q, want empty", got)
 	}
 	ws := &Workspace{
-		tabs:      []*Tab{{focused: "gone", terms: map[string]*term.Term{}}},
+		tabs:      []*tab{{focused: "gone", terms: map[string]*term.Term{}}},
 		activeTab: 0,
 	}
 	if got := ws.focusedCwd(); got != "" {

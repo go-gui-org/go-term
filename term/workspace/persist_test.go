@@ -46,18 +46,18 @@ func TestCwdLocalPath_FileURI(t *testing.T) {
 
 // buildTestWorkspace constructs a Workspace in memory (no window, no PTY)
 // with the given split tree structure.
-func buildTestWorkspace(tabs []*Tab, activeTab int) *Workspace {
+func buildTestWorkspace(tabs []*tab, activeTab int) *Workspace {
 	return &Workspace{tabs: tabs, activeTab: activeTab}
 }
 
 func TestSnapshot_SingleLeaf(t *testing.T) {
-	tab := &Tab{
+	tb := &tab{
 		id:      "tab-0",
 		root:    leaf("tab-0-pane-0"),
 		terms:   map[string]*term.Term{},
 		focused: "tab-0-pane-0",
 	}
-	ws := buildTestWorkspace([]*Tab{tab}, 0)
+	ws := buildTestWorkspace([]*tab{tb}, 0)
 	snap := ws.snapshot()
 
 	if snap.Version != 1 {
@@ -76,17 +76,17 @@ func TestSnapshot_SingleLeaf(t *testing.T) {
 }
 
 func TestSnapshot_VerticalSplit(t *testing.T) {
-	root := split(SplitVertical, 0.4,
+	root := split(splitVertical, 0.4,
 		leaf("tab-0-pane-0"),
 		leaf("tab-0-pane-1"),
 	)
-	tab := &Tab{
+	tb := &tab{
 		id:      "tab-0",
 		root:    root,
 		terms:   map[string]*term.Term{},
 		focused: "tab-0-pane-1",
 	}
-	ws := buildTestWorkspace([]*Tab{tab}, 0)
+	ws := buildTestWorkspace([]*tab{tb}, 0)
 	snap := ws.snapshot()
 
 	r := snap.Tabs[0].Root
@@ -105,12 +105,12 @@ func TestSnapshot_VerticalSplit(t *testing.T) {
 }
 
 func TestSnapshot_HorizontalSplit(t *testing.T) {
-	root := split(SplitHorizontal, 0.6,
+	root := split(splitHorizontal, 0.6,
 		leaf("tab-0-pane-0"),
 		leaf("tab-0-pane-1"),
 	)
-	tab := &Tab{id: "tab-0", root: root, terms: map[string]*term.Term{}, focused: "tab-0-pane-0"}
-	ws := buildTestWorkspace([]*Tab{tab}, 0)
+	tb := &tab{id: "tab-0", root: root, terms: map[string]*term.Term{}, focused: "tab-0-pane-0"}
+	ws := buildTestWorkspace([]*tab{tb}, 0)
 	snap := ws.snapshot()
 	if snap.Tabs[0].Root.Dir != "horizontal" {
 		t.Errorf("dir = %q, want horizontal", snap.Tabs[0].Root.Dir)
@@ -118,9 +118,9 @@ func TestSnapshot_HorizontalSplit(t *testing.T) {
 }
 
 func TestSnapshot_TwoTabs(t *testing.T) {
-	tab0 := &Tab{id: "tab-0", root: leaf("tab-0-pane-0"), terms: map[string]*term.Term{}, focused: "tab-0-pane-0"}
-	tab1 := &Tab{id: "tab-1", root: leaf("tab-1-pane-0"), terms: map[string]*term.Term{}, focused: "tab-1-pane-0"}
-	ws := buildTestWorkspace([]*Tab{tab0, tab1}, 1)
+	tab0 := &tab{id: "tab-0", root: leaf("tab-0-pane-0"), terms: map[string]*term.Term{}, focused: "tab-0-pane-0"}
+	tab1 := &tab{id: "tab-1", root: leaf("tab-1-pane-0"), terms: map[string]*term.Term{}, focused: "tab-1-pane-0"}
+	ws := buildTestWorkspace([]*tab{tab0, tab1}, 1)
 	snap := ws.snapshot()
 	if snap.ActiveTab != 1 {
 		t.Errorf("activeTab = %d, want 1", snap.ActiveTab)
@@ -134,26 +134,26 @@ func TestSnapshot_TwoTabs(t *testing.T) {
 // the tree shape + ratios. No PTY involved.
 func TestSnapshotRoundTrip(t *testing.T) {
 	// Build a 2-tab workspace: tab-0 has a vertical split, tab-1 is a single leaf.
-	tab0Root := split(SplitVertical, 0.3,
+	tab0Root := split(splitVertical, 0.3,
 		leaf("tab-0-pane-0"),
-		split(SplitHorizontal, 0.7,
+		split(splitHorizontal, 0.7,
 			leaf("tab-0-pane-1"),
 			leaf("tab-0-pane-2"),
 		),
 	)
-	tab0 := &Tab{
+	tab0 := &tab{
 		id:      "tab-0",
 		root:    tab0Root,
 		terms:   map[string]*term.Term{},
 		focused: "tab-0-pane-1",
 	}
-	tab1 := &Tab{
+	tab1 := &tab{
 		id:      "tab-1",
 		root:    leaf("tab-1-pane-0"),
 		terms:   map[string]*term.Term{},
 		focused: "tab-1-pane-0",
 	}
-	ws := buildTestWorkspace([]*Tab{tab0, tab1}, 0)
+	ws := buildTestWorkspace([]*tab{tab0, tab1}, 0)
 	snap := ws.snapshot()
 
 	data, err := json.Marshal(snap)
@@ -209,8 +209,8 @@ func TestSave_AtomicWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "workspace.json")
 
-	tab := &Tab{id: "tab-0", root: leaf("tab-0-pane-0"), terms: map[string]*term.Term{}, focused: "tab-0-pane-0"}
-	ws := buildTestWorkspace([]*Tab{tab}, 0)
+	tb := &tab{id: "tab-0", root: leaf("tab-0-pane-0"), terms: map[string]*term.Term{}, focused: "tab-0-pane-0"}
+	ws := buildTestWorkspace([]*tab{tb}, 0)
 	if err := ws.Save(path); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -289,8 +289,8 @@ func TestBuildSplitTree_VerticalSplit(t *testing.T) {
 	if node == nil || node.isLeaf() {
 		t.Fatal("expected internal node")
 	}
-	if node.Dir != SplitVertical {
-		t.Errorf("dir = %v, want SplitVertical", node.Dir)
+	if node.Dir != splitVertical {
+		t.Errorf("dir = %v, want splitVertical", node.Dir)
 	}
 	// Depth-first: old-0 → pane-0, old-1 → pane-1, old-2 → pane-2.
 	if idMap["old-0"] != "tab-0-pane-0" {
@@ -503,13 +503,13 @@ func TestConfigDir_XDGEnvVar(t *testing.T) {
 }
 
 func TestSnapshotJSON_Schema(t *testing.T) {
-	tab := &Tab{
+	tb := &tab{
 		id:      "tab-0",
-		root:    split(SplitVertical, 0.5, leaf("tab-0-pane-0"), leaf("tab-0-pane-1")),
+		root:    split(splitVertical, 0.5, leaf("tab-0-pane-0"), leaf("tab-0-pane-1")),
 		terms:   map[string]*term.Term{},
 		focused: "tab-0-pane-1",
 	}
-	ws := buildTestWorkspace([]*Tab{tab}, 0)
+	ws := buildTestWorkspace([]*tab{tb}, 0)
 	snap := ws.snapshot()
 	data, _ := json.MarshalIndent(snap, "", "  ")
 	s := string(data)

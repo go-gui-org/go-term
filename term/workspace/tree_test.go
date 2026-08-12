@@ -12,15 +12,15 @@ func TestSplitLeaf_ReplacesTarget(t *testing.T) {
 	// Tree: [A]
 	// Split A → [ [A] | [B] ]
 	root := leaf("a")
-	newRoot := splitLeaf(root, "a", "b", SplitVertical)
+	newRoot := splitLeaf(root, "a", "b", splitVertical)
 	if newRoot == nil {
 		t.Fatal("splitLeaf returned nil")
 	}
 	if newRoot.isLeaf() {
 		t.Fatal("expected internal node after split")
 	}
-	if newRoot.Dir != SplitVertical {
-		t.Errorf("Dir = %v, want SplitVertical", newRoot.Dir)
+	if newRoot.Dir != splitVertical {
+		t.Errorf("Dir = %v, want splitVertical", newRoot.Dir)
 	}
 	if newRoot.First.LeafID != "a" {
 		t.Errorf("First.LeafID = %q, want \"a\"", newRoot.First.LeafID)
@@ -32,7 +32,7 @@ func TestSplitLeaf_ReplacesTarget(t *testing.T) {
 
 func TestSplitLeaf_NotFoundReturnsNil(t *testing.T) {
 	root := leaf("a")
-	newRoot := splitLeaf(root, "nonexistent", "b", SplitHorizontal)
+	newRoot := splitLeaf(root, "nonexistent", "b", splitHorizontal)
 	if newRoot != nil {
 		t.Errorf("expected nil, got %v", newRoot)
 	}
@@ -41,8 +41,8 @@ func TestSplitLeaf_NotFoundReturnsNil(t *testing.T) {
 func TestSplitLeaf_SplitsInDeepTree(t *testing.T) {
 	// Tree: [ [A] | [B] ]
 	// Split B → [ [A] | [ [B] | [C] ] ]
-	root := split(SplitVertical, 0.5, leaf("a"), leaf("b"))
-	newRoot := splitLeaf(root, "b", "c", SplitHorizontal)
+	root := split(splitVertical, 0.5, leaf("a"), leaf("b"))
+	newRoot := splitLeaf(root, "b", "c", splitHorizontal)
 	if newRoot == nil {
 		t.Fatal("splitLeaf returned nil")
 	}
@@ -51,8 +51,8 @@ func TestSplitLeaf_SplitsInDeepTree(t *testing.T) {
 	if second.isLeaf() {
 		t.Fatal("expected internal node after split of B")
 	}
-	if second.Dir != SplitHorizontal {
-		t.Errorf("Second.Dir = %v, want SplitHorizontal", second.Dir)
+	if second.Dir != splitHorizontal {
+		t.Errorf("Second.Dir = %v, want splitHorizontal", second.Dir)
 	}
 	if second.First.LeafID != "b" {
 		t.Errorf("Second.First.LeafID = %q, want \"b\"", second.First.LeafID)
@@ -69,7 +69,7 @@ func TestSplitLeaf_SplitsInDeepTree(t *testing.T) {
 func TestRemoveLeaf_CollapsesParent(t *testing.T) {
 	// Tree: [ [A] | [B] ]
 	// Remove A → [B]
-	root := split(SplitVertical, 0.5, leaf("a"), leaf("b"))
+	root := split(splitVertical, 0.5, leaf("a"), leaf("b"))
 	newRoot, survivor := removeLeaf(root, "a")
 	if newRoot == nil {
 		t.Fatal("removeLeaf returned nil")
@@ -88,7 +88,7 @@ func TestRemoveLeaf_CollapsesParent(t *testing.T) {
 func TestRemoveLeaf_RemovesSecondChild(t *testing.T) {
 	// Tree: [ [A] | [B] ]
 	// Remove B → [A]
-	root := split(SplitHorizontal, 0.5, leaf("a"), leaf("b"))
+	root := split(splitHorizontal, 0.5, leaf("a"), leaf("b"))
 	newRoot, survivor := removeLeaf(root, "b")
 	if newRoot == nil {
 		t.Fatal("removeLeaf returned nil")
@@ -116,7 +116,7 @@ func TestRemoveLeaf_SingleLeafReturnsNil(t *testing.T) {
 }
 
 func TestRemoveLeaf_NotFoundReturnsNil(t *testing.T) {
-	root := split(SplitVertical, 0.5, leaf("a"), leaf("b"))
+	root := split(splitVertical, 0.5, leaf("a"), leaf("b"))
 	newRoot, survivor := removeLeaf(root, "c")
 	if newRoot != nil {
 		t.Errorf("expected nil, got %v", newRoot)
@@ -129,9 +129,9 @@ func TestRemoveLeaf_NotFoundReturnsNil(t *testing.T) {
 func TestRemoveLeaf_DeepRemove(t *testing.T) {
 	// Tree: [ [A] | [ [B] | [C] ] ]
 	// Remove B → [ [A] | [C] ]
-	root := split(SplitVertical, 0.5,
+	root := split(splitVertical, 0.5,
 		leaf("a"),
-		split(SplitHorizontal, 0.5, leaf("b"), leaf("c")),
+		split(splitHorizontal, 0.5, leaf("b"), leaf("c")),
 	)
 	newRoot, survivor := removeLeaf(root, "b")
 	if newRoot == nil {
@@ -159,9 +159,9 @@ func TestRemoveLeaf_DeepRemove(t *testing.T) {
 
 func makeThreeLeafTree() *splitNode {
 	// [ [A] | [ [B] | [C] ] ]  — DFS order: A, B, C
-	return split(SplitVertical, 0.5,
+	return split(splitVertical, 0.5,
 		leaf("a"),
-		split(SplitHorizontal, 0.5, leaf("b"), leaf("c")),
+		split(splitHorizontal, 0.5, leaf("b"), leaf("c")),
 	)
 }
 

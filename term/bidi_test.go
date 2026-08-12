@@ -11,7 +11,7 @@ func makeTestRow(runes []rune, cols int) []cell {
 		if i >= cols {
 			break
 		}
-		row[i] = cell{Ch: r, Width: 1, FG: DefaultColor, BG: DefaultColor}
+		row[i] = cell{Ch: r, Width: 1, FG: defaultColor, BG: defaultColor}
 	}
 	return row
 }
@@ -44,8 +44,8 @@ func TestRowHasRTL_SkipsContinuation(t *testing.T) {
 	// A row with only continuation cells (Width=0, Ch=0) should return false
 	// even though they occupy non-zero positions.
 	row := []cell{
-		{Width: 2, Ch: '日', FG: DefaultColor, BG: DefaultColor}, // wide LTR
-		{Width: 0, Ch: 0, FG: DefaultColor, BG: DefaultColor},   // continuation
+		{Width: 2, Ch: '日', FG: defaultColor, BG: defaultColor}, // wide LTR
+		{Width: 0, Ch: 0, FG: defaultColor, BG: defaultColor},   // continuation
 	}
 	if rowHasRTL(row, 2) {
 		t.Error("continuation cell wrongly flagged as RTL")
@@ -188,15 +188,15 @@ func TestVisualReorder_V2L_Roundtrip(t *testing.T) {
 func TestRowHasRTL_ColsExceedsSliceLen(t *testing.T) {
 	// cols larger than the slice must not panic (scrollback-resize scenario).
 	row := []cell{
-		{Ch: 'ש', Width: 1, FG: DefaultColor, BG: DefaultColor},
-		{Ch: 'ל', Width: 1, FG: DefaultColor, BG: DefaultColor},
+		{Ch: 'ש', Width: 1, FG: defaultColor, BG: defaultColor},
+		{Ch: 'ל', Width: 1, FG: defaultColor, BG: defaultColor},
 	}
 	got := rowHasRTL(row, 100)
 	if !got {
 		t.Error("expected true: RTL chars present in the available cells")
 	}
 	// LTR slice narrower than cols must also not panic.
-	ltr := []cell{{Ch: 'A', Width: 1, FG: DefaultColor, BG: DefaultColor}}
+	ltr := []cell{{Ch: 'A', Width: 1, FG: defaultColor, BG: defaultColor}}
 	if rowHasRTL(ltr, 50) {
 		t.Error("expected false: no RTL chars")
 	}
@@ -205,10 +205,10 @@ func TestRowHasRTL_ColsExceedsSliceLen(t *testing.T) {
 func TestVisualReorder_ColsExceedsSliceLen(t *testing.T) {
 	// cols larger than the slice must not panic and must still reorder correctly.
 	row := []cell{
-		{Ch: 'ש', Width: 1, FG: DefaultColor, BG: DefaultColor},
-		{Ch: 'ל', Width: 1, FG: DefaultColor, BG: DefaultColor},
-		{Ch: 'ו', Width: 1, FG: DefaultColor, BG: DefaultColor},
-		{Ch: 'ם', Width: 1, FG: DefaultColor, BG: DefaultColor},
+		{Ch: 'ש', Width: 1, FG: defaultColor, BG: defaultColor},
+		{Ch: 'ל', Width: 1, FG: defaultColor, BG: defaultColor},
+		{Ch: 'ו', Width: 1, FG: defaultColor, BG: defaultColor},
+		{Ch: 'ם', Width: 1, FG: defaultColor, BG: defaultColor},
 	}
 	vis, v2l := visualReorder(row, 100) // cols >> len(row)
 	if vis == nil {
@@ -260,9 +260,9 @@ func TestVisualReorder_WideRTL(t *testing.T) {
 	// A Width==2 cell inside an RTL run exercises the appendVisualCell
 	// continuation-insertion branch. The continuation cell (Width==0) must
 	// follow immediately after the primary cell in visual output.
-	wide := cell{Ch: 'ﺎ', Width: 2, FG: DefaultColor, BG: DefaultColor} // Arabic presentation form
-	cont := cell{Ch: 0, Width: 0, FG: DefaultColor, BG: DefaultColor}
-	ltr := cell{Ch: 'A', Width: 1, FG: DefaultColor, BG: DefaultColor}
+	wide := cell{Ch: 'ﺎ', Width: 2, FG: defaultColor, BG: defaultColor} // Arabic presentation form
+	cont := cell{Ch: 0, Width: 0, FG: defaultColor, BG: defaultColor}
+	ltr := cell{Ch: 'A', Width: 1, FG: defaultColor, BG: defaultColor}
 	row := []cell{wide, cont, ltr}
 
 	vis, v2l := visualReorder(row, 3)
@@ -293,9 +293,9 @@ func TestVisualReorder_WideRTL(t *testing.T) {
 func TestVisualReorder_WideLTR(t *testing.T) {
 	// Wide (Width=2) LTR cells produce nil — no RTL content.
 	row := []cell{
-		{Width: 2, Ch: '日', FG: DefaultColor, BG: DefaultColor},
-		{Width: 0, Ch: 0, FG: DefaultColor, BG: DefaultColor}, // continuation
-		{Width: 1, Ch: 'A', FG: DefaultColor, BG: DefaultColor},
+		{Width: 2, Ch: '日', FG: defaultColor, BG: defaultColor},
+		{Width: 0, Ch: 0, FG: defaultColor, BG: defaultColor}, // continuation
+		{Width: 1, Ch: 'A', FG: defaultColor, BG: defaultColor},
 	}
 	vis, v2l := visualReorder(row, 3)
 	if vis != nil || v2l != nil {

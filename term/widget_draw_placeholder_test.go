@@ -16,8 +16,8 @@ func putPlaceholder(g *grid, r, c int, id uint32, row, col int) {
 		Ch:        kgpPlaceholderRune,
 		clusterID: g.internCluster(text),
 		FG:        paletteColor(uint8(id)),
-		BG:        DefaultColor,
-		ULColor:   DefaultColor,
+		BG:        defaultColor,
+		ULColor:   defaultColor,
 		Width:     1,
 	}
 }
@@ -239,8 +239,8 @@ func TestDrawPlaceholders_RectCountCapped(t *testing.T) {
 func TestSelectedText_SkipsPlaceholders(t *testing.T) {
 	g := newGrid(4, 10)
 	fillPlaceholderBlock(g, 0, 0, 1, 4, 1)
-	g.Cells[4] = cell{Ch: 'h', FG: DefaultColor, BG: DefaultColor,
-		ULColor: DefaultColor, Width: 1}
+	g.Cells[4] = cell{Ch: 'h', FG: defaultColor, BG: defaultColor,
+		ULColor: defaultColor, Width: 1}
 
 	g.SelActive = true
 	g.SelAnchor = contentPos{Row: 0, Col: 0}

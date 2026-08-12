@@ -244,13 +244,13 @@ func (g *grid) SyncFrameQuiescent() bool {
 //	0x01       — direct RGB,   low 24 bits = R<<16 | G<<8 | B
 //	0xFF       — default-color sentinel (defer to defaultFG/defaultBG)
 //
-// SGR 39/49 reset to DefaultColor. Plain palette indices encode as
+// SGR 39/49 reset to defaultColor. Plain palette indices encode as
 // their numeric value (paletteColor(1) == 1) so equality comparisons
 // against small int literals keep working in tests.
 const (
 	colorPalette uint32 = 0x00 << 24
 	colorRGB     uint32 = 0x01 << 24
-	DefaultColor uint32 = 0xFF << 24
+	defaultColor uint32 = 0xFF << 24
 )
 
 // paletteColor encodes a 256-color palette index.
@@ -270,7 +270,7 @@ func rgbColor(r, g, b uint8) uint32 {
 //	0 — continuation cell (right half of a width-2 char to the left).
 //	    Ch == 0 in this state; the renderer skips it.
 //
-// ULColor uses the same packed uint32 encoding as FG/BG. DefaultColor
+// ULColor uses the same packed uint32 encoding as FG/BG. defaultColor
 // means "use the cell's foreground color." ULStyle selects the decoration
 // shape; 0 (ulNone) means no underline regardless of ULColor.
 //
@@ -281,9 +281,9 @@ func rgbColor(r, g, b uint8) uint32 {
 // base (first) rune so width/RTL/geometry checks stay allocation-free.
 type cell struct {
 	Ch        rune
-	FG        uint32 // packed Color (palette index, RGB, or DefaultColor)
+	FG        uint32 // packed Color (palette index, RGB, or defaultColor)
 	BG        uint32
-	ULColor   uint32 // packed underline color; DefaultColor = use FG
+	ULColor   uint32 // packed underline color; defaultColor = use FG
 	Attrs     uint16
 	Width     uint8
 	ULStyle   uint8  // ulNone..ulDashed
@@ -292,7 +292,7 @@ type cell struct {
 }
 
 func defaultCell() cell {
-	return cell{Ch: ' ', FG: DefaultColor, BG: DefaultColor, ULColor: DefaultColor, Width: 1}
+	return cell{Ch: ' ', FG: defaultColor, BG: defaultColor, ULColor: defaultColor, Width: 1}
 }
 
 // blankCell returns a space-filled cell carrying the supplied SGR
@@ -301,7 +301,7 @@ func defaultCell() cell {
 // fills with inverse background). Blank cells never carry underline
 // decoration (invisible on spaces; ULStyle=0 signals that).
 func blankCell(fg, bg uint32, attrs uint16) cell {
-	return cell{Ch: ' ', FG: fg, BG: bg, ULColor: DefaultColor, Attrs: attrs, Width: 1}
+	return cell{Ch: ' ', FG: fg, BG: bg, ULColor: defaultColor, Attrs: attrs, Width: 1}
 }
 
 // continuation returns a copy of c with Ch cleared and Width zeroed,
@@ -539,9 +539,9 @@ type grid struct {
 	Mu         sync.Mutex
 	CurFG      uint32 // packed Color
 	CurBG      uint32
-	CurULColor uint32 // current underline color; DefaultColor = use fg
+	CurULColor uint32 // current underline color; defaultColor = use fg
 	// CursorColor is the fill color for the block cursor, set via OSC 12.
-	// DefaultColor means "invert the cell under the cursor" (the default).
+	// defaultColor means "invert the cell under the cursor" (the default).
 	CursorColor uint32
 
 	// 0 ≤ ViewSubPx < cellH; with ViewOffset gives the exact scroll position.
@@ -841,7 +841,7 @@ func (g *grid) dynColorRGB(ps int) (r, gr, b uint8) {
 		c := g.Theme.DefaultBG
 		return c.R, c.G, c.B
 	default:
-		if g.CursorColor != DefaultColor {
+		if g.CursorColor != defaultColor {
 			return uint8(g.CursorColor >> 16), uint8(g.CursorColor >> 8), uint8(g.CursorColor)
 		}
 		c := g.Theme.DefaultFG
@@ -881,16 +881,16 @@ func newGrid(rows, cols int) *grid {
 		Cells:         make([]cell, rows*cols),
 		RowWrapped:    make([]bool, rows),
 		Dirty:         make([]bool, rows),
-		CurFG:         DefaultColor,
-		CurBG:         DefaultColor,
-		CurULColor:    DefaultColor,
+		CurFG:         defaultColor,
+		CurBG:         defaultColor,
+		CurULColor:    defaultColor,
 		CharsetG0:     charsetASCII,
 		CharsetG1:     charsetASCII,
 		AutoWrap:      true,
 		CursorVisible: true,
 		cursorShape:   cursorBlock,
 		CursorBlink:   false,
-		CursorColor:   DefaultColor,
+		CursorColor:   defaultColor,
 		Top:           0,
 		Bottom:        rows - 1,
 		Theme:         DefaultTheme,

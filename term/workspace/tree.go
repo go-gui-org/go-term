@@ -7,14 +7,14 @@
 // binary split tree of independent terminals. No tabs within splits.
 package workspace
 
-// SplitDir is the split direction.
-type SplitDir uint8
+// splitDir is the split direction.
+type splitDir uint8
 
 const (
-	// SplitVertical splits left | right.
-	SplitVertical SplitDir = iota
-	// SplitHorizontal splits top | bottom.
-	SplitHorizontal
+	// splitVertical splits left | right.
+	splitVertical splitDir = iota
+	// splitHorizontal splits top | bottom.
+	splitHorizontal
 )
 
 // splitNode is a node in the binary split tree.
@@ -22,7 +22,7 @@ const (
 // Internal nodes have First and Second set (both non-nil).
 // Leaf nodes have LeafID set (non-empty) and both children nil.
 type splitNode struct {
-	Dir    SplitDir
+	Dir    splitDir
 	Ratio  float32    // first child's share of available space (0.0–1.0)
 	First  *splitNode // nil if leaf
 	Second *splitNode // nil if leaf
@@ -35,7 +35,7 @@ func leaf(id string) *splitNode {
 }
 
 // split creates a new internal split node.
-func split(dir SplitDir, ratio float32, first, second *splitNode) *splitNode {
+func split(dir splitDir, ratio float32, first, second *splitNode) *splitNode {
 	return &splitNode{
 		Dir:    dir,
 		Ratio:  ratio,
@@ -50,7 +50,7 @@ func (n *splitNode) isLeaf() bool { return n.First == nil }
 // splitLeaf replaces the leaf identified by leafID with a new internal split
 // node containing the old leaf and a new leaf. Returns the new root (or nil
 // if leafID was not found).
-func splitLeaf(root *splitNode, leafID, newLeafID string, dir SplitDir) *splitNode {
+func splitLeaf(root *splitNode, leafID, newLeafID string, dir splitDir) *splitNode {
 	if root.isLeaf() {
 		if root.LeafID == leafID {
 			return split(dir, 0.5, leaf(leafID), leaf(newLeafID))
