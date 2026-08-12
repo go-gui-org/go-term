@@ -180,6 +180,11 @@ jobs:
         with:
           working-directory: go-term
           version: v2.12
+          # The action's facts cache is keyed independently of file contents
+          # and has produced stale-analysis SA5011 false positives (a clean
+          # local run, fresh or cached, reports zero issues). Lint is ~30s
+          # without it; determinism is worth that.
+          skip-cache: true
 
   bench-regress:
     runs-on: ubuntu-latest
