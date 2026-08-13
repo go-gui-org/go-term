@@ -8,7 +8,18 @@ APP_NAME     := Falcon
 # bare hash); --dirty marks uncommitted trees so a local build can't be
 # mistaken for the release it was cut from.
 VERSION      := $(shell git describe --tags --always --dirty 2>/dev/null)
-LDFLAGS      := -X main.version=$(VERSION) -w
+# Soft heap limit baked into the binary (bytes), applied at startup by
+# main.go via debug.SetMemoryLimit. The limit value is the post-burst RSS
+# governor: the runtime returns freed memory toward the live set instead of
+# leaving clean pages resident, so a heavy session (ucs-detect sweep) settles
+# at ~230MB instead of lingering at the peak. It must stay above the live
+# working set of such a session (~300-400MB) — a limit below it forces
+# constant GC and turns heavy sessions laggy. It is soft: genuine pressure
+# exceeds it rather than hard-capping. A GOMEMLIMIT env var at runtime
+# overrides both this and the in-code default. Tune per build:
+# MEMLIMIT=268435456 make app.
+MEMLIMIT     := 536870912
+LDFLAGS      := -X main.version=$(VERSION) -w -X main.memLimit=$(MEMLIMIT)
 # CFBundleShortVersionString wants a bare number, so drop the tag's leading v.
 BUNDLE_VER   := $(patsubst v%,%,$(VERSION))
 # Pre-built .icns (see examples/falcon/icon/README.md); buildapp copies it

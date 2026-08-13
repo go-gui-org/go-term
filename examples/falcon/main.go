@@ -14,6 +14,8 @@ import (
 	"net/http"
 	_ "net/http/pprof" // registers handlers on http.DefaultServeMux at import
 	"os"
+	"runtime/debug"
+	"strconv"
 	"strings"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -21,11 +23,62 @@ import (
 	"github.com/go-gui-org/go-term/term/workspace"
 )
 
+// memLimit is the soft heap limit in bytes, injected at link time by the
+// Makefile (-X main.memLimit=...). Plain go run/go build leaves it empty and
+// the default applies. Keep it a bare integer so the Makefile needs no size
+// parser; the value is validated at startup.
+var memLimit string
+
+// defaultMemLimit is applied when -X main.memLimit is absent (dev builds).
+// The limit value is the RSS governor after a burst: the runtime returns
+// freed memory toward the live set instead of leaving clean pages resident,
+// so a heavy session settles well below its peak. It must stay ABOVE the
+// live working set of a heavy session (faces + layout cache + atlas +
+// scrollback, ~300-400MB while sweeping Unicode) — a limit below the live
+// set forces constant GC (thrash: lag, then crawl). 512MiB is that safe
+// floor and still settles post-session RSS to ~230MB. The limit is soft —
+// genuine pressure exceeds it rather than hard-capping.
+const defaultMemLimit = 512 << 20
+
 // main is a thin wrapper so run's deferred teardown isn't skipped: os.Exit
 // (and log.Fatal) don't unwind defers, so the exit code has to come back
 // as a return value.
 func main() {
+	applyMemoryLimit()
 	os.Exit(run())
+}
+
+// applyMemoryLimit installs the soft heap limit before the app allocates.
+// GOMEMLIMIT env wins when set: debug.SetMemoryLimit would otherwise
+// override the runtime's own env handling, and the runtime accepts the
+// friendlier "512MiB" spelling the -X value deliberately avoids.
+func applyMemoryLimit() {
+	if limit, ok := resolveMemLimit(); ok {
+		debug.SetMemoryLimit(limit)
+	}
+}
+
+// resolveMemLimit picks the effective soft heap limit in bytes. ok is false
+// when a GOMEMLIMIT env var governs instead, in which case nothing should be
+// installed. Otherwise the -X stamp wins over the in-code default, and a
+// stamp that fails to parse (or is not positive) falls back to the default
+// with a log line.
+func resolveMemLimit() (int64, bool) {
+	if os.Getenv("GOMEMLIMIT") != "" {
+		return 0, false
+	}
+	limit := int64(defaultMemLimit)
+	if memLimit != "" {
+		v, err := strconv.ParseInt(memLimit, 10, 64)
+		if err != nil {
+			log.Printf("falcon: ignoring invalid -X memLimit %q: %v", memLimit, err)
+		} else if v <= 0 {
+			log.Printf("falcon: ignoring non-positive -X memLimit %q", memLimit)
+		} else {
+			limit = v
+		}
+	}
+	return limit, true
 }
 
 func run() int {
