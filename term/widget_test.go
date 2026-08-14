@@ -2678,16 +2678,24 @@ func TestTerm_View_CanvasIsClipped(t *testing.T) {
 	}
 }
 
-// findShapeByID walks a view tree, generating each node's layout, and returns
+// findShapeByID generates v's layout, walks the layout tree, and returns
 // the first shape carrying id. Views are generated (not laid out), so only
 // shape identity and config fields are meaningful — geometry is unset.
 func findShapeByID(w *gui.Window, v gui.View, id string) *gui.Shape {
 	layout := v.GenerateLayout(w)
-	if layout.Shape != nil && layout.Shape.ID == id {
-		return layout.Shape
+	return findShapeInLayout(&layout, id)
+}
+
+// findShapeInLayout walks a generated layout tree for the first shape
+// whose ID matches id. The tree is walked in document order via the
+// child layouts; the old View.Content() walk moved here because the
+// interface no longer exposes children.
+func findShapeInLayout(l *gui.Layout, id string) *gui.Shape {
+	if l.Shape != nil && l.Shape.ID == id {
+		return l.Shape
 	}
-	for _, child := range v.Content() {
-		if s := findShapeByID(w, child, id); s != nil {
+	for i := range l.Children {
+		if s := findShapeInLayout(&l.Children[i], id); s != nil {
 			return s
 		}
 	}
