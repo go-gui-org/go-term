@@ -1,5 +1,21 @@
 .PHONY: bench bench-verbose bench-save bench-regress test test-race vet lint \
-	build clean app clean-app build-falcon
+	lint-pin build clean app clean-app build-falcon cross-windows prepush
+
+# golangci-lint version pinned by CI (.github/workflows/ci.yml).
+LINT_VERSION := v2.12
+
+# Gate recipes resolve modules from go.mod, not from a go.work workspace.
+# go.work here points at ../go-gui and ../go-glyph, which CI never sees, so
+# a gate that used it would answer a different question than "will CI go
+# green". The app/falcon build targets deliberately keep a bare `go` so
+# local development against sibling checkouts still works.
+GO := GOWORK=off go
+
+# golangci-lint is its own binary, so $(GO) does not cover it — but it
+# honours go.work the same way the toolchain does. Without GOWORK=off it
+# type-checks against the sibling working copies and reports breakage that
+# CI, which builds the pinned versions, will never see.
+LINT := GOWORK=off golangci-lint
 
 DEMO_BIN     := falcon
 APP_NAME     := Falcon
@@ -53,32 +69,64 @@ bench-save:
 
 # Run benchmarks and check for regressions against the committed baseline.
 # Fails with exit code 1 if any benchmark regresses beyond the threshold.
+# -threshold 30 matches the CI bench-regress job; without it the tool
+# defaults to 10 and this target gated harder than CI did.
 bench-regress:
-	go test -bench=. -count=10 -benchmem -run='^$$' ./term \
+	$(GO) test -bench=. -count=10 -benchmem -run='^$$' ./term \
 	  > /tmp/bench-current.txt
-	go run ./scripts/benchregress \
+	$(GO) run ./scripts/benchregress \
+	  -threshold 30 \
 	  -base .github/benchmarks/baseline.txt \
 	  -current /tmp/bench-current.txt
 
 test:
-	go test ./...
+	$(GO) test ./...
 
 test-race:
-	go test -race -count=1 ./...
+	$(GO) test -race -count=1 ./...
 
 vet:
-	go vet ./...
+	$(GO) vet ./...
 
-lint:
-	golangci-lint run ./...
+# Verify golangci-lint is installed at the version CI pins, so a local pass
+# and a CI pass mean the same thing.
+lint-pin:
+	@golangci-lint --version | grep -q "$(LINT_VERSION:v%=%)" || \
+	  { echo "::error::golangci-lint $(LINT_VERSION) required. Run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINT_VERSION)"; exit 1; }
+
+lint: lint-pin
+	$(LINT) run ./...
 
 build:
-	go build ./...
+	$(GO) build ./...
+
+# Mirror of the CI windows job's compile half: term/ and internal/ are pure
+# Go (only examples/falcon needs cgo via go-gui), so they vet and build for
+# Windows from any host with no C toolchain. The test half of that job
+# cannot run cross, so it stays CI-only.
+cross-windows:
+	CGO_ENABLED=0 GOOS=windows $(GO) vet ./term/... ./internal/...
+	CGO_ENABLED=0 GOOS=windows $(GO) build ./term/... ./internal/...
 
 # Build the falcon binary (ensures it compiles). Shipping path: excludes the
 # go-gui inspector via the prod tag.
 build-falcon:
-	go build $(PROD_TAGS) -ldflags '$(LDFLAGS)' ./examples/falcon
+	$(GO) build $(PROD_TAGS) -ldflags '$(LDFLAGS)' ./examples/falcon
+
+# Recommended full local validation before pushing (issue go-gui#314).
+# Approximates the CI matrix from one host: race tests, vet, lint, the prod
+# falcon build, the Windows cross-compile, and the benchmark regression gate.
+# Aborts on the first failing target.
+#
+# Unlike go-gui, whose benchmark gate needs a baseline cached from main,
+# this repo's baseline is committed at .github/benchmarks/baseline.txt, so
+# bench-regress runs locally. It is the long pole: -count=10 over ./term.
+#
+# Omissions vs CI, by design:
+#   - native macOS and Windows test execution (the OS matrix)
+#   - the fuzz jobs, which are schedule- and diff-gated
+#   - release.yml packaging
+prepush: test-race vet lint build-falcon cross-windows bench-regress
 
 # Package falcon as a macOS .app bundle.
 app: $(APP_NAME).app
