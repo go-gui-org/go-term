@@ -140,10 +140,10 @@ func showAbout(w *gui.Window) {
 	var content []gui.View
 	if path := aboutIconFile(); path != "" {
 		content = append(content, gui.Image(gui.ImageCfg{
-			Src:       path,
-			Width:     aboutIconSize,
-			Height:    aboutIconSize,
-			A11YLabel: appName + " icon",
+			Src:     path,
+			Width:   aboutIconSize,
+			Height:  aboutIconSize,
+			A11YCfg: gui.A11YCfg{A11YLabel: appName + " icon"},
 		}))
 	}
 	// No app-name text: the icon artwork already spells out "Falcon".
