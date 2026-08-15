@@ -73,6 +73,22 @@ Bundling builds the `buildapp` tool from the go-gui module in `go.mod` — no
 sibling checkout needed. Icon sources and regeneration steps live in
 [`icon/README.md`](icon/README.md).
 
+By default the bundle is signed ad-hoc, which macOS keys permission grants
+against by content hash. The hash changes on every build, so each `make app`
+silently revokes Screen Recording, microphone, camera and accessibility
+access — System Settings still lists the app as granted while the API returns
+denied. Sign with a stable identity to keep grants across rebuilds:
+
+```bash
+make app SIGN_IDENTITY="My Dev Cert"
+```
+
+A self-signed code-signing certificate from Keychain Access is enough; no
+Apple Developer account is needed. A universal
+`BUILDAPP_SIGN_IDENTITY` variable applies it to every build without passing
+`SIGN_IDENTITY`. See
+[`buildapp`'s README](https://github.com/go-gui-org/go-gui/tree/main/cmd/buildapp#signing).
+
 ## Command-line flags
 
 | Flag                        | Default                              | Meaning                                                  |

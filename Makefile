@@ -47,6 +47,18 @@ APP_ICON     := examples/falcon/icon/falcon.icns
 # valid fallback.
 BUILDAPP_PKG := github.com/go-gui-org/go-gui/cmd/buildapp
 BUILDAPP_BIN := build/buildapp
+# Code-signing identity for the bundle. Empty (the default) means buildapp
+# signs ad-hoc, and an ad-hoc signature has no certificate for TCC to key a
+# permission grant against — TCC falls back to the cdhash, which changes on
+# every build, so each `make app` silently revokes Screen Recording, the
+# microphone, accessibility and the rest while System Settings keeps showing
+# them as granted. Set this to a self-signed code-signing certificate from
+# Keychain Access to keep grants across rebuilds:
+#   make app SIGN_IDENTITY="My Dev Cert"
+# BUILDAPP_SIGN_IDENTITY in the environment does the same without the flag.
+# Left empty so CI and contributors without a certificate keep the old path.
+SIGN_IDENTITY ?=
+SIGN_FLAG    := $(if $(SIGN_IDENTITY),-sign "$(SIGN_IDENTITY)",)
 # Shipping builds exclude the go-gui F12 inspector overlay. Dev builds
 # (`go run .`, plain `go build`) keep it.
 PROD_TAGS    := -tags prod
@@ -141,7 +153,7 @@ $(APP_NAME).app: $(BUILDAPP_BIN) $(APP_ICON)
 	cd examples/falcon && go build $(PROD_TAGS) -ldflags '$(LDFLAGS)' -o $(CURDIR)/$(DEMO_BIN) .
 	$(BUILDAPP_BIN) -bundle-deps -o . -name $(APP_NAME) \
 		-id github.com.go-gui-org.go-term -icon $(APP_ICON) \
-		-version $(BUNDLE_VER) $(DEMO_BIN)
+		$(SIGN_FLAG) -version $(BUNDLE_VER) $(DEMO_BIN)
 
 clean-app:
 	rm -f $(DEMO_BIN)
