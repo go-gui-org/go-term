@@ -133,6 +133,10 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 //
 // For a timed, self-describing recording — one that can be replayed inside
 // go-term — use Cfg.RecordPath or Term.StartRecording instead.
+//
+// The path comes from GOTERM_CAPTURE, set by whoever launches the binary —
+// terminal output cannot reach it, so it crosses no trust boundary
+// (Aikido SAST).
 func openCapture(seq uint64) *recfmt.Recorder {
 	prefix := os.Getenv("GOTERM_CAPTURE")
 	if prefix == "" {

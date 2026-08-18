@@ -726,6 +726,10 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 // Only http, https, and mailto schemes are permitted; other URI schemes
 // (file://, custom handlers, javascript:) are silently dropped to prevent
 // a malicious OSC 8 hyperlink from invoking arbitrary OS handlers.
+// The URL is terminal output — untrusted — so it must never reach a shell:
+// every branch below passes it as an argv element of a non-shell program
+// (open, rundll32, xdg-open), and the charset check keeps control characters
+// and quotes out of even that argv.
 func openURL(rawURL string) {
 	switch {
 	case strings.HasPrefix(rawURL, "https://"),
@@ -735,12 +739,20 @@ func openURL(rawURL string) {
 	default:
 		return
 	}
+	for i := 0; i < len(rawURL); i++ {
+		if rawURL[i] < 0x20 || rawURL[i] == '"' {
+			return // invalid in a URL; reject before it reaches any handler
+		}
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
 		cmd = exec.Command("open", rawURL)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", rawURL)
+		// rundll32 takes the URL as argv with no shell parsing — cmd /c start
+		// would let '&' or quotes in the URL escape into cmd.exe. Same choice
+		// falcon's openPath makes.
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
 	default:
 		cmd = exec.Command("xdg-open", rawURL)
 	}
