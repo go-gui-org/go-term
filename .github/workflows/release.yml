@@ -6,8 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
-permissions:
-  contents: write
+# Nothing by default; only the final release job needs a token with write
+# access (contents: write to attach assets), and only it declares it.
+permissions: {}
 
 jobs:
   linux:
@@ -129,7 +130,9 @@ jobs:
         with:
           path: go-term
 
-      - uses: msys2/setup-msys2@v2
+      # Pinned to commit 66cd2cc of the v2 tag (supply-chain hardening; bump
+      # by resolving refs/tags/v2 via `git ls-remote`).
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
         with:
           msystem: MINGW64
           update: false
@@ -170,6 +173,10 @@ jobs:
     name: Attach to GitHub Release
     needs: [linux, macos, windows]
     runs-on: ubuntu-latest
+    # Creating the release (action-gh-release) needs a write token; the build
+    # jobs above run with the workflow's empty permission set.
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -177,7 +184,9 @@ jobs:
           merge-multiple: true
           path: assets
 
-      - uses: softprops/action-gh-release@v3
+      # Pinned to commit 3d0d988 (v3 tag, annotated — dereferenced via
+      # refs/tags/v3^{} for supply-chain hardening).
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         with:
           files: assets/*
           generate_release_notes: true

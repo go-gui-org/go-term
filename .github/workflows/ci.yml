@@ -103,7 +103,9 @@ jobs:
 
       # msys2 provides the mingw gcc the GUI backend's cgo needs; without it
       # the falcon build depends on whatever the runner image happens to ship.
-      - uses: msys2/setup-msys2@v2
+      # Pinned to commit 66cd2cc of the v2 tag (supply-chain hardening; bump
+      # by resolving refs/tags/v2 via `git ls-remote`).
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884
         with:
           msystem: MINGW64
           update: false
@@ -175,8 +177,9 @@ jobs:
             libglib2.0-dev \
             libhunspell-dev
 
+      # Pinned to commit 9fae48a of the v7 tag (supply-chain hardening).
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa
         with:
           working-directory: go-term
           version: v2.12

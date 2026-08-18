@@ -422,6 +422,8 @@ func parseKeyName(name string) (gui.KeyCode, bool) {
 
 // loadConfig reads the config file for cfg, returning parsed keybindings.
 // A missing file is silently ignored (no error, empty keybindings).
+// path is Cfg.ConfigPath or DefaultConfigPath — the user's own config dir,
+// never terminal output — so it crosses no trust boundary (Aikido SAST).
 func loadConfig(cfg Cfg) workspaceConfig {
 	path := cfg.ConfigPath
 	if path == "" {

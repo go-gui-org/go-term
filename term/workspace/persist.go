@@ -171,6 +171,8 @@ func (ws *Workspace) Save(path string) error {
 // Restore reads path and rebuilds the workspace from the saved layout.
 // Falls back to New on missing file, parse error, or version mismatch;
 // the fallback is always logged but never fatal.
+// path comes from the embedder's CLI flag or DefaultConfigPath — never from
+// terminal output — so it crosses no trust boundary (Aikido SAST).
 func Restore(w *gui.Window, cfg Cfg, path string) (*Workspace, error) {
 	pw, err := loadPersistedWorkspace(path)
 	if err != nil {

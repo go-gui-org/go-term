@@ -1985,6 +1985,20 @@ func TestOpenURL_BlockedSchemes(t *testing.T) {
 	}
 }
 
+func TestOpenURL_RejectsShellInjection(t *testing.T) {
+	// Windows cmd /c start would parse these as shell metacharacters; the
+	// charset gate must drop them before any handler is reached.
+	for _, url := range []string{
+		"https://example.com\" & calc.exe &",
+		"https://example.com & calc.exe",
+		"https://example.com\ncalc.exe",
+		"http://example.com\t--help",
+		"mailto:a@b.c\" -e evil",
+	} {
+		openURL(url) // must not panic; silently dropped
+	}
+}
+
 // --- reply writer (enqueueReplies + writeLoop) ---
 
 // startReplyWriter starts tm.writeLoop with a fresh cond var and returns a

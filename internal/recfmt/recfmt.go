@@ -156,6 +156,9 @@ func NewRawRecorder(f *os.File) *Recorder {
 
 // NewRecorder creates path and writes the header line. rows/cols describe the
 // grid at this instant; env is copied into the header for context.
+// path is always supplied by the calling process's own CLI/API/config
+// (Cfg.RecordPath, Term.StartRecording, gotermrec) — never by terminal
+// output — so it crosses no trust boundary (Aikido SAST).
 func NewRecorder(path string, rows, cols int, env map[string]string, input bool) (*Recorder, error) {
 	f, err := os.Create(path)
 	if err != nil {
