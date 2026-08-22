@@ -25,6 +25,25 @@ const pipeDrainGrace = 5 * time.Second
 // immediately; the two-stage split keeps Close's worst case near 2s.
 const closeGrace = 1 * time.Second
 
+// pseudoconsoleGlyphWidthGraphemes asks conhost to measure text by grapheme
+// cluster, matching what the grid does. x/sys/windows does not define it;
+// conhost translates the bit into its own "--textMeasurement graphemes"
+// argument (winconpty.cpp). This matters because ConPTY answers DSR/CPR from
+// *its* text buffer, not ours — a client that measures width by bracketing a
+// glyph with cursor position reports (ucs-detect, and anything else probing
+// this way) reads conhost's model rather than the emulator's. Aligning the
+// two is the only lever available from out here; go-term's own CPR reply is
+// unreachable on Windows.
+//
+// Ambiguous width is deliberately left alone (PSEUDOCONSOLE_AMBIGUOUS_IS_WIDE,
+// 0x20): the grid takes uniseg's narrow default, so widening it here would
+// make conhost disagree with what we render.
+//
+// CreatePseudoConsole masks the flag word and never validates it, so conhost
+// builds predating the option (before ~Win11 24H2) ignore the bit instead of
+// failing — inert downlevel, correct where it is understood.
+const pseudoconsoleGlyphWidthGraphemes = 0x08
+
 // ptyDev drives a child shell through a Windows pseudoconsole (ConPTY).
 // ConPTY does not expose a single bidirectional fd like a Unix master, so
 // input and output are separate anonymous pipes wired into the console at
@@ -77,7 +96,8 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	}
 
 	var hpc windows.Handle
-	err := windows.CreatePseudoConsole(coordSize(rows, cols), inR, outW, 0, &hpc)
+	err := windows.CreatePseudoConsole(coordSize(rows, cols), inR, outW,
+		pseudoconsoleGlyphWidthGraphemes, &hpc)
 	// ConPTY dup'd (or failed on) the console-side ends; release them locally.
 	_ = windows.CloseHandle(inR)
 	_ = windows.CloseHandle(outW)
