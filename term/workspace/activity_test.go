@@ -88,12 +88,11 @@ func TestTermCfg_CarriesNotifyAfter(t *testing.T) {
 // tab indicators
 // ---------------------------------------------------------------------------
 
-// activityWorkspace builds a two-tab workspace with a frozen clock. tab 0 is
-// active, so tab 1 is the one that accumulates indicator state.
-func activityWorkspace(t *testing.T, now *time.Time) *Workspace {
+// activityWorkspace builds a two-tab workspace. tab 0 is active, so tab 1 is
+// the one that accumulates indicator state.
+func activityWorkspace(t *testing.T) *Workspace {
 	t.Helper()
 	ws := newTestWorkspace(t)
-	ws.clock = func() time.Time { return *now }
 	ws.tabs = []*tab{
 		{id: "tab-0", terms: map[string]*term.Term{"pane-0": nil}},
 		{id: "tab-1", terms: map[string]*term.Term{"pane-1": nil}},
@@ -102,175 +101,154 @@ func activityWorkspace(t *testing.T, now *time.Time) *Workspace {
 	return ws
 }
 
-func TestTabIndicator_BackgroundOutputThenSilence(t *testing.T) {
-	now := time.Unix(1700000000, 0)
-	ws := activityWorkspace(t, &now)
+func TestTabIndicator_CommandEnds(t *testing.T) {
+	ws := activityWorkspace(t)
 	tab := ws.tabs[1]
 
-	if got := tab.indicatorAt(now); got != indicatorNone {
+	if got := tab.indicator(); got != indicatorNone {
 		t.Errorf("fresh tab indicator = %v; want none", got)
 	}
 
-	ws.onPaneActivity("pane-1", term.ActivityOutput)
-	if got := tab.indicatorAt(now); got != indicatorActivity {
-		t.Errorf("after output indicator = %v; want activity", got)
+	ws.onPaneActivity("pane-1", term.ActivityCommandDone)
+	if got := tab.indicator(); got != indicatorCommandDone {
+		t.Errorf("after a successful command indicator = %v; want done", got)
 	}
 
-	// Just short of the threshold is still activity.
-	if got := tab.indicatorAt(now.Add(silenceAfter - time.Millisecond)); got != indicatorActivity {
-		t.Errorf("before threshold indicator = %v; want activity", got)
+	// A failure among several commands is the one worth surfacing, whichever
+	// order they finished in.
+	ws.onPaneActivity("pane-1", term.ActivityCommandFailed)
+	if got := tab.indicator(); got != indicatorCommandFailed {
+		t.Errorf("after a failure indicator = %v; want failed", got)
 	}
-	if got := tab.indicatorAt(now.Add(silenceAfter)); got != indicatorSilence {
-		t.Errorf("at threshold indicator = %v; want silence", got)
+	ws.onPaneActivity("pane-1", term.ActivityCommandDone)
+	if got := tab.indicator(); got != indicatorCommandFailed {
+		t.Errorf("a later success demoted the failure to %v", got)
 	}
 }
 
-// A bell outranks both other states and does not decay into silence: it is a
-// deliberate signal from the child, not a byproduct of output.
+// Screen output is not reported by Term at all, so a repainting application
+// in a background tab leaves the tab bar alone. This pins the contract from
+// the workspace side: an ActivityKind it does not recognize marks nothing.
+func TestTabIndicator_UnknownKindMarksNothing(t *testing.T) {
+	ws := activityWorkspace(t)
+	ws.onPaneActivity("pane-1", term.ActivityKind(99))
+	if got := ws.tabs[1].indicator(); got != indicatorNone {
+		t.Errorf("indicator = %v; want none", got)
+	}
+}
+
+// A pane that is closing may still deliver one last report after the workspace
+// dropped its Term — the lookup misses every tab and must be a no-op, not a
+// panic.
+func TestTabIndicator_StalePaneIDIsNoOp(t *testing.T) {
+	ws := activityWorkspace(t)
+	ws.onPaneActivity("gone-pane", term.ActivityBell)
+	ws.onPaneActivity("gone-pane", term.ActivityCommandFailed)
+	for _, tab := range ws.tabs {
+		if got := tab.indicator(); got != indicatorNone {
+			t.Errorf("stale report lit tab %s as %v; want none", tab.id, got)
+		}
+	}
+}
+
+// All panes of a tab report through the same latch — a tab with several panes
+// shows the most interesting event across all of them, not just one.
+func TestTabIndicator_MultiPaneTabSharesState(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.tabs = []*tab{
+		{id: "tab-0", terms: map[string]*term.Term{"pane-0": nil}},
+		{id: "tab-1", terms: map[string]*term.Term{"pane-1": nil, "pane-2": nil}},
+	}
+	ws.activeTab = 0
+
+	ws.onPaneActivity("pane-1", term.ActivityCommandDone)
+	if got := ws.tabs[1].indicator(); got != indicatorCommandDone {
+		t.Fatalf("indicator after pane-1 = %v; want done", got)
+	}
+	ws.onPaneActivity("pane-2", term.ActivityCommandFailed)
+	if got := ws.tabs[1].indicator(); got != indicatorCommandFailed {
+		t.Errorf("indicator after pane-2 = %v; want failed", got)
+	}
+	if ws.tabs[0].indicator() != indicatorNone {
+		t.Error("events leaked to the active tab")
+	}
+}
+
+// A bell outranks the command markers: it is the signal the child asked for
+// by name rather than one derived from an exit status.
 func TestTabIndicator_BellOutranksAndPersists(t *testing.T) {
-	now := time.Unix(1700000000, 0)
-	ws := activityWorkspace(t, &now)
+	ws := activityWorkspace(t)
 	tab := ws.tabs[1]
 
 	ws.onPaneActivity("pane-1", term.ActivityBell)
-	if got := tab.indicatorAt(now); got != indicatorBell {
+	if got := tab.indicator(); got != indicatorBell {
 		t.Errorf("indicator = %v; want bell", got)
 	}
-	if got := tab.indicatorAt(now.Add(time.Hour)); got != indicatorBell {
-		t.Errorf("indicator after an hour = %v; want bell", got)
-	}
-	// Later plain output must not demote it.
-	ws.onPaneActivity("pane-1", term.ActivityOutput)
-	if got := tab.indicatorAt(now); got != indicatorBell {
-		t.Errorf("indicator after later output = %v; want bell", got)
+	// Later command ends must not demote it.
+	ws.onPaneActivity("pane-1", term.ActivityCommandFailed)
+	ws.onPaneActivity("pane-1", term.ActivityCommandDone)
+	if got := tab.indicator(); got != indicatorBell {
+		t.Errorf("indicator after later command ends = %v; want bell", got)
 	}
 }
 
-// The active tab is on screen, so its own output is the indicator.
+// The active tab is on screen, so the user already saw whatever happened.
 func TestTabIndicator_ActiveTabAccumulatesNothing(t *testing.T) {
-	now := time.Unix(1700000000, 0)
-	ws := activityWorkspace(t, &now)
+	ws := activityWorkspace(t)
 
 	ws.onPaneActivity("pane-0", term.ActivityBell)
-	if got := ws.tabs[0].indicatorAt(now); got != indicatorNone {
+	if got := ws.tabs[0].indicator(); got != indicatorNone {
 		t.Errorf("active tab indicator = %v; want none", got)
 	}
-	if !ws.tabs[0].lastActivity.IsZero() || ws.tabs[0].bell {
+	if ws.tabs[0].bell || ws.tabs[0].cmdDone || ws.tabs[0].cmdFailed {
 		t.Error("active tab recorded activity state")
 	}
 }
 
 func TestTabIndicator_ClearedOnActivation(t *testing.T) {
-	now := time.Unix(1700000000, 0)
-	ws := activityWorkspace(t, &now)
+	ws := activityWorkspace(t)
 	tab := ws.tabs[1]
 
 	ws.onPaneActivity("pane-1", term.ActivityBell)
-	if got := tab.indicatorAt(now); got != indicatorBell {
+	ws.onPaneActivity("pane-1", term.ActivityCommandFailed)
+	if got := tab.indicator(); got != indicatorBell {
 		t.Fatalf("setup: indicator = %v; want bell", got)
 	}
 
 	tab.clearActivity()
-	if got := tab.indicatorAt(now); got != indicatorNone {
+	if got := tab.indicator(); got != indicatorNone {
 		t.Errorf("indicator after clear = %v; want none", got)
 	}
 }
 
-// The silence timer must target the earliest tab that can go quiet, and stop
-// existing once nothing is pending.
-func TestSilenceDeadline_EarliestPendingTab(t *testing.T) {
-	now := time.Unix(1700000000, 0)
-	ws := activityWorkspace(t, &now)
-	ws.tabs = append(ws.tabs, &tab{id: "tab-2", terms: map[string]*term.Term{"pane-2": nil}})
-
-	ws.tabs[1].lastActivity = now.Add(-3 * time.Second)
-	ws.tabs[2].lastActivity = now.Add(-1 * time.Second)
-
-	got, ok := ws.nextSilenceDeadline()
-	if !ok {
-		t.Fatal("no deadline; want the earlier of two pending tabs")
-	}
-	if want := now.Add(-3 * time.Second).Add(silenceAfter); !got.Equal(want) {
-		t.Errorf("deadline = %v; want %v", got, want)
-	}
-
-	// A tab already showing a bell is not waiting on silence.
-	ws.tabs[1].bell = true
-	got, ok = ws.nextSilenceDeadline()
-	if !ok {
-		t.Fatal("no deadline; tab-2 is still pending")
-	}
-	if want := now.Add(-1 * time.Second).Add(silenceAfter); !got.Equal(want) {
-		t.Errorf("deadline = %v; want %v", got, want)
-	}
-
-	// Nothing pending at all.
-	ws.tabs[1].clearActivity()
-	ws.tabs[2].clearActivity()
-	if _, ok := ws.nextSilenceDeadline(); ok {
-		t.Error("deadline reported with no pending tabs")
-	}
-}
-
-// A tab that has *already* gone silent is not waiting on anything. Reporting
-// its stale deadline would arm a timer that fires immediately, re-arms on the
-// same deadline, and spins the main thread repainting the tab bar forever.
-func TestSilenceDeadline_SkipsAlreadySilentTab(t *testing.T) {
-	now := time.Unix(1700000000, 0)
-	ws := activityWorkspace(t, &now)
-	ws.tabs[1].lastActivity = now.Add(-2 * silenceAfter)
-
-	if got, ok := ws.nextSilenceDeadline(); ok {
-		t.Errorf("deadline %v reported for an already-silent tab; want none", got)
-	}
-	// Sanity: the tab really is silent, so there is nothing left to repaint for.
-	if got := ws.tabs[1].indicatorAt(now); got != indicatorSilence {
-		t.Fatalf("setup: indicator = %v; want silence", got)
-	}
-
-	// Fresh output re-arms it — the deadline comes back once it is in the future.
-	ws.tabs[1].lastActivity = now
-	if _, ok := ws.nextSilenceDeadline(); !ok {
-		t.Error("no deadline after fresh output; want one")
-	}
-}
-
-// The pending repaint must not outlive the workspace: its callback queues work
-// on a window the workspace no longer handles events for.
-func TestSilenceTimer_StoppedOnClose(t *testing.T) {
-	now := time.Unix(1700000000, 0)
-	ws := activityWorkspace(t, &now)
-	ws.tabs[1].lastActivity = now
-	ws.armSilenceTimer()
-	if ws.silenceTimer == nil {
-		t.Fatal("setup: no timer armed for a tab pending silence")
-	}
-	// The fake tabs hold nil terminals, which teardown would dereference; the
-	// timer, not pane teardown, is what this test is about.
-	for _, tab := range ws.tabs {
-		tab.terms = nil
-	}
-	if err := ws.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	if ws.silenceTimer != nil {
-		t.Error("silence timer still armed after Close")
-	}
-}
-
+// The glyph is what the user actually reads, so the mapping is pinned rather
+// than left to whatever the render call happens to pass through.
 func TestTabIndicator_Glyphs(t *testing.T) {
 	tests := []struct {
 		in   tabIndicator
 		want string
 	}{
 		{indicatorNone, ""},
-		{indicatorActivity, "●"},
-		{indicatorSilence, "○"},
+		{indicatorCommandDone, "✓"},
+		{indicatorCommandFailed, "✗"},
 		{indicatorBell, "!"},
 	}
 	for _, tc := range tests {
 		if got := tc.in.glyph(); got != tc.want {
 			t.Errorf("indicator %v glyph = %q; want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// tabGlyph is the render-path entry point: the active tab never carries a
+// marker even when state somehow survived on it.
+func TestTabGlyph_ActiveTabNeverMarked(t *testing.T) {
+	ws := activityWorkspace(t)
+	ws.tabs[0].bell = true
+	if got := ws.tabGlyph(ws.tabs[0], true); got != "" {
+		t.Errorf("active tab glyph = %q; want empty", got)
+	}
+	if got := ws.tabGlyph(ws.tabs[0], false); got != "!" {
+		t.Errorf("background glyph = %q; want \"!\"", got)
 	}
 }

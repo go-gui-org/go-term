@@ -3,7 +3,6 @@ package workspace
 import (
 	"path/filepath"
 	"strconv"
-	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-term/term"
@@ -18,14 +17,14 @@ type tab struct {
 	focused string                // leafID of focused pane
 	nextID  int                   // monotonic leaf ID counter
 
-	// lastActivity is when any pane in this tab last produced output, and
-	// bell whether one rang the bell. Both accumulate only while the tab is
-	// in the background and are cleared when it becomes active — an
-	// indicator on the tab you are already reading has nothing to tell you.
-	// The silence indicator is derived from lastActivity rather than stored;
-	// see tabIndicator.
-	lastActivity time.Time
-	bell         bool
+	// bell, cmdDone, and cmdFailed latch the events any pane in this tab
+	// reported: a BEL, and OSC 133 command ends by exit status. All three
+	// accumulate only while the tab is in the background and are cleared when
+	// it becomes active — an indicator on the tab you are already reading has
+	// nothing to tell you. See tabIndicator for how they resolve to a glyph.
+	bell      bool
+	cmdDone   bool
+	cmdFailed bool
 
 	// broadcast mirrors user input from the focused pane to every other
 	// live pane in *this* tab. Toggled unconditionally, including on a

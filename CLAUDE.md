@@ -93,9 +93,9 @@ input) lives in `term/CLAUDE.md`, loaded when working under `term/`.
   Term-level shortcuts), and the live setters a config reload needs —
   `SetTextStyle`, `SetScrollbackRows`, `SetBellMode`, `SetScrollbarWidth`,
   `SetMiddleClickPaste`, `SetMinimumContrast`, `SetNotifyAfter`,
-  plus `ActivityKind`/`Cfg.OnActivity` — the pane-activity tap a tab bar needs
-  for its activity/bell indicators (silence is derived by the embedder, not
-  reported),
+  plus `ActivityKind`/`Cfg.OnActivity` — the pane-event tap a tab bar needs for
+  its bell and command-result indicators (bells and OSC 133 command ends only;
+  screen output is deliberately not reported — see the type's doc),
   plus `InputKind`/`Cfg.OnInput`/`SendInput` — the symmetric input tap and
   injection pair a pane manager needs to mirror keys and pastes to sibling
   panes (`term/workspace` broadcast mode). What the tap hands out, `SendInput`

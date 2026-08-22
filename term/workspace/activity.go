@@ -1,39 +1,34 @@
 package workspace
 
 import (
-	"time"
-
-	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-term/term"
 )
 
-// tab activity indicators. A background tab collects three states from the
-// output of its panes — something happened, the bell rang, it has gone quiet
-// again — and the tab bar renders whichever is most interesting.
+// tab activity indicators. A background tab collects the events its panes
+// asserted — the bell rang, a command finished, a command failed — and the
+// tab bar renders whichever is most interesting.
 //
-// Only the first two are reported by Term (Cfg.OnActivity). Silence is
-// derived from how long ago the last report was, because "nothing happened"
-// is not an event a terminal can send.
-
-// silenceAfter is how long a background tab must go without output, after
-// having produced some, before it reads as quiet. Sized for the case the
-// indicator is for — a long build or test run that has finished writing —
-// rather than for the gaps within one.
-const silenceAfter = 10 * time.Second
+// Every state here comes from something the child said explicitly (a BEL, an
+// OSC 133 D mark). Screen output deliberately does not count: an application
+// that repaints on a timer — a spinner, a status-line clock, an animated
+// prompt — changes cells forever whether or not anything happened, so "the
+// screen changed" cannot tell a finished build from an idle TUI. An indicator
+// that is always lit is an indicator nobody reads.
 
 // tabIndicator is what the tab bar draws to the left of a tab's title.
 type tabIndicator int
 
 const (
-	// indicatorNone is the active tab, or a background tab that has produced
+	// indicatorNone is the active tab, or a background tab that has reported
 	// nothing since it went to the background.
 	indicatorNone tabIndicator = iota
-	// indicatorActivity: output arrived recently.
-	indicatorActivity
-	// indicatorSilence: output arrived, then stopped for silenceAfter.
-	indicatorSilence
-	// indicatorBell: the bell rang. Outranks the other two — it is the only
-	// one the child asked for explicitly.
+	// indicatorCommandDone: a command finished successfully in this tab.
+	indicatorCommandDone
+	// indicatorCommandFailed: a command finished with a non-zero exit.
+	// Outranks a success — a tab holding both has one thing worth reading.
+	indicatorCommandFailed
+	// indicatorBell: the bell rang. Outranks the rest — it is the signal the
+	// child asked for by name rather than one derived from its exit status.
 	indicatorBell
 )
 
@@ -42,10 +37,10 @@ const (
 // them renders at a different size on every platform.
 func (i tabIndicator) glyph() string {
 	switch i {
-	case indicatorActivity:
-		return "●"
-	case indicatorSilence:
-		return "○"
+	case indicatorCommandDone:
+		return "✓"
+	case indicatorCommandFailed:
+		return "✗"
 	case indicatorBell:
 		return "!"
 	default:
@@ -53,31 +48,25 @@ func (i tabIndicator) glyph() string {
 	}
 }
 
-// onPaneActivity records output or a bell against the tab that owns the pane.
+// onPaneActivity records an event against the tab that owns the pane.
 // Runs on the main thread, dispatched there by Term.
 func (ws *Workspace) onPaneActivity(leafID string, kind term.ActivityKind) {
 	for i, tab := range ws.tabs {
 		if _, ok := tab.terms[leafID]; !ok {
 			continue
 		}
-		// The active tab is on screen; its output is its own indicator.
+		// The active tab is on screen; the user saw whatever happened.
 		if i == ws.activeTab {
 			return
 		}
-		now := ws.now()
-		was := tab.indicatorAt(now)
-		tab.lastActivity = now
-		if kind == term.ActivityBell {
-			tab.bell = true
-		}
-		// Only repaint when the marker actually changes. Output arrives in a
-		// steady stream from a busy pane and the indicator is the same on
-		// every one of those reads; refreshing per read would rebuild the
-		// whole view tree for a tab bar that already looks right.
-		if tab.indicatorAt(now) != was {
+		was := tab.indicator()
+		tab.noteActivity(kind)
+		// Only repaint when the marker actually changes. A tab that already
+		// shows a bell learns nothing from a second one, and rebuilding the
+		// whole view tree for a tab bar that already looks right is waste.
+		if tab.indicator() != was {
 			ws.refresh()
 		}
-		ws.armSilenceTimer()
 		return
 	}
 }
@@ -90,97 +79,42 @@ func (ws *Workspace) tabGlyph(tab *tab, isActive bool) string {
 	if isActive {
 		return ""
 	}
-	return tab.indicatorAt(ws.now()).glyph()
+	return tab.indicator().glyph()
 }
 
-// indicatorAt resolves a tab's marker as of now. The instant is passed in
-// rather than read here so the tab bar and the activity handler cannot
-// disagree about the current time, and so a test can move it. Caller is on
-// the main thread.
-func (t *tab) indicatorAt(now time.Time) tabIndicator {
+// noteActivity folds one report into the tab's accumulated state. Each kind
+// latches independently so a later success cannot erase an earlier failure;
+// the priority ordering in indicator decides what actually gets drawn.
+func (t *tab) noteActivity(kind term.ActivityKind) {
+	switch kind {
+	case term.ActivityBell:
+		t.bell = true
+	case term.ActivityCommandFailed:
+		t.cmdFailed = true
+	case term.ActivityCommandDone:
+		t.cmdDone = true
+	}
+}
+
+// indicator resolves a tab's marker from the events it has latched. Caller is
+// on the main thread.
+func (t *tab) indicator() tabIndicator {
 	switch {
 	case t.bell:
 		return indicatorBell
-	case t.lastActivity.IsZero():
-		return indicatorNone
-	case !now.Before(t.lastActivity.Add(silenceAfter)):
-		return indicatorSilence
+	case t.cmdFailed:
+		return indicatorCommandFailed
+	case t.cmdDone:
+		return indicatorCommandDone
 	default:
-		return indicatorActivity
+		return indicatorNone
 	}
 }
 
 // clearActivity drops a tab's accumulated indicator state. Called when the
 // tab becomes active — the user is now looking at whatever it was reporting.
 func (t *tab) clearActivity() {
-	t.lastActivity = time.Time{}
 	t.bell = false
-}
-
-// armSilenceTimer schedules the repaint that turns an activity marker into a
-// silence marker. Nothing else would trigger it: the transition happens
-// because output *stopped*, so there is no frame coming to notice it.
-//
-// One timer serves every tab. It fires at the earliest moment any tab could
-// go quiet and re-arms from there, so the cost is one timer per burst of
-// output rather than one per tab.
-func (ws *Workspace) armSilenceTimer() {
-	if ws.silenceTimer != nil {
-		ws.silenceTimer.Stop()
-		ws.silenceTimer = nil
-	}
-	now := ws.now()
-	next, ok := ws.nextSilenceDeadline()
-	if !ok {
-		return
-	}
-	// Measured against the workspace clock, not time.Now, so a test clock and
-	// the deadline it produced cannot disagree about how far away it is.
-	ws.silenceTimer = time.AfterFunc(next.Sub(now), func() {
-		ws.w.QueueCommand(func(*gui.Window) {
-			ws.onSilenceTimeout()
-		})
-	})
-}
-
-// nextSilenceDeadline is the soonest instant at which some background tab
-// crosses into silence, if any is pending.
-//
-// A tab that is *already* silent is not pending and must be skipped: its
-// deadline is in the past, and arming a timer on it would fire immediately,
-// re-arm on the same stale deadline, and spin the main thread repainting the
-// tab bar forever.
-func (ws *Workspace) nextSilenceDeadline() (time.Time, bool) {
-	now := ws.now()
-	var next time.Time
-	for i, tab := range ws.tabs {
-		if i == ws.activeTab || tab.lastActivity.IsZero() || tab.bell {
-			continue
-		}
-		d := tab.lastActivity.Add(silenceAfter)
-		if !d.After(now) {
-			continue
-		}
-		if next.IsZero() || d.Before(next) {
-			next = d
-		}
-	}
-	return next, !next.IsZero()
-}
-
-// onSilenceTimeout repaints for the activity → silence transition and re-arms
-// for whichever tab is next in line. Runs on the main thread.
-func (ws *Workspace) onSilenceTimeout() {
-	ws.silenceTimer = nil
-	ws.refresh()
-	ws.armSilenceTimer()
-}
-
-// now reads the workspace clock, defaulting to time.Now. The seam lets a test
-// drive the activity → silence transition without waiting silenceAfter.
-func (ws *Workspace) now() time.Time {
-	if ws.clock != nil {
-		return ws.clock()
-	}
-	return time.Now()
+	t.cmdDone = false
+	t.cmdFailed = false
 }

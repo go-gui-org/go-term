@@ -244,14 +244,22 @@ unit mix-up.
 
 A tab you are not looking at shows a marker to the left of its title:
 
-| Marker | Meaning                                            |
-| ------ | -------------------------------------------------- |
-| `●`    | The pane produced output                           |
-| `○`    | It produced output, then went quiet for 10 seconds |
-| `!`    | The pane rang the bell                             |
+| Marker | Meaning                                 |
+| ------ | --------------------------------------- |
+| `!`    | The pane rang the bell                  |
+| `✗`    | A command finished with a non-zero exit |
+| `✓`    | A command finished                      |
 
-Switching to the tab clears whichever marker it was showing. These need no
-shell integration — they follow raw output, not marks.
+A tab showing more than one of these draws the topmost in the table.
+Switching to the tab clears whichever marker it was showing.
+
+The command markers need the same shell integration `notify-after` uses (see
+`scripts/shell-integration/`); without it, only the bell marker appears.
+
+Plain screen output is deliberately not a marker. An application that
+repaints on a timer — a spinner, a clock, an animated prompt — changes the
+screen whether or not anything happened, so a marker driven by output would
+sit on every such tab forever and tell you nothing.
 
 ## Selection and mouse
 
