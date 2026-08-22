@@ -281,7 +281,6 @@ func restoreWorkspace(w *gui.Window, cfg Cfg, pw persistedWorkspace) (*Workspace
 	tab := ws.tabs[ws.activeTab]
 	if t, ok := tab.terms[tab.focused]; ok {
 		t.SetFocused(true)
-		t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 	}
 	return ws, nil
 }

@@ -225,7 +225,6 @@ func (ws *Workspace) closeTabAt(idx int) {
 		tab := ws.tabs[ws.activeTab]
 		if t, ok := tab.terms[tab.focused]; ok {
 			t.SetFocused(true)
-			t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 		}
 	}
 	ws.refresh()
@@ -301,7 +300,6 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 			tab := ws.tabs[ws.activeTab]
 			if t, ok := tab.terms[tab.focused]; ok {
 				t.SetFocused(true)
-				t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 			}
 			ws.refresh()
 			return
@@ -313,7 +311,6 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 			tab.focused = survivor
 			if t, ok := tab.terms[survivor]; ok {
 				t.SetFocused(true)
-				t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 			}
 		}
 	}
@@ -363,15 +360,13 @@ func (ws *Workspace) ActivePane() *term.Term {
 // new tab, a tab switch — already unfocuses the pane it moves away from; this
 // exists for the one path that has no "away from" to unfocus.
 //
-// Blanket-sending the event is safe only where no child has had the chance to
-// enable focus reporting (?1004) yet, since a subscribed child would read a
-// redundant event as a CSI O report. Restore, whose shells have only just
-// spawned, is that place.
+// SetFocused alone carries this: pane visibility and window focus are separate
+// inputs to the notification gate, and only the window half may reach the child
+// as a ?1004 report. Nothing here touches that half.
 func (ws *Workspace) blurAllPanes() {
 	for _, tab := range ws.tabs {
 		for _, t := range tab.terms {
 			t.SetFocused(false)
-			t.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 		}
 	}
 }
@@ -614,12 +609,10 @@ func (ws *Workspace) focusPaneInTab(tab *tab, leafID string) {
 	}
 	if prev, ok := tab.terms[tab.focused]; ok {
 		prev.SetFocused(false)
-		prev.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 	}
 	tab.focused = leafID
 	if next, ok := tab.terms[leafID]; ok {
 		next.SetFocused(true)
-		next.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 	}
 	ws.refresh()
 }
@@ -770,7 +763,6 @@ func (ws *Workspace) activateTab(idx int) {
 		oldTab := ws.tabs[old]
 		if t, ok := oldTab.terms[oldTab.focused]; ok {
 			t.SetFocused(false)
-			t.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 		}
 	}
 	ws.activeTab = idx
@@ -779,7 +771,6 @@ func (ws *Workspace) activateTab(idx int) {
 	tab.clearActivity()
 	if t, ok := tab.terms[tab.focused]; ok {
 		t.SetFocused(true)
-		t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 	}
 	ws.refresh()
 }

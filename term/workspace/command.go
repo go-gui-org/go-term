@@ -479,7 +479,6 @@ func (ws *Workspace) splitPane(horizontal bool) {
 	if old, ok := tab.terms[tab.focused]; ok {
 		inheritSize = old.FontSize()
 		old.SetFocused(false)
-		old.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 	}
 	newLeafID := tab.allocLeafID()
 	if err := tab.addPane(ws.w, ws.cfg, newLeafID, cwd, inheritSize, ws.hooks()); err != nil {
@@ -543,7 +542,6 @@ func (ws *Workspace) addTab() {
 		oldTab := ws.tabs[oldIdx]
 		if t, ok := oldTab.terms[oldTab.focused]; ok {
 			t.SetFocused(false)
-			t.HandleWindowEvent(&gui.Event{Type: gui.EventUnfocused})
 		}
 	}
 	_, err := ws.addTabIn(cwd)
@@ -554,7 +552,6 @@ func (ws *Workspace) addTab() {
 	tab := ws.tabs[ws.activeTab]
 	if t, ok := tab.terms[tab.focused]; ok {
 		t.SetFocused(true)
-		t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 	}
 	ws.refresh()
 }

@@ -40,31 +40,21 @@ func runCommand(t *testing.T, tm *Term, g *grid, p *parser, cmdLine string, elap
 func TestCommandNotify_FiresPastThreshold(t *testing.T) {
 	tm, g, p, fired := notifyTestTerm(t, 30*time.Second)
 	runCommand(t, tm, g, p, "cargo build --release", 2*time.Minute+14*time.Second, "0")
-
-	select {
-	case got := <-fired:
-		if want := "Command finished (2m14s)"; got[0] != want {
-			t.Errorf("title = %q; want %q", got[0], want)
-		}
-		if want := "cargo build --release"; got[1] != want {
-			t.Errorf("body = %q; want %q", got[1], want)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("no notification fired")
+	got := assertNotify(t, fired)
+	if want := "Command finished (2m14s)"; got[0] != want {
+		t.Errorf("title = %q; want %q", got[0], want)
+	}
+	if want := "cargo build --release"; got[1] != want {
+		t.Errorf("body = %q; want %q", got[1], want)
 	}
 }
 
 func TestCommandNotify_ReportsFailure(t *testing.T) {
 	tm, g, p, fired := notifyTestTerm(t, time.Second)
 	runCommand(t, tm, g, p, "make test", 90*time.Second, "1")
-
-	select {
-	case got := <-fired:
-		if want := "Command failed (exit 1, 1m30s)"; got[0] != want {
-			t.Errorf("title = %q; want %q", got[0], want)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("no notification fired")
+	got := assertNotify(t, fired)
+	if want := "Command failed (exit 1, 1m30s)"; got[0] != want {
+		t.Errorf("title = %q; want %q", got[0], want)
 	}
 }
 
@@ -73,14 +63,9 @@ func TestCommandNotify_ReportsFailure(t *testing.T) {
 func TestCommandNotify_UnknownExitIsNotAFailure(t *testing.T) {
 	tm, g, p, fired := notifyTestTerm(t, time.Second)
 	runCommand(t, tm, g, p, "sleep 90", 90*time.Second, "")
-
-	select {
-	case got := <-fired:
-		if want := "Command finished (1m30s)"; got[0] != want {
-			t.Errorf("title = %q; want %q", got[0], want)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("no notification fired")
+	got := assertNotify(t, fired)
+	if want := "Command finished (1m30s)"; got[0] != want {
+		t.Errorf("title = %q; want %q", got[0], want)
 	}
 }
 
@@ -95,8 +80,37 @@ func TestCommandNotify_SuppressedBelowThreshold(t *testing.T) {
 func TestCommandNotify_SuppressedWhenFocused(t *testing.T) {
 	tm, g, p, fired := notifyTestTerm(t, time.Second)
 	tm.winFocused.Store(true)
+	tm.focused.Store(true)
 	runCommand(t, tm, g, p, "sleep 60", time.Minute, "0")
 	assertNoNotify(t, fired)
+}
+
+// Attended means both halves: the window has focus *and* this pane is the one
+// in front. A pane a tab switch put in the background is unattended even
+// though its window never lost focus — the pane manager says so through
+// SetFocused, never by faking a window event (that would write a bogus ?1004
+// focus report to the child).
+func TestCommandNotify_FiresForBackgroundPaneInFocusedWindow(t *testing.T) {
+	tm, g, p, fired := notifyTestTerm(t, time.Second)
+	tm.winFocused.Store(true)
+	tm.SetFocused(false)
+	runCommand(t, tm, g, p, "sleep 60", time.Minute, "0")
+	got := assertNotify(t, fired)
+	if want := "Command finished (1m0s)"; got[0] != want {
+		t.Errorf("title = %q; want %q", got[0], want)
+	}
+}
+
+// The window half of the gate stands on its own: a pane the user is looking
+// at (focused=true) is still unattended when its window lost focus.
+func TestCommandNotify_FiresWhenWindowUnfocused(t *testing.T) {
+	tm, g, p, fired := notifyTestTerm(t, time.Second)
+	tm.focused.Store(true)
+	runCommand(t, tm, g, p, "sleep 60", time.Minute, "0")
+	got := assertNotify(t, fired)
+	if want := "Command finished (1m0s)"; got[0] != want {
+		t.Errorf("title = %q; want %q", got[0], want)
+	}
 }
 
 func TestCommandNotify_DisabledByDefault(t *testing.T) {
@@ -265,6 +279,19 @@ func TestMarkCol_DeferredWrap(t *testing.T) {
 		if m.Kind == markCommandStart && int(m.Col) >= g.Cols {
 			t.Errorf("mark.Col = %d; want < Cols (%d)", m.Col, g.Cols)
 		}
+	}
+}
+
+// assertNotify waits for one notification and returns it, so the caller
+// asserts on the parts it cares about. The mirror of assertNoNotify below.
+func assertNotify(t *testing.T, fired chan [2]string) [2]string {
+	t.Helper()
+	select {
+	case got := <-fired:
+		return got
+	case <-time.After(2 * time.Second):
+		t.Fatal("no notification fired")
+		return [2]string{}
 	}
 }
 

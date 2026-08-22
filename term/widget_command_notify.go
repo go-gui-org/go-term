@@ -73,17 +73,24 @@ func (t *Term) reportCommandEnd(exit int16) {
 }
 
 // maybeNotifyCommand fires a desktop notification for a command that ran
-// longer than the configured threshold while the window was unfocused.
-// Called from the parser on the reader goroutine with grid.Mu held.
+// longer than the configured threshold while the terminal was unattended:
+// the window unfocused, or this pane not the one in front. Called from the
+// parser on the reader goroutine with grid.Mu held.
 func (t *Term) maybeNotifyCommand(elapsed time.Duration, exit int16) {
 	after := time.Duration(t.notifyAfter.Load())
 	if after <= 0 || elapsed < after {
 		return
 	}
 	// The point of the notification is to reach a user who is looking at
-	// something else. Firing it for a window they are already watching is
+	// something else. Firing it for a pane they are already watching is
 	// pure noise, and duplicates what the pane itself just showed them.
-	if t.winFocused.Load() {
+	//
+	// Both halves are required, and they are separate facts: winFocused is the
+	// window's focus (set only by real window events), focused is whether a
+	// pane manager has this Term in front. A build finishing in a background
+	// tab of a focused window is just as unattended as one in a background
+	// window, and only the conjunction catches both.
+	if t.winFocused.Load() && t.focused.Load() {
 		return
 	}
 	// Read the command line before releasing the reader goroutine: this runs
