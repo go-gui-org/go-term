@@ -406,20 +406,21 @@ type Term struct {
 	// in the same window don't compete for the same focus slot.
 	focusID string
 
-	// winFocused tracks whether this terminal is the one the user is looking
-	// at, and gates the long-running-command notification. It is fed by the
-	// EventFocused/EventUnfocused pair in HandleWindowEvent, which carries
-	// two things at once: a standalone Term sees real window focus, while a
-	// pane manager also synthesizes the pair as the user moves between panes
-	// and tabs (term/workspace routes window events to the active pane only).
-	// The union is what the notification wants — a build running in a
-	// background tab of a focused window is just as unattended as one in a
-	// background window.
+	// winFocused tracks whether the *window* has focus. It is fed only by the
+	// EventFocused/EventUnfocused pair in HandleWindowEvent, i.e. by real
+	// window transitions — a pane manager must not synthesize the pair to
+	// signal that a pane moved to the background, because the same event also
+	// writes a ?1004 focus report (CSI O) to the child, and that report would
+	// be a lie: the window still has focus. Measured cost of the lie: Claude
+	// Code stops emitting OSC 2 title updates for the whole time its tab is in
+	// the background, so the tab label freezes.
 	//
-	// Distinct from `focused` above, which is keyboard-focus routing and is
-	// set through the separate SetFocused entry point. Defaults to true in
-	// New: a Term that never sees a focus event is assumed visible, so
-	// notifications stay quiet until something says otherwise.
+	// Together with `focused` above (pane-level keyboard focus, set through
+	// SetFocused) this gates the long-running-command notification: unattended
+	// means the window is away *or* this pane is not the one in front. See
+	// maybeNotifyCommand. Defaults to true in New: a Term that never sees a
+	// focus event is assumed visible, so notifications stay quiet until
+	// something says otherwise.
 	winFocused atomic.Bool
 
 	// cmdStart is the UnixNano instant the running command began (OSC 133 C),
