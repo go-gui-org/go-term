@@ -349,21 +349,14 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 	// goroutine immediately, off both the render loop and this read loop.
 	t.enqueueReplies()
 
-	bellRang := bellCount > t.bell.seenCount
-	if bellRang {
+	if bellCount > t.bell.seenCount {
 		t.bell.seenCount = bellCount
 		t.ringBell()
-	}
-
-	// Report activity to a pane manager. Computed here rather than per cell:
-	// needUpdate is already the answer to "did this read change the screen",
-	// so the hook costs one nil check per PTY read.
-	if fn := t.cfg.OnActivity; fn != nil && (needUpdate || bellRang) {
-		kind := ActivityOutput
-		if bellRang {
-			kind = ActivityBell
-		}
-		t.reportActivity(fn, kind)
+		// Report to a pane manager so a background tab can mark itself. The
+		// bell is one of the two things a child asserts loudly enough to be
+		// worth an indicator; the other is a command end, reported from the
+		// OSC 133 handler in widget_command_notify.go.
+		t.reportActivity(ActivityBell)
 	}
 
 	// Coalesce: queue at most one outstanding UpdateWindow so a burst of
@@ -383,31 +376,18 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 
 // reportActivity hands one activity report to the embedder's OnActivity hook
 // on the main thread. Dispatched through queueCommand because the hook runs
-// there and grid.Mu must never be held across a go-gui call.
+// there and grid.Mu must never be held across a go-gui call — both callers
+// are on the reader goroutine, one of them holding the lock.
 //
-// Coalesced exactly like the redraw above it, and for the same reason: a child
-// spewing output produces a read every few hundred microseconds, and one
-// queued closure per read floods the command queue with calls whose answer is
-// identical. At most one dispatch is outstanding; further reads fold into it.
-// A bell arriving while one is pending upgrades the kind rather than queuing
-// its own, so the signal the embedder must not miss cannot be dropped.
-func (t *Term) reportActivity(fn func(ActivityKind), kind ActivityKind) {
-	if kind == ActivityBell {
-		t.activityBell.Store(true)
-	}
-	if t.activityPending.Swap(true) {
+// Uncoalesced on purpose. Every kind is a discrete event the child asserted,
+// arriving at the rate a user rings bells or runs commands, so there is no
+// burst to fold and no report that may be dropped in favor of a later one.
+func (t *Term) reportActivity(kind ActivityKind) {
+	fn := t.cfg.OnActivity
+	if fn == nil {
 		return
 	}
-	t.queueCommand(func(*gui.Window) {
-		// Cleared before the hook runs so activity produced during it queues a
-		// fresh dispatch instead of being swallowed.
-		t.activityPending.Store(false)
-		k := ActivityOutput
-		if t.activityBell.Swap(false) {
-			k = ActivityBell
-		}
-		fn(k)
-	})
+	t.queueCommand(func(*gui.Window) { fn(kind) })
 }
 
 // onSyncTimeout is the mode-2026 watchdog callback: a sync block was begun

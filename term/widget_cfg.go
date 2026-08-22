@@ -42,18 +42,25 @@ const (
 	InputPaste
 )
 
-// ActivityKind labels what a Cfg.OnActivity callback observed. A bell
-// outranks plain output: a read that both drew text and rang the bell reports
-// ActivityBell, because that is the one a pane manager must surface.
+// ActivityKind labels what a Cfg.OnActivity callback observed. Every kind is
+// an event the child asserted explicitly — a BEL, or an OSC 133 command end.
+//
+// Screen output is deliberately not one of them. An application that repaints
+// on a timer (a spinner, a status-line clock, an animated prompt) dirties
+// cells forever whether or not anything happened, so "the screen changed"
+// cannot distinguish a finished build from an idle full-screen app, and an
+// embedder marking panes from it would mark every pane permanently.
 type ActivityKind int
 
 const (
-	// ActivityOutput is child output that changed the screen. Output that
-	// changes nothing — a query the parser answers, a no-op sequence — does
-	// not count, so an idle full-screen app does not read as busy.
-	ActivityOutput ActivityKind = iota
 	// ActivityBell is a BEL the child emitted, whatever BellMode does with it.
-	ActivityBell
+	ActivityBell ActivityKind = iota
+	// ActivityCommandDone is an OSC 133 D mark for a command that succeeded,
+	// or whose exit status the shell did not report. Requires shell
+	// integration — see scripts/shell-integration/.
+	ActivityCommandDone
+	// ActivityCommandFailed is an OSC 133 D mark carrying a non-zero exit.
+	ActivityCommandFailed
 )
 
 // Cfg configures a Term widget. All fields are optional.
@@ -75,15 +82,15 @@ type Cfg struct {
 	OnNotify func(title, body string)
 
 	// OnActivity, if non-nil, is called on the main thread when the child
-	// produces output that changed the screen, or rang the bell. A pane
-	// manager uses it to mark background tabs — see term/workspace, which
-	// derives its activity, bell, and silence indicators from this one hook.
+	// rings the bell or a command ends. A pane manager uses it to mark
+	// background tabs — see term/workspace, which draws its bell and
+	// command-result indicators from this one hook.
 	//
-	// It fires at most once per PTY read, not once per cell, and is not a
-	// change feed: consecutive output collapses into a single call, and the
-	// kind reports what that read contained rather than everything since the
-	// last call. Callers that need the screen contents should read the grid
-	// on the next draw instead.
+	// One call per event, at the rate the child produces them (a bell, a
+	// prompt), not at the rate it produces bytes. The command kinds need a
+	// shell that emits OSC 133; without one, only bells arrive. This is not a
+	// change feed — callers that need the screen contents should read the
+	// grid on the next draw instead.
 	OnActivity func(kind ActivityKind)
 
 	// CursorBlink, if non-nil, overrides the application's DECSCUSR

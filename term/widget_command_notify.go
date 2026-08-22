@@ -42,9 +42,34 @@ func (t *Term) registerCommandHandler() {
 				// nothing to report.
 				return
 			}
+			t.reportCommandEnd(exit)
 			t.maybeNotifyCommand(time.Duration(t.now().UnixNano()-start), exit)
 		}
 	})
+}
+
+// commandFailed reports whether an exit status is a real failure. Zero is
+// success, and markExitUnknown is "the shell did not say" — which must not
+// read as a failure, but must not read as success either.
+func commandFailed(exit int16) bool {
+	return exit != markExitUnknown && exit != 0
+}
+
+// reportCommandEnd tells the embedder a command finished so a pane manager can
+// mark the tab it ran in. Deliberately separate from maybeNotifyCommand below:
+// the desktop notification has a duration threshold and a focus check because
+// it interrupts the whole desktop, while a tab marker interrupts nothing and
+// wants every command end — a background tab is equally unread whether the
+// command took an hour or a second.
+//
+// Called from the parser on the reader goroutine with grid.Mu held;
+// reportActivity hops to the main thread rather than calling the hook here.
+func (t *Term) reportCommandEnd(exit int16) {
+	kind := ActivityCommandDone
+	if commandFailed(exit) {
+		kind = ActivityCommandFailed
+	}
+	t.reportActivity(kind)
 }
 
 // maybeNotifyCommand fires a desktop notification for a command that ran
@@ -68,12 +93,11 @@ func (t *Term) maybeNotifyCommand(elapsed time.Duration, exit int16) {
 	t.notifyAsync(commandNotifyTitle(elapsed, exit), body)
 }
 
-// commandNotifyTitle renders the notification title. The exit status is only
-// mentioned when the shell actually reported a failure — markExitUnknown must
-// not read as success, but it must not read as failure either.
+// commandNotifyTitle renders the notification title. A failure is only named
+// when the shell actually reported one; an absent status stays neutral.
 func commandNotifyTitle(elapsed time.Duration, exit int16) string {
 	d := elapsed.Round(time.Second)
-	if exit != markExitUnknown && exit != 0 {
+	if commandFailed(exit) {
 		return fmt.Sprintf("Command failed (exit %d, %s)", exit, d)
 	}
 	return fmt.Sprintf("Command finished (%s)", d)

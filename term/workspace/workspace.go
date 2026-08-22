@@ -5,7 +5,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-term/term"
@@ -117,16 +116,6 @@ type Workspace struct {
 	// which is what makes the first call happen at startup.
 	schemeKnown bool
 	schemeDark  bool
-
-	// silenceTimer schedules the repaint that flips a background tab's
-	// activity marker to silence. One timer serves every tab; see
-	// armSilenceTimer. Main-thread only.
-	silenceTimer *time.Timer
-
-	// clock is the time source for the activity indicators, replaced in tests
-	// so the silence transition can be driven without waiting. Nil means
-	// time.Now — see Workspace.now.
-	clock func() time.Time
 
 	prevOnEvent func(*gui.Event, *gui.Window)
 }
@@ -334,12 +323,6 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 // Close tears down all terminals and restores the original OnEvent.
 func (ws *Workspace) Close() error {
 	ws.w.OnEvent = ws.prevOnEvent
-	// Stop the pending silence repaint: its callback queues work on a window
-	// this workspace no longer handles events for.
-	if ws.silenceTimer != nil {
-		ws.silenceTimer.Stop()
-		ws.silenceTimer = nil
-	}
 	for _, tab := range ws.tabs {
 		tab.closeAll()
 	}
@@ -798,9 +781,6 @@ func (ws *Workspace) activateTab(idx int) {
 		t.SetFocused(true)
 		t.HandleWindowEvent(&gui.Event{Type: gui.EventFocused})
 	}
-	// The cleared tab may have been the one the pending silence timer was
-	// waiting on, so recompute the deadline from what is left.
-	ws.armSilenceTimer()
 	ws.refresh()
 }
 

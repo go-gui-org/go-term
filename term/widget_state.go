@@ -437,13 +437,6 @@ type Term struct {
 	// be simulated without sleeping. Nil means time.Now — see Term.now.
 	clock func() time.Time
 
-	// activityPending is true while an OnActivity dispatch is queued but not
-	// yet run, and activityBell records that one of the reads folded into it
-	// rang the bell. Together they coalesce a burst of reads into one call —
-	// see reportActivity.
-	activityPending atomic.Bool
-	activityBell    atomic.Bool
-
 	// closed guards Close so multiple calls are safe.
 	closed atomic.Bool
 
