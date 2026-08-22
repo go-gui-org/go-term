@@ -123,6 +123,43 @@ branch, plus a precedence rule making KKP win when both are enabled. File an
 issue with the application name — a real client that needs it is the evidence
 that would change this decision.
 
+### Terminal reports on Windows (ConPTY)
+
+Not a decision so much as a platform constraint, recorded here because it
+silently invalidates a whole class of test.
+
+On Windows the child runs under ConPTY, and conhost is itself a terminal
+emulator: it maintains its own text buffer and answers DSR/CPR, Device
+Attributes and DECRQM from that buffer rather than forwarding the query
+upstream. `_CursorPositionReport` in conhost's `adaptDispatch.cpp` reads its
+own cursor and, in its words, sends the reply "back into the input channel of
+the console." The sequence never reaches our parser, so the CPR handler in
+`parser_csi.go` and everything behind it — `settledCol`, grapheme widths — is
+unreachable on Windows. What a client reads back describes conhost.
+
+The practical consequence is that **width-probing tools measure conhost, not
+go-term**. Anything that brackets a glyph with cursor position reports and
+diffs the columns — `ucs-detect` most notably — reports conhost's capabilities.
+`ucs-detect` prints U+231A, requires a delta of exactly 2, and otherwise
+declares that the terminal does not support wide characters. A conhost whose
+width tables predate the emoji in question fails that gate no matter how
+correctly the grid renders it. This affects every Windows host terminal
+equally, Windows Terminal included; it is not specific to go-term.
+
+`startPTY` mitigates what it can by passing the grapheme glyph-width flag
+(`0x08`) to `CreatePseudoConsole`, which conhost turns into
+`--textMeasurement graphemes` and which aligns its buffer with the grid's
+cluster model. That option arrived around Win11 24H2 / Windows Terminal 1.22.
+Older builds mask the bit off and ignore it, so downlevel systems — Windows 10,
+whose inbox conhost is still 10.0.19041 — keep the mismatch with no lever
+available. Ambiguous width is deliberately left at conhost's default to match
+the grid's narrow interpretation.
+
+**Verify go-term is not the cause** before chasing a width bug on Windows: run
+the same probe under Windows Terminal on the same machine. An identical result
+there is conhost, not this code. To confirm the mechanism directly, check that
+no `CSI 6 n` ever appears in a `GOTERM_CAPTURE` tee of the child's output.
+
 ## External Conformance Tools
 
 This repo does not bundle a full external terminal conformance suite.

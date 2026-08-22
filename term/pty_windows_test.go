@@ -6,7 +6,56 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
+
+// TestPTY_GlyphWidthFlagAccepted pins that asking conhost for grapheme-based
+// text measurement cannot break console creation. The flag is advisory: builds
+// that understand it align their text buffer with the grid's width model,
+// older ones are supposed to mask the bit off and carry on. "Supposed to" is
+// the part worth testing — if some build ever validates the flag word instead
+// of masking it, every Windows session dies at startup, and the plain-spawn
+// tests above would report that as a skip rather than a failure.
+//
+// So compare the two spawns directly rather than asserting the flagged one
+// succeeds outright: an unflagged failure means ConPTY is unavailable in this
+// environment (skip), while an unflagged success paired with a flagged failure
+// isolates the flag as the cause.
+func TestPTY_GlyphWidthFlagAccepted(t *testing.T) {
+	tryCreate := func(flags uint32) error {
+		var inR, inW, outR, outW windows.Handle
+		if err := windows.CreatePipe(&inR, &inW, nil, 0); err != nil {
+			t.Fatalf("CreatePipe: %v", err)
+		}
+		defer func() { _ = windows.CloseHandle(inW) }()
+		if err := windows.CreatePipe(&outR, &outW, nil, 0); err != nil {
+			_ = windows.CloseHandle(inR)
+			t.Fatalf("CreatePipe: %v", err)
+		}
+		defer func() { _ = windows.CloseHandle(outR) }()
+
+		var hpc windows.Handle
+		err := windows.CreatePseudoConsole(coordSize(24, 80), inR, outW, flags, &hpc)
+		// ConPTY dup'd (or failed on) the console-side ends either way.
+		_ = windows.CloseHandle(inR)
+		_ = windows.CloseHandle(outW)
+		if err == nil {
+			windows.ClosePseudoConsole(hpc)
+		}
+		return err
+	}
+
+	if err := tryCreate(0); err != nil {
+		t.Skipf("ConPTY unavailable: CreatePseudoConsole with no flags failed: %v", err)
+	}
+	if err := tryCreate(pseudoconsoleGlyphWidthGraphemes); err != nil {
+		t.Fatalf("CreatePseudoConsole rejected the glyph-width flag (0x%x): %v\n"+
+			"  the same call with flags=0 succeeded, so this conhost validates\n"+
+			"  the flag word instead of masking unknown bits",
+			pseudoconsoleGlyphWidthGraphemes, err)
+	}
+}
 
 // TestPTY_WindowsEcho spawns cmd.exe through ConPTY, drives it to echo a
 // marker, and confirms the marker comes back on the output pipe. Exercises
