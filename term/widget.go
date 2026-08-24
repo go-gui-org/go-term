@@ -57,6 +57,8 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 		capture:     openCapture(seqID),
 	}
 	t.ptyResizeKick = make(chan struct{}, 1)
+	t.blinkKick = make(chan struct{}, 1)
+	t.autoScrollKick = make(chan struct{}, 1)
 	t.bellMode.Store(int32(cfg.BellMode))
 	if s := t.style(); s.Size > 0 {
 		t.fontSize = s.Size
@@ -162,6 +164,16 @@ func (t *Term) cursorBlinks() bool {
 	return t.grid.CursorBlink
 }
 
+// cursorBlinkActive reports whether the caret should be animating right now.
+// A blinking cursor stops blinking (and rests visible, dimmed by
+// drawCursorShape) whenever this pane or its window loses focus — matching
+// Terminal.app and iTerm, and letting blinkLoop park its ticker so a
+// background window costs no wakeups at all. Caller holds grid.Mu:
+// cursorBlinks reads grid state.
+func (t *Term) cursorBlinkActive() bool {
+	return t.cursorBlinks() && t.focused.Load() && t.winFocused.Load()
+}
+
 // HandleWindowEvent processes window-level events that the Term needs to
 // see: momentum cancellation on mouse-down/trackpad-touch, and focus-
 // reporting sequences (CSI I / CSI O) when the shell has enabled focus
@@ -187,7 +199,7 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 	if e.Type == gui.EventMouseUp && t.mouse.dragging {
 		t.mouse.dragging = false
 		t.mouse.dragReport = false
-		t.autoScrollDir.Store(0)
+		t.setAutoScrollDir(0)
 		t.unlockMouse(t.win)
 	}
 	// When the window resizes during a drag, the host platform (notably
@@ -198,7 +210,7 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 	if e.Type == gui.EventResized && t.mouse.dragging {
 		t.mouse.dragging = false
 		t.mouse.dragReport = false
-		t.autoScrollDir.Store(0)
+		t.setAutoScrollDir(0)
 		t.unlockMouse(t.win)
 	}
 	// A release the widget never saw also ends the multi-click run, so the
@@ -214,10 +226,15 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 	// This must stay ahead of the FocusReporting early-return below, which
 	// otherwise discards these events entirely for the common child.
 	switch e.Type {
-	case gui.EventFocused:
-		t.winFocused.Store(true)
-	case gui.EventUnfocused:
-		t.winFocused.Store(false)
+	case gui.EventFocused, gui.EventUnfocused:
+		t.winFocused.Store(e.Type == gui.EventFocused)
+		// The cursor blinks only while the window has focus (see
+		// cursorBlinkActive), so both edges need a repaint: losing focus must
+		// settle the caret to its steady dim state instead of freezing it in
+		// whatever half of the cycle the last frame caught, and regaining it
+		// must restart the animation. bumpVersion also wakes blinkLoop.
+		t.bumpVersion()
+		t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
 	}
 	var report []byte
 	t.grid.Mu.Lock()
@@ -243,7 +260,13 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 // Close has already been called the callback is silently dropped. All
 // background goroutines that schedule work on the GUI thread should
 // use this instead of calling t.cmd.QueueCommand directly.
+//
+// A nil t.cmd (a bare Term built by tests, never attached to a window) drops
+// the callback too — there is no GUI thread to run it on.
 func (t *Term) queueCommand(fn func(*gui.Window)) {
+	if t.cmd == nil {
+		return
+	}
 	t.cmd.QueueCommand(func(w *gui.Window) {
 		if t.closed.Load() {
 			return
@@ -621,7 +644,27 @@ func (t *Term) effectiveScrollbarWidth() float32 {
 
 // bumpVersion increments drawVersion so the next View call produces a
 // new cache key, forcing go-gui to re-invoke OnDraw for this frame.
-func (t *Term) bumpVersion() { t.drawVersion.Add(1) }
+// bumpVersion invalidates the canvas tessellation cache so the next frame
+// re-runs OnDraw, and wakes blinkLoop. The wake is what lets that loop park
+// its ticker while nothing is animating: every change that can start the
+// cursor or SGR 5/6 text blinking passes through here first.
+func (t *Term) bumpVersion() {
+	t.drawVersion.Add(1)
+	kick(t.blinkKick)
+}
+
+// kick is the shared non-blocking wake for the buffered(1) kick channels.
+// A full buffer already means "wake pending", so dropping the send is
+// correct rather than lossy. Nil-safe for Terms built without New.
+func kick(ch chan struct{}) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
 
 // writeBytes sends keyboard-derived bytes to the child. This is the single
 // choke point for onChar/onKeyDown output, which is why the OnInput tap hangs

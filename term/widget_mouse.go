@@ -520,12 +520,12 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 			switch {
 			case ctx.Event.MouseY < 0:
 				t.grid.ScrollView(1)
-				t.autoScrollDir.Store(1)
+				t.setAutoScrollDir(1)
 			case ctx.Event.MouseY > widgetH:
 				t.grid.ScrollView(-1)
-				t.autoScrollDir.Store(-1)
+				t.setAutoScrollDir(-1)
 			default:
-				t.autoScrollDir.Store(0)
+				t.setAutoScrollDir(0)
 			}
 		}
 		contentR := t.grid.viewportToContent(r)
@@ -663,7 +663,7 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 	if !t.mouse.dragging {
 		return
 	}
-	t.autoScrollDir.Store(0)
+	t.setAutoScrollDir(0)
 	t.unlockMouse(ctx.Window)
 	r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
 	if t.mouse.dragReport {
@@ -1011,15 +1011,17 @@ func (t *Term) kickMomentum() {
 	t.momentum.mu.Lock()
 	defer t.momentum.mu.Unlock()
 	t.momentum.coasting = true
-	select {
-	case t.momentum.kick <- struct{}{}:
-	default:
-	}
+	kick(t.momentum.kick)
 }
 
 // momentumLoop decelerates the scroll velocity after the user lifts their
 // finger. Ticks at ~60 fps; each tick passes the decaying pixel velocity
 // to ScrollViewPx for sub-cell-accurate smooth scrolling.
+//
+// The ticker runs only while a coast is live: kickMomentum starts it, and the
+// first tick that finds the coast finished stops it. A 60 Hz ticker left
+// running at idle was this widget's single largest energy cost — 62 wakeups a
+// second per pane, and enough to keep the Go runtime's sysmon from parking.
 func (t *Term) momentumLoop() {
 	defer t.loopWg.Done()
 	defer recoverLoop("momentumLoop")
@@ -1030,15 +1032,16 @@ func (t *Term) momentumLoop() {
 		phaseVel      = 120.0 // px/tick threshold between phases
 		minVel        = 2.0   // px/tick below which coast stops
 	)
-	tk := time.NewTicker(tickDur)
-	defer tk.Stop()
+	tk := &parkedTicker{rate: tickDur}
+	defer tk.stop()
 	for {
 		select {
 		case <-t.blinkDone:
 			return
 		case <-t.momentum.kick:
-			// coasting flag already set; next tick starts the coast
-		case <-tk.C:
+			// coasting flag already set; arm the ticker to run the coast
+			tk.arm()
+		case <-tk.tick:
 			deltaPx, cellH, coasting := func() (float32, float32, bool) {
 				t.momentum.mu.Lock()
 				defer t.momentum.mu.Unlock()
@@ -1058,6 +1061,7 @@ func (t *Term) momentumLoop() {
 				return float32(t.momentum.vel), cellH, t.momentum.coasting
 			}()
 			if !coasting {
+				tk.stop() // coast finished (or was cancelled) — park
 				continue
 			}
 			if deltaPx != 0 && finite(cellH) {

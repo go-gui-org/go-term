@@ -239,7 +239,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	if t.mouse.dragging && !t.mouse.dragReport {
 		if rows != t.grid.Rows || cols != t.grid.Cols {
 			t.mouse.dragging = false
-			t.autoScrollDir.Store(0)
+			t.setAutoScrollDir(0)
 			t.grid.ClearSelection()
 			t.unlockMouse(t.win)
 		}

@@ -60,6 +60,19 @@ func (t *Term) resizeLoop() {
 	}
 }
 
+// setAutoScrollDir records the selection auto-scroll direction and, when it
+// goes non-zero, wakes autoScrollLoop. The loop's ticker exists only between
+// this kick and the first tick that reads zero, so the single write path is
+// what keeps the loop from missing the start of a drag. Main-thread only.
+func (t *Term) setAutoScrollDir(dir int32) {
+	if t.autoScrollDir.Swap(dir) == dir {
+		return
+	}
+	if dir != 0 {
+		kick(t.autoScrollKick)
+	}
+}
+
 // recoverLoop logs and suppresses panics in background goroutines so a
 // single goroutine crash does not take down the whole process.
 func recoverLoop(name string) {
@@ -68,38 +81,89 @@ func recoverLoop(name string) {
 	}
 }
 
+// parkedTicker is the demand-driven ticker shared by the blink, auto-scroll
+// and momentum loops: no ticker exists until arm is called, and stop makes
+// the select arm nil again so the loop parks on its kick channel. A loop that
+// finds nothing to animate calls stop; the only way to wake it is the kick
+// (bumpVersion / the mouse paths), which is what keeps idle panes at zero
+// timer wakeups. Loop goroutines only — no locking.
+type parkedTicker struct {
+	rate time.Duration
+	tk   *time.Ticker
+	tick <-chan time.Time
+}
+
+func (p *parkedTicker) arm() {
+	if p.tk == nil {
+		p.tk = time.NewTicker(p.rate)
+		p.tick = p.tk.C
+	}
+}
+
+func (p *parkedTicker) stop() {
+	if p.tk != nil {
+		p.tk.Stop()
+		p.tk, p.tick = nil, nil
+	}
+}
+
 // blinkLoop wakes every cursorBlinkPeriod and forces a redraw when the
 // cursor is currently blinking + visible at the live viewport. Other
-// states (steady cursor, scrolled-back view, hidden cursor) need no
-// periodic redraw and the loop simply skips.
+// states (steady cursor, scrolled-back view, hidden cursor, unfocused
+// window) need no periodic redraw.
+//
+// The ticker is demand-driven: a tick that finds nothing to animate stops it
+// and the loop parks on blinkKick. An idle pane therefore costs zero timer
+// wakeups — which is the whole point, since a ticker that never sleeps also
+// keeps the Go runtime's sysmon from parking. Parking is safe because every
+// transition that can *start* blinking (parser output, keystrokes, focus
+// changes, theme changes, StartRecording) goes through bumpVersion, which
+// kicks this loop.
 func (t *Term) blinkLoop() {
 	defer t.loopWg.Done()
 	defer recoverLoop("blinkLoop")
-	tk := time.NewTicker(cursorBlinkPeriod)
-	defer tk.Stop()
+	tk := &parkedTicker{rate: cursorBlinkPeriod}
+	defer tk.stop()
+	// Start armed: the pane may already have a blinking cursor before the
+	// first byte of output arrives to kick us.
+	tk.arm()
 	for {
 		select {
 		case <-t.blinkDone:
 			return
-		case <-tk.C:
+		case <-t.blinkKick:
+			tk.arm()
+		case <-tk.tick:
 			redraw := func() bool {
 				t.grid.Mu.Lock()
 				defer t.grid.Mu.Unlock()
 				return t.grid.CursorVisible &&
 					t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0 &&
-					t.cursorBlinks()
+					t.cursorBlinkActive()
 			}()
 			// Blinking text needs the same periodic repaint, and unlike the
 			// cursor it blinks in any viewport position. The recording
 			// indicator rides the same tick to advance its elapsed timer,
 			// which is why the timer shows whole seconds and no finer.
 			redraw = redraw || t.blinkCells.Load() || t.Recording()
-			if redraw {
-				t.bumpVersion()
-				t.queueCommand(func(w *gui.Window) {
-					w.UpdateWindow()
-				})
+			if !redraw {
+				tk.stop() // nothing animating — park until kicked
+				continue
 			}
+			// drawVersion directly, not bumpVersion: bumping would kick this
+			// loop's own channel every tick for no gain.
+			t.drawVersion.Add(1)
+			// UpdateWindow, not RequestRedraw: the canvas tessellation cache
+			// is keyed on the Version carried by the *layout shape*, which
+			// View writes (widget.go). A render-only refresh reuses the
+			// existing layout tree, so the shape keeps the stale version, the
+			// cache hits, and OnDraw never runs — SGR 5 text and a blinking
+			// cursor would then only change phase when some other event
+			// forced a full update. The view rebuild is affordable because
+			// this loop now only ticks while something is actually blinking.
+			t.queueCommand(func(w *gui.Window) {
+				w.UpdateWindow()
+			})
 		}
 	}
 }
@@ -107,19 +171,25 @@ func (t *Term) blinkLoop() {
 // autoScrollLoop scrolls the viewport while autoScrollDir is non-zero.
 // Handles the case where onMouseMove stops firing when the mouse leaves
 // the window (e.g. above the title bar). Exits when blinkDone is closed.
+//
+// Demand-driven like blinkLoop: the ticker exists only while a drag is
+// actually scrolling. setAutoScrollDir kicks it when the direction goes
+// non-zero; the first tick that reads zero parks it again.
 func (t *Term) autoScrollLoop() {
 	defer t.loopWg.Done()
 	defer recoverLoop("autoScrollLoop")
-	const rate = 80 * time.Millisecond
-	tk := time.NewTicker(rate)
-	defer tk.Stop()
+	tk := &parkedTicker{rate: 80 * time.Millisecond}
+	defer tk.stop()
 	for {
 		select {
 		case <-t.blinkDone:
 			return
-		case <-tk.C:
+		case <-t.autoScrollKick:
+			tk.arm()
+		case <-tk.tick:
 			dir := int(t.autoScrollDir.Load())
 			if dir == 0 {
+				tk.stop() // drag ended or moved back inside the widget
 				continue
 			}
 			func() {
