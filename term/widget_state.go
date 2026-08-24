@@ -306,6 +306,14 @@ type Term struct {
 	// blinkDone signals the blink ticker goroutine to exit. Closed by Close.
 	blinkDone chan struct{}
 
+	// blinkKick wakes blinkLoop after it has suspended its ticker. Buffered 1
+	// with a non-blocking send, so a kick is never lost and never blocks the
+	// sender. Every state change that can *start* blinking (parser output,
+	// keystrokes, focus, theme, recording) bumps the draw version, and
+	// bumpVersion kicks this channel — that is what makes suspending the
+	// ticker safe.
+	blinkKick chan struct{}
+
 	// blinkCells records whether the last painted frame contained any SGR 5/6
 	// (blink) text. Written by drawFgPass on the main thread, read by
 	// blinkLoop, so periodic repaints happen only while blinking text is
@@ -462,6 +470,12 @@ type Term struct {
 	// +1 = into scrollback, 0 = no scroll). Written on the main
 	// thread; read in autoScrollLoop — atomic for safety.
 	autoScrollDir atomic.Int32
+
+	// autoScrollKick wakes autoScrollLoop when a drag first leaves the widget.
+	// Buffered 1, non-blocking send. The loop suspends its ticker whenever the
+	// direction reads zero, so a pane that is not being drag-selected costs no
+	// timer wakeups at all.
+	autoScrollKick chan struct{}
 
 	// ptyResizeRows/Cols carry a pending TIOCSWINSZ from onDraw to
 	// resizeLoop, the dedicated goroutine that applies pty resizes.

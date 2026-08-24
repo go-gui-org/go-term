@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/go-gui-org/go-gui/gui"
+
 	"github.com/go-gui-org/go-term/internal/recfmt"
 )
 
@@ -49,13 +51,24 @@ func (t *Term) StartRecording(path string) error {
 	if old := t.rec.Swap(r); old != nil {
 		_ = old.Close()
 	}
+	// The recording indicator's elapsed timer rides blinkLoop's tick, and that
+	// loop parks itself when nothing is animating — recording is the one
+	// trigger that does not pass through bumpVersion, so kick it directly.
+	kick(t.blinkKick)
 	return nil
 }
 
 // StopRecording finishes and closes the current recording. It is a no-op
 // when nothing is being recorded. Call from the GUI main thread.
 func (t *Term) StopRecording() error {
-	return t.rec.Swap(nil).Close()
+	err := t.rec.Swap(nil).Close()
+	// The indicator's visibility is decided per frame in drawOverlays, so the
+	// stopped state needs a repaint like any other visible change — and with
+	// blinkLoop parked there is no tick to deliver one. bumpVersion kicks the
+	// loop (it will re-park); the queued update is what actually repaints.
+	t.bumpVersion()
+	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+	return err
 }
 
 // Recording reports whether a session recording is currently running.

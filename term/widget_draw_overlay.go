@@ -461,7 +461,7 @@ func (t *Term) scrollbarEdgeInset(canvasW float32) float32 {
 // hidden half of its blink cycle. Returns false (always visible) for
 // steady cursors. Caller holds grid.Mu.
 func (t *Term) cursorBlinkOff(now time.Time) bool {
-	if !t.cursorBlinks() {
+	if !t.cursorBlinkActive() {
 		return false
 	}
 	elapsed := now.Sub(t.cursorEpoch)
