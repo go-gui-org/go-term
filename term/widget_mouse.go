@@ -964,10 +964,16 @@ func (t *Term) onMouseScroll(ctx gui.EventCtx) {
 		return
 	}
 
-	// Track peak velocity of the current gesture so coast starts at
-	// live-scroll speed. Ignore decelerating OS-momentum samples by only
-	// updating when the new sample is larger in magnitude or direction
-	// reverses. Cap prevents a huge flick from coasting forever.
+	// Coast velocity tracks the *latest* sample, not the gesture peak.
+	// macOS already delivers its own momentum phase as a decaying stream of
+	// precise scroll events, so holding the peak would restart a second,
+	// full-speed coast once that stream ended — the visible symptom being an
+	// extra line of scroll after the OS momentum had already settled. Taking
+	// the last sample makes the synthetic coast a continuation of whatever
+	// motion was actually in flight: on macOS the tail is near zero and the
+	// coast is a no-op, while backends that emit no momentum of their own
+	// still see the finger's live speed at lift-off. Cap prevents a huge
+	// flick from coasting forever.
 	const (
 		momentumScale = float64(trackpadSensitivity) // coast starts at live-scroll speed
 		momentumCap   = 600.0
@@ -976,10 +982,7 @@ func (t *Term) onMouseScroll(ctx gui.EventCtx) {
 	func() {
 		t.momentum.mu.Lock()
 		defer t.momentum.mu.Unlock()
-		newVel := math.Max(-momentumCap, math.Min(momentumCap, float64(ctx.Event.ScrollY)*momentumScale))
-		if math.Abs(newVel) >= math.Abs(t.momentum.vel) || (t.momentum.vel > 0) != (newVel > 0) {
-			t.momentum.vel = newVel
-		}
+		t.momentum.vel = math.Max(-momentumCap, math.Min(momentumCap, float64(ctx.Event.ScrollY)*momentumScale))
 		t.momentum.cellH = t.cellH
 		t.momentum.coasting = false
 	}()
