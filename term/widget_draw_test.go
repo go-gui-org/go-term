@@ -313,7 +313,7 @@ func TestOnDraw_CursorBlock(t *testing.T) {
 	g.CursorR = 0
 	g.CursorC = 0
 	g.CursorVisible = true
-	g.cursorShape = cursorBlock
+	g.cursorShape = CursorStyleBlock
 	g.Cells[0].Ch = 'X'
 	g.Cells[0].Width = 1
 	tm.grid.Mu.Unlock()
@@ -344,7 +344,7 @@ func TestOnDraw_CursorUnderline(t *testing.T) {
 	g.CursorR = 0
 	g.CursorC = 0
 	g.CursorVisible = true
-	g.cursorShape = cursorUnderline
+	g.cursorShape = CursorStyleUnderline
 	g.Cells[0].Ch = 'X'
 	g.Cells[0].Width = 1
 	tm.grid.Mu.Unlock()
@@ -376,7 +376,7 @@ func TestOnDraw_CursorBarShape(t *testing.T) {
 	g.CursorR = 0
 	g.CursorC = 0
 	g.CursorVisible = true
-	g.cursorShape = cursorBar
+	g.cursorShape = CursorStyleBar
 	g.Cells[0].Ch = 'X'
 	g.Cells[0].Width = 1
 	tm.grid.Mu.Unlock()
@@ -664,7 +664,7 @@ func TestDrawCursor_CustomColor(t *testing.T) {
 	tm.grid.CursorColor = 0xFF0000 // red
 	tm.grid.Mu.Unlock()
 	cell := cell{Ch: 'X', Width: 1}
-	tm.drawCursorShape(dc, 0, 0, cell, cursorBlock, gui.TextStyle{})
+	tm.drawCursorShape(dc, 0, 0, cell, CursorStyleBlock, gui.TextStyle{})
 	batches := dc.Batches()
 	found := false
 	for _, b := range batches {

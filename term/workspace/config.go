@@ -47,6 +47,13 @@ type workspaceConfig struct {
 
 	middleClickPaste bool // [general] middle-click-paste
 
+	// Cursor appearance. cursorStyle/cursorBlink are the pane's starting
+	// cursor (and what `reset` restores); cursorLock drops the child's
+	// DECSCUSR so those two hold for the life of the pane.
+	cursorStyle term.CursorStyle // [general] cursor-style
+	cursorBlink bool             // [general] cursor-blink
+	cursorLock  bool             // [general] cursor-lock
+
 	hasFontSize         bool
 	hasMinContrast      bool
 	hasScrollback       bool
@@ -54,6 +61,9 @@ type workspaceConfig struct {
 	hasBell             bool
 	hasMiddleClickPaste bool
 	hasNotifyAfter      bool
+	hasCursorStyle      bool
+	hasCursorBlink      bool
+	hasCursorLock       bool
 }
 
 const (
@@ -231,6 +241,24 @@ func (c *workspaceConfig) setGeneral(key, val string) error {
 			return fmt.Errorf("middle-click-paste %q: want true|false", val)
 		}
 		c.middleClickPaste, c.hasMiddleClickPaste = b, true
+	case "cursor-style":
+		st, ok := parseCursorStyle(val)
+		if !ok {
+			return fmt.Errorf("cursor-style %q: want block|underline|bar", val)
+		}
+		c.cursorStyle, c.hasCursorStyle = st, true
+	case "cursor-blink":
+		b, ok := parseConfigBool(val)
+		if !ok {
+			return fmt.Errorf("cursor-blink %q: want true|false", val)
+		}
+		c.cursorBlink, c.hasCursorBlink = b, true
+	case "cursor-lock":
+		b, ok := parseConfigBool(val)
+		if !ok {
+			return fmt.Errorf("cursor-lock %q: want true|false", val)
+		}
+		c.cursorLock, c.hasCursorLock = b, true
 	case "notify-after":
 		d, ok := parseNotifyAfter(val)
 		if !ok {
@@ -289,6 +317,22 @@ func parseConfigBool(s string) (bool, bool) {
 // maxScrollbarPx bounds a [general] scrollbar entry. A thumb wider than this
 // would eat the pane; negative values are legal (they hide the scrollbar).
 const maxScrollbarPx = 100
+
+// parseCursorStyle maps a config cursor-style value to a term.CursorStyle.
+// Deliberately no "auto": whether an application may change the cursor is a
+// separate question, answered by cursor-lock.
+func parseCursorStyle(s string) (term.CursorStyle, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "block":
+		return term.CursorStyleBlock, true
+	case "underline":
+		return term.CursorStyleUnderline, true
+	case "bar", "beam":
+		return term.CursorStyleBar, true
+	default:
+		return term.CursorStyleBlock, false
+	}
+}
 
 // parseBellMode maps a config bell value to a term.BellMode.
 func parseBellMode(s string) (term.BellMode, bool) {
@@ -465,6 +509,12 @@ type termOpts struct {
 	// Empty exactly when theme is nil.
 	themeName string
 
+	// cursorStyle/cursorBlink are the pane's starting cursor; cursorLocked
+	// pins them against the child's DECSCUSR. See workspaceConfig.
+	cursorStyle  term.CursorStyle
+	cursorBlink  bool
+	cursorLocked bool
+
 	keys        term.KeyMap
 	scrollback  int
 	scrollbar   float32
@@ -528,6 +578,15 @@ func applySettings(base Cfg, fc workspaceConfig, keys term.KeyMap) Cfg {
 	}
 	if fc.hasNotifyAfter {
 		out.opts.notifyAfter = fc.notifyAfter
+	}
+	if fc.hasCursorStyle {
+		out.opts.cursorStyle = fc.cursorStyle
+	}
+	if fc.hasCursorBlink {
+		out.opts.cursorBlink = fc.cursorBlink
+	}
+	if fc.hasCursorLock {
+		out.opts.cursorLocked = fc.cursorLock
 	}
 	out.opts.middleClickPaste = defaultMiddleClickPaste()
 	if fc.hasMiddleClickPaste {

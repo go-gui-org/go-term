@@ -318,6 +318,12 @@ func TestCommands_RegisterWithoutCollision(t *testing.T) {
 			t.Errorf("duplicate command ID %q", c.ID)
 		}
 		seenID[c.ID] = true
+		// Palette-only commands carry no chord. The registry compares
+		// shortcuts only when one is set, so several unset ones are not a
+		// collision — mirror that rule here rather than flagging them.
+		if !c.Shortcut.IsSet() {
+			continue
+		}
 		if prev, dup := seenChord[c.Shortcut]; dup {
 			t.Errorf("commands %q and %q share shortcut %v", prev, c.ID, c.Shortcut)
 		}

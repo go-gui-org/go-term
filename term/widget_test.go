@@ -603,31 +603,37 @@ func TestTerm_WriteBytes_UsesWriteHost(t *testing.T) {
 	term.writeBytes([]byte("x"))
 }
 
-func TestCursorBlinks_HonorsGridDefault(t *testing.T) {
+// The blink flag lives on the grid, which is what lets blinkLoop read it
+// under Mu. A focused pane animates exactly when the grid says so.
+func TestCursorBlinkActive_HonorsGrid(t *testing.T) {
 	g := newGrid(1, 5)
 	tm := &Term{grid: g}
-	if tm.cursorBlinks() {
+	tm.focused.Store(true)
+	tm.winFocused.Store(true)
+	if tm.cursorBlinkActive() {
 		t.Error("default cursor should be steady")
 	}
 	g.CursorBlink = true
-	if !tm.cursorBlinks() {
-		t.Error("blinking cursor should blink")
+	if !tm.cursorBlinkActive() {
+		t.Error("blinking cursor should animate while focused")
 	}
 }
 
-func TestCursorBlinks_CfgOverridesGrid(t *testing.T) {
+// Cfg seeds the grid; it does not override it at draw time.
+func TestApplyCursorConfig_SeedsGrid(t *testing.T) {
 	g := newGrid(1, 5)
-	g.CursorBlink = true
-	off := false
-	tm := &Term{cfg: Cfg{CursorBlink: &off}, grid: g}
-	if tm.cursorBlinks() {
-		t.Error("Cfg override (false) should win over grid blink=true")
+	applyCursorConfig(g, Cfg{CursorStyle: CursorStyleBar, CursorBlink: true})
+	if g.cursorShape != CursorStyleBar || !g.CursorBlink {
+		t.Errorf("seeded cursor = %v/blink %v, want bar/true", g.cursorShape, g.CursorBlink)
 	}
-	on := true
-	g.CursorBlink = false
-	tm.cfg.CursorBlink = &on
-	if !tm.cursorBlinks() {
-		t.Error("Cfg override (true) should win over grid blink=false")
+	if g.defaultShape != CursorStyleBar || !g.defaultBlink {
+		t.Errorf("defaults = %v/%v, want bar/true", g.defaultShape, g.defaultBlink)
+	}
+	// An out-of-range style falls back to the block the renderer would have
+	// drawn anyway, so DECSCUSRParam agrees with the screen.
+	applyCursorConfig(g, Cfg{CursorStyle: CursorStyle(99)})
+	if g.cursorShape != CursorStyleBlock {
+		t.Errorf("out-of-range style = %v, want block", g.cursorShape)
 	}
 }
 
@@ -1927,33 +1933,19 @@ func TestClose_FullIntegration(t *testing.T) {
 	}
 }
 
-func TestCursorBlinks_CfgOverride(t *testing.T) {
+// A locked cursor keeps the configured blink no matter what the child asks
+// for; an unlocked one follows DECSCUSR.
+func TestCursorBlink_LockIgnoresDECSCUSR(t *testing.T) {
 	g := newGrid(24, 80)
-	g.CursorBlink = false
-
-	yes := true
-	tm := &Term{grid: g, cfg: Cfg{CursorBlink: &yes}}
-	if !tm.cursorBlinks() {
-		t.Error("CursorBlink=true override should force blinking on")
+	applyCursorConfig(g, Cfg{CursorStyle: CursorStyleBar, CursorLocked: true})
+	g.ApplyDECSCUSR(1) // blinking block
+	if g.cursorShape != CursorStyleBar || g.CursorBlink {
+		t.Errorf("locked cursor changed to %v/blink %v", g.cursorShape, g.CursorBlink)
 	}
-
-	no := false
-	tm.cfg.CursorBlink = &no
-	if tm.cursorBlinks() {
-		t.Error("CursorBlink=false override should force blinking off")
-	}
-}
-
-func TestCursorBlinks_HonorsGrid(t *testing.T) {
-	g := newGrid(24, 80)
-	g.CursorBlink = true
-	tm := &Term{grid: g, cfg: Cfg{}}
-	if !tm.cursorBlinks() {
-		t.Error("should honor grid.CursorBlink=true when no override")
-	}
-	g.CursorBlink = false
-	if tm.cursorBlinks() {
-		t.Error("should honor grid.CursorBlink=false when no override")
+	applyCursorConfig(g, Cfg{CursorStyle: CursorStyleBar})
+	g.ApplyDECSCUSR(1)
+	if g.cursorShape != CursorStyleBlock || !g.CursorBlink {
+		t.Errorf("unlocked cursor = %v/blink %v, want block/true", g.cursorShape, g.CursorBlink)
 	}
 }
 
@@ -2942,7 +2934,7 @@ func TestDrawCursor_UnfocusedDimmed(t *testing.T) {
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
 	c := cell{Ch: 'X', FG: 7, BG: 0, Width: 1}
 
-	shapes := []cursorShape{cursorBlock, cursorUnderline, cursorBar}
+	shapes := []CursorStyle{CursorStyleBlock, CursorStyleUnderline, CursorStyleBar}
 	for _, shape := range shapes {
 		term.drawCursorShape(dc, 0, 0, c, shape, base)
 	}
@@ -2960,7 +2952,7 @@ func TestDrawCursor_FocusedFullOpacity(t *testing.T) {
 	base := gui.TextStyle{Typeface: glyph.TypefaceRegular}
 	c := cell{Ch: 'X', FG: 7, BG: 0, Width: 1}
 
-	shapes := []cursorShape{cursorBlock, cursorUnderline, cursorBar}
+	shapes := []CursorStyle{CursorStyleBlock, CursorStyleUnderline, CursorStyleBar}
 	for _, shape := range shapes {
 		term.drawCursorShape(dc, 0, 0, c, shape, base)
 	}

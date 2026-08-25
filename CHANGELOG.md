@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Cursor appearance is now a user setting. `[general] cursor-style`
+  (`block`, `underline`, `bar`) and `cursor-blink` set the cursor a pane starts
+  with and the one `reset` returns to; `cursor-lock` makes go-term ignore an
+  application's `DECSCUSR`, pinning both. All three are also rows in the
+  command palette, applied to every open pane for the session. `term.Cfg`
+  gains `CursorStyle`, `CursorLocked`, and the live setters `SetCursorStyle`,
+  `SetCursorBlink`, `SetCursorLocked`.
+
+### Changed
+
+- **Breaking:** `term.Cfg.CursorBlink` is now a `bool` rather than a `*bool`,
+  and seeds the cursor instead of overriding the application. The "override"
+  half of the old pointer moved to the new `CursorLocked`, which covers shape
+  and blink together. `nil` becomes `false`; `*true` becomes
+  `CursorBlink: true, CursorLocked: true`.
+- The internal `cursorShape` type is now the exported `term.CursorStyle`, so
+  the configured value and the grid state are one type.
+
 ## [0.9.0] - 2026-08-12
 
 ### API freeze

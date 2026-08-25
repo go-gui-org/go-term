@@ -167,9 +167,13 @@ func (g *grid) HardReset() {
 	g.AllowColumnMode = false
 	g.ColumnMode = 0
 
-	// Cursor appearance (DECSCUSR / OSC 12).
-	g.cursorShape = cursorBlock
-	g.CursorBlink = false
+	// Cursor appearance (DECSCUSR / OSC 12). Back to the *embedder's*
+	// shape and blink, not the built-in block: those are the power-on state
+	// for this pane, and a `reset` that discarded a configured cursor would
+	// look like the setting had stopped working. The lock is not reset — it
+	// is the user's policy, not child-set state.
+	g.cursorShape = g.defaultShape
+	g.CursorBlink = g.defaultBlink
 	g.CursorColor = defaultColor
 
 	// OSC 4 palette overrides. Unlike OSC 10/11 these are unambiguously

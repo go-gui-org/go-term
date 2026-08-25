@@ -132,3 +132,52 @@ func TestGrid_CursorMovementMarksDirty(t *testing.T) {
 		t.Errorf("ReverseIndex: rows 6 and 7 not marked dirty")
 	}
 }
+
+// A locked cursor drops DECSCUSR outright. The sequence is not remembered for
+// later either: unlocking must not suddenly apply a shape the child asked for
+// while the user had the cursor pinned.
+func TestApplyDECSCUSR_LockDropsRequest(t *testing.T) {
+	g := newGrid(4, 8)
+	g.setCursorDefaults(CursorStyleBar, true, true)
+
+	g.ApplyDECSCUSR(2) // steady block
+	if g.cursorShape != CursorStyleBar || !g.CursorBlink {
+		t.Errorf("locked cursor = %v/blink %v, want bar/true", g.cursorShape, g.CursorBlink)
+	}
+
+	g.cursorLocked = false
+	if got := g.DECSCUSRParam(); got != 5 {
+		t.Errorf("DECSCUSRParam = %d, want 5 (blinking bar) — the lock must not queue requests", got)
+	}
+	g.ApplyDECSCUSR(2)
+	if g.cursorShape != CursorStyleBlock || g.CursorBlink {
+		t.Errorf("unlocked cursor = %v/blink %v, want block/false", g.cursorShape, g.CursorBlink)
+	}
+}
+
+// setCursorDefaults moves the live cursor and the reset target together.
+func TestSetCursorDefaults(t *testing.T) {
+	g := newGrid(4, 8)
+	g.setCursorDefaults(CursorStyleUnderline, true, false)
+	if g.cursorShape != CursorStyleUnderline || !g.CursorBlink {
+		t.Errorf("live cursor = %v/blink %v, want underline/true", g.cursorShape, g.CursorBlink)
+	}
+	if g.defaultShape != CursorStyleUnderline || !g.defaultBlink || g.cursorLocked {
+		t.Errorf("defaults = %v/%v locked %v, want underline/true/false",
+			g.defaultShape, g.defaultBlink, g.cursorLocked)
+	}
+}
+
+func TestCursorStyle_String(t *testing.T) {
+	cases := map[CursorStyle]string{
+		CursorStyleBlock:     "block",
+		CursorStyleUnderline: "underline",
+		CursorStyleBar:       "bar",
+		CursorStyle(99):      "block",
+	}
+	for style, want := range cases {
+		if got := style.String(); got != want {
+			t.Errorf("CursorStyle(%d).String() = %q, want %q", style, got, want)
+		}
+	}
+}

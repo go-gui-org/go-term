@@ -3,6 +3,7 @@ package term
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
 )
@@ -340,5 +341,84 @@ func TestApplyContrastConfig(t *testing.T) {
 				t.Errorf("MinContrast = %v, want %v", g.MinContrast, tc.want)
 			}
 		})
+	}
+}
+
+// The three cursor setters write grid state, which is what the draw pass and
+// blinkLoop read. Each is a default as well as a live change, so a later RIS
+// returns to the value the setter installed.
+func TestSetCursor_LiveAndDefault(t *testing.T) {
+	tm := &Term{grid: newGrid(4, 8)}
+
+	tm.SetCursorStyle(CursorStyleUnderline)
+	tm.SetCursorBlink(true)
+	if tm.grid.cursorShape != CursorStyleUnderline || !tm.grid.CursorBlink {
+		t.Fatalf("cursor = %v/blink %v, want underline/true",
+			tm.grid.cursorShape, tm.grid.CursorBlink)
+	}
+	tm.grid.HardReset()
+	if tm.grid.cursorShape != CursorStyleUnderline || !tm.grid.CursorBlink {
+		t.Errorf("cursor after RIS = %v/blink %v, want the configured underline/true",
+			tm.grid.cursorShape, tm.grid.CursorBlink)
+	}
+
+	// Out of range falls back to a block, matching what drawCursorShape
+	// would have painted for an unknown value.
+	tm.SetCursorStyle(CursorStyle(200))
+	if tm.grid.cursorShape != CursorStyleBlock {
+		t.Errorf("out-of-range style = %v, want block", tm.grid.cursorShape)
+	}
+
+	// The lock gates DECSCUSR without moving the current cursor.
+	tm.SetCursorStyle(CursorStyleBar)
+	tm.SetCursorLocked(true)
+	if tm.grid.cursorShape != CursorStyleBar {
+		t.Errorf("locking moved the cursor to %v", tm.grid.cursorShape)
+	}
+	tm.grid.ApplyDECSCUSR(1)
+	if tm.grid.cursorShape != CursorStyleBar {
+		t.Errorf("locked pane followed DECSCUSR to %v", tm.grid.cursorShape)
+	}
+	tm.SetCursorLocked(false)
+	tm.grid.ApplyDECSCUSR(1)
+	if tm.grid.cursorShape != CursorStyleBlock {
+		t.Errorf("unlocked pane ignored DECSCUSR: %v", tm.grid.cursorShape)
+	}
+}
+
+// SetCursorBlink restarts the blink phase: the cursor must be visible at the
+// moment the setting changes rather than stuck in the hidden half of a cycle
+// the child started. cursorBlinkOff reads cursorEpoch, so the epoch write is
+// what makes the promise observable.
+func TestSetCursorBlink_RestartsPhase(t *testing.T) {
+	tm := &Term{grid: newGrid(4, 8)}
+	tm.focused.Store(true)
+	tm.winFocused.Store(true)
+
+	// Age the epoch so the cursor sits in the hidden half of its cycle…
+	tm.grid.CursorBlink = true
+	tm.cursorEpoch = time.Now().Add(-cursorBlinkPeriod)
+	if !tm.cursorBlinkOff(time.Now()) {
+		t.Fatalf("precondition: cursor should be in its hidden half")
+	}
+
+	// …and the setter must bring it back into the visible half.
+	tm.SetCursorBlink(true)
+	if tm.cursorBlinkOff(time.Now()) {
+		t.Error("cursor still in the hidden half right after SetCursorBlink(true)")
+	}
+}
+
+// Setting a value the pane already has must not repaint: every setter in this
+// file early-outs, and the version counter is how that is observable.
+func TestSetCursor_IdempotentSettersDoNotBump(t *testing.T) {
+	tm := &Term{grid: newGrid(4, 8)}
+	tm.SetCursorStyle(CursorStyleBar)
+	tm.SetCursorBlink(true)
+	before := tm.drawVersion.Load()
+	tm.SetCursorStyle(CursorStyleBar)
+	tm.SetCursorBlink(true)
+	if got := tm.drawVersion.Load(); got != before {
+		t.Errorf("drawVersion moved %d → %d on a no-op set", before, got)
 	}
 }

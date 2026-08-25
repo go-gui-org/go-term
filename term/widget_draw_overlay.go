@@ -473,7 +473,7 @@ func (t *Term) cursorBlinkOff(now time.Time) bool {
 // fg's color); underline/bar overlay a thin filled rect on top of the
 // regular foreground glyph already drawn in the foreground pass.
 func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
-	shape cursorShape, style gui.TextStyle) {
+	shape CursorStyle, style gui.TextStyle) {
 	// Pixel-snapped like the text passes, so the cursor box lines up with the
 	// cell it inverts instead of straddling a pixel boundary.
 	x := t.colX(col)
@@ -488,7 +488,7 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 	}
 
 	switch shape {
-	case cursorUnderline:
+	case CursorStyleUnderline:
 		// Bottom-aligned bar 1/8th of the cell height (min 2px) so it
 		// stays visible at smaller font sizes.
 		h := t.snapPx(ch / 8)
@@ -497,14 +497,14 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 		}
 		dc.FilledRect(x, y+ch-h, cw, h,
 			t.grid.fgOf(cell).WithOpacity(opacity))
-	case cursorBar:
+	case CursorStyleBar:
 		w := t.snapPx(cw / 6)
 		if w < 2 {
 			w = 2
 		}
 		dc.FilledRect(x, y, w, ch,
 			t.grid.fgOf(cell).WithOpacity(opacity))
-	default: // cursorBlock
+	default: // CursorStyleBlock
 		fillColor := t.grid.fgOf(cell)
 		if t.grid.CursorColor != defaultColor {
 			fillColor = rgbToGUIColor(t.grid.CursorColor)

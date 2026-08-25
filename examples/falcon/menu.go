@@ -223,6 +223,13 @@ const configStub = `# go-term configuration.
 # pick it for a dark background, and no theme setting can reach those.
 # minimum-contrast = 3
 
+# Cursor shape and blink. These are what a pane starts with and what "reset"
+# returns to; an app can still change them (vim switches to a bar for insert
+# mode) until cursor-lock is on, which makes go-term ignore those requests.
+# cursor-style = bar
+# cursor-blink = on
+# cursor-lock  = true
+
 # Environment variables for every child process. These are applied last, so
 # they override the terminal's own — including TERM_PROGRAM, which is what
 # yazi and superfile key their image protocol off. go-term implements the

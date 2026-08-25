@@ -213,3 +213,35 @@ func TestApplyTermSettings_NoPanes(t *testing.T) {
 	ws, _ := newConfiguredWorkspace(t, "")
 	ws.applyTermSettings(ws.cfg) // must not panic
 }
+
+// The cursor settings ride the same reload path as the rest: the file is
+// re-applied to a pristine base, so a deleted key reverts and a session
+// override made from the palette is discarded.
+func TestReloadConfig_CursorSettings(t *testing.T) {
+	ws, path := newConfiguredWorkspace(t, `
+[general]
+cursor-style = underline
+cursor-blink = on
+cursor-lock  = true
+`)
+	if ws.cfg.opts.cursorStyle != term.CursorStyleUnderline || !ws.cfg.opts.cursorBlink ||
+		!ws.cfg.opts.cursorLocked {
+		t.Fatalf("opts = %v/%v/%v, want underline/true/true",
+			ws.cfg.opts.cursorStyle, ws.cfg.opts.cursorBlink, ws.cfg.opts.cursorLocked)
+	}
+
+	// A palette pick changes the workspace default for the session…
+	ws.setCursorStyle(term.CursorStyleBar)
+	if ws.cfg.opts.cursorStyle != term.CursorStyleBar {
+		t.Errorf("palette pick = %v, want bar", ws.cfg.opts.cursorStyle)
+	}
+
+	// …and a reload recomputes from the file, discarding it.
+	writeConfig(t, path, "[general]\ncursor-style = block\n")
+	ws.reloadConfig()
+	if ws.cfg.opts.cursorStyle != term.CursorStyleBlock || ws.cfg.opts.cursorBlink ||
+		ws.cfg.opts.cursorLocked {
+		t.Errorf("after reload = %v/%v/%v, want block/false/false",
+			ws.cfg.opts.cursorStyle, ws.cfg.opts.cursorBlink, ws.cfg.opts.cursorLocked)
+	}
+}
