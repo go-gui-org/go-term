@@ -3,9 +3,9 @@ package term
 import "math"
 
 // scrollUpRegion shifts rows [Top..Bottom] up by n, clearing the bottom
-// n rows of the region with default cells. When the region spans the
-// full screen and ScrollbackCap > 0, the displaced top rows are pushed
-// to the scrollback ring (oldest first) and trimmed to cap. n is
+// n rows of the region with default cells. When the region starts at row 0
+// and ScrollbackCap > 0, the displaced top rows are pushed to the scrollback
+// ring (oldest first) and trimmed to cap — see regionFeedsScrollback. n is
 // clamped: n <= 0 is a no-op, n >= region height clears the region.
 func (g *grid) scrollUpRegion(n int) {
 	if n <= 0 || !g.regionValid() {
@@ -15,8 +15,8 @@ func (g *grid) scrollUpRegion(n int) {
 	if n > height {
 		n = height
 	}
-	full := g.regionFullScreen()
-	if full && g.ScrollbackCap > 0 && !g.AltActive {
+	feeds := g.regionFeedsScrollback()
+	if feeds && g.ScrollbackCap > 0 && !g.AltActive {
 		g.Scrollback.EnsureGeom(g.ScrollbackCap, g.Cols)
 		evicted := 0
 		for r := 0; r < n; r++ {
@@ -36,6 +36,14 @@ func (g *grid) scrollUpRegion(n int) {
 		// eviction starts — see grid.ViewFrozen.
 		if g.ViewFrozen {
 			g.ViewOffset = clamp(g.ViewOffset+n, 0, g.Scrollback.Len())
+		}
+		// Graphics are anchored in content coordinates (scrollback length +
+		// screen row), so rows that moved up by n keep the same coordinate
+		// for free — the ring grew by the same n. Rows *below* a bottom
+		// margin did not move, so the ring's growth silently shifted them;
+		// push them down by n to cancel it. No-op without a bottom margin.
+		if g.Bottom < g.Rows-1 {
+			g.scrollGraphicsRegion(g.Bottom+1, g.Rows-1, n, true)
 		}
 	} else {
 		// Nothing entered scrollback, so the content-row space did not

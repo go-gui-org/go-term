@@ -1069,12 +1069,18 @@ func (g *grid) regionValid() bool {
 	return g.Top >= 0 && g.Bottom < g.Rows && g.Top <= g.Bottom
 }
 
-// regionFullScreen reports whether the scroll region spans every row.
-// Only full-screen scrolls push to scrollback (DEC convention shared
-// by xterm/iTerm/kitty); a status-line app shouldn't fill history with
-// its top pane every keystroke.
-func (g *grid) regionFullScreen() bool {
-	return g.regionValid() && g.Top == 0 && g.Bottom == g.Rows-1
+// regionFeedsScrollback reports whether rows leaving the top of the scroll
+// region are history worth keeping. The test is the region *top* only: a row
+// pushed off row 0 scrolled off the screen, so it belongs in scrollback even
+// when a bottom margin reserves rows for a fixed status or input area. This
+// is what Ghostty does (Terminal.index -> cursorScrollAbove), and it is what
+// inline TUIs that keep a prompt pinned to the bottom rely on for history —
+// without it their whole transcript is unreachable.
+//
+// A region whose top is *not* row 0 keeps a header pane on screen, so its
+// displaced rows are redraw churn, not history; those never reach scrollback.
+func (g *grid) regionFeedsScrollback() bool {
+	return g.regionValid() && g.Top == 0
 }
 
 // ViewCellAt returns the cell visible at viewport position (r, c)

@@ -141,6 +141,54 @@ func TestGrid_ScrollUpRegion_FullScreenScrollback(t *testing.T) {
 	}
 }
 
+// TestGrid_ScrollUpRegion_BottomMarginScrollback pins the inline-TUI case:
+// a region that starts at row 0 but reserves rows at the bottom for a fixed
+// input area still feeds scrollback, because rows leaving row 0 really did
+// scroll off the screen. Matches Ghostty; without it an app like muse or
+// any prompt-pinned TUI has no reachable history at all.
+func TestGrid_ScrollUpRegion_BottomMarginScrollback(t *testing.T) {
+	g := newGrid(5, 2)
+	g.ScrollbackCap = 10
+	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
+		fillRow(g, i, ch)
+	}
+	g.Top, g.Bottom = 0, 2 // rows 3..4 are the pinned input area
+
+	g.scrollUpRegion(1)
+
+	if g.Scrollback.Len() != 1 {
+		t.Fatalf("scrollback len = %d, want 1", g.Scrollback.Len())
+	}
+	if got := g.Scrollback.Row(0)[0].Ch; got != 'A' {
+		t.Errorf("scrollback row 0 = %q, want 'A'", got)
+	}
+	// Region scrolled; the rows below the margin are untouched.
+	want := []rune{'B', 'C', ' ', 'D', 'E'}
+	for i, w := range want {
+		if got := rowChar(g, i); got != w {
+			t.Errorf("row %d = %q, want %q", i, got, w)
+		}
+	}
+}
+
+// TestGrid_ScrollUpRegion_TopMarginNoScrollback is the other half of the
+// rule: a region below row 0 keeps a header pane on screen, so its displaced
+// rows are redraw churn and must not reach history.
+func TestGrid_ScrollUpRegion_TopMarginNoScrollback(t *testing.T) {
+	g := newGrid(5, 2)
+	g.ScrollbackCap = 10
+	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
+		fillRow(g, i, ch)
+	}
+	g.Top, g.Bottom = 1, 4
+
+	g.scrollUpRegion(1)
+
+	if g.Scrollback.Len() != 0 {
+		t.Errorf("top-margin scroll polluted scrollback: %d", g.Scrollback.Len())
+	}
+}
+
 func TestGrid_ScrollUpRegion_OverHeight(t *testing.T) {
 	g := newGrid(5, 2)
 	for i, ch := range []rune{'A', 'B', 'C', 'D', 'E'} {
