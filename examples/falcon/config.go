@@ -115,12 +115,16 @@ func (c *startCfg) effectiveSavePath() string {
 
 // defaultWorkspacePath returns the default workspace JSON path, or "" when
 // the config directory can't be determined. The file need not exist.
+//
+// It sits beside the config file in falcon's own directory
+// (<config-dir>/falcon/workspace.json) rather than go-term's shared one, so
+// both of falcon's state files live under the application's name.
 func defaultWorkspacePath() string {
-	def, err := workspace.DefaultWorkspacePath()
-	if err != nil {
+	cfg := defaultConfigPath()
+	if cfg == "" {
 		return ""
 	}
-	return def
+	return filepath.Join(filepath.Dir(cfg), "workspace.json")
 }
 
 // defaultTextStyle is the terminal font used by both the live and replay
@@ -180,4 +184,21 @@ func themeList() []term.NamedTheme {
 		out = append(out, nt)
 	}
 	return out
+}
+
+// defaultConfigPath returns falcon's own config file,
+// <config-dir>/falcon/config. go-term's default is <config-dir>/go-term/config,
+// which every embedder would share; falcon takes its own directory so its
+// settings sit under the application's name. The base config directory comes
+// from DefaultConfigPath (<base>/go-term/config) rather than a second XDG
+// resolution here, so the search order stays in one place. Empty when no
+// config directory resolves.
+func defaultConfigPath() string {
+	def := workspace.DefaultConfigPath()
+	if def == "" {
+		return ""
+	}
+	// Strip "go-term/config" back to the base config directory.
+	base := filepath.Dir(filepath.Dir(def))
+	return filepath.Join(base, "falcon", "config")
 }

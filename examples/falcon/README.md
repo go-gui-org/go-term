@@ -1,21 +1,22 @@
 # <img src="icon/falcon-icon.png" width="32" alt="Falcon icon" style="vertical-align: middle;"> Falcon
 
-Falcon is a full-featured terminal emulator built on
-[`go-term`](../../) and the [`go-gui`](https://github.com/go-gui-org/go-gui)
-framework. It spawns a real shell over a PTY and renders through a
-GPU-accelerated `gui.DrawCanvas`, covering the protocol surface expected by
-modern CLI tools and TUI frameworks (vim, less, htop, tmux).
+Falcon is a full-featured terminal emulator built on [`go-term`](../../) and the
+[`go-gui`](https://github.com/go-gui-org/go-gui) framework. It spawns a real
+shell over a PTY and renders through a GPU-accelerated `gui.DrawCanvas`,
+covering the protocol surface expected by modern CLI tools and TUI frameworks
+(vim, less, htop, tmux).
 
-It is both the reference embedder for `term/workspace` — multi-tab,
-multi-pane, save/restore, config-file driven — and a daily-driver terminal on
-macOS. Targets macOS, Linux, and Windows (ConPTY).
+It is both the reference embedder for `term/workspace` — multi-tab, multi-pane,
+save/restore, config-file driven — and a daily-driver terminal on macOS. Targets
+macOS, Linux, and Windows (ConPTY).
 
 ![screenshot](../../screenshot.png)
 
 ## Install
 
-Prebuilt binaries attach to each [go-term release](https://github.com/go-gui-org/go-term/releases):
-a macOS DMG, a Linux tarball, and a Windows zip.
+Prebuilt binaries attach to each
+[go-term release](https://github.com/go-gui-org/go-term/releases): a macOS DMG,
+a Linux tarball, and a Windows zip.
 
 ### macOS
 
@@ -23,21 +24,21 @@ a macOS DMG, a Linux tarball, and a Windows zip.
 brew install go-gui-org/tap/falcon
 ```
 
-Until Falcon is Developer ID signed and notarized, Gatekeeper blocks the
-first launch: right-click the app in Finder and choose Open. Releases are
-ad-hoc signed.
+Until Falcon is Developer ID signed and notarized, Gatekeeper blocks the first
+launch: right-click the app in Finder and choose Open. Releases are ad-hoc
+signed.
 
 ### Linux
 
 Download `falcon-<version>-linux-amd64.tar.gz` from the release page — it
 contains the binary, a `.desktop` entry, the icon, and install instructions
-(`packaging/install.txt` in the repo). Requires SDL2, FreeType, HarfBuzz,
-Pango, fontconfig, and GLib at runtime.
+(`packaging/install.txt` in the repo). Requires SDL2, FreeType, HarfBuzz, Pango,
+fontconfig, and GLib at runtime.
 
 ### Windows
 
-Download `falcon-<version>-windows-amd64.zip` from the release page and
-unzip it anywhere. No runtime dependencies beyond a stock Windows 10/11.
+Download `falcon-<version>-windows-amd64.zip` from the release page and unzip it
+anywhere. No runtime dependencies beyond a stock Windows 10/11.
 
 ## Run from the source tree
 
@@ -75,18 +76,17 @@ sibling checkout needed. Icon sources and regeneration steps live in
 
 By default the bundle is signed ad-hoc, which macOS keys permission grants
 against by content hash. The hash changes on every build, so each `make app`
-silently revokes Screen Recording, microphone, camera and accessibility
-access — System Settings still lists the app as granted while the API returns
-denied. Sign with a stable identity to keep grants across rebuilds:
+silently revokes Screen Recording, microphone, camera and accessibility access —
+System Settings still lists the app as granted while the API returns denied.
+Sign with a stable identity to keep grants across rebuilds:
 
 ```bash
 make app SIGN_IDENTITY="My Dev Cert"
 ```
 
-A self-signed code-signing certificate from Keychain Access is enough; no
-Apple Developer account is needed. A universal
-`BUILDAPP_SIGN_IDENTITY` variable applies it to every build without passing
-`SIGN_IDENTITY`. See
+A self-signed code-signing certificate from Keychain Access is enough; no Apple
+Developer account is needed. A universal `BUILDAPP_SIGN_IDENTITY` variable
+applies it to every build without passing `SIGN_IDENTITY`. See
 [`buildapp`'s README](https://github.com/go-gui-org/go-gui/tree/main/cmd/buildapp#signing).
 
 ## Command-line flags
@@ -101,21 +101,21 @@ Apple Developer account is needed. A universal
 | `--replay-idle-limit <dur>` | `0` (no cap)                         | Cap any single gap between recorded frames, e.g. `250ms` |
 | `--replay-loop`             | off                                  | Restart playback at the end of the recording             |
 
-`--replay` is a viewer path, not a multiplexer: one pane, no tabs, no shell,
-no workspace persistence.
+`--replay` is a viewer path, not a multiplexer: one pane, no tabs, no shell, no
+workspace persistence.
 
 ## Workspace persistence
 
 Falcon saves its tab/pane layout on quit and restores it on the next launch,
-with no flags needed. The default file is `workspace.json` in the go-term
-config directory (`workspace.DefaultWorkspacePath()`).
+with no flags needed. The default file is `~/.config/falcon/workspace.json`,
+beside falcon's own config file.
 
 - Restore falls back to a fresh workspace on a missing, unparseable, or
   version-mismatched file — a bad workspace file never blocks startup.
-- Saving happens on both quit paths: the close request (Cmd+Q, window close)
-  and the last shell exiting.
-- With live shells open, quitting asks for confirmation first
-  (`confirmOnQuit` in `window.go`).
+- Saving happens on both quit paths: the close request (Cmd+Q, window close) and
+  the last shell exiting.
+- With live shells open, quitting asks for confirmation first (`confirmOnQuit`
+  in `window.go`).
 - New tabs and splits inherit the focused pane's working directory.
 
 Point `--workspace` and `--save-workspace` at different files to keep a
@@ -123,9 +123,10 @@ read-only "template" layout that startup restores but quit never overwrites.
 
 ## Configuration
 
-Falcon reads the shared go-term config file — an INI at
-`~/.config/go-term/config` (or `$XDG_CONFIG_HOME`/`os.UserConfigDir()`),
-parsed by `term/workspace`, not by falcon itself.
+Falcon reads an INI file at `~/.config/falcon/config` (or
+`$XDG_CONFIG_HOME`/`os.UserConfigDir()`), parsed by `term/workspace`, not by
+falcon itself. Falcon sets this path with `workspace.Cfg.ConfigPath`; go-term's
+own default, for an embedder that sets nothing, is `~/.config/go-term/config`.
 
 ```ini
 [font]
@@ -156,21 +157,21 @@ Every section, key, default, and rebindable action is documented in
 
 Falcon registers fourteen built-in themes (`themeList()` in `config.go`):
 Default, Dracula, Catppuccin Mocha, Tokyo Night, Monokai, One Dark, Rosé Pine,
-Kanagawa, Ayu Dark, Everforest, GitHub Dark, Gruvbox, Nord, Solarized Dark.
-Pick one live with `Cmd+Shift+T`, or set `[general] theme` in the config.
+Kanagawa, Ayu Dark, Everforest, GitHub Dark, Gruvbox, Nord, Solarized Dark. Pick
+one live with `Cmd+Shift+T`, or set `[general] theme` in the config.
 
 ### Font
 
 The default is `JetBrainsMono NFM` at 12pt. The family must be spelled as the
-font's own name table spells it — go-glyph's pure-Go discovery reads that
-table, where JetBrains Mono Nerd Font Mono appears as `JetBrainsMono NFM`, not
-the marketing name. If the font isn't installed, set `[font] family` to
-something that is (e.g. `Menlo`).
+font's own name table spells it — go-glyph's pure-Go discovery reads that table,
+where JetBrains Mono Nerd Font Mono appears as `JetBrainsMono NFM`, not the
+marketing name. If the font isn't installed, set `[font] family` to something
+that is (e.g. `Menlo`).
 
 ## Keyboard shortcuts
 
-`Cmd+/` opens the in-app help overlay, which is generated from the live
-binding table — it is always accurate for your config. Highlights:
+`Cmd+/` opens the in-app help overlay, which is generated from the live binding
+table — it is always accurate for your config. Highlights:
 
 | Chord                                         | Action                                                       |
 | --------------------------------------------- | ------------------------------------------------------------ |
@@ -238,17 +239,17 @@ home directory can't be resolved.
 
 Design notes worth knowing before editing:
 
-- `main` is a thin wrapper around `run()` because `os.Exit` and `log.Fatal`
-  skip deferred teardown; the exit code comes back as a return value.
+- `main` is a thin wrapper around `run()` because `os.Exit` and `log.Fatal` skip
+  deferred teardown; the exit code comes back as a return value.
 - `OnInit` cannot return an error and must not `log.Fatal`, so a fatal init
   failure is stashed in `app.initErr` and reported after the app loop unwinds.
-- Quit confirmation uses go-gui's in-app dialog, not `NativeConfirmDialog`:
-  the native `NSAlert` modal loses keyboard focus under the Metal backend's
-  manual event pump.
+- Quit confirmation uses go-gui's in-app dialog, not `NativeConfirmDialog`: the
+  native `NSAlert` modal loses keyboard focus under the Metal backend's manual
+  event pump.
 - The About dialog is falcon's own, not `NSAboutPanel`, which reads from a
   bundle `Info.plist` that a `go run` binary doesn't have.
-- There is no Edit menu — an auto-wired one would swallow `Cmd+C`/`Cmd+V`
-  before go-term's binding table sees them.
+- There is no Edit menu — an auto-wired one would swallow `Cmd+C`/`Cmd+V` before
+  go-term's binding table sees them.
 
 ## Tests
 
@@ -259,6 +260,6 @@ go test ./examples/falcon
 The tests cover the parts that don't need a window: flag parsing and path
 resolution (`config_test.go`), menubar config fields (`menu_test.go`), version
 resolution (`version_test.go`), and the window/replay configs
-(`window_test.go`). Anything that opens a real window still has to be checked
-by running the app — try `ls`, `cat`, ANSI color output, window resize,
-selection and copy, and a full-screen app such as `vim` or `less`.
+(`window_test.go`). Anything that opens a real window still has to be checked by
+running the app — try `ls`, `cat`, ANSI color output, window resize, selection
+and copy, and a full-screen app such as `vim` or `less`.

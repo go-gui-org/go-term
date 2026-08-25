@@ -104,7 +104,7 @@ func TestResolvedWorkspacePathDefaultExists(t *testing.T) {
 	cfgHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfgHome)
 
-	want := filepath.Join(cfgHome, "go-term", "workspace.json")
+	want := filepath.Join(cfgHome, "falcon", "workspace.json")
 	if err := os.MkdirAll(filepath.Dir(want), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestEffectiveSavePathFreshInstall(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", cfgHome)
 
 	c := &startCfg{}
-	want := filepath.Join(cfgHome, "go-term", "workspace.json")
+	want := filepath.Join(cfgHome, "falcon", "workspace.json")
 	if got := c.resolvedWorkspacePath(); got != "" {
 		t.Errorf("resolvedWorkspacePath = %q, want \"\"", got)
 	}
