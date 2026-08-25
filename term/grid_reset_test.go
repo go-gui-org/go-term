@@ -162,7 +162,7 @@ func TestGrid_HardReset(t *testing.T) {
 		t.Errorf("kitty flags survived RIS: %d stack=%d",
 			g.KittyKeyFlags, len(g.kittyFlagStack))
 	}
-	if g.CursorColor != defaultColor || g.CursorBlink || g.cursorShape != cursorBlock {
+	if g.CursorColor != defaultColor || g.CursorBlink || g.cursorShape != CursorStyleBlock {
 		t.Error("cursor appearance survived RIS")
 	}
 	if !g.TabStops[8] || !g.TabStops[16] {
@@ -315,5 +315,24 @@ func TestGrid_FlatFillClears_KeepsKittyPlacements(t *testing.T) {
 	g.ScreenAlignment()
 	if len(g.Graphics) != 1 {
 		t.Fatalf("DECALN removed a Kitty placement: %d left", len(g.Graphics))
+	}
+}
+
+// RIS returns to the *configured* cursor, not to the built-in block. A pane
+// configured with a blinking bar that came back from `reset` as a steady block
+// would look like the setting had stopped working.
+func TestHardReset_RestoresConfiguredCursor(t *testing.T) {
+	g := newGrid(4, 8)
+	g.setCursorDefaults(CursorStyleBar, true, false)
+	g.ApplyDECSCUSR(2) // a child switches to a steady block
+	g.HardReset()
+	if g.cursorShape != CursorStyleBar || !g.CursorBlink {
+		t.Errorf("cursor after RIS = %v/blink %v, want bar/true", g.cursorShape, g.CursorBlink)
+	}
+	// The lock is the user's policy, not child-set state, so RIS leaves it.
+	g.setCursorDefaults(CursorStyleBar, true, true)
+	g.HardReset()
+	if !g.cursorLocked {
+		t.Error("RIS cleared the cursor lock")
 	}
 }

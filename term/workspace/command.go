@@ -150,6 +150,52 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Global:   true,
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.toggleBroadcast() },
 		},
+		// Cursor appearance. No shortcuts: these are palette-only, and
+		// RegisterCommand only rejects a duplicate Shortcut when one is set.
+		// Explicit rows rather than cycling toggles — the palette shows no
+		// current state, so a cycle would be a guess.
+		{
+			ID:      "workspace.cursorStyleBlock",
+			Label:   "Cursor: Block",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorStyle(term.CursorStyleBlock) },
+		},
+		{
+			ID:      "workspace.cursorStyleUnderline",
+			Label:   "Cursor: Underline",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorStyle(term.CursorStyleUnderline) },
+		},
+		{
+			ID:      "workspace.cursorStyleBar",
+			Label:   "Cursor: Bar",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorStyle(term.CursorStyleBar) },
+		},
+		{
+			ID:      "workspace.cursorBlinkOn",
+			Label:   "Cursor Blink: On",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorBlink(true) },
+		},
+		{
+			ID:      "workspace.cursorBlinkOff",
+			Label:   "Cursor Blink: Off",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorBlink(false) },
+		},
+		{
+			ID:      "workspace.cursorLockOn",
+			Label:   "Cursor: Lock (Ignore Apps)",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorLocked(true) },
+		},
+		{
+			ID:      "workspace.cursorLockOff",
+			Label:   "Cursor: Unlock (Follow Apps)",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorLocked(false) },
+		},
 		// Theme.
 		{
 			ID:       "workspace.chooseTheme",
@@ -354,10 +400,53 @@ func (ws *Workspace) applyTermSettings(prev Cfg) {
 			if prev.opts.notifyAfter != cur.opts.notifyAfter {
 				tm.SetNotifyAfter(cur.opts.notifyAfter)
 			}
+			if prev.opts.cursorStyle != cur.opts.cursorStyle {
+				tm.SetCursorStyle(cur.opts.cursorStyle)
+			}
+			if prev.opts.cursorBlink != cur.opts.cursorBlink {
+				tm.SetCursorBlink(cur.opts.cursorBlink)
+			}
+			if prev.opts.cursorLocked != cur.opts.cursorLocked {
+				tm.SetCursorLocked(cur.opts.cursorLocked)
+			}
 			// KeyMap is a map, so it can't be compared for equality cheaply;
 			// re-seeding is idempotent (mergeBindings rebuilds from the
 			// defaults each time) and costs one small map per pane.
 			tm.SetKeyBindings(cur.opts.keys)
+		}
+	}
+	ws.w.UpdateWindow()
+}
+
+// setCursorStyle / setCursorBlink / setCursorLocked apply a cursor setting to
+// every live pane and to the workspace default, so a later split or tab
+// inherits it. They are the palette's entry points.
+//
+// The choice lasts for the session only: a config reload recomputes the
+// effective Cfg from the file and therefore discards it. The config file stays
+// the durable setting — nothing here writes to it.
+func (ws *Workspace) setCursorStyle(s term.CursorStyle) {
+	ws.cfg.opts.cursorStyle = s
+	ws.forEachPane(func(tm *term.Term) { tm.SetCursorStyle(s) })
+}
+
+func (ws *Workspace) setCursorBlink(on bool) {
+	ws.cfg.opts.cursorBlink = on
+	ws.forEachPane(func(tm *term.Term) { tm.SetCursorBlink(on) })
+}
+
+func (ws *Workspace) setCursorLocked(locked bool) {
+	ws.cfg.opts.cursorLocked = locked
+	ws.forEachPane(func(tm *term.Term) { tm.SetCursorLocked(locked) })
+}
+
+// forEachPane runs fn against every live pane in every tab, then repaints.
+// Deliberately not used by applyTermSettings, which needs both the previous
+// and current Cfg inside the loop to skip settings that did not change.
+func (ws *Workspace) forEachPane(fn func(*term.Term)) {
+	for _, tab := range ws.tabs {
+		for _, tm := range tab.terms {
+			fn(tm)
 		}
 	}
 	ws.w.UpdateWindow()

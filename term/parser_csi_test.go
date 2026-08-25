@@ -648,17 +648,17 @@ func TestParser_DECRQSS_Replies(t *testing.T) {
 func TestParser_DECSCUSR_AllPs(t *testing.T) {
 	cases := []struct {
 		ps    int
-		shape cursorShape
+		shape CursorStyle
 		blink bool
 	}{
-		{0, cursorBlock, true},
-		{1, cursorBlock, true},
-		{2, cursorBlock, false},
-		{3, cursorUnderline, true},
-		{4, cursorUnderline, false},
-		{5, cursorBar, true},
-		{6, cursorBar, false},
-		{99, cursorBlock, true},
+		{0, CursorStyleBlock, true},
+		{1, CursorStyleBlock, true},
+		{2, CursorStyleBlock, false},
+		{3, CursorStyleUnderline, true},
+		{4, CursorStyleUnderline, false},
+		{5, CursorStyleBar, true},
+		{6, CursorStyleBar, false},
+		{99, CursorStyleBlock, true},
 	}
 	for _, c := range cases {
 		g, p := newParserGrid(1, 5)
@@ -675,11 +675,11 @@ func TestParser_DECSCUSR_AllPs(t *testing.T) {
 
 func TestParser_DECSCUSR_RequiresSpaceIntermediate(t *testing.T) {
 	g, p := newParserGrid(1, 5)
-	g.cursorShape = cursorBar
+	g.cursorShape = CursorStyleBar
 	g.CursorBlink = false
 
 	feed(t, g, p, []byte("\x1b[2q"))
-	if g.cursorShape != cursorBar || g.CursorBlink != false {
+	if g.cursorShape != CursorStyleBar || g.CursorBlink != false {
 		t.Errorf("CSI 2 q (no SP) clobbered shape=%d blink=%v",
 			g.cursorShape, g.CursorBlink)
 	}
@@ -688,7 +688,7 @@ func TestParser_DECSCUSR_RequiresSpaceIntermediate(t *testing.T) {
 func TestParser_DECSCUSR_DefaultParam(t *testing.T) {
 	g, p := newParserGrid(1, 5)
 	feed(t, g, p, []byte("\x1b[ q"))
-	if g.cursorShape != cursorBlock || !g.CursorBlink {
+	if g.cursorShape != CursorStyleBlock || !g.CursorBlink {
 		t.Errorf("default DECSCUSR: shape=%d blink=%v",
 			g.cursorShape, g.CursorBlink)
 	}

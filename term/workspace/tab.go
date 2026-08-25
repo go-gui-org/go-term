@@ -97,6 +97,9 @@ func (t *tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHoo
 		BellMode:        cfg.opts.bell,
 		NotifyAfter:     cfg.opts.notifyAfter,
 		KeyBindings:     cfg.opts.keys,
+		CursorStyle:     cfg.opts.cursorStyle,
+		CursorBlink:     cfg.opts.cursorBlink,
+		CursorLocked:    cfg.opts.cursorLocked,
 
 		MiddleClickPaste: cfg.opts.middleClickPaste,
 		OnTitle: func(title string) {

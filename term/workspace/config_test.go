@@ -946,3 +946,74 @@ func TestLegacyThemeAliases_AreLoadBearing(t *testing.T) {
 		}
 	}
 }
+
+// --- cursor settings ---
+
+func TestParseConfig_CursorKeys(t *testing.T) {
+	cases := []struct {
+		name       string
+		body       string
+		wantStyle  term.CursorStyle
+		wantBlink  bool
+		wantLock   bool
+		wantErrors int
+	}{
+		{"block", "cursor-style = block", term.CursorStyleBlock, false, false, 0},
+		{"underline", "cursor-style = underline", term.CursorStyleUnderline, false, false, 0},
+		{"bar", "cursor-style = bar", term.CursorStyleBar, false, false, 0},
+		{"beam_is_bar", "cursor-style = BEAM", term.CursorStyleBar, false, false, 0},
+		{"blink_on", "cursor-blink = on", term.CursorStyleBlock, true, false, 0},
+		{"blink_true", "cursor-blink = true", term.CursorStyleBlock, true, false, 0},
+		{"blink_no", "cursor-blink = no", term.CursorStyleBlock, false, false, 0},
+		{"lock", "cursor-lock = yes", term.CursorStyleBlock, false, true, 0},
+		// A bad value logs and leaves the setting alone rather than wedging
+		// the reload.
+		{"bad_style", "cursor-style = wedge", term.CursorStyleBlock, false, false, 1},
+		{"bad_blink", "cursor-blink = maybe", term.CursorStyleBlock, false, false, 1},
+		{"bad_lock", "cursor-lock = sometimes", term.CursorStyleBlock, false, false, 1},
+		// "auto" is deliberately not a style: whether an app may change the
+		// cursor is cursor-lock's question, not cursor-style's.
+		{"auto_is_not_a_style", "cursor-style = auto", term.CursorStyleBlock, false, false, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, errs := parseConfig(strings.NewReader("[general]\n" + tc.body + "\n"))
+			if len(errs) != tc.wantErrors {
+				t.Fatalf("errors = %v, want %d", errs, tc.wantErrors)
+			}
+			if got.cursorStyle != tc.wantStyle || got.cursorBlink != tc.wantBlink ||
+				got.cursorLock != tc.wantLock {
+				t.Errorf("style/blink/lock = %v/%v/%v, want %v/%v/%v",
+					got.cursorStyle, got.cursorBlink, got.cursorLock,
+					tc.wantStyle, tc.wantBlink, tc.wantLock)
+			}
+		})
+	}
+}
+
+func TestApplySettings_CursorSettings(t *testing.T) {
+	base := Cfg{Themes: testThemes(t)}
+	fc, errs := parseConfig(strings.NewReader(`
+[general]
+cursor-style = bar
+cursor-blink = on
+cursor-lock  = true
+`))
+	if len(errs) != 0 {
+		t.Fatalf("parse errors: %v", errs)
+	}
+	got := applySettings(base, fc, nil)
+	if got.opts.cursorStyle != term.CursorStyleBar || !got.opts.cursorBlink ||
+		!got.opts.cursorLocked {
+		t.Errorf("opts = %v/%v/%v, want bar/true/true",
+			got.opts.cursorStyle, got.opts.cursorBlink, got.opts.cursorLocked)
+	}
+	// Deleting the keys reverts to the built-in default — the file is always
+	// re-applied to a pristine base.
+	bare := applySettings(base, workspaceConfig{}, nil)
+	if bare.opts.cursorStyle != term.CursorStyleBlock || bare.opts.cursorBlink ||
+		bare.opts.cursorLocked {
+		t.Errorf("opts = %v/%v/%v, want block/false/false",
+			bare.opts.cursorStyle, bare.opts.cursorBlink, bare.opts.cursorLocked)
+	}
+}

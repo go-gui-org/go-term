@@ -93,6 +93,12 @@ input) lives in `term/CLAUDE.md`, loaded when working under `term/`.
   Term-level shortcuts), and the live setters a config reload needs —
   `SetTextStyle`, `SetScrollbackRows`, `SetBellMode`, `SetScrollbarWidth`,
   `SetMiddleClickPaste`, `SetMinimumContrast`, `SetNotifyAfter`,
+  plus `CursorStyle` (`CursorStyleBlock`/`Underline`/`Bar`) with
+  `SetCursorStyle`/`SetCursorBlink`/`SetCursorLocked` — the cursor appearance
+  a config file drives. Style and blink are *defaults* (what `reset` restores),
+  never draw-time overrides; the lock is the separate axis that decides whether
+  a child's DECSCUSR is honored, and it is enforced in `ApplyDECSCUSR` so the
+  draw path and DECRQSS stay in agreement,
   plus `ActivityKind`/`Cfg.OnActivity` — the pane-event tap a tab bar needs for
   its bell and command-result indicators (bells and OSC 133 command ends only;
   screen output is deliberately not reported — see the type's doc),

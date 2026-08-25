@@ -143,20 +143,20 @@ const (
 )
 
 const (
-	cursorBlock cursorShape = iota
-	cursorUnderline
-	cursorBar
+	CursorStyleBlock CursorStyle = iota
+	CursorStyleUnderline
+	CursorStyleBar
 )
 
 // DECSCUSRParam returns the current cursor-style parameter for DECRQSS.
 func (g *grid) DECSCUSRParam() int {
 	switch g.cursorShape {
-	case cursorUnderline:
+	case CursorStyleUnderline:
 		if g.CursorBlink {
 			return 3
 		}
 		return 4
-	case cursorBar:
+	case CursorStyleBar:
 		if g.CursorBlink {
 			return 5
 		}
@@ -674,11 +674,19 @@ type grid struct {
 	mutSeq         uint64
 	syncOpenSeq    uint64
 
-	// Cursor shape + blink. Set via DECSCUSR (CSI Ps SP q). Default is
-	// a steady block. Embedders can override blink via
-	// Cfg.CursorBlink without overriding shape.
-	cursorShape cursorShape
+	// Cursor shape + blink. Set via DECSCUSR (CSI Ps SP q), seeded from
+	// Cfg.CursorStyle / Cfg.CursorBlink. Default is a steady block.
+	cursorShape CursorStyle
 	CursorBlink bool
+
+	// The embedder's cursor settings, written only by setCursorDefaults.
+	// defaultShape/defaultBlink are what HardReset restores — a `reset` must
+	// return to the *configured* cursor, not to the built-in block.
+	// cursorLocked pins the pair: ApplyDECSCUSR is dropped while it is set,
+	// so a child cannot take the cursor over.
+	defaultShape CursorStyle
+	defaultBlink bool
+	cursorLocked bool
 
 	// Mouse reporting modes. Multiple may be active at once; the
 	// widget emits the broadest report any of them enables. SGR
@@ -888,8 +896,10 @@ func newGrid(rows, cols int) *grid {
 		CharsetG1:     charsetASCII,
 		AutoWrap:      true,
 		CursorVisible: true,
-		cursorShape:   cursorBlock,
+		cursorShape:   CursorStyleBlock,
 		CursorBlink:   false,
+		defaultShape:  CursorStyleBlock,
+		defaultBlink:  false,
 		CursorColor:   defaultColor,
 		Top:           0,
 		Bottom:        rows - 1,

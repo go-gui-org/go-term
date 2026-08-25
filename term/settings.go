@@ -1,6 +1,8 @@
 package term
 
 import (
+	"time"
+
 	"github.com/go-gui-org/go-gui/gui"
 )
 
@@ -136,4 +138,65 @@ func (t *Term) SetScrollbarWidth(px float32) {
 	t.cfg.ScrollbarWidth = px
 	t.bumpVersion()
 	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+}
+
+// SetCursorStyle changes the shape the cursor is drawn in, mirroring
+// Cfg.CursorStyle: it sets both the live shape and the default `reset`
+// restores. An unrecognized value falls back to a block.
+//
+// This is a default, not an override — an unlocked pane still follows the
+// child's DECSCUSR. Pair it with SetCursorLocked to pin the shape.
+//
+// Takes grid.Mu: the shape is grid state that the draw pass reads.
+func (t *Term) SetCursorStyle(s CursorStyle) {
+	s = validCursorStyle(s)
+	t.grid.Mu.Lock()
+	if t.grid.defaultShape == s && t.grid.cursorShape == s {
+		t.grid.Mu.Unlock()
+		return
+	}
+	t.grid.defaultShape = s
+	t.grid.cursorShape = s
+	t.grid.markDirty(t.grid.CursorR)
+	t.grid.Mu.Unlock()
+	t.bumpVersion()
+	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+}
+
+// SetCursorBlink turns cursor blinking on or off, mirroring Cfg.CursorBlink
+// with the same default-not-override meaning as SetCursorStyle.
+//
+// The blink phase is restarted so the cursor is visible at the moment the
+// setting changes rather than mid-cycle. bumpVersion is what un-parks
+// blinkLoop, which sleeps indefinitely while nothing is animating.
+func (t *Term) SetCursorBlink(on bool) {
+	t.grid.Mu.Lock()
+	if t.grid.defaultBlink == on && t.grid.CursorBlink == on {
+		t.grid.Mu.Unlock()
+		return
+	}
+	t.grid.defaultBlink = on
+	t.grid.CursorBlink = on
+	t.grid.markDirty(t.grid.CursorR)
+	t.grid.Mu.Unlock()
+	// Main-thread only, like the rest of this file: cursorEpoch is read by
+	// the draw pass, which also runs there.
+	t.cursorEpoch = time.Now()
+	t.bumpVersion()
+	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+}
+
+// SetCursorLocked pins the cursor to the configured style and blink, dropping
+// every DECSCUSR the child sends. Mirrors Cfg.CursorLocked.
+//
+// The current shape is left as it is: locking means "no further changes", not
+// "revert now". A caller that wants both calls SetCursorStyle as well.
+func (t *Term) SetCursorLocked(locked bool) {
+	t.grid.Mu.Lock()
+	if t.grid.cursorLocked == locked {
+		t.grid.Mu.Unlock()
+		return
+	}
+	t.grid.cursorLocked = locked
+	t.grid.Mu.Unlock()
 }

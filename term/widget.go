@@ -39,6 +39,7 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 	applyTheme(g, cfg)
 	applyScrollbackConfig(g, cfg)
 	applyContrastConfig(g, cfg)
+	applyCursorConfig(g, cfg)
 	seqID := termSeq.Add(1)
 	t := &Term{
 		cfg:         cfg,
@@ -154,24 +155,14 @@ func openCapture(seq uint64) *recfmt.Recorder {
 	return recfmt.NewRawRecorder(f)
 }
 
-// cursorBlinks reports whether the cursor should currently blink,
-// honoring the Cfg.CursorBlink override over the grid's DECSCUSR
-// state. Caller holds grid.Mu.
-func (t *Term) cursorBlinks() bool {
-	if t.cfg.CursorBlink != nil {
-		return *t.cfg.CursorBlink
-	}
-	return t.grid.CursorBlink
-}
-
 // cursorBlinkActive reports whether the caret should be animating right now.
 // A blinking cursor stops blinking (and rests visible, dimmed by
 // drawCursorShape) whenever this pane or its window loses focus — matching
 // Terminal.app and iTerm, and letting blinkLoop park its ticker so a
-// background window costs no wakeups at all. Caller holds grid.Mu:
-// cursorBlinks reads grid state.
+// background window costs no wakeups at all. Caller holds grid.Mu: the blink
+// flag is grid state, which is also what keeps blinkLoop race-free.
 func (t *Term) cursorBlinkActive() bool {
-	return t.cursorBlinks() && t.focused.Load() && t.winFocused.Load()
+	return t.grid.CursorBlink && t.focused.Load() && t.winFocused.Load()
 }
 
 // HandleWindowEvent processes window-level events that the Term needs to

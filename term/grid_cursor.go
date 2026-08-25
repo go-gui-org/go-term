@@ -1,29 +1,62 @@
 package term
 
-// cursorShape selects the cursor glyph: filled block, baseline
-// underline, or vertical bar at the leading edge of the cell.
-type cursorShape uint8
+// CursorStyle selects the cursor glyph: filled block, baseline underline, or
+// vertical bar at the leading edge of the cell. It is both the internal grid
+// state DECSCUSR writes and the public spelling an embedder configures through
+// Cfg.CursorStyle — one type, so the two cannot drift.
+type CursorStyle uint8
+
+// String names the style the way the config file spells it, so a log line
+// and a config key read the same.
+func (s CursorStyle) String() string {
+	switch s {
+	case CursorStyleUnderline:
+		return "underline"
+	case CursorStyleBar:
+		return "bar"
+	default:
+		return "block"
+	}
+}
 
 // ApplyDECSCUSR applies the DECSCUSR (CSI Ps SP q) parameter,
 // setting cursor shape + blink. Unknown values fall back to the
 // xterm default (blinking block, matching Ps=0/1).
+//
+// A locked cursor drops the sequence outright rather than recording it for
+// later: the user asked for one cursor, and DECRQSS must keep reporting what
+// is actually on screen (see DECSCUSRParam).
 func (g *grid) ApplyDECSCUSR(ps int) {
+	if g.cursorLocked {
+		return
+	}
 	switch ps {
 	case 0, 1:
-		g.cursorShape, g.CursorBlink = cursorBlock, true
+		g.cursorShape, g.CursorBlink = CursorStyleBlock, true
 	case 2:
-		g.cursorShape, g.CursorBlink = cursorBlock, false
+		g.cursorShape, g.CursorBlink = CursorStyleBlock, false
 	case 3:
-		g.cursorShape, g.CursorBlink = cursorUnderline, true
+		g.cursorShape, g.CursorBlink = CursorStyleUnderline, true
 	case 4:
-		g.cursorShape, g.CursorBlink = cursorUnderline, false
+		g.cursorShape, g.CursorBlink = CursorStyleUnderline, false
 	case 5:
-		g.cursorShape, g.CursorBlink = cursorBar, true
+		g.cursorShape, g.CursorBlink = CursorStyleBar, true
 	case 6:
-		g.cursorShape, g.CursorBlink = cursorBar, false
+		g.cursorShape, g.CursorBlink = CursorStyleBar, false
 	default:
-		g.cursorShape, g.CursorBlink = cursorBlock, true
+		g.cursorShape, g.CursorBlink = CursorStyleBlock, true
 	}
+}
+
+// setCursorDefaults records the user's cursor settings and applies the shape
+// and blink to the live cursor. The defaults are what HardReset restores, so a
+// configured cursor survives `reset`; locked drops every later DECSCUSR.
+//
+// Caller holds Mu.
+func (g *grid) setCursorDefaults(style CursorStyle, blink, locked bool) {
+	g.defaultShape, g.defaultBlink, g.cursorLocked = style, blink, locked
+	g.cursorShape, g.CursorBlink = style, blink
+	g.markDirty(g.CursorR)
 }
 
 // savedCursor holds the snapshot taken by SaveCursor (DECSC / CSI s).

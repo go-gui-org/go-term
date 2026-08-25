@@ -93,12 +93,6 @@ type Cfg struct {
 	// grid on the next draw instead.
 	OnActivity func(kind ActivityKind)
 
-	// CursorBlink, if non-nil, overrides the application's DECSCUSR
-	// blink request. Use *true to force blinking on, *false to force
-	// steady. Leave nil to honor whatever the shell asks for (steady
-	// by default for a brand-new grid).
-	CursorBlink *bool
-
 	// OnExit, if non-nil, is called when the child process exits.
 	// Runs on the reader goroutine — fire a goroutine for any slow
 	// work (e.g. calling Term.Close on the main thread via QueueCommand).
@@ -208,6 +202,25 @@ type Cfg struct {
 	// unaffected; only what is painted changes. 3.0 is a reasonable setting,
 	// 4.5 is the WCAG floor for body text.
 	MinimumContrast float64
+
+	// CursorStyle is the shape the cursor starts in, and the one `reset`
+	// returns to. The zero value is a block; CursorStyleUnderline and
+	// CursorStyleBar select the other two.
+	//
+	// It is a default, not an override: an application is free to change the
+	// shape with DECSCUSR (vim does, for insert mode) unless CursorLocked
+	// says otherwise.
+	CursorStyle CursorStyle
+
+	// CursorBlink is whether the cursor starts blinking, with the same
+	// default-not-override meaning as CursorStyle. The zero value is steady.
+	CursorBlink bool
+
+	// CursorLocked ignores every DECSCUSR (CSI Ps SP q) the child sends, so
+	// CursorStyle and CursorBlink hold for the life of the pane. Off by
+	// default: shells and editors legitimately move the cursor, and a
+	// terminal that silently dropped those requests would be the surprise.
+	CursorLocked bool
 
 	// MiddleClickPaste enables pasting with the middle mouse button: the X11
 	// PRIMARY selection where one exists, the clipboard otherwise. Off by
@@ -325,5 +338,24 @@ func applyTheme(g *grid, cfg Cfg) {
 func applyContrastConfig(g *grid, cfg Cfg) {
 	if r := cfg.MinimumContrast; realNumber(r) && r > contrastDisabled {
 		g.MinContrast = r
+	}
+}
+
+// applyCursorConfig seeds the grid's cursor defaults from Cfg. Called before
+// the reader goroutine starts, so no lock is needed.
+func applyCursorConfig(g *grid, cfg Cfg) {
+	g.setCursorDefaults(validCursorStyle(cfg.CursorStyle), cfg.CursorBlink, cfg.CursorLocked)
+}
+
+// validCursorStyle maps an out-of-range CursorStyle onto the block default.
+// The type is a bare uint8, so an embedder (or a future config value) can hand
+// over a number no shape corresponds to; drawing would silently fall through
+// to the block branch anyway, and this makes DECSCUSRParam agree with it.
+func validCursorStyle(s CursorStyle) CursorStyle {
+	switch s {
+	case CursorStyleUnderline, CursorStyleBar:
+		return s
+	default:
+		return CursorStyleBlock
 	}
 }
