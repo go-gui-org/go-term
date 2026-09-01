@@ -1,8 +1,11 @@
 .PHONY: bench bench-verbose bench-save bench-regress test test-race vet lint \
-	lint-pin build clean app clean-app build-falcon cross-windows prepush
+	lint-bin build clean app clean-app build-falcon cross-windows prepush
 
-# golangci-lint version pinned by CI (.github/workflows/ci.yml).
-LINT_VERSION := v2.12
+# Repo-local bin for the pinned linter. The pinned VERSION itself lives in
+# tools/lint/go.mod -- see the $(LINT_BIN) rule below.
+LINT_DIR = $(CURDIR)/.bin
+LINT_BIN = $(LINT_DIR)/golangci-lint
+LINT_ARGS ?=
 
 # Gate recipes resolve modules from go.mod, not from a go.work workspace.
 # go.work here points at ../go-gui and ../go-glyph, which CI never sees, so
@@ -10,12 +13,6 @@ LINT_VERSION := v2.12
 # green". The app/falcon build targets deliberately keep a bare `go` so
 # local development against sibling checkouts still works.
 GO := GOWORK=off go
-
-# golangci-lint is its own binary, so $(GO) does not cover it — but it
-# honours go.work the same way the toolchain does. Without GOWORK=off it
-# type-checks against the sibling working copies and reports breakage that
-# CI, which builds the pinned versions, will never see.
-LINT := GOWORK=off golangci-lint
 
 DEMO_BIN     := falcon
 APP_NAME     := Falcon
@@ -100,14 +97,40 @@ test-race:
 vet:
 	$(GO) vet ./...
 
-# Verify golangci-lint is installed at the version CI pins, so a local pass
-# and a CI pass mean the same thing.
-lint-pin:
-	@golangci-lint --version | grep -q "$(LINT_VERSION:v%=%)" || \
-	  { echo "::error::golangci-lint $(LINT_VERSION) required. Run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINT_VERSION)"; exit 1; }
+# Build the pinned linter on demand, into a repo-local bin.
+#
+# The version lives in tools/lint/go.mod and nowhere else, so local and CI
+# cannot drift -- the old scheme pinned v2.12 here and v2.12 (floating
+# patch) in CI, and checked the pin with a substring grep that also
+# accepted 2.12.10.
+#
+# tools/lint is a SEPARATE module on purpose: a `tool` directive in the root
+# go.mod grew it from 40 to 246 lines and go.sum from 119 to 997; every
+# downstream sibling (go-charts, go-edit, go-kite, go-term, go-map) would
+# inherit that module graph for a linter they never run.
+#
+# GOWORK=off because tools/lint sits inside the repo but is deliberately not
+# a go.work member; without it go refuses to build a module the workspace
+# does not use. The Go build cache makes every run after the first fast.
+#
+# GOOS/GOARCH/CGO_ENABLED/CC are neutralised for the BUILD of the linter:
+# callers set them to pick the target being ANALYSED, and inheriting them
+# here would cross-compile the linter itself into a binary the runner
+# cannot execute. An empty GOOS or GOARCH means "host default" to the go
+# command; CGO_ENABLED=0 makes the caller's CC irrelevant, which
+# golangci-lint (pure Go) never needs.
+$(LINT_BIN): tools/lint/go.mod tools/lint/go.sum
+	GOWORK=off GOOS= GOARCH= CGO_ENABLED=0 GOFLAGS= GOBIN=$(LINT_DIR) \
+	  go -C tools/lint install \
+	  github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 
-lint: lint-pin
-	$(LINT) run ./...
+# Named entry point for callers that want the binary without linting.
+lint-bin: $(LINT_BIN)
+
+# Run golangci-lint at the pinned version. LINT_ARGS passes extra flags
+# through.
+lint: $(LINT_BIN)
+	$(LINT_BIN) run $(LINT_ARGS) ./...
 
 build:
 	$(GO) build ./...
@@ -162,4 +185,5 @@ clean-app:
 
 # Clean test cache and built binaries.
 clean:
+	rm -rf $(LINT_DIR)
 	go clean -testcache ./...

@@ -68,6 +68,9 @@ Thumbs.db
 # Antigravity
 .antigravitycli/
 
+# Pinned linter binary, built by `make lint` from tools/lint.
+.bin/
+
 # Graphify
 graphify-out/
 

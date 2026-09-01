@@ -582,6 +582,30 @@ func applyPointerShape(w *gui.Window, s pointerShape) {
 	}
 }
 
+// syncHoverForModifiers updates cmdHeld from the current modifier state and
+// re-evaluates the hover highlight at the last known pointer position. Called
+// from onKeyDown/onKeyUp so pressing Cmd without moving the mouse still shows
+// the link underline/blue recolor (issue: visual cue missing until mouse move).
+// Main-thread only.
+func (t *Term) syncHoverForModifiers(m gui.Modifier, w *gui.Window) {
+	cmd := m.Has(gui.ModSuper)
+	if cmd == t.mouse.cmdHeld.Load() {
+		return
+	}
+	t.mouse.cmdHeld.Store(cmd)
+	// Bump for OSC 8 recolor: cellRunKey reads cmdHeld directly, and
+	// updateHover's same-cell path only bumps for implicit-URL changes, so a
+	// modifier-only press over an OSC 8 link would otherwise not repaint.
+	t.bumpVersion()
+	if w != nil {
+		w.UpdateWindow()
+	}
+	r, c := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
+	if r >= 0 && c >= 0 {
+		t.updateHover(r, c, w)
+	}
+}
+
 // updateHover updates t.hoverR/C, requests a redraw when entering or leaving
 // a hyperlinked cell run, and sets the cursor to a pointing hand when Cmd is
 // held over a link.
@@ -618,11 +642,13 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 	// A hovered link outranks OSC 22: the link is a property of the cell under
 	// the pointer *right now*, while the OSC 22 shape is a pane-wide default the
 	// application set at some earlier point.
-	switch {
-	case cmd && (curLink != 0 || url != ""):
-		w.SetMouseCursorPointingHand()
-	case shape != pointerDefault:
-		applyPointerShape(w, shape)
+	if w != nil {
+		switch {
+		case cmd && (curLink != 0 || url != ""):
+			w.SetMouseCursorPointingHand()
+		case shape != pointerDefault:
+			applyPointerShape(w, shape)
+		}
 	}
 
 	prevURL := t.mouse.hoverURL
@@ -634,7 +660,9 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 		// without motion doesn't reach here). Redraw if the highlight differs.
 		if url != prevURL {
 			t.bumpVersion()
-			w.UpdateWindow()
+			if w != nil {
+				w.UpdateWindow()
+			}
 		}
 		return
 	}
@@ -642,7 +670,9 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 	t.mouse.hoverC.Store(int32(c))
 	if prevLink != 0 || curLink != 0 || url != prevURL {
 		t.bumpVersion()
-		w.UpdateWindow()
+		if w != nil {
+			w.UpdateWindow()
+		}
 	}
 }
 

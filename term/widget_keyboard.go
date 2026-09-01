@@ -391,6 +391,7 @@ func funcKeySeq(k gui.KeyCode, shift, ctrl bool) []byte {
 // move the viewport instead of writing to the pty; any other key snaps
 // the viewport back to live.
 func (t *Term) onKeyDown(ctx gui.EventCtx) {
+	t.syncHoverForModifiers(ctx.Event.Modifiers, ctx.Window)
 	// Hints first, ahead of copy mode: the entry chords must work from inside
 	// copy mode (a link you scrolled back to find is exactly the one you want
 	// to open), and while hints is up it owns the keyboard outright.
@@ -816,6 +817,7 @@ func (t *Term) encodeKeyEvent(e *gui.Event, w *gui.Window, shift, ctrl bool) []b
 
 // onKeyUp generates KKP key-release sequences (event-type 3) when flag bit 2 is set.
 func (t *Term) onKeyUp(ctx gui.EventCtx) {
+	t.syncHoverForModifiers(ctx.Event.Modifiers, ctx.Window)
 	modes := t.keyModes()
 	if modes.kittyKeyFlags&2 == 0 {
 		return
