@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-02
+
 ### Added
 
 - Cursor appearance is now a user setting. `[general] cursor-style`
@@ -15,6 +17,12 @@ adheres to [Semantic Versioning](https://semver.org/).
   command palette, applied to every open pane for the session. `term.Cfg`
   gains `CursorStyle`, `CursorLocked`, and the live setters `SetCursorStyle`,
   `SetCursorBlink`, `SetCursorLocked`.
+- Pane activity indicators: `term` now reports bells and OSC 133 command ends
+  via `Cfg.OnActivity` / `ActivityKind`, and notifies command completion for
+  background panes (`Cfg.NotifyAfter` / `SetNotifyAfter`) without synthesizing
+  window focus events.
+- `falcon`: soft heap limit to bound RSS after heavy sessions; `GOTERM_PPROF`
+  profiling hook that keeps symbols when stripping.
 
 ### Changed
 
@@ -25,6 +33,28 @@ adheres to [Semantic Versioning](https://semver.org/).
   `CursorBlink: true, CursorLocked: true`.
 - The internal `cursorShape` type is now the exported `term.CursorStyle`, so
   the configured value and the grid state are one type.
+- `falcon` keeps config and workspace state under `~/.config/falcon` rather
+  than `~/.config/go-term`.
+- Blink, auto-scroll, and momentum tickers park when idle to reduce CPU/wakeups.
+- Dependencies: go-gui v0.59.2 → v0.66.1, go-glyph v1.20.1 → v1.24.0 (single-method
+  `View`, per-scope IDs, and related API migrations).
+
+### Fixed
+
+- Bottom-margin scroll regions now correctly feed scrollback.
+- Cmd-hover hyperlink highlight appears without requiring a mouse move.
+- Mouse scroll coast velocity uses the latest sample instead of the first.
+- Windows: ConPTY now measures text by grapheme cluster.
+
+### Security
+
+- URL-open injection fix; third-party GitHub Actions pinned by SHA with
+  least-privilege release token.
+
+### Build
+
+- macOS app bundle signs via `SIGN_IDENTITY` (go-gui #303).
+- `make prepush` local validation gate added.
 
 ## [0.9.0] - 2026-08-12
 
