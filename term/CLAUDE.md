@@ -175,12 +175,17 @@ yields U+10EEEE.
 
 Image lifetime differs by protocol and this distinction is load-bearing. Kitty
 placements are their own layer: text drawn over their cells leaves them alone,
-and only `a=d` removes them (`kittyDeleteID` — lowercase `d=` drops the
-placement, uppercase also frees the stored data). Sixel and iTerm2 images have
-no delete sequence, so a client clears one by painting over the cells it
-occupies; `grid.occludeGraphics`, called from `putCell`, `eraseSpan` (so EL, ED
-and ECH alike) and every flat fill that bypasses `eraseSpan` — ED 2/3,
-`ClearAll` (DECCOLM) and `ScreenAlignment` (DECALN) — is what makes that work.
+as does a bounded erase (EL, ECH, ED 0/1). Two commands remove them: `a=d`
+(`kittyDeleteID` — lowercase `d=` drops the placement, uppercase also frees the
+stored data) and a whole-screen ED 2 / ED 3, which kitty answers with
+`grman_clear` (`grid.clearKittyGraphics`) — ED 2 drops placements reaching the
+live screen, ED 3 drops the ones parked in scrollback too. That is what makes
+`clear` remove an image instead of leaving it on a blank screen. Sixel and
+iTerm2 images have no delete sequence, so a client clears one by painting over
+the cells it occupies; `grid.occludeGraphics`, called from `putCell`,
+`eraseSpan` (so EL, ED and ECH alike) and every flat fill that bypasses
+`eraseSpan` — ED 2/3, `ClearAll` (DECCOLM) and `ScreenAlignment` (DECALN) — is
+what makes that work.
 
 The two layers share one `grid.Graphics` list, so each removal path filters on
 `graphic.kgp` and the split is symmetric: `occludeGraphics` skips KGP entries,

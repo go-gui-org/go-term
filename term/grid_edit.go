@@ -637,6 +637,9 @@ func (g *grid) eraseInDisplay(mode int, selective bool) {
 				g.occludeGraphics(0, g.Rows, 0, g.Cols)
 			}
 		}
+		// ED 2/3 is the one erase that takes the Kitty layer with it, so
+		// `clear` leaves no image behind. Mode 3 reaches into scrollback too.
+		g.clearKittyGraphics(mode == 3)
 		// Mode 3 additionally erases saved lines (scrollback). Dropping
 		// scrollback shifts the content-row coordinate space, so marks,
 		// graphics, and any active selection (all content-row based) must be
