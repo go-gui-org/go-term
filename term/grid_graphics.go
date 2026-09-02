@@ -191,7 +191,8 @@ func (g *grid) AddGraphicKitty(
 // yazi does when the preview moves off an image. Without this the picture
 // stays on screen for the rest of the session. Kitty placements are exempt —
 // KGP is explicit about images being their own layer that text does not
-// disturb, so those go away only via a=d (see kittyDeleteID).
+// disturb, so those go away only via a=d (see kittyDeleteID) or an ED 2 / ED 3
+// screen clear (see clearKittyGraphics).
 //
 // Callers guard on len(g.Graphics) != 0 so the common no-image case costs one
 // length check on the write path. Caller holds Mu.
@@ -369,4 +370,52 @@ func (g *grid) addGraphicCells(src string, widthPx, heightPx, cols, rows int) (i
 		g.markDirty(lr)
 	}
 	return cols, rows
+}
+
+// clearKittyGraphics removes Kitty placements on an ED 2 / ED 3 erase. This
+// is the one erase Kitty honors for its own layer: kitty's
+// screen_erase_in_display calls grman_clear for modes 2 and 3 (and only those
+// — ED 0/1, EL and ECH leave placements standing, which is why occludeGraphics
+// skips them everywhere else).
+//
+// all selects ED 3 ("erase saved lines"): every placement goes, including ones
+// already scrolled into scrollback. Without it only placements still reaching
+// the live screen go — kitty's clear_filter_func, `start_row + rows > 0`, which
+// in content-row space is "ends at or below the first live row".
+//
+// Non-Kitty images are left to occludeGraphics: the flat-fill ED path already
+// occludes them, and ED 3's scrollback drop trims the rest. Caller holds Mu.
+func (g *grid) clearKittyGraphics(all bool) {
+	base := g.Scrollback.Len()
+	j := 0
+	for _, gr := range g.Graphics {
+		if gr.kgp && (all || gr.OriginR+gr.Rows > base) {
+			continue
+		}
+		g.Graphics[j] = gr
+		j++
+	}
+	if j != len(g.Graphics) {
+		g.Graphics = g.Graphics[:j]
+		g.markAllDirty()
+	}
+	// ED 3 while the alt screen is up still erases saved lines (the main
+	// screen's scrollback). A virtual screen has no history, so a flat
+	// screen wipe is correct for ED 2, but for ED 3 every parked main-screen
+	// Kitty placement must go too — otherwise ExitAlt restores an image that
+	// kitty's grman_clear would have removed.
+	if all && g.AltActive && len(g.mainSaved.graphics) != 0 {
+		j = 0
+		for _, gr := range g.mainSaved.graphics {
+			if gr.kgp {
+				continue
+			}
+			g.mainSaved.graphics[j] = gr
+			j++
+		}
+		if j != len(g.mainSaved.graphics) {
+			g.mainSaved.graphics = g.mainSaved.graphics[:j]
+			// No repaint: the alt screen is visible.
+		}
+	}
 }

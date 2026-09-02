@@ -576,8 +576,10 @@ func TestGrid_OccludeGraphics_EraseInDisplay(t *testing.T) {
 	}
 }
 
-// Kitty placements are their own layer: text over them is not a delete. They
-// go away only through a=d, which kittyDeleteID handles.
+// Kitty placements are their own layer: text over them is not a delete, and
+// neither is a bounded erase (EL/ECH/ED 0/1). They go away through a=d
+// (kittyDeleteID) or a whole-screen ED 2/3 — see
+// TestGrid_EraseInDisplay_ClearsKittyPlacements.
 func TestGrid_OccludeGraphics_KittyExempt(t *testing.T) {
 	g := newGrid(10, 40)
 	g.CellPxW, g.CellPxH = 8, 16
@@ -585,9 +587,11 @@ func TestGrid_OccludeGraphics_KittyExempt(t *testing.T) {
 	g.AddGraphicKitty("img.png", 16, 32, 0, 0, 7)
 	g.CursorR, g.CursorC = 3, 5
 	g.Put('x')
-	g.EraseInDisplay(2)
+	g.EraseChars(4)
+	g.CursorR, g.CursorC = 3, 5
+	g.EraseInDisplay(0)
 	if len(g.Graphics) != 1 {
-		t.Fatal("KGP placement removed by text/erase; only a=d may remove it")
+		t.Fatal("KGP placement removed by text/bounded erase; only a=d or ED 2/3 may")
 	}
 }
 
@@ -844,5 +848,112 @@ func BenchmarkPutCell_GraphicsInScrollback(b *testing.B) {
 		for range 80 {
 			g.Put('x')
 		}
+	}
+}
+
+// `clear` emits ED 3 then ED 2, and in kitty both take the graphics layer with
+// them (screen_erase_in_display → grman_clear). Without that the image stayed
+// on a cleared screen for the rest of the session.
+func TestGrid_EraseInDisplay_ClearsKittyPlacements(t *testing.T) {
+	g := newGrid(4, 10)
+	g.CellPxW, g.CellPxH = 8, 16
+	g.AddGraphicKitty("img.png", 16, 32, 0, 0, 7)
+	if len(g.Graphics) != 1 {
+		t.Fatalf("setup: want 1 placement, got %d", len(g.Graphics))
+	}
+	g.EraseInDisplay(2)
+	if len(g.Graphics) != 0 {
+		t.Fatalf("ED 2 left %d Kitty placements", len(g.Graphics))
+	}
+}
+
+// ED 2 only reaches placements touching the live screen; one scrolled fully
+// into scrollback survives, exactly as kitty's clear_filter_func has it. ED 3
+// ("erase saved lines") takes that one too.
+func TestGrid_EraseInDisplay_KittyScrollbackScope(t *testing.T) {
+	for _, tc := range []struct {
+		mode int
+		want int
+	}{{2, 1}, {3, 0}} {
+		g := newGrid(4, 10)
+		g.ScrollbackCap = 100
+		g.CellPxW, g.CellPxH = 8, 16
+		g.AddGraphicKitty("img.png", 8, 16, 0, 0, 7)
+		// Push the placement's row out of the live screen and into history.
+		g.ScrollUp(8)
+		if g.Scrollback.Len() == 0 {
+			t.Fatal("setup: nothing scrolled into scrollback")
+		}
+		g.EraseInDisplay(tc.mode)
+		if len(g.Graphics) != tc.want {
+			t.Errorf("ED %d: want %d placements, got %d",
+				tc.mode, tc.want, len(g.Graphics))
+		}
+	}
+}
+
+// ED 3 while the alt screen is up must also clear the parked main-screen
+// Kitty placements, or ExitAlt would resurrect an image kitty's grman_clear
+// (all=true) would have removed. ED 2 (all=false) leaves parked images alone.
+func TestGrid_EraseInDisplay_KittyAltScope(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode int
+		want int
+	}{{`ED 2 keeps parked`, 2, 1}, {`ED 3 drops parked`, 3, 0}} {
+		g := newGrid(4, 10)
+		g.ScrollbackCap = 100
+		g.CellPxW, g.CellPxH = 8, 16
+		g.AddGraphicKitty("main.png", 8, 16, 0, 0, 7)
+		g.EnterAlt()
+		if len(g.mainSaved.graphics) != 1 {
+			t.Fatalf("%s setup: parked want 1, got %d", tc.name, len(g.mainSaved.graphics))
+		}
+		g.EraseInDisplay(tc.mode)
+		if n := len(g.mainSaved.graphics); n != tc.want {
+			t.Errorf("%s: parked want %d, got %d", tc.name, tc.want, n)
+		}
+		// ED 2 must not have leaked non-Kitty logic onto the parked list:
+		// a parked sixel would survive an ED 2 either way.
+	}
+}
+
+// Selective ED 2/3 still takes the Kitty layer: DECSCA protection guards
+// cells, not the separate Kitty placement layer, and kitty's grman_clear is
+// keyed only on the erase mode, not the selective flag.
+func TestGrid_EraseInDisplay_KittySelectiveScope(t *testing.T) {
+	g := newGrid(4, 10)
+	g.CellPxW, g.CellPxH = 8, 16
+	g.AddGraphicKitty("img.png", 8, 16, 0, 0, 7)
+	g.SelectiveEraseInDisplay(2)
+	if len(g.Graphics) != 0 {
+		t.Fatalf("selective ED 2 left %d Kitty placements", len(g.Graphics))
+	}
+}
+
+// A non-Kitty (sixel/iTerm2) image is never touched by the Kitty path —
+// it goes away through occludeGraphics, not clearKittyGraphics, so a kitty
+// erase must leave it to its own removal signal (painting over cells).
+func TestGrid_EraseInDisplay_KittyPathLeavesSixel(t *testing.T) {
+	g := newGrid(4, 10)
+	g.CellPxW, g.CellPxH = 8, 16
+	// A sixel image on the live screen: ED 2's flat fill already occludes it,
+	// so it vanishes — but through the other layer, not the Kitty filter.
+	// A scrollback sixel survives ED 2, proving the Kitty filter did not
+	// claim it.
+	g.ScrollbackCap = 100
+	g.AddGraphic("sixel.png", 8, 16)
+	g.ScrollUp(8)
+	if g.Scrollback.Len() == 0 {
+		t.Fatal("setup: nothing scrolled into scrollback")
+	}
+	g.EraseInDisplay(2)
+	if len(g.Graphics) != 1 {
+		t.Fatalf("ED 2 removed a scrollback sixel via Kitty path; want 1, got %d",
+			len(g.Graphics))
+	}
+	g.EraseInDisplay(3)
+	if len(g.Graphics) != 0 {
+		t.Fatalf("ED 3 left %d scrollback sixels (should trim via scrollback drop)", len(g.Graphics))
 	}
 }
