@@ -128,7 +128,7 @@ func (t *Term) onChar(ctx gui.EventCtx) {
 		if r >= 'A' && r <= 'Z' && ctx.Event.Modifiers.Has(gui.ModShift) {
 			cp = int(r-'A') + 'a'
 		}
-		if seq := kittyKeySeq(cp, ctx.Event.Modifiers, kkpFlags, false); seq != nil {
+		if seq := kittyPrintableSeq(cp, r, ctx.Event.Modifiers, kkpFlags); seq != nil {
 			t.writeBytes(seq)
 			ctx.Consume()
 			return
@@ -148,17 +148,9 @@ func (t *Term) onChar(ctx gui.EventCtx) {
 	ctx.Consume()
 }
 
-// kittyKeySeq encodes a key in Kitty Keyboard Protocol format: CSI codepoint u
-// or CSI codepoint ; modifiers u. Returns nil when flags == 0 (legacy mode).
-// The modifier parameter follows the KKP spec: 1=none, 2=shift, 3=shift+alt,
-// 5=ctrl, 6=shift+ctrl, 9=super, ... (1 + sum of modifier bits).
-// When release is true, generates a key release sequence (event-type 3):
-// CSI codepoint ; modifiers : 3 u. The modifier field is mandatory when
-// event-type is present, even when mod==1 (no modifiers).
-func kittyKeySeq(codepoint int, mods gui.Modifier, flags uint32, release bool) []byte {
-	if flags == 0 || codepoint <= 0 {
-		return nil
-	}
+// kittyModParam returns the KKP modifier parameter: 1 plus the sum of the
+// modifier bits (shift 1, alt 2, ctrl 4, super 8).
+func kittyModParam(mods gui.Modifier) int {
 	mod := 1
 	if mods.Has(gui.ModShift) {
 		mod += 1
@@ -172,6 +164,73 @@ func kittyKeySeq(codepoint int, mods gui.Modifier, flags uint32, release bool) [
 	if mods.Has(gui.ModSuper) {
 		mod += 8
 	}
+	return mod
+}
+
+// kittyPrintableSeq encodes a printable keystroke under KKP flag 8 (report all
+// keys as escape codes). base is the unshifted codepoint that belongs in the
+// key field; produced is the character the OS actually generated.
+//
+// Two optional fields carry the shifted form, and without one of them the child
+// cannot tell Shift+m from M — the shift state alone does not name a layout's
+// uppercase. Flag 4 (report alternate keys) puts the shifted codepoint in the
+// key field as base:shifted; flag 16 (report associated text) appends the
+// produced text as a third parameter. fish asks for both, and replying with a
+// bare "CSI 109;2u" made every shifted character vanish at its prompt.
+//
+// The modifier field is mandatory once the text field is present, even when it
+// is the no-modifier 1, because the parameters are positional.
+//
+// Returns nil when flag 8 is off, so the caller falls back to writing the
+// character itself.
+func kittyPrintableSeq(
+	base int, produced rune, mods gui.Modifier, flags uint32,
+) []byte {
+	if flags&8 == 0 || base <= 0 {
+		return nil
+	}
+	mod := kittyModParam(mods)
+	// Longest form is base:shifted;mod;text — five digits per codepoint plus
+	// four separators, so one allocation covers every keystroke.
+	b := make([]byte, 0, 24)
+	b = append(b, 0x1b, '[')
+	b = strconv.AppendInt(b, int64(base), 10)
+	// Alternate key: only meaningful when shifting actually changed the
+	// character. Shift+1 on a US layout reports '!' as its own base (onChar
+	// has no key code to derive '1' from), so there is nothing to add there.
+	if flags&4 != 0 && int(produced) != base {
+		b = append(b, ':')
+		b = strconv.AppendInt(b, int64(produced), 10)
+	}
+	// The text field reports what the key typed, so it carries text only.
+	// Control characters name a key, not text, and KKP forbids them here;
+	// onKeyDown owns Enter/Tab/Escape/Backspace, so this is a backstop
+	// against a backend that routes one of them through onChar instead.
+	wantText := flags&16 != 0 && produced >= 0x20 && produced != 0x7f
+	if mod != 1 || wantText {
+		b = append(b, ';')
+		b = strconv.AppendInt(b, int64(mod), 10)
+	}
+	if wantText {
+		b = append(b, ';')
+		b = strconv.AppendInt(b, int64(produced), 10)
+	}
+	b = append(b, 'u')
+	return b
+}
+
+// kittyKeySeq encodes a key in Kitty Keyboard Protocol format: CSI codepoint u
+// or CSI codepoint ; modifiers u. Returns nil when flags == 0 (legacy mode).
+// The modifier parameter follows the KKP spec: 1=none, 2=shift, 3=shift+alt,
+// 5=ctrl, 6=shift+ctrl, 9=super, ... (1 + sum of modifier bits).
+// When release is true, generates a key release sequence (event-type 3):
+// CSI codepoint ; modifiers : 3 u. The modifier field is mandatory when
+// event-type is present, even when mod==1 (no modifiers).
+func kittyKeySeq(codepoint int, mods gui.Modifier, flags uint32, release bool) []byte {
+	if flags == 0 || codepoint <= 0 {
+		return nil
+	}
+	mod := kittyModParam(mods)
 	b := []byte("\x1b[")
 	b = strconv.AppendInt(b, int64(codepoint), 10)
 	if mod != 1 || release {
