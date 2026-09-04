@@ -80,4 +80,8 @@ deep-dive/
 # Zed
 .zed/
 
+.direnv/
+.tokensave/
 .codegraph/
+.codehound-cache/
+.goslop-cache/

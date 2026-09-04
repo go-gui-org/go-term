@@ -735,3 +735,67 @@ func TestOnChar_IMECommitReachesSearchBar(t *testing.T) {
 		t.Errorf("search query = %q, want %q", got, want)
 	}
 }
+
+// kittyPrintableSeq must give the child a way to recover the shifted
+// character. A bare "CSI 109;2u" says only "shift and m were held", which no
+// client can turn back into 'M' without knowing the keyboard layout — fish
+// (flags 29) dropped every shifted character on that encoding.
+func TestKittyPrintableSeq(t *testing.T) {
+	tests := []struct {
+		name     string
+		base     int
+		produced rune
+		mods     gui.Modifier
+		flags    uint32
+		want     string
+	}{{
+		// Flag 8 alone: no room for the shifted form, so the legacy
+		// key-plus-modifier encoding is all there is.
+		name: "report all keys only", base: 'm', produced: 'M',
+		mods: gui.ModShift, flags: 8, want: "\x1b[109;2u",
+	}, {
+		// Flag 4 adds the alternate-key field: base:shifted.
+		name: "alternate keys", base: 'm', produced: 'M',
+		mods: gui.ModShift, flags: 8 | 4, want: "\x1b[109:77;2u",
+	}, {
+		// Flag 16 adds the associated text as a third parameter. The
+		// modifier field becomes mandatory because parameters are positional.
+		name: "associated text", base: 'm', produced: 'M',
+		mods: gui.ModShift, flags: 8 | 16, want: "\x1b[109;2;77u",
+	}, {
+		// What fish actually asks for.
+		name: "fish flags", base: 'm', produced: 'M',
+		mods: gui.ModShift, flags: 29, want: "\x1b[109:77;2;77u",
+	}, {
+		// An unmodified key still reports its text, with the placeholder
+		// modifier 1.
+		name: "unshifted with text", base: 'm', produced: 'm',
+		mods: 0, flags: 29, want: "\x1b[109;1;109u",
+	}, {
+		// Shift+1 arrives as '!' with no key code to derive '1' from, so the
+		// base is the produced character itself and the alternate-key field
+		// would be a duplicate. The text field carries the answer.
+		name: "shifted symbol", base: '!', produced: '!',
+		mods: gui.ModShift, flags: 29, want: "\x1b[33;2;33u",
+	}, {
+		// A layout whose shifted form is not ASCII gets no alternate-key
+		// field (onChar cannot derive the base), so the text field is the
+		// only thing that names the character.
+		name: "non-ascii", base: 0xC9, produced: 0xC9,
+		mods: gui.ModShift, flags: 29, want: "\x1b[201;2;201u",
+	}, {
+		// A control character names a key, not text. onKeyDown owns those,
+		// but if one arrives here the text field must stay off.
+		name: "control character", base: '\r', produced: '\r',
+		mods: 0, flags: 29, want: "\x1b[13u",
+	}, {
+		name: "kkp disabled", base: 'm', produced: 'M',
+		mods: gui.ModShift, flags: 0, want: "",
+	}}
+	for _, tc := range tests {
+		got := kittyPrintableSeq(tc.base, tc.produced, tc.mods, tc.flags)
+		if string(got) != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
