@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The quit confirmation in the `falcon` example now defaults to "Yes", so Enter
+  quits. The dialog is only reached after a deliberate quit gesture; Esc and the
+  "No" button still cancel.
+
+- Bumped go-gui to v0.71.0, which re-exports `DialogCfg.DefaultButton`.
+
+### Fixed
+
+- Cmd+hover and Cmd+click open links again inside full-screen apps that read the
+  mouse (Claude Code, `mdr`, anything using `?1002`/`?1003`). The motion report
+  returned before hover resolution, so nothing highlighted, and the press report
+  returned before the link-open path, so nothing opened. Cmd is now honored for
+  both: the link under the pointer always resolves, and a Cmd+click is taken
+  locally only when it lands on a link — every other click and every drag still
+  goes to the child. Cmd carries no SGR modifier bit, so the child could not
+  tell these clicks from plain ones in any case.
+
 ## [0.11.0] - 2026-09-07
 
 ### Fixed

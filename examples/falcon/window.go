@@ -132,16 +132,27 @@ func (a *app) onCloseRequest(w *gui.Window) {
 		// loses keyboard focus under the metal backend's manual
 		// event pump, and doesn't participate in the quit-request
 		// dedup, so it could stack duplicate dialogs.
-		w.Dialog(gui.DialogCfg{
-			DialogType: gui.DialogConfirm,
-			Title:      "Quit " + appName + "?",
-			Body: fmt.Sprintf(
-				"%d active terminal(s) will be terminated. Quit anyway?", n),
-			OnOkYes: a.saveAndClose,
-		})
+		w.Dialog(a.quitConfirmDialog(n))
 		return
 	}
 	a.saveAndClose(w)
+}
+
+// quitConfirmDialog builds the "terminals are still running" confirmation.
+// Split out of onCloseRequest so its wiring is assertable: onCloseRequest
+// itself needs a live *gui.Window and cannot be called from a test.
+func (a *app) quitConfirmDialog(n int) gui.DialogCfg {
+	return gui.DialogCfg{
+		DialogType: gui.DialogConfirm,
+		Title:      "Quit " + appName + "?",
+		Body: fmt.Sprintf(
+			"%d active terminal(s) will be terminated. Quit anyway?", n),
+		// Enter quits. Reaching this dialog already took a deliberate quit
+		// gesture (Cmd+Q, the close button), so "Yes" is the answer the user
+		// came to give; Esc and the No button still cancel.
+		DefaultButton: gui.DialogButtonYes,
+		OnOkYes:       a.saveAndClose,
+	}
 }
 
 // saveAndClose persists the workspace (when a save path is configured) and

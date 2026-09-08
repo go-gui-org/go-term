@@ -1657,3 +1657,165 @@ func TestOSC22AppliesCursor(t *testing.T) {
 		t.Fatalf("link hover cursor = %v, want CursorPointingHand", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Cmd links inside a mouse-reporting app (?1002 / ?1003)
+//
+// A full-screen TUI that reads the mouse (Claude Code, mdr, anything using
+// bubbletea's EnableMouseAllMotion) used to swallow both link gestures: the
+// motion report returned before updateHover, and the press report returned
+// before the Cmd link-open path in onMouseUp. Super carries no SGR modifier
+// bit, so taking these two cases costs the child nothing it could act on.
+// ---------------------------------------------------------------------------
+
+// reportingLinkTerm returns a Term with ?1003 + ?1006 active and a URL on
+// row 0 starting at column 4 ("see https://go.dev now").
+func reportingLinkTerm(t *testing.T) (*Term, *[]byte) {
+	t.Helper()
+	tm, buf := newMouseTerm(4, 30)
+	putRow(tm.grid, "see https://go.dev now")
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrackAny = true // ?1003
+	tm.grid.MouseSGR = true      // ?1006
+	tm.grid.Mu.Unlock()
+	return tm, buf
+}
+
+// moveTo emits a pointer motion at the given pixel position. Cells are 10x20
+// in newMouseTerm, so column n spans x = [10n, 10n+10).
+func moveTo(tm *Term, x, y float32, mods gui.Modifier) {
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{
+		MouseX: x, MouseY: y, Modifiers: mods,
+	}, Window: &gui.Window{}})
+}
+
+func TestOnMouseMove_CmdHoverResolvesLinkUnderAnyMotion(t *testing.T) {
+	tm, _ := reportingLinkTerm(t)
+
+	moveTo(tm, 65, 10, gui.ModSuper) // row 0, col 6 — inside the URL
+
+	if tm.mouse.hoverURL != "https://go.dev" {
+		t.Errorf("Cmd+hover under ?1003: hoverURL = %q, want %q",
+			tm.mouse.hoverURL, "https://go.dev")
+	}
+	if len(tm.mouse.hoverSpans) == 0 {
+		t.Error("Cmd+hover under ?1003: expected highlight spans for the draw pass")
+	}
+}
+
+// The hover fix must not steal the child's motion events.
+func TestOnMouseMove_CmdHoverStillReportsMotion(t *testing.T) {
+	tm, buf := reportingLinkTerm(t)
+
+	moveTo(tm, 65, 10, gui.ModSuper)
+
+	if got := string(*buf); !strings.Contains(got, "\x1b[<35;7;1M") {
+		t.Errorf("Cmd+hover under ?1003: report = %q, want any-motion at col 7 row 1", got)
+	}
+}
+
+// Without Cmd the pointer is the child's alone — no hover resolution runs.
+func TestOnMouseMove_NoCmdSkipsHoverUnderAnyMotion(t *testing.T) {
+	tm, _ := reportingLinkTerm(t)
+
+	moveTo(tm, 65, 10, 0)
+
+	if tm.mouse.hoverURL != "" {
+		t.Errorf("no Cmd under ?1003: hoverURL = %q, want empty", tm.mouse.hoverURL)
+	}
+}
+
+func TestOnClick_CmdOnLinkSuppressesPressReport(t *testing.T) {
+	tm, buf := reportingLinkTerm(t)
+
+	clickAt(tm, 65, 10, gui.ModSuper) // on the URL
+
+	if got := string(*buf); got != "" {
+		t.Errorf("Cmd+click on a link: reported %q, want nothing", got)
+	}
+	if tm.mouse.dragReport {
+		t.Error("Cmd+click on a link: dragReport set, so onMouseUp would skip the open path")
+	}
+}
+
+func TestOnClick_CmdOffLinkStillReports(t *testing.T) {
+	tm, buf := reportingLinkTerm(t)
+
+	clickAt(tm, 5, 10, gui.ModSuper) // col 0 — "s" of "see", not a link
+
+	if got := string(*buf); !strings.Contains(got, "\x1b[<0;1;1M") {
+		t.Errorf("Cmd+click off a link: report = %q, want a left press at col 1 row 1", got)
+	}
+	if !tm.mouse.dragReport {
+		t.Error("Cmd+click off a link: expected the drag to stay the child's")
+	}
+}
+
+func TestOnMouseUp_CmdClickOnLinkUnderReportingOpensURL(t *testing.T) {
+	tm, buf := reportingLinkTerm(t)
+
+	var opened string
+	orig := openURLFn
+	openURLFn = func(u string) { opened = u }
+	defer func() { openURLFn = orig }()
+
+	clickAt(tm, 65, 10, gui.ModSuper)
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: &gui.Event{
+		MouseX: 65, MouseY: 10,
+		MouseButton: gui.MouseLeft,
+		Modifiers:   gui.ModSuper,
+	}, Window: &gui.Window{}})
+
+	if opened != "https://go.dev" {
+		t.Errorf("Cmd+click under ?1003: opened %q, want %q", opened, "https://go.dev")
+	}
+	if got := string(*buf); got != "" {
+		t.Errorf("Cmd+click under ?1003: reported %q, want nothing", got)
+	}
+}
+
+// An OSC 8 destination outranks the text under the pointer, the same
+// precedence linkURLAt gives the non-reporting path.
+func TestLinkURLAt_ExplicitLinkWinsOverDetectedText(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	putRow(tm.grid, "see https://go.dev now")
+	tm.grid.Mu.Lock()
+	id := tm.grid.internLink("https://example.com")
+	tm.grid.At(0, 6).LinkID = id
+	tm.grid.Mu.Unlock()
+
+	if got := tm.linkURLAt(0, 6); got != "https://example.com" {
+		t.Errorf("linkURLAt on an OSC 8 cell = %q, want the explicit destination", got)
+	}
+	if got := tm.linkURLAt(0, 7); got != "https://go.dev" {
+		t.Errorf("linkURLAt on a plain URL cell = %q, want the detected URL", got)
+	}
+}
+
+// A move without Cmd resolves no link, but must still track where the pointer
+// is: syncHoverForModifiers resolves at the stored cell, so a stale one made a
+// later Cmd press light up the previously Cmd+clicked link instead of the one
+// under the cursor.
+func TestOnMouseMove_ReportingWithoutCmdStillTracksHoverCell(t *testing.T) {
+	tm, _ := newMouseTerm(4, 40)
+	putRow(tm.grid, "https://a.dev and https://b.dev")
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrackAny = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+
+	// Cmd over the first link — the state a Cmd+click leaves behind.
+	moveTo(tm, 35, 10, gui.ModSuper) // col 3
+	if tm.mouse.hoverURL != "https://a.dev" {
+		t.Fatalf("setup: hoverURL = %q, want the first link", tm.mouse.hoverURL)
+	}
+
+	// Release Cmd, move onto the second link, then press Cmd without moving.
+	moveTo(tm, 245, 10, 0) // col 24
+	tm.syncHoverForModifiers(gui.ModSuper, &gui.Window{})
+
+	if tm.mouse.hoverURL != "https://b.dev" {
+		t.Errorf("Cmd pressed over the second link: hoverURL = %q, want %q",
+			tm.mouse.hoverURL, "https://b.dev")
+	}
+}

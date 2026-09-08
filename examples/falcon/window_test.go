@@ -125,3 +125,26 @@ func TestAppCloseWithoutInit(t *testing.T) {
 	a := &app{}
 	a.close() // must not panic
 }
+
+// TestQuitConfirmDialogDefaultsToYes guards the quit confirmation's keyboard
+// default. The dialog only appears after a deliberate quit gesture, so Enter
+// must quit; go-gui's own default is "No", which silently made Enter a no-op.
+func TestQuitConfirmDialogDefaultsToYes(t *testing.T) {
+	cfg := (&app{}).quitConfirmDialog(3)
+
+	if cfg.DialogType != gui.DialogConfirm {
+		t.Errorf("DialogType = %v, want DialogConfirm", cfg.DialogType)
+	}
+	if cfg.DefaultButton != gui.DialogButtonYes {
+		t.Errorf("DefaultButton = %v, want DialogButtonYes: Enter would not quit",
+			cfg.DefaultButton)
+	}
+	// Without OnOkYes the dialog closes on "Yes" and nothing quits or saves.
+	if cfg.OnOkYes == nil {
+		t.Error("OnOkYes is nil: confirming would neither save nor close")
+	}
+	// The count is what tells the user how much is about to be killed.
+	if !strings.Contains(cfg.Body, "3 active") {
+		t.Errorf("Body = %q, want it to name the live terminal count", cfg.Body)
+	}
+}
