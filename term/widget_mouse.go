@@ -345,7 +345,16 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 	}
 	r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
 	snap := t.mouseSnap()
-	if snap.shouldReport() {
+	// A Cmd+click that lands on a link is a local gesture even while the child
+	// is reading the mouse. Super has no SGR modifier bit (see mouseModBits), so
+	// the child could not have distinguished this click from a plain one — it
+	// loses nothing it could have acted on. The exception is deliberately narrow:
+	// only a click actually on a link is taken, so every other click, and every
+	// drag, still reports and a full-screen app's own mouse handling is intact.
+	cmdLink := ctx.Event.MouseButton == gui.MouseLeft &&
+		ctx.Event.Modifiers.Has(gui.ModSuper) &&
+		t.linkURLAt(r, c) != ""
+	if snap.shouldReport() && !cmdLink {
 		base, ok := mouseSGRBaseButton(ctx.Event.MouseButton)
 		if !ok {
 			return
@@ -479,31 +488,25 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 
 	r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
 	snap := t.mouseSnap()
-	if snap.sgr && snap.live {
-		// Dedupe: only emit when crossing a cell boundary.
-		if r == t.mouse.lastR && c == t.mouse.lastC {
-			if t.mouse.dragReport {
-				return
-			}
-			// Local-selection drag: still fall through to update
-			// SelHead at unchanged coords (cheap; avoids stale state).
+	if t.motionReport(ctx.Event, snap, r, c) {
+		// The motion belongs to the child, but a Cmd-held pointer still has to
+		// resolve the link under it: without this, an app driving ?1002/?1003
+		// (Claude Code, mdr, anything bubbletea's EnableMouseAllMotion) never
+		// reached updateHover, so Cmd-hover highlighted nothing at all. The
+		// report went out either way — Super carries no SGR modifier bit (see
+		// mouseModBits), so the child cannot tell the difference.
+		if cmd {
+			t.updateHover(r, c, ctx.Window)
+		} else {
+			// No link resolution without Cmd, but the pointer cell still has to
+			// be recorded: a later Cmd press resolves the link at the *stored*
+			// cell (syncHoverForModifiers), so leaving it stale highlighted
+			// whichever link the pointer last sat on while Cmd was down —
+			// typically the one just Cmd+clicked.
+			t.mouse.hoverR.Store(int32(r))
+			t.mouse.hoverC.Store(int32(c))
 		}
-		switch {
-		case t.mouse.dragReport && snap.drag:
-			base, ok := mouseSGRBaseButton(t.mouse.dragButton)
-			if !ok {
-				return
-			}
-			cb := base + mouseModBits(ctx.Event.Modifiers) + 32
-			t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
-			t.mouse.lastR, t.mouse.lastC = r, c
-			return
-		case !t.mouse.dragging && snap.any:
-			cb := 35 + mouseModBits(ctx.Event.Modifiers) // 3+32 = motion, no button
-			t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
-			t.mouse.lastR, t.mouse.lastC = r, c
-			return
-		}
+		return
 	}
 	if !t.mouse.dragging || t.mouse.dragReport {
 		// Update hover for hyperlink highlighting even when not dragging.
@@ -543,6 +546,41 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 	t.bumpVersion()
 	ctx.Window.UpdateWindow()
 	t.updateHover(r, c, ctx.Window)
+}
+
+// motionReport emits the ?1002 drag report or the ?1003 any-motion report for
+// this move, when the current modes call for one. Returns true when the event
+// belongs to the child, i.e. the local selection and hover paths in
+// onMouseMove must not also act on it.
+func (t *Term) motionReport(e *gui.Event, snap mouseSnap, r, c int) bool {
+	if !snap.sgr || !snap.live {
+		return false
+	}
+	// Dedupe: only emit when crossing a cell boundary.
+	if r == t.mouse.lastR && c == t.mouse.lastC {
+		if t.mouse.dragReport {
+			return true
+		}
+		// Local-selection drag: still fall through to update
+		// SelHead at unchanged coords (cheap; avoids stale state).
+	}
+	switch {
+	case t.mouse.dragReport && snap.drag:
+		base, ok := mouseSGRBaseButton(t.mouse.dragButton)
+		if !ok {
+			return true
+		}
+		cb := base + mouseModBits(e.Modifiers) + 32
+		t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+		t.mouse.lastR, t.mouse.lastC = r, c
+		return true
+	case !t.mouse.dragging && snap.any:
+		cb := 35 + mouseModBits(e.Modifiers) // 3+32 = motion, no button
+		t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+		t.mouse.lastR, t.mouse.lastC = r, c
+		return true
+	}
+	return false
 }
 
 // pointerShapeSnap copies the OSC 22 shape out from under g.Mu so the caller
@@ -716,19 +754,9 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 	// at the click cell, matching the Cmd-hover highlight.
 	if !t.grid.SelActive {
 		if ctx.Event.Modifiers&gui.ModSuper != 0 || ctx.Event.Modifiers&gui.ModCtrl != 0 {
-			url := func() string {
-				t.grid.Mu.Lock()
-				defer t.grid.Mu.Unlock()
-				cell := t.grid.ViewCellAt(r, c)
-				if u := t.grid.LinkURL(cell.LinkID); u != "" {
-					return u
-				}
-				cp := contentPos{Row: t.grid.viewportToContent(r), Col: c}
-				u, _, _ := t.grid.detectURLAt(cp)
-				return u
-			}()
+			url := t.linkURLAt(r, c)
 			if url != "" {
-				openURL(url)
+				openURLFn(url)
 				ctx.Consume()
 				return
 			}
@@ -751,6 +779,27 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 	ctx.Window.UpdateWindow()
 	ctx.Event.IsHandled = true
 }
+
+// linkURLAt resolves the link at viewport cell (r,c). An explicit OSC 8
+// destination wins; otherwise implicit URL detection runs at the same cell,
+// matching the precedence the Cmd-hover highlight uses. Returns "" when the
+// cell carries no link.
+func (t *Term) linkURLAt(r, c int) string {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	cell := t.grid.ViewCellAt(r, c)
+	if u := t.grid.LinkURL(cell.LinkID); u != "" {
+		return u
+	}
+	cp := contentPos{Row: t.grid.viewportToContent(r), Col: c}
+	u, _, _ := t.grid.detectURLAt(cp)
+	return u
+}
+
+// openURLFn is the indirection the widget calls instead of openURL directly, so
+// a test can assert that a gesture reached the open path without launching a
+// real browser. Production never reassigns it.
+var openURLFn = openURL
 
 // openURL opens url with the OS default browser/handler.
 // Only http, https, and mailto schemes are permitted; other URI schemes

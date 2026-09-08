@@ -184,7 +184,7 @@ func (t *Term) commitHint(idx int, w *gui.Window) {
 	default:
 		// openURL enforces the http/https/mailto allowlist, so a hostile OSC 8
 		// destination is no more dangerous here than under Cmd+click.
-		openURL(url)
+		openURLFn(url)
 	}
 }
 
