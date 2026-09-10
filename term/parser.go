@@ -28,6 +28,9 @@ type parser struct {
 	kittyOpenID       uint32
 	kittyOpenDropped  bool
 	kittyPendingBytes int
+	// kittyPendingSeq stamps each pending transmission with its insertion
+	// order so a full table evicts the oldest (see evictOldestPending).
+	kittyPendingSeq uint64
 
 	// onTitle, if non-nil, is invoked for OSC 0/1/2 (window title).
 	// onReply, if non-nil, is invoked when the parser needs to write
@@ -186,9 +189,16 @@ func (p *parser) popTitle() {
 // hardReset performs RIS (ESC c): the grid returns to its power-on state and
 // the parser drops the escape-level state it owns. The current title is kept —
 // the widget owns the window title, and RIS gives no replacement to show.
+//
+// The in-flight KGP state goes with it. `reset` is the only recovery a user
+// has, and without this an abandoned chunked transfer keeps its slot (and its
+// buffered base64) for the life of the pane, so a stream that fills the
+// pending table denies every later image permanently.
 func (p *parser) hardReset() {
 	p.g.HardReset()
 	p.titleStack = p.titleStack[:0]
+	p.kittyResetTransfers()
+	p.kittyDropStore()
 }
 
 // newParser binds a parser to a grid. Callers must hold g.Mu while calling

@@ -54,7 +54,12 @@ func (g *grid) addMark(kind markKind, exit int16) {
 		Row: row, Kind: kind, Exit: exit, Col: int16(g.settledCol()),
 	})
 	if len(g.Marks) > maxMarks {
-		g.Marks = g.Marks[len(g.Marks)-maxMarks:]
+		// Copy down rather than reslice forward: a forward reslice leaves the
+		// dropped head inside the same allocation and shrinks the remaining
+		// capacity by one on every trim, so the backing array reallocates and
+		// doubles once it runs out. Copying keeps it at exactly maxMarks.
+		copy(g.Marks, g.Marks[len(g.Marks)-maxMarks:])
+		g.Marks = g.Marks[:maxMarks]
 	}
 	g.marksVer++
 }

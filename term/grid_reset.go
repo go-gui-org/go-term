@@ -204,6 +204,13 @@ func (g *grid) HardReset() {
 	g.reflowArena = rowArena{}
 	g.Marks = g.Marks[:0]
 	g.marksVer++
+	// The OSC 8 registry follows the cells that referenced it. Keeping it
+	// would pin every URL of the old session and — once maxLinkEntries was
+	// reached — leave internLink refusing new links forever, so `reset` could
+	// not recover a pane whose registry had filled up.
+	clear(g.links)
+	clear(g.linkIDs)
+	g.nextLink = 1
 	g.Graphics = g.Graphics[:0]
 	// Virtual placements go too: RIS wipes the screen, so every placeholder
 	// cell that could have named one is gone as well.

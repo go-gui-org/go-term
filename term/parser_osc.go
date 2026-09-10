@@ -224,7 +224,7 @@ func (p *parser) dispatchOSC() {
 		}
 		// iTerm2-style notification: OSC 9 ; message BEL — body only, no title.
 		if p.onNotify != nil {
-			p.onNotify("", truncatePaste(pt, notifyMax))
+			p.onNotify("", truncatePaste(sanitizeNotifyBody(pt), notifyMax))
 		}
 	case 52:
 
@@ -254,7 +254,8 @@ func (p *parser) dispatchOSC() {
 			title, body = parts[1], parts[2]
 		}
 		if p.onNotify != nil {
-			p.onNotify(truncatePaste(title, notifyMax), truncatePaste(body, notifyMax))
+			p.onNotify(truncatePaste(sanitizeOSCString(title), notifyMax),
+				truncatePaste(sanitizeNotifyBody(body), notifyMax))
 		}
 	case 1337:
 		p.handleOSC1337(pt)
@@ -678,6 +679,33 @@ func sanitizeOSCString(s string) string {
 			}
 			return buf.String()
 		}
+	}
+	return s
+}
+
+// sanitizeNotifyBody strips the control bytes from a notification body, but
+// keeps newline and tab: a body is the one OSC payload that legitimately spans
+// lines (notify-send renders them), while a title is a single line by nature
+// and goes through sanitizeOSCString instead. The delivery path passes both as
+// argv or environment, never as interpolated script source, so this is about
+// what the text *looks* like, not about injection.
+func sanitizeNotifyBody(s string) string {
+	keep := func(b byte) bool {
+		return b >= 0x20 && b != 0x7F || b == '\n' || b == '\t'
+	}
+	for i := 0; i < len(s); i++ {
+		if keep(s[i]) {
+			continue
+		}
+		var buf strings.Builder
+		buf.Grow(len(s))
+		buf.WriteString(s[:i])
+		for j := i + 1; j < len(s); j++ {
+			if keep(s[j]) {
+				buf.WriteByte(s[j])
+			}
+		}
+		return buf.String()
 	}
 	return s
 }

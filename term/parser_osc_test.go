@@ -794,3 +794,30 @@ func TestFromHexNibble(t *testing.T) {
 		}
 	}
 }
+
+// A title is a single line by nature, so control bytes are stripped from it
+// outright. A notification body legitimately spans lines (notify-send renders
+// them), so it keeps newline and tab and loses the rest. ESC cannot appear in
+// the payload at all — it terminates the OSC — so the bytes that matter here
+// are the other C0 controls and DEL.
+func TestParser_OSC_Notify_SanitizesControlBytes(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	var gotTitle, gotBody string
+	g.Mu.Lock()
+	p.SetNotifyHandler(func(title, body string) { gotTitle, gotBody = title, body })
+	g.Mu.Unlock()
+
+	feed(t, g, p, []byte("\x1b]777;notify;My\x01 App;line one\nline\x08 two\x07"))
+	if gotTitle != "My App" {
+		t.Errorf("title = %q; want the control byte stripped", gotTitle)
+	}
+	if gotBody != "line one\nline two" {
+		t.Errorf("body = %q; want the backspace stripped and the newline kept", gotBody)
+	}
+
+	gotTitle, gotBody = "", ""
+	feed(t, g, p, []byte("\x1b]9;done\x7fnow\x07"))
+	if gotTitle != "" || gotBody != "donenow" {
+		t.Errorf("OSC 9: title=%q body=%q; want DEL stripped from the body", gotTitle, gotBody)
+	}
+}

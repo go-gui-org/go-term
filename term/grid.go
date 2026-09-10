@@ -739,13 +739,22 @@ const (
 )
 
 // PushKittyKeyFlags saves the current KittyKeyFlags on the stack and ORs in
-// the new flags. Called by CSI > flags u. The stack is capped at 8 entries
-// so runaway nesting can't grow it without bound.
+// the new flags. Called by CSI > flags u. The stack is capped at 8 entries so
+// runaway nesting can't grow it without bound.
+//
+// A push past the cap drops the *oldest* entry rather than the new one. The
+// flags are ORed in either way, so refusing the save would leave the next pop
+// restoring the state from before the previous push — one level off, and every
+// pop after it shifted with it. Evicting the bottom keeps the innermost eight
+// push/pop pairs exact and costs only the outermost restores, which fall back
+// to legacy mode on an empty stack. Kitty's own stack evicts the oldest too.
 func (g *grid) PushKittyKeyFlags(flags uint32) {
 	const maxStack = 8
-	if len(g.kittyFlagStack) < maxStack {
-		g.kittyFlagStack = append(g.kittyFlagStack, g.KittyKeyFlags)
+	if len(g.kittyFlagStack) >= maxStack {
+		copy(g.kittyFlagStack, g.kittyFlagStack[len(g.kittyFlagStack)-maxStack+1:])
+		g.kittyFlagStack = g.kittyFlagStack[:maxStack-1]
 	}
+	g.kittyFlagStack = append(g.kittyFlagStack, g.KittyKeyFlags)
 	g.KittyKeyFlags |= flags
 }
 

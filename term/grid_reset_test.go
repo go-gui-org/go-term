@@ -1,6 +1,7 @@
 package term
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -334,5 +335,59 @@ func TestHardReset_RestoresConfiguredCursor(t *testing.T) {
 	g.HardReset()
 	if !g.cursorLocked {
 		t.Error("RIS cleared the cursor lock")
+	}
+}
+
+// RIS wipes every cell that could carry a LinkID, so the OSC 8 registry goes
+// with them. Keeping it would pin the old session's URLs and — once the cap
+// was reached — leave internLink refusing new links for the life of the pane,
+// with no way for the user to recover the pane.
+func TestGrid_HardReset_ClearsLinkRegistry(t *testing.T) {
+	g := newGrid(5, 20)
+	for i := range maxLinkEntries {
+		if id := g.internLink("https://example.com/" + strconv.Itoa(i)); id == 0 {
+			t.Fatalf("internLink returned 0 at entry %d, before the cap", i)
+		}
+	}
+	if g.internLink("https://full.example.com") != 0 {
+		t.Fatal("registry did not reach its cap; the test would prove nothing")
+	}
+
+	g.HardReset()
+
+	if len(g.links) != 0 || len(g.linkIDs) != 0 {
+		t.Fatalf("after RIS: %d links, %d ids; want 0, 0", len(g.links), len(g.linkIDs))
+	}
+	id := g.internLink("https://after-reset.example.com")
+	if id == 0 {
+		t.Fatal("internLink still refusing after RIS; a full registry must be recoverable")
+	}
+	if url := g.LinkURL(id); url != "https://after-reset.example.com" {
+		t.Fatalf("LinkURL(%d) = %q after RIS", id, url)
+	}
+}
+
+// A push past the cap drops the oldest saved entry, not the new one: the flags
+// are ORed in either way, so refusing the save would leave every later pop
+// restoring the state from one level too far out.
+func TestGrid_KittyFlagStack_OverflowKeepsInnermostPairs(t *testing.T) {
+	g := newGrid(5, 20)
+	const depth = 9 // one past the 8-entry cap
+	for i := range depth {
+		g.PushKittyKeyFlags(1 << uint(i))
+	}
+	want := uint32(0)
+	for i := range depth - 1 {
+		want |= 1 << uint(i) // state saved by the innermost push
+	}
+	g.PopKittyKeyFlags(1)
+	if g.KittyKeyFlags != want {
+		t.Fatalf("pop after overflow: flags = %#b; want %#b", g.KittyKeyFlags, want)
+	}
+	// The evicted level is the outermost one, so the stack runs out early and
+	// falls back to legacy mode rather than restoring a wrong value.
+	g.PopKittyKeyFlags(depth)
+	if g.KittyKeyFlags != 0 {
+		t.Fatalf("popping past the stack: flags = %#b; want 0", g.KittyKeyFlags)
 	}
 }
