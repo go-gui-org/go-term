@@ -101,3 +101,40 @@ func TestGrid_AddMark_AltScreenSuppressed(t *testing.T) {
 		t.Errorf("alt screen: want 0 marks, got %d", len(g.Marks))
 	}
 }
+
+// The mark ring trims by copying down, not by reslicing forward: a forward
+// reslice shrinks the remaining capacity on every trim, so the backing array
+// reallocates and doubles once it runs out.
+func TestGrid_AddMark_TrimKeepsCapacityStable(t *testing.T) {
+	g := newGrid(5, 20)
+	total := int16(0)
+	add := func() {
+		g.AddCommandEnd(total)
+		total++
+	}
+	for range maxMarks + 1 {
+		add()
+	}
+	capAfterFirstTrim := cap(g.Marks)
+
+	const extra = 2000
+	for range extra {
+		add()
+	}
+
+	if len(g.Marks) != maxMarks {
+		t.Fatalf("len(Marks) = %d; want %d", len(g.Marks), maxMarks)
+	}
+	if cap(g.Marks) != capAfterFirstTrim {
+		t.Errorf("cap(Marks) = %d after %d more marks; want it pinned at %d",
+			cap(g.Marks), extra, capAfterFirstTrim)
+	}
+	// Oldest-first: the surviving window ends at the newest mark and starts
+	// exactly maxMarks back from it.
+	if got, want := g.Marks[len(g.Marks)-1].Exit, total-1; got != want {
+		t.Errorf("newest mark = %d; want %d", got, want)
+	}
+	if got, want := g.Marks[0].Exit, total-maxMarks; got != want {
+		t.Errorf("oldest surviving mark = %d; want %d", got, want)
+	}
+}

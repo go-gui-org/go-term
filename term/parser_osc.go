@@ -116,11 +116,18 @@ func (p *parser) dispatchOSC() {
 	pt := string(p.osc[sep+1:])
 	switch ps {
 	case 0, 1, 2:
-		// Tracked as well as forwarded so XTWINOPS 22/23 (title stack) has
-		// something to push.
-		p.curTitle = pt
+		// Control bytes are stripped and the length is capped before the
+		// title leaves the parser. Unlike every other OSC payload this one
+		// is not consumed by a terminal: it goes to the platform title bar
+		// and to an embedder's tab strip, so a hostile child must not be
+		// able to smuggle C0 bytes or 4 KB of text into either.
+		//
+		// Sanitised on the way in rather than at each consumer, so the copy
+		// XTWINOPS 22/23 pushes onto the title stack is clean too.
+		title := truncatePaste(sanitizeOSCString(pt), maxTitleBytes)
+		p.curTitle = title
 		if p.onTitle != nil {
-			p.onTitle(pt)
+			p.onTitle(title)
 		}
 	case 7:
 		// Accept standard file:// URIs and bare absolute paths (common in
@@ -217,7 +224,7 @@ func (p *parser) dispatchOSC() {
 		}
 		// iTerm2-style notification: OSC 9 ; message BEL — body only, no title.
 		if p.onNotify != nil {
-			p.onNotify("", truncatePaste(pt, notifyMax))
+			p.onNotify("", truncatePaste(sanitizeNotifyBody(pt), notifyMax))
 		}
 	case 52:
 
@@ -247,7 +254,8 @@ func (p *parser) dispatchOSC() {
 			title, body = parts[1], parts[2]
 		}
 		if p.onNotify != nil {
-			p.onNotify(truncatePaste(title, notifyMax), truncatePaste(body, notifyMax))
+			p.onNotify(truncatePaste(sanitizeOSCString(title), notifyMax),
+				truncatePaste(sanitizeNotifyBody(body), notifyMax))
 		}
 	case 1337:
 		p.handleOSC1337(pt)
@@ -671,6 +679,35 @@ func sanitizeOSCString(s string) string {
 			}
 			return buf.String()
 		}
+	}
+	return s
+}
+
+// sanitizeNotifyBody strips the control bytes from a notification body, but
+// keeps newline and tab: a body is the one OSC payload that legitimately spans
+// lines (notify-send renders them), while a title is a single line by nature
+// and goes through sanitizeOSCString instead. The delivery path passes both as
+// argv or environment, never as interpolated script source, and puts "--"
+// ahead of the positional arguments so a value beginning with "-" cannot be
+// read as an option — so this is about what the text *looks* like, not about
+// injection.
+func sanitizeNotifyBody(s string) string {
+	keep := func(b byte) bool {
+		return b >= 0x20 && b != 0x7F || b == '\n' || b == '\t'
+	}
+	for i := 0; i < len(s); i++ {
+		if keep(s[i]) {
+			continue
+		}
+		var buf strings.Builder
+		buf.Grow(len(s))
+		buf.WriteString(s[:i])
+		for j := i + 1; j < len(s); j++ {
+			if keep(s[j]) {
+				buf.WriteByte(s[j])
+			}
+		}
+		return buf.String()
 	}
 	return s
 }

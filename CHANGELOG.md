@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- OSC 0/1/2 window titles are stripped of ASCII control bytes and capped at 512
+  bytes before they are published. The title is the one OSC payload that leaves
+  the terminal — it reaches the platform title bar and, through `Cfg.OnTitle`,
+  an embedder's tab strip — so a child process could previously smuggle C0 bytes
+  and up to 4 KB of text into both. Every other caller-visible OSC string was
+  already sanitized or capped.
+
 ### Changed
 
 - The quit confirmation in the `falcon` example now defaults to "Yes", so Enter

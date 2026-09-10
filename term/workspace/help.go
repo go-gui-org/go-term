@@ -51,36 +51,16 @@ func (ws *Workspace) toggleHelp() {
 	ws.refresh()
 }
 
-// helpBackdrop is a window-sized translucent float behind the panel that
-// dims the panes and dismisses the overlay on click.
+// helpBackdrop dims the panes behind the help sheet and closes it on click.
 func (ws *Workspace) helpBackdrop(ww, wh int) gui.View {
-	b := tight(gui.FixedFixed)
-	b.Width = float32(ww)
-	b.Height = float32(wh)
-	b.Float = true
-	b.FloatAnchor = gui.FloatTopLeft
-	b.FloatTieOff = gui.FloatTopLeft
-	b.FloatZIndex = 999
-	b.Color = gui.RGBA(0, 0, 0, 120)
-	b.OnClick = func(ctx gui.EventCtx) {
-		// Ignore clicks near window edges — the platform (notably
-		// macOS) dispatches MouseDown to the content view even when
-		// the user is starting a window-resize drag at a corner or
-		// edge. Without this guard the dialog would dismiss on the
-		// first touch of a resize instead of on an intentional
-		// click-outside-to-dismiss.
-		const edgePx = float32(30)
-		if ctx.Event.MouseX < edgePx || ctx.Event.MouseX > float32(ww)-edgePx ||
-			ctx.Event.MouseY < edgePx || ctx.Event.MouseY > float32(wh)-edgePx {
-			// A resize drag, not a dismiss: let it through.
-			return
-		}
-		ws.helpVisible = false
-		ws.refresh()
-		// As in palette.go: dismissing is the click.
-		ctx.Consume()
-	}
-	return gui.Column(b)
+	return overlayBackdrop(ww, wh, ws.closeHelp)
+}
+
+// closeHelp hides the overlay and rebuilds the view. Separate from toggleHelp
+// so the backdrop and Escape cannot accidentally re-open it.
+func (ws *Workspace) closeHelp() {
+	ws.helpVisible = false
+	ws.refresh()
 }
 
 // helpSections builds the cheatsheet content. The workspace section is
@@ -206,7 +186,10 @@ func helpColumns(secs []helpSection, ww, wh int, rowH float32) (int, float32) {
 
 	// Widest column count the window can show, even if it still overflows
 	// vertically — a too-narrow window falls back to one column and scrolls.
-	best, bestH := 1, packedHeight(packSections(secs, 1), rowH)
+	// n == 1 always runs — the width guard below only applies from two
+	// columns up — so the loop always assigns both, and seeding these with a
+	// one-column packing would only pack that layout twice.
+	best, bestH := 1, float32(0)
 	for n := 1; n <= helpMaxCols; n++ {
 		if n > 1 && helpPanelWidth(n) > wBudget {
 			break
@@ -271,20 +254,9 @@ func (ws *Workspace) helpPanel(ww, wh int) gui.View {
 		inner.Padding = gui.NewPadding(0, scrollGutter(), 0, 0)
 	}
 
-	panel := tight(gui.FitFit)
-	panel.Float = true
-	panel.FloatAnchor = gui.FloatMiddleCenter
-	panel.FloatTieOff = gui.FloatMiddleCenter
-	panel.FloatZIndex = 1000
-	panel.Color = theme.ColorPanel
-	panel.ColorBorder = theme.ColorBorder
-	panel.SizeBorder = gui.SomeF(1)
-	panel.Radius = gui.SomeF(6)
+	panel := overlayPanel(theme)
 	panel.Padding = gui.NewPadding(10, 14, 10, 14)
 	panel.Spacing = gui.SomeF(1)
-	// Swallow clicks so they don't fall through to the backdrop, which
-	// would dismiss the overlay when clicking inside the panel.
-	panel.OnClick = func(ctx gui.EventCtx) {}
 	panel.Content = []gui.View{gui.Column(inner)}
 	return gui.Column(panel)
 }

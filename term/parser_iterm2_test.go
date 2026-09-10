@@ -309,18 +309,19 @@ func TestOSC1337_StateResetAfterDispatch_NormalOSCCapped(t *testing.T) {
 	feedOSC1337(t, g, p, "inline=1", make1x1PNG(color.NRGBA{255, 0, 0, 255}))
 
 	// Subsequent normal OSC must use maxOSCBytes, not the enlarged 1337 cap.
-	var got string
-	p.SetTitleHandler(func(s string) { got = s })
+	// Probed through OSC 7 rather than the title: a title carries its own,
+	// much smaller cap (maxTitleBytes), which would hide a leaked 1337 cap.
 	huge := make([]byte, 0, maxOSCBytes+200)
-	huge = append(huge, "\x1b]0;"...)
+	huge = append(huge, "\x1b]7;/"...)
 	for range maxOSCBytes + 100 {
 		huge = append(huge, 'A')
 	}
 	huge = append(huge, 0x07)
 	feed(t, g, p, huge)
 
-	if len(got) != maxOSCBytes-2 {
-		t.Errorf("title len = %d; want %d (oscIsImage state leaked from 1337)", len(got), maxOSCBytes-2)
+	// "7;" is consumed by the Ps parse, so the payload keeps the rest.
+	if len(g.Cwd) != maxOSCBytes-2 {
+		t.Errorf("cwd len = %d; want %d (oscIsImage state leaked from 1337)", len(g.Cwd), maxOSCBytes-2)
 	}
 }
 

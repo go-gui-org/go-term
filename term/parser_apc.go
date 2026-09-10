@@ -22,7 +22,8 @@ type kittyEntry struct {
 type kittyPending struct {
 	params    kgpParams
 	b64       []byte
-	truncated bool // maxKittyImageBytes was hit; suppresses repeat logging
+	seq       uint64 // insertion order, for oldest-first eviction
+	truncated bool   // maxKittyImageBytes was hit; suppresses repeat logging
 }
 
 // dispatchAPC processes a completed APC sequence (ESC _ payload ESC \).
@@ -267,13 +268,6 @@ func (p *parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 		if p.kittyChunks == nil {
 			p.kittyChunks = make(map[uint32]kittyPending)
 		}
-		// Refuse new IDs when the pending-chunk table is full to prevent a
-		// DoS where a malicious server opens many IDs with m=1 and never
-		// finalises them. Reply so the client doesn't wait on a dead transfer.
-		if len(p.kittyChunks) >= maxKittyPendingChunks {
-			p.kittyRefuse(id, params)
-			return
-		}
 		// A raw transmission states its pixel dimensions up front. Reject an
 		// oversize one here rather than buffering tens of MB of base64 that
 		// kittyRawToNRGBA is going to refuse anyway.
@@ -283,6 +277,20 @@ func (p *parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 				params.widthPx, params.heightPx, maxSixelWidth, maxSixelHeight)
 			p.kittyRefuse(id, params)
 			return
+		}
+		// Make room when the pending table is full. Refusing the *new* id
+		// instead would let a stream that opens many m=1 transmissions and
+		// never finalises them deny every later image for the life of the
+		// pane: nothing expires a pending entry, so the table would never
+		// drain. Dropping the oldest keeps the table self-healing, and an
+		// abandoned transfer is exactly the one an eviction should take.
+		//
+		// This sits after every check that can still refuse the opener: an
+		// opener that never occupies a slot must not cost a bystander its
+		// own, or a stream of refused requests evicts one legitimate
+		// in-flight transfer apiece.
+		if len(p.kittyChunks) >= maxKittyPendingChunks {
+			p.evictOldestPending()
 		}
 		pend.params = params
 		p.putKittyPending(id, pend)
@@ -344,8 +352,71 @@ func (p *parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 // the table. Every write to kittyChunks outside the tests goes through here (or
 // dropKittyPending) so the aggregate byte count cannot drift from the map.
 func (p *parser) putKittyPending(id uint32, pend kittyPending) {
-	p.kittyPendingBytes += len(pend.b64) - len(p.kittyChunks[id].b64)
+	prev, existed := p.kittyChunks[id]
+	p.kittyPendingBytes += len(pend.b64) - len(prev.b64)
+	if existed {
+		pend.seq = prev.seq // an update keeps the transfer's place in line
+	} else {
+		p.kittyPendingSeq++
+		pend.seq = p.kittyPendingSeq
+	}
 	p.kittyChunks[id] = pend
+}
+
+// evictOldestPending drops the least recently opened in-flight transmission.
+// Linear over at most maxKittyPendingChunks entries, which is cheaper than a
+// second ordering structure for a map that is almost always tiny — the same
+// trade the virtual-placement store makes (see evictOldestVirtual).
+func (p *parser) evictOldestPending() {
+	var (
+		oldestID  uint32
+		oldestSeq uint64
+		found     bool
+	)
+	for id, pend := range p.kittyChunks {
+		if !found || pend.seq < oldestSeq {
+			oldestID, oldestSeq, found = id, pend.seq, true
+		}
+	}
+	if !found {
+		return
+	}
+	// Tell the evicted transfer's client the transfer is dead rather than
+	// leaving it waiting on a response that can never come — the same courtesy
+	// kittyRefuse pays a transmission rejected at its opening chunk.
+	p.kittyReply(oldestID, p.kittyChunks[oldestID].params.quiet, false)
+	p.dropKittyPending(oldestID)
+	// The open slot is deliberately left alone. Eviction only ever runs from
+	// the opening chunk of a *new* transmission, which claims the slot on its
+	// way out, so the evicted transfer's payload-only continuations follow the
+	// new one. That is the protocol's own rule — chunks of two images may not
+	// interleave — not a case this code can recover.
+}
+
+// kittyResetTransfers drops every in-flight chunked transmission and the open
+// slot with them. Used by RIS.
+func (p *parser) kittyResetTransfers() {
+	p.kittyChunks = nil
+	p.kittyPendingBytes = 0
+	p.kittyOpenID = 0
+	p.kittyOpenDropped = false
+}
+
+// kittyDropStore empties the off-screen image store and removes the PNG each
+// entry owns. Used by the data-freeing KGP delete (uppercase d=) and by RIS.
+//
+// Each file goes out through releaseStoreFile, which also drops the
+// placements drawing it — including the parked main-screen list, which the
+// d=A caller does not touch. A d=A issued from the alt screen would otherwise
+// remove the PNGs and leave the parked placements to draw dead paths on
+// ExitAlt. The entry is deleted before the release so the store no longer
+// counts itself as a user of the file.
+func (p *parser) kittyDropStore() {
+	for id, e := range p.kittyStore {
+		delete(p.kittyStore, id)
+		p.releaseStoreFile(e.path)
+	}
+	p.kittyStore = nil
 }
 
 // dropKittyPending removes id's pending state and returns its bytes to the
@@ -463,36 +534,88 @@ func (p *parser) kittyDisplay(
 }
 
 // kittyStoreImage records the PNG at path in the off-screen store under id,
-// evicting one entry first when the store is at capacity. Eviction prefers an
-// image not currently on screen so a visible picture's file doesn't vanish
-// under the renderer, but falls back to any entry — otherwise the store would
-// freeze permanently once every stored image is displayed.
+// evicting one entry first when the store is at capacity.
+//
+// Re-transmitting an id replaces its entry, and the PNG the old entry owned is
+// released with it. A client that animates by re-sending one id would
+// otherwise leave one file per frame in the graphics directory for the life of
+// the pane, bounded by disk rather than by maxKittyStoreEntries.
 func (p *parser) kittyStoreImage(id uint32, path string, w, h int) {
 	if p.kittyStore == nil {
 		p.kittyStore = make(map[uint32]kittyEntry)
 	}
-	if len(p.kittyStore) >= maxKittyStoreEntries {
-		var fallbackID uint32
-		for evictID, e := range p.kittyStore {
-			fallbackID = evictID
-			if p.g.graphicsUseSrc(e.path) {
-				continue
-			}
-			_ = os.Remove(e.path)
-			delete(p.kittyStore, evictID)
-			fallbackID = 0
-			break
-		}
-		if fallbackID != 0 {
-			evicted := p.kittyStore[fallbackID].path
-			_ = os.Remove(evicted)
-			delete(p.kittyStore, fallbackID)
-			// Drop the placements too, or the renderer keeps trying to draw
-			// a file that is no longer there.
-			p.g.deleteGraphicsBySrc(evicted)
-		}
+	prev, replacing := p.kittyStore[id]
+	// Only a *new* key grows the store, so a replacement must not evict a
+	// bystander (mirrors addVirtualImage).
+	if !replacing && len(p.kittyStore) >= maxKittyStoreEntries {
+		p.evictKittyStore()
 	}
 	p.kittyStore[id] = kittyEntry{path: path, w: w, h: h}
+	if replacing && prev.path != path {
+		// The id's placements survive a re-transmission and now show the new
+		// picture — Kitty's semantics, and the only thing that keeps a
+		// virtual placement alive: nothing re-creates one but a fresh a=p,
+		// so deleting it here would blank the placeholder cells for good.
+		// Retargeting first also empties the old path of users, so the
+		// release below only removes the file.
+		p.g.retargetGraphicsSrc(prev.path, path, w, h)
+		p.releaseStoreFile(prev.path)
+	}
+}
+
+// evictKittyStore frees one slot. Eviction prefers an image not currently on
+// screen so a visible picture's file doesn't vanish under the renderer, but
+// falls back to any entry — otherwise the store would freeze permanently once
+// every stored image is displayed.
+func (p *parser) evictKittyStore() {
+	// Id 0 is never stored (kittyFinish stores only a non-zero id), so it is
+	// free to mean "no fallback chosen yet".
+	var (
+		fallbackID uint32
+		fallback   kittyEntry
+	)
+	for evictID, e := range p.kittyStore {
+		if p.g.graphicsUseSrc(e.path) {
+			if fallbackID == 0 {
+				fallbackID, fallback = evictID, e
+			}
+			continue
+		}
+		delete(p.kittyStore, evictID)
+		p.releaseStoreFile(e.path)
+		return
+	}
+	if fallbackID == 0 {
+		return
+	}
+	delete(p.kittyStore, fallbackID)
+	p.releaseStoreFile(fallback.path)
+}
+
+// releaseStoreFile removes the PNG at path now that the entry owning it is
+// gone, and drops the placements drawing it — the renderer would otherwise
+// keep reaching for a dead path.
+//
+// The file survives when another store entry still names it. encodePNGFile
+// names a file after its content, so two ids transmitted the same picture
+// share one path on disk, and removing it for one of them would leave the
+// other pointing at nothing.
+func (p *parser) releaseStoreFile(path string) {
+	if path == "" || p.storeUsesSrc(path) {
+		return
+	}
+	_ = os.Remove(path)
+	p.g.deleteGraphicsBySrc(path)
+}
+
+// storeUsesSrc reports whether any store entry owns the file at path.
+func (p *parser) storeUsesSrc(path string) bool {
+	for _, e := range p.kittyStore {
+		if e.path == path {
+			return true
+		}
+	}
+	return false
 }
 
 // kittyPlace retrieves a previously transmitted image by id and renders
@@ -548,10 +671,7 @@ func (p *parser) kittyDeleteID(id uint32, op string) {
 		// nothing left to draw.
 		if freeData {
 			p.g.deleteAllVirtualImages()
-			for _, e := range p.kittyStore {
-				_ = os.Remove(e.path)
-			}
-			p.kittyStore = nil
+			p.kittyDropStore()
 		}
 	case 'i':
 		p.g.deleteGraphics(id, false)
@@ -561,8 +681,12 @@ func (p *parser) kittyDeleteID(id uint32, op string) {
 		p.g.deleteVirtualImage(id)
 		if freeData {
 			if e, ok := p.kittyStore[id]; ok {
-				_ = os.Remove(e.path)
+				// releaseStoreFile, not a bare os.Remove: encodePNGFile is
+				// content-addressed, so another id transmitted the same
+				// picture shares this path and must keep it. Delete the
+				// entry first or the store counts itself as that user.
 				delete(p.kittyStore, id)
+				p.releaseStoreFile(e.path)
 			}
 		}
 	}
