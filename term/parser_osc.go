@@ -687,8 +687,10 @@ func sanitizeOSCString(s string) string {
 // keeps newline and tab: a body is the one OSC payload that legitimately spans
 // lines (notify-send renders them), while a title is a single line by nature
 // and goes through sanitizeOSCString instead. The delivery path passes both as
-// argv or environment, never as interpolated script source, so this is about
-// what the text *looks* like, not about injection.
+// argv or environment, never as interpolated script source, and puts "--"
+// ahead of the positional arguments so a value beginning with "-" cannot be
+// read as an option — so this is about what the text *looks* like, not about
+// injection.
 func sanitizeNotifyBody(s string) string {
 	keep := func(b byte) bool {
 		return b >= 0x20 && b != 0x7F || b == '\n' || b == '\t'

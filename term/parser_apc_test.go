@@ -1289,3 +1289,159 @@ func TestParser_APC_RIS_DropsStoreAndFiles(t *testing.T) {
 		t.Errorf("PNG %q still on disk after RIS (stat err %v)", path, err)
 	}
 }
+
+// Re-transmitting an image id updates the picture its existing placements
+// draw. Only a fresh a=p creates a virtual placement, so deleting it here
+// would blank the placeholder cells for the life of the pane.
+func TestParser_APC_KittyRetransmitKeepsVirtualPlacement(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=9,U=1,c=4,r=2,q=1;" + b64)
+
+	old := h.p.kittyStore[9].path
+	if old == "" || h.g.virtualImages[9].Src != old {
+		t.Fatalf("setup: store=%q virtual=%q", old, h.g.virtualImages[9].Src)
+	}
+
+	// Same id, different picture — a new content-addressed file.
+	h.feedAPC("a=t,f=100,i=9,q=1;" + makeSquarePNGBase64(t, 2))
+
+	v, ok := h.g.virtualImages[9]
+	if !ok {
+		t.Fatal("re-transmission deleted the virtual placement")
+	}
+	newPath := h.p.kittyStore[9].path
+	if newPath == old {
+		t.Fatal("setup: second transmission reused the first file")
+	}
+	if v.Src != newPath {
+		t.Errorf("virtual Src = %q; want the new file %q", v.Src, newPath)
+	}
+	if v.Cols != 4 || v.Rows != 2 {
+		t.Errorf("placement rect = %dx%d; want the client's 4x2", v.Cols, v.Rows)
+	}
+	if v.WidthPx != 2 || v.HeightPx != 2 {
+		t.Errorf("source size = %dx%d; want the new image's 2x2",
+			v.WidthPx, v.HeightPx)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("old file still on disk: %v", err)
+	}
+}
+
+// The same rule for an on-screen placement: it keeps its rectangle and draws
+// the new file rather than disappearing.
+func TestParser_APC_KittyRetransmitKeepsScreenPlacement(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=11,c=3,r=2,q=1;" + b64)
+
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("setup: %d placements; want 1", len(h.g.Graphics))
+	}
+	old := h.p.kittyStore[11].path
+
+	h.feedAPC("a=t,f=100,i=11,q=1;" + makeSquarePNGBase64(t, 2))
+
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("re-transmission left %d placements; want 1", len(h.g.Graphics))
+	}
+	if got := h.g.Graphics[0].Src; got != h.p.kittyStore[11].path {
+		t.Errorf("placement Src = %q; want the new file %q",
+			got, h.p.kittyStore[11].path)
+	}
+	if got := h.g.Graphics[0].Cols; got != 3 {
+		t.Errorf("placement lost its footprint: cols = %d; want 3", got)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("old file still on disk: %v", err)
+	}
+}
+
+// An opener refused for its dimensions must not evict a pending transfer: it
+// never takes a slot, so it must not cost a bystander one. A stream of such
+// openers would otherwise kill one legitimate in-flight transmission apiece.
+func TestParser_APC_KittyRefusedOpenerEvictsNothing(t *testing.T) {
+	h := newAPCHelper(t)
+
+	// Fill the pending table with open (m=1) streams.
+	for i := 1; i <= maxKittyPendingChunks; i++ {
+		h.feedAPC(fmt.Sprintf("a=T,f=100,i=%d,m=1;AAAA", i))
+	}
+	if len(h.p.kittyChunks) != maxKittyPendingChunks {
+		t.Fatalf("setup: kittyChunks = %d; want %d",
+			len(h.p.kittyChunks), maxKittyPendingChunks)
+	}
+
+	// A raw opener whose stated size is over the decode ceiling: refused.
+	h.feedAPC(fmt.Sprintf("a=T,f=32,s=%d,v=%d,i=9999,m=1;AAAA",
+		maxSixelWidth+1, maxSixelHeight+1))
+
+	if _, ok := h.p.kittyChunks[9999]; ok {
+		t.Error("refused opener took a pending slot")
+	}
+	if len(h.p.kittyChunks) != maxKittyPendingChunks {
+		t.Fatalf("kittyChunks = %d after a refused opener; want %d untouched",
+			len(h.p.kittyChunks), maxKittyPendingChunks)
+	}
+	if _, ok := h.p.kittyChunks[1]; !ok {
+		t.Error("refused opener evicted the oldest pending transfer")
+	}
+}
+
+// d=I,i= frees one id's data. encodePNGFile is content-addressed, so a second
+// id holding the same picture shares the file and must keep it — a bare
+// os.Remove there leaves the survivor pointing at a dead path.
+func TestParser_APC_KittyDeleteIDKeepsSharedFile(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=t,f=100,i=1,q=1;" + b64)
+	h.feedAPC("a=t,f=100,i=2,q=1;" + b64)
+
+	shared := h.p.kittyStore[1].path
+	if shared == "" || h.p.kittyStore[2].path != shared {
+		t.Fatalf("setup: identical images did not share a file (%q vs %q)",
+			shared, h.p.kittyStore[2].path)
+	}
+
+	h.feedAPC("a=d,d=I,i=1,q=1;")
+
+	if _, ok := h.p.kittyStore[1]; ok {
+		t.Error("d=I left image 1 in the store")
+	}
+	if _, ok := h.p.kittyStore[2]; !ok {
+		t.Fatal("d=I,i=1 removed image 2 from the store")
+	}
+	if _, err := os.Stat(shared); err != nil {
+		t.Errorf("file image 2 still owns was removed: %v", err)
+	}
+
+	// The last owner going takes the file with it.
+	h.feedAPC("a=d,d=I,i=2,q=1;")
+	if _, err := os.Stat(shared); !os.IsNotExist(err) {
+		t.Errorf("file survived its last owner: %v", err)
+	}
+}
+
+// d=A frees every image's data. Placements parked by the alt screen draw
+// those files too, so they must go with them — otherwise ExitAlt restores
+// placements pointing at removed PNGs.
+func TestParser_APC_KittyDeleteAllDropsParkedPlacements(t *testing.T) {
+	h := newAPCHelper(t)
+	_, b64 := makePNG(t)
+	h.feedAPC("a=T,f=100,i=5,c=2,r=1,q=1;" + b64)
+	if len(h.g.Graphics) != 1 {
+		t.Fatalf("setup: %d placements; want 1", len(h.g.Graphics))
+	}
+
+	h.g.EnterAlt() // parks the main-screen placement in mainSaved
+	h.feedAPC("a=d,d=A,q=1;")
+
+	if n := len(h.g.mainSaved.graphics); n != 0 {
+		t.Errorf("d=A left %d parked placements pointing at removed files", n)
+	}
+	h.g.ExitAlt()
+	if n := len(h.g.Graphics); n != 0 {
+		t.Errorf("ExitAlt restored %d placements after d=A; want 0", n)
+	}
+}

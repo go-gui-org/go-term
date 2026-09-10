@@ -79,20 +79,11 @@ func sendDesktopNotify(title, body string) {
 	clean := func(s string) string { return strings.ReplaceAll(s, "\x00", "") }
 	switch runtime.GOOS {
 	case "darwin":
-		// Pass title/body as argv to avoid AppleScript string-literal injection.
-		stmt := `display notification (item 1 of argv)`
-		args := []string{"-e", "on run argv", "-e", stmt, "-e", "end run", clean(body)}
-		if title != "" {
-			stmt = `display notification (item 1 of argv) with title (item 2 of argv)`
-			args = []string{"-e", "on run argv", "-e", stmt, "-e", "end run", clean(body), clean(title)}
-		}
-		exec.Command("osascript", args...).Run() //nolint:errcheck
+		exec.Command("osascript", osascriptNotifyArgs(clean(title), clean(body))...).
+			Run() //nolint:errcheck
 	case "linux":
-		args := []string{clean(body)}
-		if title != "" {
-			args = []string{clean(title), clean(body)}
-		}
-		exec.Command("notify-send", args...).Run() //nolint:errcheck
+		exec.Command("notify-send", notifySendArgs(clean(title), clean(body))...).
+			Run() //nolint:errcheck
 	case "windows":
 		// WinRT toast via PowerShell — no extra dependency. Title and body
 		// reach the script only through environment variables, never as
@@ -106,6 +97,36 @@ func sendDesktopNotify(title, body string) {
 			"GOTERM_NOTIFY_BODY="+clean(body))
 		cmd.Run() //nolint:errcheck
 	}
+}
+
+// osascriptNotifyArgs builds the osascript argv for a notification. Title and
+// body are passed as `run` arguments rather than interpolated into the script
+// source, so AppleScript string literals cannot be broken out of, and "--"
+// ends option parsing so a value that starts with "-" stays a value instead
+// of becoming another osascript option.
+func osascriptNotifyArgs(title, body string) []string {
+	stmt := `display notification (item 1 of argv)`
+	if title != "" {
+		stmt = `display notification (item 1 of argv) with title (item 2 of argv)`
+	}
+	args := []string{"-e", "on run argv", "-e", stmt, "-e", "end run", "--", body}
+	if title != "" {
+		args = append(args, title)
+	}
+	return args
+}
+
+// notifySendArgs builds the notify-send argv for a notification.
+//
+// "--" ends option parsing and is what makes this safe: without it a child
+// emitting `OSC 777;notify;--icon=/some/path;body` — or -u critical, -t 0,
+// -a <spoofed app name> — has its own output read as notify-send options.
+// That is notification spoofing driven entirely by whatever runs in the pane.
+func notifySendArgs(title, body string) []string {
+	if title != "" {
+		return []string{"--", title, body}
+	}
+	return []string{"--", body}
 }
 
 // winToastScript builds and shows a Windows toast from GOTERM_NOTIFY_TITLE /

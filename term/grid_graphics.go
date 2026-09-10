@@ -419,3 +419,51 @@ func (g *grid) clearKittyGraphics(all bool) {
 		}
 	}
 }
+
+// retargetGraphicsSrc points every placement drawing oldSrc at newSrc. Used
+// when a KGP image id is re-transmitted: the id's picture changed, but its
+// placements are the same placements and Kitty's semantics are that they now
+// show the new content. Deleting them instead would blank a virtual placement
+// permanently, since only a fresh a=p re-creates one.
+//
+// newW/newH are the new picture's pixel size: the placement's cell footprint
+// is the client's (c=/r=) and stays, but the source dimensions describe the
+// file and must follow it.
+//
+// The three lists are the same three deleteGraphicsBySrc walks, so after a
+// retarget nothing names oldSrc and removing its file is safe. Caller holds
+// Mu.
+func (g *grid) retargetGraphicsSrc(oldSrc, newSrc string, newW, newH int) {
+	if oldSrc == "" || oldSrc == newSrc {
+		return
+	}
+	var changed bool
+	for i := range g.Graphics {
+		if g.Graphics[i].Src == oldSrc {
+			g.Graphics[i].Src = newSrc
+			g.Graphics[i].WidthPx, g.Graphics[i].HeightPx = newW, newH
+			changed = true
+		}
+	}
+	// The parked main-screen list is retargeted too, so placements restored
+	// by ExitAlt draw the new file rather than a removed one. Nothing on
+	// screen changes for that half, so it does not force a repaint.
+	for i := range g.mainSaved.graphics {
+		if g.mainSaved.graphics[i].Src == oldSrc {
+			g.mainSaved.graphics[i].Src = newSrc
+			g.mainSaved.graphics[i].WidthPx = newW
+			g.mainSaved.graphics[i].HeightPx = newH
+		}
+	}
+	for id, v := range g.virtualImages {
+		if v.Src == oldSrc {
+			v.Src = newSrc
+			v.WidthPx, v.HeightPx = newW, newH
+			g.virtualImages[id] = v
+			changed = true
+		}
+	}
+	if changed {
+		g.markAllDirty()
+	}
+}
