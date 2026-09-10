@@ -466,7 +466,9 @@ func (ws *Workspace) refresh() {
 // View returns the workspace's go-gui view tree.
 func (ws *Workspace) View(w *gui.Window) gui.View {
 	ww, wh := w.WindowSize()
-	if len(ws.tabs) == 0 || ws.activeTab >= len(ws.tabs) {
+	// Both bounds: activeTab is -1 for a beat while the last tab closes, and
+	// activeTabPtr already guards it on the same reasoning.
+	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs) {
 		return gui.Column(tight(gui.FillFill))
 	}
 	tab := ws.tabs[ws.activeTab]
@@ -644,7 +646,7 @@ func (ws *Workspace) tabBarView() gui.View {
 			buttons = append(buttons, gui.Column(sep))
 		}
 		isActive := i == ws.activeTab
-		buttons = append(buttons, ws.tabButton(tab, isActive, i))
+		buttons = append(buttons, ws.tabButton(theme, tab, isActive, i))
 	}
 	bar := tight(gui.FillFit)
 	bar.Color = theme.ColorPanel
@@ -653,8 +655,7 @@ func (ws *Workspace) tabBarView() gui.View {
 }
 
 // tabButton renders a single tab.
-func (ws *Workspace) tabButton(tab *tab, isActive bool, idx int) gui.View {
-	theme := gui.CurrentTheme()
+func (ws *Workspace) tabButton(theme gui.Theme, tab *tab, isActive bool, idx int) gui.View {
 	bg := theme.ColorPanel
 	style := theme.M5
 	if isActive {

@@ -102,11 +102,15 @@ func (t *tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHoo
 		CursorLocked:    cfg.opts.cursorLocked,
 
 		MiddleClickPaste: cfg.opts.middleClickPaste,
+		// Already on the main thread: Term hops the reader goroutine through
+		// its own QueueCommand before calling this (term/widget_notify.go).
+		// A second hop here would only cost a closure per title and delay the
+		// tab label by a frame. OnExit below is the opposite case — it is
+		// documented as running on the reader goroutine — which is why that
+		// one keeps its wrap.
 		OnTitle: func(title string) {
-			w.QueueCommand(func(w *gui.Window) {
-				t.titles[panelID] = title
-				hooks.onTitle(panelID, title)
-			})
+			t.titles[panelID] = title
+			hooks.onTitle(panelID, title)
 		},
 		OnExit: func() {
 			w.QueueCommand(func(w *gui.Window) {

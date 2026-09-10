@@ -543,6 +543,12 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 				ws.refresh()
 			}
 		}
+		// Same affordance the palette rows carry: the row is clickable, so
+		// the pointer has to say so. Selection stays keyboard-driven — the
+		// hover does not move idx.
+		row.OnHover = func(ctx gui.EventCtx) {
+			ctx.Window.SetMouseCursorPointingHand()
+		}
 
 		mark := "  "
 		if ti == activeIdx {

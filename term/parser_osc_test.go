@@ -3,6 +3,7 @@ package term
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/go-gui-org/go-gui/gui"
 )
@@ -57,6 +58,42 @@ func TestParser_OSCTitle_SplitAcrossFeeds(t *testing.T) {
 	}
 }
 
+// The title leaves the terminal — it reaches the platform title bar and an
+// embedder's tab strip — so control bytes a child embeds must be stripped
+// before it is published, the way every other caller-visible OSC payload is.
+func TestParser_OSCTitle_StripsControlBytes(t *testing.T) {
+	g, p := newParserGrid(1, 5)
+	var got string
+	p.SetTitleHandler(func(s string) { got = s })
+	feed(t, g, p, []byte("\x1b]0;a\x01b\x0ac\x7fd\x1b\\"))
+	if got != "abcd" {
+		t.Errorf("control bytes not stripped: %q", got)
+	}
+	if p.curTitle != "abcd" {
+		t.Errorf("tracked title not stripped: %q", p.curTitle)
+	}
+}
+
+// A title long enough to matter is capped before publication, on a rune
+// boundary so the tail is never a split UTF-8 sequence.
+func TestParser_OSCTitle_Capped(t *testing.T) {
+	g, p := newParserGrid(1, 5)
+	var got string
+	p.SetTitleHandler(func(s string) { got = s })
+	// Three-byte runes, so a naive byte cut would land mid-sequence.
+	body := strings.Repeat("→", maxTitleBytes)
+	feed(t, g, p, []byte("\x1b]0;"+body+"\x07"))
+	if len(got) > maxTitleBytes {
+		t.Errorf("title not capped: %d bytes", len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("title cut mid-rune: %q", got)
+	}
+	if got == "" {
+		t.Error("title truncated to nothing")
+	}
+}
+
 func TestParser_OSC7_SetsCwd(t *testing.T) {
 	g, p := newParserGrid(1, 5)
 	feed(t, g, p, []byte("\x1b]7;file://host/Users/me\x07"))
@@ -88,20 +125,21 @@ func TestParser_OSC_NoSeparatorDropped(t *testing.T) {
 	}
 }
 
+// Probed through OSC 7: the title has a cap of its own (maxTitleBytes), so it
+// would report that cap rather than the OSC buffer's.
 func TestParser_OSC_OverflowTruncated(t *testing.T) {
 	g, p := newParserGrid(1, 5)
-	var got string
-	p.SetTitleHandler(func(s string) { got = s })
 	huge := make([]byte, 0, maxOSCBytes+200)
-	huge = append(huge, []byte("\x1b]0;")...)
+	huge = append(huge, []byte("\x1b]7;/")...)
 	for range maxOSCBytes + 100 {
 		huge = append(huge, 'A')
 	}
 	huge = append(huge, 0x07)
 	feed(t, g, p, huge)
 
-	if len(got) != maxOSCBytes-2 {
-		t.Errorf("truncated len=%d, want %d", len(got), maxOSCBytes-2)
+	// "7;" is consumed by the Ps parse, so the payload keeps the rest.
+	if len(g.Cwd) != maxOSCBytes-2 {
+		t.Errorf("truncated len=%d, want %d", len(g.Cwd), maxOSCBytes-2)
 	}
 }
 

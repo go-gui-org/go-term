@@ -348,34 +348,9 @@ func (ws *Workspace) paletteDismiss() {
 
 // — view —————————————————————————————————————————————————————
 
-// paletteBackdrop is a window-sized translucent float behind the panel that
-// dims the panes and dismisses the palette on click. Mirrors helpBackdrop,
-// including its window-edge guard.
+// paletteBackdrop dims the panes behind the palette and closes it on click.
 func (ws *Workspace) paletteBackdrop(ww, wh int) gui.View {
-	b := tight(gui.FixedFixed)
-	b.Width = float32(ww)
-	b.Height = float32(wh)
-	b.Float = true
-	b.FloatAnchor = gui.FloatTopLeft
-	b.FloatTieOff = gui.FloatTopLeft
-	b.FloatZIndex = 999
-	b.Color = gui.RGBA(0, 0, 0, 120)
-	b.OnClick = func(ctx gui.EventCtx) {
-		// macOS dispatches MouseDown to the content view even when the user is
-		// starting a window-resize drag at an edge; without this guard the
-		// palette would dismiss on the first touch of a resize.
-		const edgePx = float32(30)
-		if ctx.Event.MouseX < edgePx || ctx.Event.MouseX > float32(ww)-edgePx ||
-			ctx.Event.MouseY < edgePx || ctx.Event.MouseY > float32(wh)-edgePx {
-			// A resize drag, not a dismiss: let it through.
-			return
-		}
-		ws.closePalette()
-		// The dismiss is the whole click; nothing behind the backdrop
-		// should also see it.
-		ctx.Consume()
-	}
-	return gui.Column(b)
+	return overlayBackdrop(ww, wh, ws.closePalette)
 }
 
 // palettePanel builds the floating palette: filter box above a scrolling list.
@@ -399,19 +374,8 @@ func (ws *Workspace) palettePanel(ww, wh int) gui.View {
 		ws.paletteRows(theme, float32(wh)),
 	}
 
-	panel := tight(gui.FitFit)
-	panel.Float = true
-	panel.FloatAnchor = gui.FloatMiddleCenter
-	panel.FloatTieOff = gui.FloatMiddleCenter
-	panel.FloatZIndex = 1000
-	panel.Color = theme.ColorPanel
-	panel.ColorBorder = theme.ColorBorder
-	panel.SizeBorder = gui.SomeF(1)
-	panel.Radius = gui.SomeF(6)
+	panel := overlayPanel(theme)
 	panel.Padding = gui.NewPadding(palettePad, palettePad, palettePad, palettePad)
-	// Swallow clicks so they don't fall through to the backdrop, which would
-	// dismiss the palette when clicking inside it.
-	panel.OnClick = func(ctx gui.EventCtx) {}
 	panel.Content = []gui.View{gui.Column(inner)}
 	return gui.Column(panel)
 }

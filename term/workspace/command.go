@@ -544,7 +544,9 @@ func (ws *Workspace) dismissOverlay() {
 		// the browser (clear the filter, then close-and-revert).
 		ws.themeBrowserDismiss()
 	case ws.helpVisible:
-		ws.toggleHelp()
+		// Not toggleHelp: this arm only ever closes, and a toggle here would
+		// re-open the sheet if the guard above it ever stopped matching.
+		ws.closeHelp()
 	}
 }
 

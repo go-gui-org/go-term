@@ -101,6 +101,14 @@ const maxCSIParamValue = 1 << 20
 // (the shell's) recoverable.
 const maxTitleStack = 10
 
+// maxTitleBytes caps one OSC 0/1/2 window title. maxOSCBytes already bounds
+// the payload the parser will buffer, but 4 KB of title still reaches the
+// platform title bar and an embedder's tab strip, neither of which is a
+// terminal and neither of which is sized for it. A real title is a path and
+// a command name; 512 bytes is several of those. Truncation is on a rune
+// boundary (truncatePaste), so the tail is never a split UTF-8 sequence.
+const maxTitleBytes = 512
+
 // maxXTGETTCAPParts caps the number of capability names in one XTGETTCAP
 // query so a pathological DCS (4096 semicolons) can't force a large
 // allocation or iteration. Real apps query 1–3 caps at a time.
