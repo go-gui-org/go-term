@@ -435,8 +435,8 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 	ctx.Consume()
 }
 
-// onMouseMove handles pointer motion. Under ?1002 with a button held,
-// emits a drag report; under ?1003 even with no button, emits an
+// onMouseMove handles pointer motion. Under ?1002/?1003 with a button
+// held, emits a drag report; under ?1003 with no button held, emits an
 // any-motion report. Falls through to selection extension when this
 // drag was started outside of a reporting mode.
 func (t *Term) onMouseMove(ctx gui.EventCtx) {
@@ -548,8 +548,9 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 	t.updateHover(r, c, ctx.Window)
 }
 
-// motionReport emits the ?1002 drag report or the ?1003 any-motion report for
-// this move, when the current modes call for one. Returns true when the event
+// motionReport emits the drag report (?1002, or ?1003 which is its
+// superset per xterm) or the ?1003 any-motion report for this move,
+// when the current modes call for one. Returns true when the event
 // belongs to the child, i.e. the local selection and hover paths in
 // onMouseMove must not also act on it.
 func (t *Term) motionReport(e *gui.Event, snap mouseSnap, r, c int) bool {
@@ -565,7 +566,7 @@ func (t *Term) motionReport(e *gui.Event, snap mouseSnap, r, c int) bool {
 		// SelHead at unchanged coords (cheap; avoids stale state).
 	}
 	switch {
-	case t.mouse.dragReport && snap.drag:
+	case t.mouse.dragReport && (snap.drag || snap.any):
 		base, ok := mouseSGRBaseButton(t.mouse.dragButton)
 		if !ok {
 			return true
