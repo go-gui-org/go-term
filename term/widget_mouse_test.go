@@ -356,6 +356,30 @@ func TestOnMouseMove_SGRDragReport(t *testing.T) {
 	}
 }
 
+func TestOnMouseMove_SGRDragReport_AnyMotionOnly(t *testing.T) {
+	// Limoni enables ?1003 (any-motion) without ?1002 (button-motion).
+	// Per xterm ?1003 is a superset of ?1002: motion with a button held
+	// must still report as a drag (cb = base+32). Without it slider
+	// drags never reach the child.
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrackAny = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+	tm.mouse.lastR = 0
+	tm.mouse.lastC = 0
+	e := &gui.Event{MouseX: 35, MouseY: 45}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	got := string(*buf)
+	// base=0, +32 = 32, col=3+1=4, row=2+1=3
+	if !strings.HasPrefix(got, "\x1b[<32;4;3M") {
+		t.Errorf("got %q, want \\x1b[<32;4;3M", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // onMouseUp
 // ---------------------------------------------------------------------------
