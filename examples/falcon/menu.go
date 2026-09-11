@@ -18,9 +18,20 @@ const appName = "Falcon"
 
 const repoURL = "https://github.com/go-gui-org/go-term"
 
-// actionAbout routes the app menu's About item to showAbout through OnAction.
+// actionAbout routes the Help menu's About item to showAbout through OnAction.
 // No command backs it: About has no shortcut, and nothing else invokes it.
 const actionAbout = "help.about"
+
+// cmdToggleHelp names the workspace command that shows or hides the
+// keyboard-shortcut overlay. Must match the ID in
+// term/workspace/command.go: the Help menu item carries this as its ID so a
+// native menu click resolves through the command registry.
+const cmdToggleHelp = "workspace.toggleHelp"
+
+// helpShortcutsLabel is the Help menu item's text. It repeats the
+// workspace.toggleHelp command label verbatim — keep the two in step (see
+// term/workspace/command.go).
+const helpShortcutsLabel = "Show / Hide Shortcuts"
 
 // cmdOpenConfig is falcon's own window command (Cmd+,). It carries no menu
 // item — the chord is the whole interface.
@@ -50,16 +61,15 @@ func registerCommands(w *gui.Window) {
 	}
 }
 
-// installMenubar replaces the backend's default menubar. There are no custom
-// menus: the two things a Help menu used to hold — the shortcut overlay and
-// the config file — are Cmd+/ and Cmd+, respectively, which is where a
-// terminal user reaches for them anyway. That leaves the app menu (About,
-// Quit) and the Window menu.
+// installMenubar replaces the backend's default menubar. The one custom menu
+// is Help: the keyboard-shortcut overlay (Cmd+/, the same chord the menu item
+// fires through the workspace command registry) and the About dialog, which
+// OmitAboutItem moves out of the app menu.
 //
-// AboutActionID keeps About in its conventional app-menu slot while still
-// routing to falcon's own dialog. The system NSAboutPanel is not usable here:
-// it renders from Info.plist, so an unbundled `go build` would show the
-// lowercase process name with no version and no icon.
+// AboutActionID is deliberately unset: About is an explicit Help item routed
+// through OnAction to falcon's own dialog. The system NSAboutPanel is not
+// usable here: it renders from Info.plist, so an unbundled `go build` would
+// show the lowercase process name with no version and no icon.
 //
 // No Edit menu: Cmd+C/Cmd+V are terminal shortcuts handled by term's binding
 // table, and an auto-wired Edit menu would swallow them before they get there.
@@ -74,10 +84,45 @@ func (a *app) installMenubar(gapp *gui.App, w *gui.Window) {
 // a live platform backend, so it is a no-op under `go test`.
 func (a *app) menubarCfg(w *gui.Window) gui.NativeMenubarCfg {
 	return gui.NativeMenubarCfg{
-		AppName:           appName,
-		AboutActionID:     actionAbout,
+		AppName: appName,
+		// About lives in the Help menu below, so drop it from the app
+		// menu. This takes precedence over AboutActionID, which stays
+		// unset.
+		OmitAboutItem:     true,
 		IncludeWindowMenu: true,
 		OnAction:          func(id string) { a.onMenuAction(id, w) },
+		Menus: []gui.NativeMenuCfg{
+			{
+				Title: "Help",
+				Items: []gui.NativeMenuItemCfg{
+					{
+						// ID is what the macOS backend hands back
+						// on click, and App.SetNativeMenubar
+						// resolves it via the command registry
+						// first — so this fires
+						// workspace.toggleHelp with no OnAction
+						// handling. CommandID mirrors it for
+						// backends that route on that field.
+						// Shortcut paints the ⌘/ hint beside the
+						// item; it duplicates the command's own
+						// chord by construction, so the two
+						// cannot drift.
+						ID:        cmdToggleHelp,
+						CommandID: cmdToggleHelp,
+						Text:      helpShortcutsLabel,
+						Shortcut:  gui.Shortcut{Key: gui.KeySlash, Modifiers: gui.ModSuper},
+					},
+					{Separator: true},
+					{
+						// No command backs About, so this ID
+						// falls through to OnAction and
+						// onMenuAction shows the dialog.
+						ID:   actionAbout,
+						Text: "About " + appName,
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -146,8 +191,10 @@ func showAbout(w *gui.Window) {
 		}))
 	}
 	// No app-name text: the icon artwork already spells out "Falcon".
+	// aboutVersion prefixes an unstamped dev build with the release
+	// line, so the dialog names a release even under `go run`.
 	content = append(content, gui.Text(gui.TextCfg{
-		Text:      "Version " + appVersion(),
+		Text:      "Version " + aboutVersion(),
 		TextStyle: gui.DefaultDialogStyle.TextStyle,
 	}))
 	w.Dialog(gui.DialogCfg{
