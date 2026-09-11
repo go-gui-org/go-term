@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-11
+
+### Added
+
+- The `falcon` example gains a Help menu with Show/Hide Shortcuts (Cmd+/,
+  via the workspace command registry) and About. The app-menu About entry is
+  omitted in favor of the Help one. Unstamped dev builds prefix the
+  VCS/dev fallback with the release line, so About shows e.g. v0.12.0
+  (dev-1a2b3c4) instead of a bare hash. `releaseVersion` is test-guarded
+  against the newest CHANGELOG entry.
+
 ### Security
 
 - OSC 0/1/2 window titles are stripped of ASCII control bytes and capped at 512
@@ -14,6 +25,12 @@ adheres to [Semantic Versioning](https://semver.org/).
   an embedder's tab strip — so a child process could previously smuggle C0 bytes
   and up to 4 KB of text into both. Every other caller-visible OSC string was
   already sanitized or capped.
+- Notification delivery puts `--` ahead of the `notify-send` and `osascript`
+  positionals, so a child emitting OSC 9/777 with a leading-dash title or
+  body cannot have its output parsed as delivery options (icon, urgency, or
+  app-name spoofing). Notification titles go through `sanitizeOSCString` and
+  bodies through a variant that keeps newline and tab, which `notify-send`
+  renders.
 
 ### Changed
 
@@ -21,7 +38,9 @@ adheres to [Semantic Versioning](https://semver.org/).
   quits. The dialog is only reached after a deliberate quit gesture; Esc and the
   "No" button still cancel.
 
-- Bumped go-gui to v0.71.0, which re-exports `DialogCfg.DefaultButton`.
+- Bumped go-glyph to v1.25.1 and go-gui to v0.74.0 (via v0.71.0–v0.73.0,
+  which re-exports `DialogCfg.DefaultButton` and renames `UpdateWindow` to
+  `InvalidateLayout` and `UpdateView` to `SetView`).
 
 ### Fixed
 
@@ -33,6 +52,31 @@ adheres to [Semantic Versioning](https://semver.org/).
   locally only when it lands on a link — every other click and every drag still
   goes to the child. Cmd carries no SGR modifier bit, so the child could not
   tell these clicks from plain ones in any case.
+
+- Mouse drags report under `?1003` any-motion mode. Presses armed the drag
+  report but motion events were dropped unless a mouse-tracking mode that
+  includes drags was set, so a drag inside a `?1003` app never reached the
+  child.
+
+- The default (SGR 58-less) underline color follows dimmed, contrast-adjusted,
+  and hovered text instead of the base foreground, so underlines stay legible
+  on faded runs and visible against the hover highlight.
+
+- Bounded the Kitty graphics stores that grew without limit. Re-transmitting
+  an image id replaces its store entry and now releases the PNG the old entry
+  owned (content-addressed files stay alive while another id shares them via
+  a use count), and existing placements — on screen, parked, and virtual —
+  retarget at the new file instead of orphaning or blanking. A full
+  pending-chunk table evicts the oldest transfer with an error reply instead
+  of refusing every new image for the life of the pane. `RIS` now clears the
+  in-flight transfers, their buffered base64, the open slot, the image store
+  with its files, and the OSC 8 link registry alongside the title stack, so
+  `reset` recovers a pane that hit any of those caps. A Kitty-flags push past
+  the 8-entry cap evicts the oldest entry instead of dropping the save while
+  still ORing the flags in, which had shifted every later pop one level out;
+  replacing an existing store id no longer evicts a bystander. `addMark` trims
+  by copying down so the backing array stays at `maxMarks` instead of drifting
+  and doubling.
 
 ## [0.11.0] - 2026-09-07
 
