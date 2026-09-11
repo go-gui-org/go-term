@@ -152,7 +152,7 @@ func (t *Term) scheduleDelayedUpdate(d time.Duration, tmr **time.Timer) {
 				return
 			}
 			t.bumpVersion()
-			t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+			t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 		})
 	} else {
 		(*tmr).Reset(d)

@@ -15,7 +15,7 @@ func ExampleNew() {
 	}
 	defer func() { _ = t.Close() }()
 
-	win.UpdateView(t.View)
+	win.SetView(t.View)
 }
 
 func ExampleCfg() {

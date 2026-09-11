@@ -26,7 +26,7 @@ func main() {
 			if err != nil {
 				log.Fatalf("term.New: %v", err)
 			}
-			w.UpdateView(tm.View)
+			w.SetView(tm.View)
 		},
 	})
 	defer func() {

@@ -65,7 +65,7 @@ var actionDispatch = map[Action]actionFn{
 		t.recompileSearchRE()
 		t.bumpVersion()
 		if w != nil {
-			w.UpdateWindow()
+			w.InvalidateLayout()
 		}
 		return true
 	},

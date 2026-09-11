@@ -109,7 +109,7 @@ func (t *Term) onChar(ctx gui.EventCtx) {
 		}
 		ctx.Consume()
 		t.bumpVersion()
-		t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+		t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 		return
 	}
 	t.snapToLive()
@@ -533,7 +533,7 @@ func (t *Term) openSearchBar(w *gui.Window) {
 	t.search.idx = 0
 	t.bumpVersion()
 	if w != nil {
-		w.UpdateWindow()
+		w.InvalidateLayout()
 	}
 }
 
@@ -622,7 +622,7 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 			t.search.regex = !t.search.regex
 			t.recompileSearchRE()
 			t.bumpVersion()
-			w.UpdateWindow()
+			w.InvalidateLayout()
 		// Backspace and Escape are text editing, not rebindable shortcuts.
 		case e.KeyCode == gui.KeyBackspace:
 			if len(t.search.query) > 0 {
@@ -630,7 +630,7 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 				t.search.query = string(rr[:len(rr)-1])
 				t.recompileSearchRE()
 				t.bumpVersion()
-				w.UpdateWindow()
+				w.InvalidateLayout()
 			}
 		case e.KeyCode == gui.KeyEscape:
 			t.search.active = false
@@ -643,7 +643,7 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 				break
 			}
 			t.bumpVersion()
-			w.UpdateWindow()
+			w.InvalidateLayout()
 		}
 		e.IsHandled = true
 		return true

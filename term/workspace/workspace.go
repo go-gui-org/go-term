@@ -448,19 +448,19 @@ func (ws *Workspace) refresh() {
 			t.SetFocused(!ws.overlayOwnsKeys())
 		}
 	}
-	// UpdateView wipes go-gui's whole state registry, including the per-input
+	// SetView wipes go-gui's whole state registry, including the per-input
 	// caret positions keyed by view ID. Doing that on every rebuild left every
 	// filter box inserting at position 0, since each keystroke rebuilt the view
 	// and threw the caret away — typing "dark" into the theme browser produced
 	// "krad". The generator only needs installing once; every rebuild after
-	// that is UpdateWindow, which marks the layout dirty and leaves widget
+	// that is InvalidateLayout, which marks the layout dirty and leaves widget
 	// state alone.
 	if !ws.viewInstalled {
 		ws.viewInstalled = true
-		ws.w.UpdateView(ws.View)
+		ws.w.SetView(ws.View)
 		return
 	}
-	ws.w.UpdateWindow()
+	ws.w.InvalidateLayout()
 }
 
 // View returns the workspace's go-gui view tree.
@@ -548,7 +548,7 @@ func (ws *Workspace) activeThemeIdx() int {
 
 // applyThemeImpl sets the active theme pointer and calls SetTheme on every
 // pane across every tab. Does not refresh the window — callers that need a
-// refresh must call UpdateWindow themselves.
+// refresh must call InvalidateLayout themselves.
 func (ws *Workspace) applyThemeImpl(nt term.NamedTheme) {
 	ws.cfg.opts.setTheme(nt)
 	for _, tab := range ws.tabs {
@@ -564,7 +564,7 @@ func (ws *Workspace) applyThemeImpl(nt term.NamedTheme) {
 // applyThemeByName looks up name in the configured theme list
 // (case-insensitively) and applies the matched theme to all panes.
 // Returns false when no theme matches. It does not
-// call UpdateWindow — callers that are already building the view
+// call InvalidateLayout — callers that are already building the view
 // (restoreWorkspace, Restore zero-tab path) will trigger a refresh
 // themselves.
 func (ws *Workspace) applyThemeByName(name string) bool {

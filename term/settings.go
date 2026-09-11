@@ -65,7 +65,7 @@ func (t *Term) SetScrollbackRows(n int) {
 	// Outside the lock: grid.Mu must never be held across a go-gui call.
 	// Trimming can clamp ViewOffset, which moves the visible viewport, so the
 	// frame has to be requested here rather than left to the next event.
-	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 }
 
 // resizeScrollback applies a new scrollback capacity under grid.Mu, reporting
@@ -125,7 +125,7 @@ func (t *Term) SetMinimumContrast(ratio float64) {
 	t.grid.contrast.reset()
 	t.grid.Mu.Unlock()
 	t.bumpVersion()
-	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 }
 
 // SetScrollbarWidth changes the scrollbar thumb width in pixels. Mirrors
@@ -137,7 +137,7 @@ func (t *Term) SetScrollbarWidth(px float32) {
 	}
 	t.cfg.ScrollbarWidth = px
 	t.bumpVersion()
-	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 }
 
 // SetCursorStyle changes the shape the cursor is drawn in, mirroring
@@ -160,7 +160,7 @@ func (t *Term) SetCursorStyle(s CursorStyle) {
 	t.grid.markDirty(t.grid.CursorR)
 	t.grid.Mu.Unlock()
 	t.bumpVersion()
-	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 }
 
 // SetCursorBlink turns cursor blinking on or off, mirroring Cfg.CursorBlink
@@ -183,7 +183,7 @@ func (t *Term) SetCursorBlink(on bool) {
 	// the draw pass, which also runs there.
 	t.cursorEpoch = time.Now()
 	t.bumpVersion()
-	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 }
 
 // SetCursorLocked pins the cursor to the configured style and blink, dropping

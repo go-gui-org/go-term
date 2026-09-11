@@ -67,7 +67,7 @@ func (t *Term) StopRecording() error {
 	// blinkLoop parked there is no tick to deliver one. bumpVersion kicks the
 	// loop (it will re-park); the queued update is what actually repaints.
 	t.bumpVersion()
-	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 	return err
 }
 

@@ -415,7 +415,7 @@ func (ws *Workspace) applyTermSettings(prev Cfg) {
 			tm.SetKeyBindings(cur.opts.keys)
 		}
 	}
-	ws.w.UpdateWindow()
+	ws.w.InvalidateLayout()
 }
 
 // setCursorStyle / setCursorBlink / setCursorLocked apply a cursor setting to
@@ -449,7 +449,7 @@ func (ws *Workspace) forEachPane(fn func(*term.Term)) {
 			fn(tm)
 		}
 	}
-	ws.w.UpdateWindow()
+	ws.w.InvalidateLayout()
 }
 
 // effectiveTheme returns the theme a new pane would start with: the one named

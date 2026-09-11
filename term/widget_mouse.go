@@ -431,7 +431,7 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 	t.mouse.dragReport = false
 	t.lockMouse(ctx.Window)
 	t.bumpVersion()
-	ctx.Window.UpdateWindow()
+	ctx.Window.InvalidateLayout()
 	ctx.Consume()
 }
 
@@ -455,7 +455,7 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 		if inHit != t.scrollbar.hovered {
 			t.scrollbar.hovered = inHit
 			t.bumpVersion()
-			ctx.Window.UpdateWindow()
+			ctx.Window.InvalidateLayout()
 		}
 	}
 
@@ -544,7 +544,7 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 		}
 	}()
 	t.bumpVersion()
-	ctx.Window.UpdateWindow()
+	ctx.Window.InvalidateLayout()
 	t.updateHover(r, c, ctx.Window)
 }
 
@@ -637,7 +637,7 @@ func (t *Term) syncHoverForModifiers(m gui.Modifier, w *gui.Window) {
 	// modifier-only press over an OSC 8 link would otherwise not repaint.
 	t.bumpVersion()
 	if w != nil {
-		w.UpdateWindow()
+		w.InvalidateLayout()
 	}
 	r, c := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
 	if r >= 0 && c >= 0 {
@@ -700,7 +700,7 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 		if url != prevURL {
 			t.bumpVersion()
 			if w != nil {
-				w.UpdateWindow()
+				w.InvalidateLayout()
 			}
 		}
 		return
@@ -710,7 +710,7 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 	if prevLink != 0 || curLink != 0 || url != prevURL {
 		t.bumpVersion()
 		if w != nil {
-			w.UpdateWindow()
+			w.InvalidateLayout()
 		}
 	}
 }
@@ -777,7 +777,7 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 		}()
 	}
 	t.bumpVersion()
-	ctx.Window.UpdateWindow()
+	ctx.Window.InvalidateLayout()
 	ctx.Event.IsHandled = true
 }
 
@@ -1153,7 +1153,7 @@ func (t *Term) momentumLoop() {
 				t.bumpVersion()
 				t.queueCommand(func(w *gui.Window) {
 					t.showScrollbar()
-					w.UpdateWindow()
+					w.InvalidateLayout()
 				})
 			}
 		}

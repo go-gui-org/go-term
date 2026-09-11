@@ -513,7 +513,7 @@ type Term struct {
 	// on the reader goroutine while the setter runs on the main thread.
 	bellMode atomic.Int32
 
-	// redrawPending coalesces UpdateWindow requests from the reader
+	// redrawPending coalesces InvalidateLayout requests from the reader
 	// goroutine: applyChunk only queues a redraw command when one is not
 	// already in flight, so a burst of PTY reads between frames does not
 	// pile up redundant closures on the command queue. Cleared by the

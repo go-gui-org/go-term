@@ -102,7 +102,7 @@ func (a *app) onInit(w *gui.Window) {
 			log.Printf("recording to %s", a.recordPath)
 		}
 	}
-	w.UpdateView(s.View)
+	w.SetView(s.View)
 	registerCommands(w)
 	// After the workspace exists: the Help menu's shortcut item resolves
 	// against the workspace commands registered by workspace.New.
@@ -214,7 +214,7 @@ func runReplay(rc replayCfg) int {
 			w.Close()
 			return
 		}
-		w.UpdateView(tm.View)
+		w.SetView(tm.View)
 	}))
 	defer func() {
 		if tm != nil {

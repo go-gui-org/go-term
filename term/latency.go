@@ -132,7 +132,7 @@ func (l *latencyTracker) markEcho() {
 
 // markWake stamps the moment the main thread ran the queued repaint command,
 // which is the boundary between "waiting to be noticed" and "being drawn".
-// Called from the queueCommand callback, before UpdateWindow.
+// Called from the queueCommand callback, before InvalidateLayout.
 //
 // The command is coalesced — one callback can serve several PTY reads — so the
 // first wake after an echo is the one that counts, exactly as with the echo
