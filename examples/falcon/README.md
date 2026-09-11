@@ -61,7 +61,8 @@ go install github.com/go-gui-org/go-term/examples/falcon@latest
 ```
 
 A `go install` build has no linker-stamped tag, so the About dialog falls back
-to the module version, then the embedded VCS revision, then `dev`.
+to the module version, then the embedded VCS revision, then `dev`. The last two
+name no release, so the dialog prefixes them with the latest release.
 
 ### macOS `.app` bundle
 
@@ -228,14 +229,14 @@ home directory can't be resolved.
 
 ## Source map
 
-| File               | Holds                                                                                    |
-| ------------------ | ---------------------------------------------------------------------------------------- |
-| `main.go`          | Flag parsing, app/window construction, exit-code plumbing                                |
-| `config.go`        | CLI config structs, workspace path resolution, font, theme list, download dir            |
-| `window.go`        | `app` struct, workspace create/restore, quit confirmation, save-and-close, replay window |
-| `menu.go`          | Native menubar, About dialog, `Cmd+,` config command, config stub                        |
-| `version.go`       | Version resolution: linker stamp → module version → VCS revision → `dev`                 |
-| `icon.go`, `icon/` | Embedded window/Dock icon and platform icon assets                                       |
+| File               | Holds                                                                                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `main.go`          | Flag parsing, app/window construction, exit-code plumbing                                                                                 |
+| `config.go`        | CLI config structs, workspace path resolution, font, theme list, download dir                                                             |
+| `window.go`        | `app` struct, workspace create/restore, quit confirmation, save-and-close, replay window                                                  |
+| `menu.go`          | Native menubar, About dialog, `Cmd+,` config command, config stub                                                                         |
+| `version.go`       | Version resolution: linker stamp → module version → VCS revision → `dev`, plus the release line the About dialog prefixes onto dev builds |
+| `icon.go`, `icon/` | Embedded window/Dock icon and platform icon assets                                                                                        |
 
 Design notes worth knowing before editing:
 
