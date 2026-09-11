@@ -70,7 +70,7 @@ func embed(win *gui.Window) error {
 	}
 	defer func() { _ = t.Close() }()
 
-	win.UpdateView(t.View)
+	win.SetView(t.View)
 	return nil
 }
 ```

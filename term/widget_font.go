@@ -111,5 +111,5 @@ func (t *Term) invalidateFontMetrics() {
 	t.cellW = 0
 	t.draw.runeCache = nil
 	t.bumpVersion()
-	t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 }

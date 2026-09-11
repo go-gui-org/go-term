@@ -225,7 +225,7 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 		// whatever half of the cycle the last frame caught, and regaining it
 		// must restart the animation. bumpVersion also wakes blinkLoop.
 		t.bumpVersion()
-		t.queueCommand(func(w *gui.Window) { w.UpdateWindow() })
+		t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 	}
 	var report []byte
 	t.grid.Mu.Lock()
@@ -439,7 +439,7 @@ func (t *Term) onAmendLayout(ctx gui.EventCtx) {
 }
 
 // View returns the go-gui view tree for this terminal. Usable as a
-// gui.Window UpdateView generator: w.UpdateView(t.View).
+// gui.Window SetView generator: w.SetView(t.View).
 func (t *Term) View(w *gui.Window) gui.View {
 	// Detect IME composition state changes and bump version to redraw.
 	// Composition state is window-global, but only the focused pane may
@@ -502,7 +502,7 @@ func (t *Term) View(w *gui.Window) gui.View {
 	if t.focused.Load() {
 		colCfg.ID = t.focusID
 		colCfg.Focusable = true
-		// UpdateView → clearViewStateLocked clears the window's
+		// SetView → clearViewStateLocked clears the window's
 		// focus ID. Reassert after every full layout rebuild so
 		// keystrokes reach onChar/onKeyDown without requiring a
 		// prior click. Skip while a modal dialog is up: go-gui routes

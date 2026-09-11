@@ -395,7 +395,7 @@ func newTestTermCapture() (*Term, *[]byte) {
 }
 
 // syncScheduler runs QueueCommand callbacks immediately inline so tests
-// can observe side effects (UpdateWindow, display changes, etc.) without a
+// can observe side effects (InvalidateLayout, display changes, etc.) without a
 // real GUI main loop.
 type syncScheduler struct{}
 
@@ -2385,7 +2385,7 @@ func TestApplyChunk_MultipleChunksEachBumpVersion(t *testing.T) {
 		cmd:    &gui.Window{},
 	}
 	// Two separate dirty chunks — each bumps the version even though the
-	// coalesced UpdateWindow is queued at most once.
+	// coalesced InvalidateLayout is queued at most once.
 	tm.applyChunk([]byte("AB"), true)
 	tm.applyChunk([]byte("CD"), true)
 	if v := tm.drawVersion.Load(); v != 2 {
@@ -2623,7 +2623,7 @@ func TestTerm_IMEComposition_UnfocusedPaneIgnores(t *testing.T) {
 
 // TestTerm_View_RestoresFocus verifies that View() reasserts
 // w.SetFocus when the Term is focused. go-gui clears the focus ID
-// during UpdateView; View() must restore it so keystrokes reach
+// during SetView; View() must restore it so keystrokes reach
 // onChar/onKeyDown without requiring a prior click.
 func TestTerm_View_RestoresFocus(t *testing.T) {
 	win := gui.NewWindow(gui.WindowCfg{Width: 640, Height: 480})
@@ -2633,7 +2633,7 @@ func TestTerm_View_RestoresFocus(t *testing.T) {
 	}
 	defer func() { _ = term.Close() }()
 
-	// Simulate what UpdateView does: clear focus, then rebuild.
+	// Simulate what SetView does: clear focus, then rebuild.
 	win.ClearFocus()
 	if got := win.FocusID(); got != "" {
 		t.Fatalf("ClearFocus() = %q, want empty", got)

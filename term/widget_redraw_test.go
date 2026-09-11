@@ -6,8 +6,8 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 )
 
-// Why applyChunk asks for UpdateWindow (a full layout refresh) rather than the
-// cheaper RequestRedraw (render-only) after every screen-changing PTY read.
+// Why applyChunk asks for InvalidateLayout (a full layout refresh) rather than the
+// cheaper InvalidateRender (render-only) after every screen-changing PTY read.
 //
 // The terminal repaints by bumping drawVersion, which reaches go-gui as the
 // DrawCanvas Version — the canvas tessellation cache re-invokes OnDraw only when
@@ -25,7 +25,7 @@ func TestRenderOnlyRefreshSkipsCanvasVersionBump(t *testing.T) {
 	var version uint64 = 1
 	draws := 0
 	w := gui.NewWindow(gui.WindowCfg{Title: "redraw-probe", Width: 400, Height: 300})
-	w.UpdateView(func(*gui.Window) gui.View {
+	w.SetView(func(*gui.Window) gui.View {
 		return gui.DrawCanvas(gui.DrawCanvasCfg{
 			ID:      "redraw-probe-canvas",
 			Version: version,
@@ -40,9 +40,9 @@ func TestRenderOnlyRefreshSkipsCanvasVersionBump(t *testing.T) {
 		t.Fatalf("initial frame: draws = %d, want 1", draws)
 	}
 
-	// What RequestRedraw would buy — and why it cannot be used here.
+	// What InvalidateRender would buy — and why it cannot be used here.
 	version++
-	w.RequestRedraw()
+	w.InvalidateRender()
 	w.FrameFn()
 	if draws != 1 {
 		t.Fatalf("render-only refresh: draws = %d, want 1 (see comment above)", draws)
@@ -50,7 +50,7 @@ func TestRenderOnlyRefreshSkipsCanvasVersionBump(t *testing.T) {
 
 	// What applyChunk actually does.
 	version++
-	w.UpdateWindow()
+	w.InvalidateLayout()
 	w.FrameFn()
 	if draws != 2 {
 		t.Fatalf("full refresh: draws = %d, want 2", draws)

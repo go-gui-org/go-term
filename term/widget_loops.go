@@ -153,7 +153,7 @@ func (t *Term) blinkLoop() {
 			// drawVersion directly, not bumpVersion: bumping would kick this
 			// loop's own channel every tick for no gain.
 			t.drawVersion.Add(1)
-			// UpdateWindow, not RequestRedraw: the canvas tessellation cache
+			// InvalidateLayout, not InvalidateRender: the canvas tessellation cache
 			// is keyed on the Version carried by the *layout shape*, which
 			// View writes (widget.go). A render-only refresh reuses the
 			// existing layout tree, so the shape keeps the stale version, the
@@ -162,7 +162,7 @@ func (t *Term) blinkLoop() {
 			// forced a full update. The view rebuild is affordable because
 			// this loop now only ticks while something is actually blinking.
 			t.queueCommand(func(w *gui.Window) {
-				w.UpdateWindow()
+				w.InvalidateLayout()
 			})
 		}
 	}
@@ -200,7 +200,7 @@ func (t *Term) autoScrollLoop() {
 			t.bumpVersion()
 			t.queueCommand(func(w *gui.Window) {
 				t.showScrollbar()
-				w.UpdateWindow()
+				w.InvalidateLayout()
 			})
 		}
 	}
@@ -295,7 +295,7 @@ func (t *Term) writeLoop() {
 // back to the pty here, decoupled from the vsync-throttled render loop — so
 // a query/response round-trip costs microseconds instead of a full display
 // frame. Only the resulting repaint is handed to the main thread, via a
-// coalesced queueCommand(UpdateWindow). Exits when the pty is closed or
+// coalesced queueCommand(InvalidateLayout). Exits when the pty is closed or
 // returns EOF.
 func (t *Term) readLoop() {
 	defer recoverLoop("readLoop")
@@ -429,16 +429,16 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 		t.reportActivity(ActivityBell)
 	}
 
-	// Coalesce: queue at most one outstanding UpdateWindow so a burst of
+	// Coalesce: queue at most one outstanding InvalidateLayout so a burst of
 	// reads between frames doesn't pile up redundant command closures.
 	if needUpdate && !t.redrawPending.Swap(true) {
 		t.queueCommand(func(w *gui.Window) {
 			t.redrawPending.Store(false)
 			// First thing on the main thread: the stamp must not include the
-			// UpdateWindow it precedes, or the wake/paint split moves work from
+			// InvalidateLayout it precedes, or the wake/paint split moves work from
 			// one side to the other.
 			t.lat.markWake()
-			w.UpdateWindow()
+			w.InvalidateLayout()
 		})
 	}
 	return needUpdate
@@ -493,7 +493,7 @@ func (t *Term) onSyncTimeout() {
 		t.queueCommand(func(w *gui.Window) {
 			t.redrawPending.Store(false)
 			t.lat.markWake() // same split as applyChunk's repaint
-			w.UpdateWindow()
+			w.InvalidateLayout()
 		})
 	}
 }

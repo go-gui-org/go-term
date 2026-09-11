@@ -14,7 +14,7 @@ func (t *Term) scheduleViewUpdate(w *gui.Window) {
 	t.showScrollbar()
 	t.bumpVersion()
 	if w != nil {
-		w.UpdateWindow()
+		w.InvalidateLayout()
 	}
 }
 

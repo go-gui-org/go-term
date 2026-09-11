@@ -101,7 +101,7 @@
 //   - Term methods: new methods may appear; existing signatures stay.
 //   - The gui.View tree returned by [Term.View] is an implementation
 //     detail and may gain new widgets; embedders only pass the result
-//     to UpdateView, and that contract holds.
+//     to SetView, and that contract holds.
 //   - Internal layout: import only this package; the source-file
 //     organisation within it is not a contract.
 //   - Go version: the go directive in go.mod reflects the oldest Go
