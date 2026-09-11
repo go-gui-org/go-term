@@ -32,7 +32,8 @@ Whitespace around `=` is trimmed. Keys and values are capped at 128 bytes each.
 
 `Cmd+Shift+,` (`Ctrl+Alt+,` on Windows) re-reads the file and applies it to
 every open pane without restarting: font, theme, scrollback, bell, scrollbar,
-cursor, every keybinding, and — for panes created from then on — `[env]`.
+minimum contrast, middle-click paste, notify-after, cursor, every keybinding,
+and — for panes created from then on — `[env]`.
 
 `Cmd+,` opens this file in the OS-default editor, creating a commented stub
 first if it doesn't exist yet. That binding belongs to falcon, not to

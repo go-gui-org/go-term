@@ -23,7 +23,7 @@ from `go-term`.
 ## Toolchain
 
 - Go 1.26+
-- macOS or Linux
+- macOS, Linux, or Windows
 
 ## Common commands
 
@@ -51,7 +51,7 @@ Individual targets for a tighter loop while iterating:
 cd examples/falcon && go run .
 
 make build          # build everything
-make test           # tests (pure-logic only — widget verified visually)
+make test           # tests (grid, parser, widget helpers, replay fixtures)
 make test-race      # tests with the race detector
 make vet            # go vet ./...
 make lint           # golangci-lint, pinned to the CI version
@@ -75,14 +75,15 @@ which is what CI does — the local `go.work` pointing at `../go-gui` and
 
 ## Scope
 
-Before adding a feature, check the **Out of scope** list in
-[README.md](README.md). Items there were excluded deliberately. If you want one
-of them, open an issue first to discuss whether the cost is worth carrying — the
-goal is to keep the codebase approachable.
+Before adding a feature, check the **Post-1.0 backlog** list in
+[ROADMAP.md](ROADMAP.md) and the open issues. Items there were excluded
+deliberately. If you want one of them, open an issue first to discuss whether
+the cost is worth carrying — the goal is to keep the codebase approachable.
 
-The public API in `term/` (`Cfg`, `Term`, `New`, `View`, `Close`) is small on
-purpose. Add unexported helpers freely; expand the public surface only when
-there is a clear caller need.
+The public API in `term/` is small on purpose and frozen at v0.9.0 — widget,
+themes, actions, recording/replay, the live setters, and the activity/input taps
+(see `CLAUDE.md` for the full list). Add unexported helpers freely; expand the
+public surface only when there is a clear caller need.
 
 ## Architectural rules
 

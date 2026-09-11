@@ -156,10 +156,14 @@ Every section, key, default, and rebindable action is documented in
 
 ### Themes
 
-Falcon registers fourteen built-in themes (`themeList()` in `config.go`):
-Default, Dracula, Catppuccin Mocha, Tokyo Night, Monokai, One Dark, Rosé Pine,
-Kanagawa, Ayu Dark, Everforest, GitHub Dark, Gruvbox, Nord, Solarized Dark. Pick
-one live with `Cmd+Shift+T`, or set `[general] theme` in the config.
+Falcon registers go-term's own `Default` plus the whole bundled corpus
+(`themeList()` in `config.go`): 602 themes, 473 dark and 129 light. Pick one
+live with `Cmd+Shift+T`, or set `[general] theme` in the config. The names are
+listed in [`docs/themes.md`](../../docs/themes.md).
+
+Theme names that go-term shipped before the corpus (`Tokyo Night`, `One Dark`,
+`Solarized Dark`, `Gruvbox`, …) still resolve, to their closest corpus
+equivalent. Existing config files and saved workspaces keep working.
 
 ### Font
 
@@ -180,10 +184,13 @@ table — it is always accurate for your config. Highlights:
 | `Cmd+[` / `Cmd+]`                             | Previous / next pane                                         |
 | `Cmd+Ctrl+←↑↓→`                               | Resize the split                                             |
 | `Cmd+T` / `Cmd+Shift+W` / `Cmd+Ctrl+W`        | New tab / close pane / close tab                             |
+| `Cmd+S`                                       | Save workspace                                               |
+| `Cmd+/` / `Cmd+Shift+P`                       | Shortcut help / command palette                              |
 | `Cmd+1`…`Cmd+9`, `Cmd+Shift+[` / `]`          | Select tab, previous / next tab                              |
 | `Cmd+C` / `Cmd+V`                             | Copy / paste (`Ctrl+Shift+C/V` also)                         |
 | `Cmd+F`                                       | Find, with `Ctrl+R` for regex                                |
 | `Cmd+Shift+Space`                             | Copy mode — vim-keyed selection, output frozen               |
+| `Cmd+Shift+O` / `Cmd+Shift+U` / `Cmd+Shift+Y` | Select command output / open link / copy link (hints)        |
 | `Cmd+↑` / `Cmd+↓` / `Cmd+Shift+E`             | Previous / next prompt, jump to last failure (needs OSC 133) |
 | `Cmd+=` / `Cmd+-` / `Cmd+0`                   | Font zoom in / out / reset                                   |
 | `Cmd+Shift+T` / `Cmd+Shift+I` / `Cmd+Shift+R` | Theme picker / broadcast input / toggle recording            |
@@ -212,9 +219,11 @@ falcon --replay session.gtr    # space pauses, +/- speed, . steps, 0 restarts
 config directory. Inspect and convert them with the `gotermrec` CLI:
 
 ```bash
-go run ../../term/gotermrec info   session.gtr
-go run ../../term/gotermrec play   session.gtr
-go run ../../term/gotermrec export session.gtr -cast session.cast   # asciicast v2
+go run ../../term/gotermrec info    session.gtr
+go run ../../term/gotermrec cat     session.gtr   # raw bytes to stdout
+go run ../../term/gotermrec play    session.gtr
+go run ../../term/gotermrec fixture session.gtr -name session   # replay fixture
+go run ../../term/gotermrec export  session.gtr -cast session.cast   # asciicast v2
 ```
 
 This is the preferred way to file a rendering bug: a recording reproduces the
@@ -231,7 +240,7 @@ home directory can't be resolved.
 
 | File               | Holds                                                                                                                                     |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `main.go`          | Flag parsing, app/window construction, exit-code plumbing                                                                                 |
+| `main.go`          | Flag parsing, memory limit, profiling hook, app/window construction, exit-code plumbing                                                   |
 | `config.go`        | CLI config structs, workspace path resolution, font, theme list, download dir                                                             |
 | `window.go`        | `app` struct, workspace create/restore, quit confirmation, save-and-close, replay window                                                  |
 | `menu.go`          | Native menubar, About dialog, `Cmd+,` config command, config stub                                                                         |
@@ -260,7 +269,8 @@ go test ./examples/falcon
 
 The tests cover the parts that don't need a window: flag parsing and path
 resolution (`config_test.go`), menubar config fields (`menu_test.go`), version
-resolution (`version_test.go`), and the window/replay configs
-(`window_test.go`). Anything that opens a real window still has to be checked by
-running the app — try `ls`, `cat`, ANSI color output, window resize, selection
-and copy, and a full-screen app such as `vim` or `less`.
+resolution (`version_test.go`), the window/replay configs (`window_test.go`),
+and the memory-limit resolution (`memlimit_test.go`). Anything that opens a real
+window still has to be checked by running the app — try `ls`, `cat`, ANSI color
+output, window resize, selection and copy, and a full-screen app such as `vim`
+or `less`.
