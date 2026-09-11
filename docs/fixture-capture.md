@@ -1,13 +1,13 @@
 # Capturing Replay Fixtures from Real Terminal Sessions
 
-Replay fixtures are JSON files in `term/testdata/` that let the test
-suite verify parser behaviour without a live PTY. Each fixture contains
-base64-encoded input bytes and expected grid output.
+Replay fixtures are JSON files in `term/testdata/` that let the test suite
+verify parser behaviour without a live PTY. Each fixture contains base64-encoded
+input bytes and expected grid output.
 
 ## Quick Start: Go-Generated Fixtures
 
-For programmatic fixture capture, edit and run the `TestCaptureFixture`
-helper in `term/fixture_test.go`:
+For programmatic fixture capture, edit and run the `TestCaptureFixture` helper
+in `term/fixture_capture_test.go`:
 
 ```go
 func TestCaptureFixture(t *testing.T) {
@@ -25,8 +25,8 @@ go test -run TestCaptureFixture -count=1 ./term
 
 ## Capturing from a Real Terminal with `script`
 
-The `script` command (available on macOS and Linux) records an entire
-terminal session to a file. Use it to capture real program output:
+The `script` command (available on macOS and Linux) records an entire terminal
+session to a file. Use it to capture real program output:
 
 ```bash
 # Start recording. The shell prompt appears normally.
@@ -49,8 +49,8 @@ This produces two files:
 
 ## Converting a Script Typescript to a Fixture
 
-Use the `script2fixture` Go helper to convert a typescript file into a
-replay fixture:
+Use the `script2fixture` Go helper to convert a typescript file into a replay
+fixture:
 
 ```bash
 go run ./term/script2fixture \
@@ -73,6 +73,18 @@ After generating the fixture:
 # Verify it replays correctly.
 go test -run TestEmulatorReplayFixtures -count=1 ./term
 ```
+
+### Converting a `.gtr` recording
+
+A session recorded with `falcon --record` (or `Cmd+Shift+R`) converts directly,
+without going through `script(1)` first:
+
+```bash
+go run ./term/gotermrec fixture session.gtr -name cursor_moves -out term/testdata/
+```
+
+This feeds the recording's output bytes through a fresh `Parser` + `Grid`
+exactly like `script2fixture` does.
 
 ### Manual Conversion (Shell One-Liner)
 
@@ -99,11 +111,11 @@ EOF
 
 ## Determining Expected Output
 
-The hardest part of manual fixture creation is knowing what the grid
-_should_ look like after feeding the input. Two approaches:
+The hardest part of manual fixture creation is knowing what the grid _should_
+look like after feeding the input. Two approaches:
 
-1. **Feed-and-inspect**: temporarily modify `TestCaptureFixture` to
-   use your recorded bytes, run it, and copy the `want_lines` it prints.
+1. **Feed-and-inspect**: temporarily modify `TestCaptureFixture` to use your
+   recorded bytes, run it, and copy the `want_lines` it prints.
 2. **Use `script2fixture`**: it does this automatically.
 
 ## Fixture JSON Format
@@ -130,10 +142,10 @@ _should_ look like after feeding the input. Two approaches:
 
 ## Limitations
 
-- **No timing**: fixtures are pure byte streams, not interactive sessions.
-  The parser doesn't model time, so replay is always instantaneous.
+- **No timing**: fixtures are pure byte streams, not interactive sessions. The
+  parser doesn't model time, so replay is always instantaneous.
 - **No resize events**: the grid size is fixed per fixture. Test resize
   behaviour with multiple fixtures at different sizes.
-- **No PTY behaviour**: the fixture path feeds bytes directly into the
-  parser, bypassing the PTY reader goroutine. PTY-specific behaviour
-  (SIGWINCH, process lifecycle) must be tested separately.
+- **No PTY behaviour**: the fixture path feeds bytes directly into the parser,
+  bypassing the PTY reader goroutine. PTY-specific behaviour (SIGWINCH, process
+  lifecycle) must be tested separately.
