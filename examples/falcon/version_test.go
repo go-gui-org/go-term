@@ -33,41 +33,6 @@ func TestAppVersion_Unstamped(t *testing.T) {
 	}
 }
 
-func TestVCSVersion(t *testing.T) {
-	tests := []struct {
-		name string
-		info *debug.BuildInfo
-		want string
-	}{{
-		name: "clean revision abbreviates to a short hash",
-		info: &debug.BuildInfo{Settings: []debug.BuildSetting{
-			{Key: "vcs.revision", Value: "1a2b3c4d5e6f7a8b9c0d"},
-			{Key: "vcs.modified", Value: "false"},
-		}},
-		want: "dev-1a2b3c4",
-	}, {
-		name: "modified tree is marked dirty",
-		info: &debug.BuildInfo{Settings: []debug.BuildSetting{
-			{Key: "vcs.revision", Value: "1a2b3c4d5e6f7a8b9c0d"},
-			{Key: "vcs.modified", Value: "true"},
-		}},
-		want: "dev-1a2b3c4-dirty",
-	}, {
-		// -buildvcs=false, a module-cache build, or a source tarball.
-		name: "no vcs settings",
-		info: &debug.BuildInfo{},
-		want: "dev",
-	}}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := vcsVersion(tt.info); got != tt.want {
-				t.Errorf("vcsVersion() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 // TestAboutVersionFor covers the About display rule: builds that already
 // name a release show verbatim, while VCS/dev fallbacks gain the release
 // line so the dialog never shows a bare hash or "dev".
@@ -158,4 +123,103 @@ func TestReleaseVersionMatchesChangelog(t *testing.T) {
 		return
 	}
 	t.Fatal("no versioned ## [x.y.z] entry in CHANGELOG.md")
+}
+
+// TestBuildDateFrom covers the Built row's value: an RFC 3339 stamp shows as
+// a bare date, and every shape that carries no stamp yields "" so the row is
+// dropped rather than rendered empty.
+func TestBuildDateFrom(t *testing.T) {
+	tests := []struct {
+		name string
+		info *debug.BuildInfo
+		want string
+	}{{
+		name: "rfc3339 stamp trims to the date",
+		info: &debug.BuildInfo{Settings: []debug.BuildSetting{
+			{Key: "vcs.time", Value: "2026-09-12T10:04:22Z"},
+		}},
+		want: "2026-09-12",
+	}, {
+		name: "date-only stamp passes through",
+		info: &debug.BuildInfo{Settings: []debug.BuildSetting{
+			{Key: "vcs.time", Value: "2026-09-12"},
+		}},
+		want: "2026-09-12",
+	}, {
+		name: "no vcs settings",
+		info: &debug.BuildInfo{},
+		want: "",
+	}, {
+		name: "no build info at all",
+		info: nil,
+		want: "",
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildDateFrom(tt.info); got != tt.want {
+				t.Errorf("buildDateFrom() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSettingValue_NilInfo guards the accessors against a build with no
+// embedded record: they must report "unknown", not panic.
+func TestSettingValue_NilInfo(t *testing.T) {
+	if got := settingValue(nil, "vcs.revision"); got != "" {
+		t.Errorf("settingValue(nil) = %q, want empty", got)
+	}
+}
+
+// TestCommitLenFitsShortHash keeps the About dialog's abbreviation inside a
+// real hash: a commitLen past 40 would slice out of range.
+func TestCommitLenFitsShortHash(t *testing.T) {
+	if commitLen < 7 || commitLen > 40 {
+		t.Errorf("commitLen = %d, want 7..40", commitLen)
+	}
+}
+
+// TestIsPseudoVersion keeps the module-version branch of appVersion from
+// capturing a synthesized version. A pseudo-version names a release nobody
+// tagged and is far too wide for the dialog, so it must fall through to the
+// release line plus "dev".
+func TestIsPseudoVersion(t *testing.T) {
+	pseudo := []string{
+		"v0.12.1-0.20260912165223-4b26046b8092",
+		"v0.0.0-20260101000000-000000000000",
+		"v1.2.3-rc.1.0.20260912165223-4b26046b8092",
+		// A modified tree appends build metadata after the hash.
+		"v0.12.1-0.20260912165223-4b26046b8092+dirty",
+	}
+	for _, v := range pseudo {
+		if !isPseudoVersion(v) {
+			t.Errorf("isPseudoVersion(%q) = false, want true", v)
+		}
+	}
+	real := []string{
+		"v0.12.0",
+		"v0.12.0-3-g1a2b3c4",
+		"v1.0.0-rc.1",
+		"dev",
+		"",
+	}
+	for _, v := range real {
+		if isPseudoVersion(v) {
+			t.Errorf("isPseudoVersion(%q) = true, want false", v)
+		}
+	}
+}
+
+// TestAppVersion_NoBareHash locks in the split the About dialog's Commit row
+// created: the version string never carries a revision, so the two rows can
+// never print the same hash twice.
+func TestAppVersion_NoBareHash(t *testing.T) {
+	old := version
+	t.Cleanup(func() { version = old })
+
+	version = ""
+	if got := appVersion(); strings.Contains(got, "dev-") {
+		t.Errorf("appVersion() = %q, want no revision suffix", got)
+	}
 }
