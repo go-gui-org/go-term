@@ -95,3 +95,155 @@ func TestMenubarCfg_HelpMenu(t *testing.T) {
 		t.Error("about Text is empty")
 	}
 }
+
+// TestAboutDialogKeyboardContract locks in the About panel's dismissal rules:
+// no OK button and no default button, with the focus parked on the invisible
+// key holder so Enter dismisses instead of opening a link.
+func TestAboutDialogKeyboardContract(t *testing.T) {
+	cfg := aboutDialogCfg(gui.CurrentTheme())
+
+	if cfg.DialogType != gui.DialogCustom {
+		t.Errorf("DialogType = %v, want DialogCustom", cfg.DialogType)
+	}
+	if cfg.FocusID != aboutKeysID {
+		t.Errorf("FocusID = %q, want %q: Enter would hit a link, not dismiss",
+			cfg.FocusID, aboutKeysID)
+	}
+	// A confirm-style default would highlight a target the panel doesn't
+	// have; it reports, it does not ask. OnCancelNo is set, but only as
+	// go-gui's Escape notification — see aboutDialogCfg.
+	if cfg.OnOkYes != nil {
+		t.Error("About dialog set OnOkYes; it has no confirm button")
+	}
+	if cfg.OnCancelNo == nil {
+		t.Error("OnCancelNo is nil: Escape would leave the hook installed")
+	}
+	if len(cfg.CustomContent) != 1 {
+		t.Errorf("CustomContent has %d views, want 1 (the key holder)",
+			len(cfg.CustomContent))
+	}
+}
+
+// TestAboutDialogDismissal drives the real dismissal paths through a headless
+// window: the panel has no button to click, so Escape and Enter are the whole
+// keyboard contract and a regression in either leaves the dialog stuck.
+func TestAboutDialogDismissal(t *testing.T) {
+	for _, key := range []struct {
+		name string
+		code gui.KeyCode
+	}{
+		{"escape", gui.KeyEscape},
+		{"enter", gui.KeyEnter},
+		{"keypad enter", gui.KeyKPEnter},
+	} {
+		t.Run(key.name, func(t *testing.T) {
+			w := gui.NewTestWindow(gui.WindowCfg{})
+			w.TestRender(func(*gui.Window) gui.View {
+				return gui.Column(gui.ContainerCfg{ID: "root"})
+			})
+			showAbout(w)
+			w.TestRender(nil)
+			if !w.DialogIsVisible() {
+				t.Fatal("About dialog did not open")
+			}
+			// The event goes straight to the window rather than
+			// through TestKey: the dialog is a floating layer, and
+			// opening it already parked focus on FocusID, so there
+			// is nothing to focus by ID first.
+			down := gui.Event{Type: gui.EventKeyDown, KeyCode: key.code}
+			w.EventFn(&down)
+			w.TestRender(nil)
+			if w.DialogIsVisible() {
+				t.Errorf("dialog still visible after %s", key.name)
+			}
+		})
+	}
+}
+
+// TestAboutDialogClickOutside covers the third dismissal path: a click on the
+// terminal behind the panel closes it. The panel has no OK button, so a user
+// who reaches for the mouse has nothing else to aim at.
+func TestAboutDialogClickOutside(t *testing.T) {
+	w := gui.NewTestWindow(gui.WindowCfg{})
+	w.TestRender(func(*gui.Window) gui.View {
+		return gui.Column(gui.ContainerCfg{ID: "root"})
+	})
+	showAbout(w)
+	w.TestRender(nil)
+	if !w.DialogIsVisible() {
+		t.Fatal("About dialog did not open")
+	}
+	// Top-left corner: outside the centered panel at any window size.
+	click := gui.Event{
+		Type: gui.EventMouseDown, MouseX: 5, MouseY: 5,
+		MouseButton: gui.MouseLeft,
+	}
+	w.EventFn(&click)
+	w.TestRender(nil)
+	if w.DialogIsVisible() {
+		t.Error("dialog still visible after a click outside it")
+	}
+	if aboutHookInstalled {
+		t.Error("outside-click hook stayed installed after dismissal")
+	}
+}
+
+// TestAboutDialogHookRetires guards the hook's other exit: a key dismissal
+// must unwrap it there and then. A hook that never retired would wrap itself
+// on the next open and stay in the terminal's event path for good.
+func TestAboutDialogHookRetires(t *testing.T) {
+	w := gui.NewTestWindow(gui.WindowCfg{})
+	w.TestRender(func(*gui.Window) gui.View {
+		return gui.Column(gui.ContainerCfg{ID: "root"})
+	})
+	showAbout(w)
+	w.TestRender(nil)
+	esc := gui.Event{Type: gui.EventKeyDown, KeyCode: gui.KeyEscape}
+	w.EventFn(&esc)
+	w.TestRender(nil)
+	if aboutHookInstalled {
+		t.Error("hook still installed after the dialog closed")
+	}
+	// Reopening must work, and must not chain the hook to itself.
+	showAbout(w)
+	w.TestRender(nil)
+	if !w.DialogIsVisible() {
+		t.Fatal("About dialog did not reopen")
+	}
+	click := gui.Event{
+		Type: gui.EventMouseDown, MouseX: 5, MouseY: 5,
+		MouseButton: gui.MouseLeft,
+	}
+	w.EventFn(&click)
+	w.TestRender(nil)
+	if w.DialogIsVisible() {
+		t.Error("reopened dialog did not close on an outside click")
+	}
+}
+
+// TestShortCommitRev covers the Commit row's label rule: a full hash shows
+// abbreviated to commitLen, a dirty tree gains the suffix, and an empty
+// revision stays empty so no "Commit -dirty" row can render.
+func TestShortCommitRev(t *testing.T) {
+	full := "0123456789abcdef0123456789abcdef01234567"
+	tests := []struct {
+		name  string
+		rev   string
+		dirty bool
+		want  string
+	}{
+		{"full hash truncates", full, false, full[:commitLen]},
+		{"dirty suffix keeps the link base", full, true, full[:commitLen] + "-dirty"},
+		{"short hash passes through", "abc1234", false, "abc1234"},
+		{"empty stays empty", "", true, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shortCommitRev(tt.rev, tt.dirty); got != tt.want {
+				t.Errorf("shortCommitRev(%q, %v) = %q, want %q",
+					tt.rev, tt.dirty, got, tt.want)
+			}
+		})
+	}
+}

@@ -139,9 +139,32 @@ func (a *app) onMenuAction(id string, w *gui.Window) {
 // matching the proportions the macOS about panel uses.
 const aboutIconSize = 96
 
-// aboutOKID names the dialog's only button, used both as the button ID and as
-// the dialog's initial focus target.
-const aboutOKID = "about/ok"
+// About dialog widget IDs. aboutKeysID is the dialog's initial focus target
+// and its Enter handler; the rest are the links along the bottom and the
+// commit row.
+const (
+	aboutKeysID   = "about/keys"
+	aboutDocsID   = "about/docs"
+	aboutGitHubID = "about/github"
+	aboutCommitID = "about/commit"
+)
+
+// aboutTagline is the description under the icon, matching what the README
+// leads with. The line break is written in rather than left to the wrapper:
+// the break belongs after "emulator", where the clause ends, and a width-
+// driven wrap put it mid-clause at the panel's natural size.
+const aboutTagline = "A fast, GPU-rendered terminal emulator\n" +
+	"written in pure Go."
+
+// docsURL is the config reference the Docs button opens. Points at main
+// rather than the built tag: the docs are corrected between releases, and a
+// user opening them wants the current text.
+const docsURL = repoURL + "/blob/main/docs/config.md"
+
+// aboutLabelWidth is the width of the label column in the version rows. Fixed
+// so "Version", "Built", and "Commit" right-align into one edge, the way the
+// macOS and Ghostty about panels set their metadata out.
+const aboutLabelWidth = 76
 
 // aboutIconFile materializes the embedded icon as a real file: gui.Image loads
 // from a path, and data: URLs are only honored by the WASM backend. Written
@@ -173,14 +196,87 @@ var aboutIconFile = sync.OnceValue(func() string {
 // a `go run` binary doesn't have, so it would show the process name and
 // nothing else.
 //
-// Laid out like the macOS default About box — icon, app name, version — which
-// needs DialogCustom, the only dialog type that renders CustomContent. That
-// also means supplying the OK button (Escape still dismisses via the dialog's
-// own key handler).
+// Laid out like the Ghostty about panel — icon, tagline, a right-aligned
+// label column of build metadata, then links out to the docs and the repo.
+// That needs DialogCustom, the only dialog type that renders CustomContent.
+//
+// There is no OK button and no default button: the panel reports, it does
+// not ask, so nothing here is worth a highlighted target. Escape dismisses
+// through go-gui's own dialog key handler, and Enter dismisses through the
+// invisible focus holder this builds around the content — see aboutKeys.
+// Docs and GitHub stay reachable with Tab.
 func showAbout(w *gui.Window) {
 	if w.DialogIsVisible() {
 		return
 	}
+	installAboutOutsideClick(w)
+	w.Dialog(aboutDialogCfg(w.Theme()))
+}
+
+// The About panel's outside-click hook. aboutHookInstalled says the wrapper
+// below is in place and aboutPrevOnEvent holds the handler it displaced.
+// Without the flag a second open before the hook retired would capture the
+// hook as its own predecessor and chain to itself forever. Read and written
+// only from gui callbacks, which all run on the main thread.
+var (
+	aboutHookInstalled bool
+	aboutPrevOnEvent   func(*gui.Event, *gui.Window)
+)
+
+// installAboutOutsideClick makes a click anywhere outside the panel close it.
+//
+// Window.OnEvent is go-gui's last-resort hook: it fires only for events no
+// shape consumed. A click that lands on the terminal is exactly that — the
+// dialog is modal, so go-gui routes the click into the dialog layer, where
+// nothing contains the point and nothing handles it. Clicks on the panel's
+// own controls never reach here, because those consume first.
+//
+// Every dismissal path calls retireAboutHook, so the terminal's own handler
+// is back in charge as soon as the panel closes rather than paying for this
+// dialog on every event for the rest of the session.
+func installAboutOutsideClick(w *gui.Window) {
+	if aboutHookInstalled {
+		return
+	}
+	aboutHookInstalled = true
+	aboutPrevOnEvent = w.OnEvent
+	w.OnEvent = func(e *gui.Event, w *gui.Window) {
+		prev := aboutPrevOnEvent
+		if w.DialogIsVisible() && e.Type == gui.EventMouseDown {
+			w.DialogDismiss()
+			retireAboutHook(w)
+			// Swallowed on purpose: the click spent itself closing
+			// the panel, and passing it on would also send a mouse
+			// report to the child that was hidden behind it.
+			return
+		}
+		// Safety net for a dismissal that reached neither of the
+		// panel's own exits (a future go-gui path, or a caller that
+		// dismisses the dialog itself).
+		if !w.DialogIsVisible() {
+			retireAboutHook(w)
+		}
+		if prev != nil {
+			prev(e, w)
+		}
+	}
+}
+
+// retireAboutHook puts the displaced handler back. Safe to call when no hook
+// is installed, which is what lets every dismissal path call it blindly.
+func retireAboutHook(w *gui.Window) {
+	if !aboutHookInstalled {
+		return
+	}
+	w.OnEvent = aboutPrevOnEvent
+	aboutPrevOnEvent = nil
+	aboutHookInstalled = false
+}
+
+// aboutDialogCfg builds the About dialog's config. Split out of showAbout so
+// a test can assert the keyboard contract — the focus target, and that no
+// button is defaulted — without a live window.
+func aboutDialogCfg(theme gui.Theme) gui.DialogCfg {
 	var content []gui.View
 	if path := aboutIconFile(); path != "" {
 		content = append(content, gui.Image(gui.ImageCfg{
@@ -190,44 +286,210 @@ func showAbout(w *gui.Window) {
 			A11YCfg: gui.A11YCfg{A11YLabel: appName + " icon"},
 		}))
 	}
-	// No app-name text: the icon artwork already spells out "Falcon".
-	// aboutVersion prefixes an unstamped dev build with the release
-	// line, so the dialog names a release even under `go run`.
-	content = append(content, gui.Text(gui.TextCfg{
-		Text:      "Version " + aboutVersion(),
-		TextStyle: gui.DefaultDialogStyle.TextStyle,
-	}))
-	w.Dialog(gui.DialogCfg{
-		DialogType: gui.DialogCustom,
-		// Dialog() focuses FocusID on open; pointing it at the OK button is
-		// what makes Enter/Space dismiss without a click.
-		FocusID: aboutOKID,
-		CustomContent: []gui.View{
-			gui.Column(gui.ContainerCfg{
-				Sizing:     gui.FillFit,
-				HAlign:     gui.HAlignCenter,
-				Padding:    gui.NoPadding,
-				SizeBorder: gui.NoBorder,
-				Spacing:    gui.Some(gui.SpacingMedium),
-				Content:    content,
-			}),
-			gui.Row(gui.ContainerCfg{
-				Sizing:     gui.FillFit,
-				HAlign:     gui.HAlignCenter,
-				Padding:    gui.NoPadding,
-				SizeBorder: gui.NoBorder,
-				Content: []gui.View{
-					gui.Button(gui.ButtonCfg{
-						ID:      aboutOKID,
-						Content: []gui.View{gui.Text(gui.TextCfg{Text: "OK"})},
-						OnClick: func(ctx gui.EventCtx) {
-							ctx.Window.DialogDismiss()
-						},
-					}),
-				},
+	// The name in the panel's largest bold face, the way the macOS and
+	// Ghostty about panels title themselves. It repeats the wordmark in
+	// the icon artwork on purpose: the icon is decoration, and a panel
+	// whose only statement of what it is sits inside a picture reads as
+	// unnamed — and says nothing at all to a screen reader.
+	name := theme.B1
+	name.Align = gui.TextAlignCenter
+	// The tagline sets a step below body text: it is a caption for the
+	// icon, and at body size it competed with the metadata rows for the
+	// eye instead of introducing them.
+	tagline := theme.TextStyleSecondary
+	tagline.Size = theme.SizeTextSmall
+	tagline.Align = gui.TextAlignCenter
+	// Name and tagline ride in one block rather than as two items of the
+	// outer stack: the tagline says what the name means, so they belong
+	// closer to each other than to the icon above or the rows below.
+	// Medium, not Small — at the title's 22px the smaller gap read as a
+	// collision rather than as a pairing.
+	content = append(content, gui.Column(gui.ContainerCfg{
+		Sizing:     gui.FillFit,
+		HAlign:     gui.HAlignCenter,
+		Padding:    gui.NoPadding,
+		SizeBorder: gui.NoBorder,
+		Spacing:    gui.Some(gui.SpacingMedium),
+		Content: []gui.View{
+			gui.Text(gui.TextCfg{Text: appName, TextStyle: name}),
+			gui.Text(gui.TextCfg{
+				Text:      aboutTagline,
+				TextStyle: tagline,
+				Mode:      gui.TextModeWrap,
 			}),
 		},
+	}))
+	content = append(content, aboutMetadata(theme))
+	content = append(content, gui.Row(gui.ContainerCfg{
+		Sizing:     gui.FillFit,
+		HAlign:     gui.HAlignCenter,
+		Padding:    gui.NoPadding,
+		SizeBorder: gui.NoBorder,
+		Spacing:    gui.Some(gui.SpacingLarge),
+		Content: []gui.View{
+			aboutLinkButton(aboutDocsID, "Docs", docsURL),
+			aboutLinkButton(aboutGitHubID, "GitHub", repoURL),
+		},
+	}))
+	return gui.DialogCfg{
+		DialogType: gui.DialogCustom,
+		// Dialog() focuses FocusID on open. It points at the invisible key
+		// holder rather than at Docs or GitHub: focusing a link would make
+		// Enter open a browser, which is the opposite of dismissing.
+		FocusID:       aboutKeysID,
+		CustomContent: []gui.View{aboutKeys(content)},
+		// go-gui's dialog root calls OnCancelNo when Escape dismisses.
+		// Not a button callback here — the panel has no buttons — just
+		// the notification that tells the outside-click hook to retire.
+		OnCancelNo: retireAboutHook,
+	}
+}
+
+// aboutKeys wraps the dialog body in a focusable container that dismisses on
+// Enter. A plain container takes no focus ring and no fill, so it adds the
+// key handling without adding a visible control — which is the point, since
+// the dialog has no button worth defaulting to.
+//
+// Escape is not handled here: go-gui's dialog root already consumes it, and a
+// second handler on the same key would only be a place for the two to drift.
+func aboutKeys(content []gui.View) gui.View {
+	return gui.Column(gui.ContainerCfg{
+		ID:         aboutKeysID,
+		Focusable:  true,
+		Sizing:     gui.FillFit,
+		HAlign:     gui.HAlignCenter,
+		Padding:    gui.NoPadding,
+		SizeBorder: gui.NoBorder,
+		// Large, not Medium: the four blocks here are separate ideas
+		// (what it is, how old it is, where to read more), and the
+		// panel reads as a stack of them rather than a dense list.
+		Spacing: gui.Some(gui.SpacingLarge),
+		OnKeyDown: func(ctx gui.EventCtx) {
+			switch ctx.Event.KeyCode {
+			case gui.KeyEnter, gui.KeyKPEnter:
+				ctx.Window.DialogDismiss()
+				retireAboutHook(ctx.Window)
+				ctx.Consume()
+			}
+		},
+		Content: content,
 	})
+}
+
+// aboutMetadata builds the Version/Built/Commit block. Every row is optional
+// below the first: an unstamped build knows no revision and no commit date,
+// and an empty row reading "Commit —" is worse than no row.
+func aboutMetadata(theme gui.Theme) gui.View {
+	// The values sit in the theme's mono face so the hash and the version
+	// digits line up column-wise, at the dialog's own text size rather than
+	// M3's slightly larger default.
+	value := theme.M3
+	value.Size = gui.DefaultDialogStyle.TextStyle.Size
+	rows := []gui.View{
+		aboutRow(theme, "Version", gui.Text(gui.TextCfg{
+			Text:      aboutVersion(),
+			TextStyle: value,
+		})),
+	}
+	if date := buildDate(); date != "" {
+		rows = append(rows, aboutRow(theme, "Built", gui.Text(gui.TextCfg{
+			Text:      date,
+			TextStyle: value,
+		})))
+	}
+	if rev := buildCommit(); rev != "" {
+		rows = append(rows, aboutRow(theme, "Commit",
+			aboutCommitLink(theme, value, rev)))
+	}
+	return gui.Column(gui.ContainerCfg{
+		Sizing:     gui.FitFit,
+		Padding:    gui.NoPadding,
+		SizeBorder: gui.NoBorder,
+		Spacing:    gui.Some(gui.SpacingTight),
+		Content:    rows,
+	})
+}
+
+// aboutRow pairs one right-aligned label with its value view.
+func aboutRow(theme gui.Theme, label string, value gui.View) gui.View {
+	style := theme.TextStyleSecondary
+	style.Align = gui.TextAlignRight
+	return gui.Row(gui.ContainerCfg{
+		Sizing:     gui.FitFit,
+		VAlign:     gui.VAlignMiddle,
+		Padding:    gui.NoPadding,
+		SizeBorder: gui.NoBorder,
+		Spacing:    gui.Some(gui.SpacingSmall),
+		Content: []gui.View{
+			gui.Text(gui.TextCfg{
+				Text:      label,
+				TextStyle: style,
+				MinWidth:  aboutLabelWidth,
+			}),
+			value,
+		},
+	})
+}
+
+// shortCommitRev abbreviates a full revision for the About dialog's Commit
+// row. Split out of aboutCommitLink so tests can cover the rule without
+// stubbing the toolchain's build info.
+func shortCommitRev(rev string, dirty bool) string {
+	if rev == "" {
+		return ""
+	}
+	short := rev
+	if len(short) > commitLen {
+		short = short[:commitLen]
+	}
+	if dirty {
+		short += "-dirty"
+	}
+	return short
+}
+
+// aboutCommitLink renders the short revision as a button that opens the
+// commit on GitHub. A ghost button rather than colored text: it carries the
+// hit target, the focus ring, and the keyboard activation that a bare Text
+// has none of, while showing no chrome until hovered.
+//
+// A dirty tree appends "-dirty" to the label but keeps the link, which still
+// points at the revision the working tree was based on.
+func aboutCommitLink(theme gui.Theme, value gui.TextStyle, rev string) gui.View {
+	short := shortCommitRev(rev, buildDirty())
+	value.Color = theme.ColorAccent
+	url := repoURL + "/commit/" + rev
+	return gui.Button(gui.ButtonCfg{
+		ID:      aboutCommitID,
+		Variant: gui.ButtonGhost,
+		Padding: gui.NoPadding,
+		Content: []gui.View{gui.Text(gui.TextCfg{
+			Text:      short,
+			TextStyle: value,
+		})},
+		A11YCfg: gui.A11YCfg{A11YLabel: "Commit " + short + ", opens GitHub"},
+		OnClick: func(gui.EventCtx) { openURL(url) },
+	})
+}
+
+// aboutLinkButton is one of the dialog's outbound links. The dialog stays
+// open behind the browser: the user asked to read something, not to dismiss
+// the panel.
+func aboutLinkButton(id, label, url string) gui.View {
+	return gui.Button(gui.ButtonCfg{
+		ID:      id,
+		Content: []gui.View{gui.Text(gui.TextCfg{Text: label})},
+		OnClick: func(gui.EventCtx) { openURL(url) },
+	})
+}
+
+// openURL hands a URL to the platform browser, logging rather than surfacing
+// a failure: a link that does nothing is a small loss, and an error dialog
+// stacked on the About dialog is a bigger one.
+func openURL(url string) {
+	if err := openPath(url); err != nil {
+		log.Printf("about: open %s: %v", url, err)
+	}
 }
 
 // openConfigFile opens the user's config file in the OS-default editor,
