@@ -274,3 +274,5 @@ and the memory-limit resolution (`memlimit_test.go`). Anything that opens a real
 window still has to be checked by running the app — try `ls`, `cat`, ANSI color
 output, window resize, selection and copy, and a full-screen app such as `vim`
 or `less`.
+
+Falcon is a trademark of Mike Ward.

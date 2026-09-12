@@ -15,7 +15,8 @@ Targets macOS, Linux, and Windows (ConPTY).
 
 The screenshot above is **falcon**, the example app: a full terminal emulator
 with tabs, splits, workspace save/restore, themes, and session replay. It is the
-reference embedder for `term/workspace` and a daily driver on macOS.
+reference embedder for `term/workspace` and a daily driver on macOS. Falcon is a
+trademark of Mike Ward.
 
 ```bash
 cd examples/falcon && go run .
