@@ -340,6 +340,44 @@ func (t *Term) selectCommandOutput(w *gui.Window) {
 	t.scheduleViewUpdate(w)
 }
 
+// selectAll selects every content row: scrollback plus live grid, or the
+// live grid alone while the alt screen is active (the scrollback ring
+// still holds main-screen rows under EnterAlt, so ContentRows would reach
+// behind the full-screen app without the clamp).
+//
+// In copy mode it expands the copy selection instead, so the selection
+// keeps its owner and y still yanks it. Either way the viewport is left
+// alone — no revealCursor, no scroll — and the caller (Cmd+A, palette)
+// can copy with Cmd+C next.
+func (t *Term) selectAll(w *gui.Window) {
+	func() {
+		g := t.grid
+		g.Mu.Lock()
+		defer g.Mu.Unlock()
+		base, count := 0, g.ContentRows()
+		if g.AltActive {
+			base, count = g.Scrollback.Len(), g.Rows
+		}
+		if count <= 0 || g.Cols <= 0 {
+			return
+		}
+		if t.copy.active {
+			t.copy.anchor = contentPos{Row: base}
+			t.copy.cursor = contentPos{Row: base + count - 1, Col: g.Cols - 1}
+			t.copy.sel = copySelChar
+			t.clampCopyCursor()
+			t.syncSelection()
+			return
+		}
+		g.SelMode = selChar
+		g.SelAnchor = contentPos{Row: base}
+		g.SelHead = contentPos{Row: base + count - 1, Col: g.Cols}
+		g.SelActive = true
+		g.hasSelAnchor = true
+	}()
+	t.scheduleViewUpdate(w)
+}
+
 // copyWordMotion moves the cursor a word forward or back.
 func (t *Term) copyWordMotion(forward bool, w *gui.Window) {
 	func() {

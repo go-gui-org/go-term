@@ -507,6 +507,7 @@ window.
 | `term.next-prompt`      | `Cmd+Down`                             |
 | `term.jump-failure`     | `Cmd+Shift+E`                          |
 | `term.select-output`    | `Cmd+Shift+O`                          |
+| `term.select-all`       | `Cmd+A`                                |
 | `term.scroll-page-up`   | `PageUp`                               |
 | `term.scroll-page-down` | `PageDown`                             |
 | `term.scroll-top`       | `Shift+Home`                           |

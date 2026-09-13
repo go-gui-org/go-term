@@ -592,6 +592,11 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 		e.IsHandled = true
 		return true
 	}
+	if t.binds(ActionSelectAll, e) {
+		t.selectAll(w)
+		e.IsHandled = true
+		return true
+	}
 
 	// While in search mode, intercept navigation and editing keys.
 	if t.search.active {

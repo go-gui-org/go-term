@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `term.select-all` (`Cmd+A`) selects all text, including the scrollback
+  buffer. On the alt screen it selects the visible screen only; in copy
+  mode it expands the copy selection; with the Find bar open it still
+  runs. The viewport does not move. Rebindable via `[keybindings]` like
+  every other `term.*` action.
+
 ## [0.12.0] - 2026-09-11
 
 ### Added
