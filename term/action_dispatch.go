@@ -57,6 +57,10 @@ var actionDispatch = map[Action]actionFn{
 		t.selectCommandOutput(w)
 		return true
 	},
+	ActionSelectAll: func(t *Term, w *gui.Window) bool {
+		t.selectAll(w)
+		return true
+	},
 	ActionToggleRegex: func(t *Term, w *gui.Window) bool {
 		if !t.search.active {
 			return false
@@ -141,9 +145,10 @@ var actionDispatch = map[Action]actionFn{
 // and runActionDirect consults it directly, so the keyboard path and the
 // palette cannot apply different operations to the same action.
 //
-// The three Term-level actions with copy-mode behavior (ActionCopy yanks,
-// ActionJumpFailure and ActionSelectOutput keep working) are included with
-// their copy-mode meaning; runActionDirect resolves their state first.
+// The four Term-level actions with copy-mode behavior (ActionCopy yanks,
+// ActionJumpFailure, ActionSelectOutput and ActionSelectAll keep working)
+// are included with their copy-mode meaning; runActionDirect resolves
+// their state first.
 var copyModeOps = map[Action]actionFn{
 	ActionCopyModeExit: func(t *Term, w *gui.Window) bool {
 		t.exitCopyMode(w)
@@ -257,12 +262,16 @@ var copyModeOps = map[Action]actionFn{
 		t.selectCommandOutput(w)
 		return true
 	},
+	ActionSelectAll: func(t *Term, w *gui.Window) bool {
+		t.selectAll(w)
+		return true
+	},
 }
 
 // copyModeOrder is the dispatch order for copy-mode keys. It preserves the
 // case order of the old binds-switch in handleCopyModeKey, which decided
 // which action wins when a user rebinds two actions onto one chord —
-// first-listed wins. The three Term-level tail actions keep their places at
+// first-listed wins. The four Term-level tail actions keep their places at
 // the end.
 var copyModeOrder = []Action{
 	ActionCopyModeExit,
@@ -292,6 +301,7 @@ var copyModeOrder = []Action{
 	ActionCopyModeNextMark,
 	ActionJumpFailure,
 	ActionSelectOutput,
+	ActionSelectAll,
 }
 
 // runActionDirect executes one Term-level action from its name, with no
@@ -326,7 +336,7 @@ func (t *Term) runActionDirect(a Action, w *gui.Window) bool {
 	if t.search.active {
 		switch a {
 		case ActionFind, ActionPrevPrompt, ActionNextPrompt,
-			ActionJumpFailure, ActionSelectOutput,
+			ActionJumpFailure, ActionSelectOutput, ActionSelectAll,
 			ActionToggleRegex, ActionNextMatch, ActionPrevMatch:
 			return actionDispatch[a](t, w)
 		default:

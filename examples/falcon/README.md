@@ -188,6 +188,7 @@ table — it is always accurate for your config. Highlights:
 | `Cmd+/` / `Cmd+Shift+P`                       | Shortcut help / command palette                              |
 | `Cmd+1`…`Cmd+9`, `Cmd+Shift+[` / `]`          | Select tab, previous / next tab                              |
 | `Cmd+C` / `Cmd+V`                             | Copy / paste (`Ctrl+Shift+C/V` also)                         |
+| `Cmd+A`                                       | Select all, including scrollback                             |
 | `Cmd+F`                                       | Find, with `Ctrl+R` for regex                                |
 | `Cmd+Shift+Space`                             | Copy mode — vim-keyed selection, output frozen               |
 | `Cmd+Shift+O` / `Cmd+Shift+U` / `Cmd+Shift+Y` | Select command output / open link / copy link (hints)        |

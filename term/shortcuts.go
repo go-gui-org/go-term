@@ -28,6 +28,7 @@ const (
 	ActionNextPrompt     Action = "term.next-prompt"
 	ActionJumpFailure    Action = "term.jump-failure"
 	ActionSelectOutput   Action = "term.select-output"
+	ActionSelectAll      Action = "term.select-all"
 	ActionScrollPageUp   Action = "term.scroll-page-up"
 	ActionScrollPageDown Action = "term.scroll-page-down"
 	ActionScrollTop      Action = "term.scroll-top"
@@ -174,7 +175,7 @@ func (b binding) matches(key gui.KeyCode, mods gui.Modifier) bool {
 var actionOrder = []Action{
 	ActionCopy, ActionPaste, ActionFind, ActionToggleRegex,
 	ActionNextMatch, ActionPrevMatch, ActionPrevPrompt, ActionNextPrompt,
-	ActionJumpFailure, ActionSelectOutput,
+	ActionJumpFailure, ActionSelectOutput, ActionSelectAll,
 	ActionScrollPageUp, ActionScrollPageDown, ActionScrollTop, ActionScrollBottom,
 	ActionFontInc, ActionFontDec, ActionFontReset,
 	ActionCopyMode, ActionHints, ActionHintsCopy,
@@ -209,6 +210,7 @@ var actionLabels = map[Action]string{
 	ActionNextPrompt:     "Next prompt mark",
 	ActionJumpFailure:    "Jump to last failed command",
 	ActionSelectOutput:   "Select command output",
+	ActionSelectAll:      "Select all",
 	ActionScrollPageUp:   "Scroll page up",
 	ActionScrollPageDown: "Scroll page down",
 	ActionScrollTop:      "Scroll to top",
@@ -288,6 +290,10 @@ func defaultBindings() map[Action]binding {
 		// shiftOptional is moot for a chord that already names Shift.
 		ActionJumpFailure:  b(false, k(gui.KeyE, gui.ModSuper|gui.ModShift)),
 		ActionSelectOutput: b(false, k(gui.KeyO, gui.ModSuper|gui.ModShift)),
+
+		// Select-all tolerates Shift like Copy and Find do: it names no
+		// direction, so a stray Shift (or Caps Lock) must not change it.
+		ActionSelectAll: b(true, k(gui.KeyA, gui.ModSuper)),
 
 		// One chord each: shiftOptional makes plain PageUp and Shift+PageUp
 		// both match, and scrollbackIntercept's own alt-screen check decides
