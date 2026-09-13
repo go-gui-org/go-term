@@ -1148,6 +1148,87 @@ func TestParser_XTWINOPS_PixelGeometry(t *testing.T) {
 	}
 }
 
+func TestParser_XTWINOPS_CharGeometryAndState(t *testing.T) {
+	// esctest's per-test reset() blocks on CSI 18 t (text-area size in
+	// chars); a missing reply stalls every test for the 1s read timeout.
+	g, p := newParserGrid(24, 80)
+	g.CellPxW, g.CellPxH = 8.0, 16.0
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+
+	cases := []struct{ seq, want string }{
+		{"\x1b[18t", "\x1b[8;24;80t"},   // text-area size in chars
+		{"\x1b[19t", "\x1b[9;24;80t"},   // screen size in chars
+		{"\x1b[11t", "\x1b[1t"},         // window state: not iconified
+		{"\x1b[13t", "\x1b[3;0;0t"},     // window position: unknown
+		{"\x1b[15t", "\x1b[5;384;640t"}, // screen size in pixels
+	}
+	for _, tc := range cases {
+		reply = nil
+		feed(t, g, p, []byte(tc.seq))
+		if string(reply) != tc.want {
+			t.Errorf("%q reply = %q, want %q", tc.seq, reply, tc.want)
+		}
+	}
+
+	// Icon label and window title echo the last OSC 0/1/2 title.
+	feed(t, g, p, []byte("\x1b]2;hello\x07"))
+	reply = nil
+	feed(t, g, p, []byte("\x1b[20t"))
+	if string(reply) != "\x1b]Lhello\x1b\\" {
+		t.Errorf("CSI 20t reply = %q, want OSC L echo", reply)
+	}
+	reply = nil
+	feed(t, g, p, []byte("\x1b[21t"))
+	if string(reply) != "\x1b]lhello\x1b\\" {
+		t.Errorf("CSI 21t reply = %q, want OSC l echo", reply)
+	}
+
+	// A resize request shares 18t's reply shape (CSI 8;h;w t) but is a
+	// manipulation op: it must stay silent, never answered.
+	reply = nil
+	feed(t, g, p, []byte("\x1b[8;25;80t"))
+	if len(reply) != 0 {
+		t.Errorf("CSI 8;25;80t (resize) should not reply, got %q", reply)
+	}
+
+	// Extra params are ignored: esctest's shell-size probe sends CSI 4;2t.
+	reply = nil
+	feed(t, g, p, []byte("\x1b[14;2t"))
+	if string(reply) != "\x1b[4;384;640t" {
+		t.Errorf("CSI 14;2t reply = %q, want text-area pixels", reply)
+	}
+	reply = nil
+	feed(t, g, p, []byte("\x1b[18;0t"))
+	if string(reply) != "\x1b[8;24;80t" {
+		t.Errorf("CSI 18;0t reply = %q, want text-area chars", reply)
+	}
+}
+
+func TestParser_XTWINOPS_ReportTitleEmpty(t *testing.T) {
+	// With no OSC title seen yet the reports echo an empty title.
+	g, p := newParserGrid(2, 10)
+	var reply []byte
+	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+	feed(t, g, p, []byte("\x1b[21t"))
+	if string(reply) != "\x1b]l\x1b\\" {
+		t.Errorf("CSI 21t with no title = %q, want empty OSC l", reply)
+	}
+}
+
+func TestParser_XTWINOPS_NoHandler(t *testing.T) {
+	// Report queries without a reply handler must not panic.
+	g, p := newParserGrid(2, 10)
+	// No SetReplyHandler call — p.onReply is nil.
+	for _, seq := range []string{
+		"\x1b[11t", "\x1b[13t", "\x1b[14t", "\x1b[15t",
+		"\x1b[16t", "\x1b[18t", "\x1b[19t", "\x1b[20t", "\x1b[21t",
+	} {
+		feed(t, g, p, []byte(seq))
+	}
+	// No panic = pass.
+}
+
 func TestParser_XTVERSION(t *testing.T) {
 	g, p := newParserGrid(2, 10)
 	var reply []byte
