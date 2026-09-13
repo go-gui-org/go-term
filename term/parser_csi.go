@@ -190,23 +190,56 @@ func (p *parser) dispatchCSI(final byte) {
 			p.g.ReverseAttrsRect(p.params)
 			break
 		}
-		// XTWINOPS. Only the read-only geometry queries and the title stack
-		// are honored — window manipulation ops (move/resize/raise…) are
+		// XTWINOPS. Only the read-only reports and the title stack are
+		// honored — window manipulation ops (move/resize/raise…) are
 		// ignored, an embedded widget must not let the app drive the host
 		// window. Cell pixel sizes come from the widget's measurement
 		// (CellPxW/CellPxH, 0 before the first frame); a 0 reply is valid and
-		// clients fall back.
+		// clients fall back. There is no separate screen or window position
+		// to report, so 13t answers 0;0 and 15t/19t echo the text area.
 		px := func(f float32) int { return int(f + 0.5) }
 		switch p.param(0, 0) {
+		case 11: // report window state: always open (an embedded pane
+			// has no iconified state): CSI 1 t.
+			if p.onReply != nil {
+				p.onReply([]byte("\x1b[1t"))
+			}
+		case 13: // report window position: CSI 3 ; x ; y t. The host
+			// window position is unknown to the parser; answer origin.
+			if p.onReply != nil {
+				p.onReply([]byte("\x1b[3;0;0t"))
+			}
 		case 14: // report text-area size in pixels: CSI 4 ; height ; width t
 			if p.onReply != nil {
 				h, w := px(float32(p.g.Rows)*p.g.CellPxH), px(float32(p.g.Cols)*p.g.CellPxW)
 				p.onReply([]byte("\x1b[4;" + strconv.Itoa(h) + ";" + strconv.Itoa(w) + "t"))
 			}
+		case 15: // report screen size in pixels: CSI 5 ; height ; width t
+			if p.onReply != nil {
+				h, w := px(float32(p.g.Rows)*p.g.CellPxH), px(float32(p.g.Cols)*p.g.CellPxW)
+				p.onReply([]byte("\x1b[5;" + strconv.Itoa(h) + ";" + strconv.Itoa(w) + "t"))
+			}
 		case 16: // report cell size in pixels: CSI 6 ; height ; width t
 			if p.onReply != nil {
 				h, w := px(p.g.CellPxH), px(p.g.CellPxW)
 				p.onReply([]byte("\x1b[6;" + strconv.Itoa(h) + ";" + strconv.Itoa(w) + "t"))
+			}
+		case 18: // report text-area size in chars: CSI 8 ; height ; width t
+			if p.onReply != nil {
+				p.onReply([]byte("\x1b[8;" + strconv.Itoa(p.g.Rows) + ";" + strconv.Itoa(p.g.Cols) + "t"))
+			}
+		case 19: // report screen size in chars: CSI 9 ; height ; width t
+			if p.onReply != nil {
+				p.onReply([]byte("\x1b[9;" + strconv.Itoa(p.g.Rows) + ";" + strconv.Itoa(p.g.Cols) + "t"))
+			}
+		case 20: // report icon label: OSC L title ST. Icon and window
+			// share one title (see parser.curTitle).
+			if p.onReply != nil {
+				p.onReply([]byte("\x1b]L" + p.curTitle + "\x1b\\"))
+			}
+		case 21: // report window title: OSC l title ST.
+			if p.onReply != nil {
+				p.onReply([]byte("\x1b]l" + p.curTitle + "\x1b\\"))
 			}
 		case 22: // push the current title onto the stack
 			p.pushTitle()

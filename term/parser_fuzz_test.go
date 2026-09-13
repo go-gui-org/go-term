@@ -164,7 +164,7 @@ func FuzzCSIDispatch(f *testing.F) {
 		"0;0H", "1;1r", "@", "L", "M", "P",
 		"3g", " q", "0 q", "2 q",
 		"!p", "$p", "?1003;1$p", // DECSTR, DECRQM
-		"14t", "16t", "22t", "23t", // XTWINOPS
+		"14t", "15t", "16t", "18t", "19t", "11t", "13t", "20t", "21t", "22t", "23t", // XTWINOPS
 		">q", ">c", "?996n", "?6n", "5n", "6n", // XTVERSION, DA2, DSR
 		"$r", "$t", "$v", "$x", "*x", "$z", "${", "$x", // rect ops
 		"38;2;1;2;3m", "48;5;200m", "58;2;9;9;9m", // extended SGR
