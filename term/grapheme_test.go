@@ -1,6 +1,9 @@
 package term
 
-import "testing"
+import (
+	"testing"
+	"unicode/utf8"
+)
 
 // cellAt is a tiny helper for these tests; returns the live-grid cell.
 func gcell(g *grid, r, c int) cell { return *g.At(r, c) }
@@ -249,5 +252,65 @@ func TestGrapheme_StandaloneEmojiModifier(t *testing.T) {
 	}
 	if w := gcell(g, 0, 0).Width; w != 2 {
 		t.Errorf("width = %d, want 2", w)
+	}
+}
+
+// TestPutRune_PlainWideMatchesSegmenter pins the assumption behind PutRune's CJK fast
+// path: every rune isPlainWide accepts is 3 bytes of UTF-8, and the segmenter the slow
+// path uses sees it as a complete width-2 syllable when another plain wide rune follows.
+// A range edit that took in a narrow or joining rune fails here, not on screen.
+func TestPutRune_PlainWideMatchesSegmenter(t *testing.T) {
+	var buf []byte
+	for _, rng := range [][2]rune{{0x3400, 0x4DBF}, {0x4E00, 0x9FFF}, {0xAC00, 0xD7A3}} {
+		for r := rng[0]; r <= rng[1]; r++ {
+			if !isPlainWide(r) || utf8.RuneLen(r) != 3 {
+				t.Fatalf("%U: isPlainWide=%v len=%d, want true 3", r, isPlainWide(r), utf8.RuneLen(r))
+			}
+			for _, next := range []rune{r, 0x3400, 0x4E00, 0xAC00, 0xD7A3} {
+				buf = utf8.AppendRune(utf8.AppendRune(buf[:0], r), next)
+				if n, w, complete := leadingAkshara(buf); n != 3 || w != 2 || !complete {
+					t.Fatalf("%U then %U: leadingAkshara = (%d, %d, %v), want (3, 2, true)",
+						r, next, n, w, complete)
+				}
+			}
+		}
+	}
+	for _, r := range []rune{0x33FF, 0x4DC0, 0x4DFF, 0xA000, 0xABFF, 0xD7A4} {
+		if isPlainWide(r) {
+			t.Errorf("%U: isPlainWide = true, want false (outside the checked ranges)", r)
+		}
+	}
+}
+
+// TestGrapheme_HangulJamoAfterPlainSyllable checks that the CJK fast path does not
+// commit a syllable a following trailing jamo still extends: 나 + U+11A8 is one
+// cluster, 낙, even though 나 arrived right after another plain syllable.
+func TestGrapheme_HangulJamoAfterPlainSyllable(t *testing.T) {
+	g, p := newParserGrid(1, 10)
+	feedStr(t, g, p, "가낙")
+	if g.CursorC != 4 {
+		t.Fatalf("cursor col = %d, want 4", g.CursorC)
+	}
+	if c := gcell(g, 0, 0); c.Ch != '가' || c.Width != 2 || c.clusterID != 0 {
+		t.Errorf("cell 0 = %+v, want 가 width 2 no cluster", c)
+	}
+	c := gcell(g, 0, 2)
+	if c.Width != 2 || c.clusterID == 0 {
+		t.Fatalf("cell 2 = %+v, want width-2 cluster", c)
+	}
+	if got := g.clusters[c.clusterID]; got != "낙" {
+		t.Errorf("cluster = %q, want 나+U+11A8", got)
+	}
+}
+
+// TestGrapheme_RepeatClusterNoAlloc checks that writing a multi-rune cluster already in
+// the intern pool allocates nothing. internCluster used to take a string, so every
+// accented letter built from a combining mark copied its bytes to the heap.
+func TestGrapheme_RepeatClusterNoAlloc(t *testing.T) {
+	g, p := newParserGrid(4, 40)
+	in := []byte("é\r")
+	feedStr(t, g, p, string(in)) // first sight interns the cluster
+	if allocs := testing.AllocsPerRun(100, func() { p.Feed(in) }); allocs != 0 {
+		t.Errorf("repeat cluster allocs = %v, want 0", allocs)
 	}
 }

@@ -42,8 +42,29 @@ func (g *grid) PutRune(r rune) {
 		g.gphBuf[0] = byte(r)
 		return
 	}
+	// The same shortcut for CJK ideographs and Hangul syllables, which make up most CJK
+	// text. Every rune isPlainWide accepts is 3 bytes of UTF-8, grapheme property Other
+	// or a precomposed LV/LVT syllable, and East Asian Wide. No grapheme rule joins two
+	// such runes (a syllable extends only with V/T jamo, which are not plain), so a
+	// pending one is a complete width-2 cluster once another arrives.
+	if len(g.gphBuf) == 3 && isPlainWide(r) {
+		if a, _ := utf8.DecodeRune(g.gphBuf); isPlainWide(a) {
+			g.putCell(a, 0, 2)
+			g.gphBuf = utf8.AppendRune(g.gphBuf[:0], r)
+			return
+		}
+	}
 	g.gphBuf = utf8.AppendRune(g.gphBuf, r)
 	g.drainAksharas(false)
+}
+
+// isPlainWide reports whether r is a CJK Unified Ideograph (Extension A or the main
+// block) or a precomposed Hangul syllable. PutRune's fast path relies on all of them
+// being width 2 and never joined into one grapheme with each other;
+// TestPutRune_PlainWideMatchesSegmenter checks that against uniseg for every one.
+func isPlainWide(r rune) bool {
+	return (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0xAC00 && r <= 0xD7A3) ||
+		(r >= 0x3400 && r <= 0x4DBF)
 }
 
 // FlushGrapheme commits any pending orthographic syllable(s) to the grid.
@@ -165,6 +186,13 @@ func clusterFusesRight(cluster []byte) bool {
 // (category Mc) forces the syllable to 2 cells; ZWJ preserves a pending
 // virama, ZWNJ breaks it; non-spacing marks contribute nothing.
 func brahmicWidth(b []byte) (brahmic bool, width int) {
+	// Only a virama or an Mc mark makes a syllable Brahmic, and the width below is thrown
+	// away otherwise. Scan for one first: almost every cluster (CJK, Latin, symbols) has
+	// neither, and the width loop's per-rune runeWidth costs a uniseg lookup each. On
+	// vtebench's unicode input this pre-scan halved the parser's time per MiB.
+	if !hasBrahmicSign(b) {
+		return false, 0
+	}
 	prevVirama := false
 	for i := 0; i < len(b); {
 		if b[i] < utf8.RuneSelf {
@@ -210,6 +238,25 @@ func brahmicWidth(b []byte) (brahmic bool, width int) {
 	return brahmic, width
 }
 
+// hasBrahmicSign reports whether b holds a virama or a spacing combining mark
+// (category Mc) — the two runes that make brahmicWidth treat a syllable as Brahmic.
+// Both sets start at U+0903, so ASCII and Latin-1 through Arabic skip the table
+// search entirely.
+func hasBrahmicSign(b []byte) bool {
+	for i := 0; i < len(b); {
+		if b[i] < utf8.RuneSelf {
+			i++
+			continue
+		}
+		r, sz := utf8.DecodeRune(b[i:])
+		i += sz
+		if r >= 0x0903 && (isVirama(r) || unicode.Is(unicode.Mc, r)) {
+			return true
+		}
+	}
+	return false
+}
+
 // isVirama reports whether r is a Brahmic virama / halant / pangkon — the
 // dead-consonant sign that forms a conjunct with the following consonant.
 // Set per wcwidth's _ISC_VIRAMA_SET (Unicode general category derivation);
@@ -244,17 +291,22 @@ func (g *grid) commitCluster(b []byte, width int) {
 	base, sz := utf8.DecodeRune(b)
 	var cid uint16
 	if sz != len(b) {
-		cid = g.internCluster(string(b))
+		cid = g.internCluster(b)
 	}
 	g.putCell(base, cid, width)
 }
 
 // internCluster returns the clusterID for s, allocating one on first sight.
 // Returns 0 (degrade to base rune) when the pool is exhausted.
-func (g *grid) internCluster(s string) uint16 {
-	if id, ok := g.clusterIDs[s]; ok {
+//
+// b is bytes, not a string: the compiler turns m[string(b)] into a lookup without a copy,
+// so a cluster already in the pool (every repeat of an accented letter or ZWJ emoji)
+// costs no allocation. The string is built only when a new entry is stored.
+func (g *grid) internCluster(b []byte) uint16 {
+	if id, ok := g.clusterIDs[string(b)]; ok {
 		return id
 	}
+	s := string(b)
 	if len(g.clusters) >= maxClusters {
 		return 0
 	}

@@ -2,6 +2,7 @@ package term
 
 import (
 	"testing"
+	"unicode/utf8"
 )
 
 func feed(t *testing.T, g *grid, p *parser, b []byte) {
@@ -415,6 +416,34 @@ func BenchmarkParserFeed_PlainText(b *testing.B) {
 	b.SetBytes(int64(len(input)))
 	b.ReportAllocs()
 	b.ResetTimer()
+	for b.Loop() {
+		g.Mu.Lock()
+		p.Feed(input)
+		g.Mu.Unlock()
+	}
+}
+
+// BenchmarkParserFeed_Unicode mirrors vtebench's "unicode" test: runs of consecutive
+// code points from Latin-1, Greek/Cyrillic, CJK ideographs, Hangul and emoji, with no
+// escapes. Every rune takes the grapheme path. Before PutRune's CJK fast path and
+// brahmicWidth's pre-scan the real vtebench file parsed at ~62 ms per MiB; ~14 after.
+func BenchmarkParserFeed_Unicode(b *testing.B) {
+	g := newGrid(50, 200)
+	p := newParser(g)
+	// vtebench's setup enters the alt screen, so nothing reaches scrollback. It also
+	// keeps the ring's warm-up allocations out of B/op.
+	p.Feed([]byte("\x1b[?1049h"))
+	ranges := [][2]rune{{0xA1, 0x2FF}, {0x370, 0x487}, {0x4E00, 0x6FFF}, {0xAC00, 0xBFFF}, {0x1F600, 0x1F64F}}
+	var input []byte
+	for len(input) < 1<<18 {
+		for _, rng := range ranges {
+			for r := rng[0]; r <= rng[1]; r++ {
+				input = utf8.AppendRune(input, r)
+			}
+		}
+	}
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
 	for b.Loop() {
 		g.Mu.Lock()
 		p.Feed(input)
