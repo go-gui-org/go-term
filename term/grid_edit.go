@@ -547,7 +547,7 @@ func (g *grid) eraseSpan(r, from, to int, selective bool) {
 		return
 	}
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
-	row := g.Cells[r*g.Cols : (r+1)*g.Cols]
+	row := g.row(r)
 	for c := from; c < to; c++ {
 		if selective && row[c].Attrs&attrProtected != 0 {
 			continue
@@ -685,17 +685,12 @@ func (g *grid) InsertLines(n int) {
 	// reach scrollback, so images travel with them.
 	g.scrollGraphicsRegion(g.CursorR, g.Bottom, n, true)
 	if n < height {
-		for r := g.Bottom; r >= g.CursorR+n; r-- {
-			copy(
-				g.Cells[r*g.Cols:(r+1)*g.Cols],
-				g.Cells[(r-n)*g.Cols:(r-n+1)*g.Cols],
-			)
-			g.RowWrapped[r] = g.RowWrapped[r-n]
-		}
+		g.rotateRowsDown(g.CursorR, g.Bottom, n)
+		copy(g.RowWrapped[g.CursorR+n:g.Bottom+1], g.RowWrapped[g.CursorR:g.Bottom+1-n])
 	}
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	for r := g.CursorR; r < g.CursorR+n && r <= g.Bottom; r++ {
-		row := g.Cells[r*g.Cols : (r+1)*g.Cols]
+		row := g.row(r)
 		for i := range row {
 			row[i] = blank
 		}
@@ -723,15 +718,12 @@ func (g *grid) DeleteLines(n int) {
 	// up with the rows that survive and die with the ones that don't.
 	g.scrollGraphicsRegion(g.CursorR, g.Bottom, n, false)
 	if n < height {
-		copy(
-			g.Cells[g.CursorR*g.Cols:(g.Bottom+1)*g.Cols],
-			g.Cells[(g.CursorR+n)*g.Cols:(g.Bottom+1)*g.Cols],
-		)
+		g.rotateRowsUp(g.CursorR, g.Bottom, n)
 		copy(g.RowWrapped[g.CursorR:g.Bottom+1-n], g.RowWrapped[g.CursorR+n:g.Bottom+1])
 	}
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	for r := g.Bottom - n + 1; r <= g.Bottom; r++ {
-		row := g.Cells[r*g.Cols : (r+1)*g.Cols]
+		row := g.row(r)
 		for i := range row {
 			row[i] = blank
 		}
@@ -756,7 +748,7 @@ func (g *grid) InsertChars(n int) {
 	}
 	g.eraseWideAt(g.CursorR, g.CursorC)
 	g.eraseWideAt(g.CursorR, g.Cols-1)
-	row := g.Cells[g.CursorR*g.Cols : (g.CursorR+1)*g.Cols]
+	row := g.row(g.CursorR)
 	if n < width {
 		copy(row[g.CursorC+n:], row[g.CursorC:g.Cols-n])
 	}
@@ -782,7 +774,7 @@ func (g *grid) DeleteChars(n int) {
 	}
 	g.eraseWideAt(g.CursorR, g.CursorC)
 	g.eraseWideAt(g.CursorR, g.CursorC+n)
-	row := g.Cells[g.CursorR*g.Cols : (g.CursorR+1)*g.Cols]
+	row := g.row(g.CursorR)
 	if n < width {
 		copy(row[g.CursorC:], row[g.CursorC+n:g.Cols])
 	}

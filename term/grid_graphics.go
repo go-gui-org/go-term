@@ -364,7 +364,7 @@ func (g *grid) addGraphicCells(src string, widthPx, heightPx, cols, rows int) (i
 			if cc < 0 || cc >= g.Cols {
 				continue
 			}
-			g.Cells[lr*g.Cols+cc] = blank
+			g.row(lr)[cc] = blank
 		}
 		g.RowWrapped[lr] = false
 		g.markDirty(lr)

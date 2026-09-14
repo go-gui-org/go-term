@@ -50,6 +50,9 @@ func (g *grid) EnterAlt() {
 	if g.AltActive {
 		return
 	}
+	// The stash is read back row-major by Resize's reflow, and ExitAlt restores
+	// it with an identity rowMap, so it must leave in row order.
+	g.linearize()
 	g.mainSaved = altSavedScreen{
 		cells:       g.Cells,
 		rowWrapped:  g.RowWrapped,
@@ -111,6 +114,7 @@ func (g *grid) ExitAlt() {
 		return
 	}
 	g.Cells = g.mainSaved.cells
+	g.resetRowMap() // stashed row-major by EnterAlt
 	g.RowWrapped = g.mainSaved.rowWrapped
 	g.CursorR, g.CursorC = g.mainSaved.cursorR, g.mainSaved.cursorC
 	g.CurFG = g.mainSaved.curFG

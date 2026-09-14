@@ -105,6 +105,7 @@ type drawState struct {
 	dc            *gui.DrawContext
 	g             *grid
 	cells         []cell
+	rowMap        []int32 // grid.rowMap alias: live row r is slot rowMap[r]
 	vMatchesByRow [][]vMatch
 	rowSel        []rowBounds
 	rowURL        []rowBounds // hover-detected implicit-URL span per viewport row
@@ -135,7 +136,7 @@ type drawState struct {
 // index) when ds.live; otherwise goes through ViewCellAt.
 func (ds *drawState) resolveCell(r, c int) cell {
 	if ds.live {
-		return ds.cells[r*ds.cols+c]
+		return ds.cells[int(ds.rowMap[r])*ds.cols+c]
 	}
 	cell := ds.g.ViewCellAt(r, c)
 	// Search matches invert; selection tints. Search runs first so a cell that
@@ -163,7 +164,7 @@ func (ds *drawState) resolveCell(r, c int) cell {
 // color, and highlightSelected rewrites exactly that.
 func (ds *drawState) rawCell(r, c int) cell {
 	if ds.live {
-		return ds.cells[r*ds.cols+c]
+		return ds.cells[int(ds.rowMap[r])*ds.cols+c]
 	}
 	return ds.g.ViewCellAt(r, c)
 }
@@ -394,6 +395,7 @@ func (t *Term) prepareFastPath(ds *drawState) {
 	ds.live = g.ViewOffset == 0 && ds.renderYOff == 0 && !g.SelActive &&
 		!t.search.active && !t.copy.active
 	ds.cells = g.Cells
+	ds.rowMap = g.rowMap
 	ds.renderRows = ds.rows
 	// Copy mode's bar occupies the top cellH pixels. Reserving from the *top*
 	// (rather than the bottom, as the search bar does) keeps the last row on
@@ -545,7 +547,7 @@ func (t *Term) prepareBiDi(ds *drawState) {
 	for r := ds.renderTop; r < renderRows; r++ {
 		var hasRTL bool
 		if ds.live {
-			hasRTL = rowHasRTL(ds.cells[r*cols:(r+1)*cols], cols)
+			hasRTL = rowHasRTL(ds.cells[int(ds.rowMap[r])*cols:(int(ds.rowMap[r])+1)*cols], cols)
 		} else {
 			for c := range cols {
 				if isRTLRune(ds.g.ViewCellAt(r, c).Ch) {

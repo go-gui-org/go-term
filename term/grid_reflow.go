@@ -640,6 +640,9 @@ func (g *grid) Resize(rows, cols int) {
 		trackRows = append(trackRows, g.resizeTrack...)
 	}
 
+	// reflowBuffer and logicalReflow read Cells as row-major.
+	g.linearize()
+
 	sbRows := make([][]cell, oldSbLen)
 	sbWrap := make([]bool, oldSbLen)
 	for i := range oldSbLen {
@@ -717,6 +720,10 @@ func (g *grid) Resize(rows, cols int) {
 
 	g.Rows = rows
 	g.Cols = cols
+	// Both reflow paths produced a fresh row-major buffer at the new size. The
+	// old spare no longer fits, so drop it rather than keep dead memory.
+	g.resetRowMap()
+	g.linearBuf = nil
 	g.Dirty = make([]bool, rows)
 	g.markAllDirty()
 

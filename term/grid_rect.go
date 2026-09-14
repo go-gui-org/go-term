@@ -132,7 +132,7 @@ func (g *grid) eachRectRow(rc rect, stream bool, edge wideEdge, fn func(row []ce
 		}
 		g.splitWideAt(r, from, edge)
 		g.splitWideAt(r, to-1, edge)
-		fn(g.Cells[r*g.Cols:(r+1)*g.Cols], from, to)
+		fn(g.row(r), from, to)
 		g.markDirty(r)
 	}
 }
@@ -338,13 +338,13 @@ func (g *grid) CopyRect(pts, pls, pbs, prs, ptd, pld int) {
 	}
 	buf := g.rectBuf[:rows*cols]
 	for r := range rows {
-		copy(buf[r*cols:(r+1)*cols], g.Cells[(src.top+r)*g.Cols+src.left:])
+		copy(buf[r*cols:(r+1)*cols], g.row(src.top + r)[src.left:])
 	}
 	for r := range rows {
 		dr := dstTop + r
 		g.eraseWideAt(dr, dstLeft)
 		g.eraseWideAt(dr, dstLeft+cols-1)
-		copy(g.Cells[dr*g.Cols+dstLeft:dr*g.Cols+dstLeft+cols], buf[r*cols:(r+1)*cols])
+		copy(g.row(dr)[dstLeft:dstLeft+cols], buf[r*cols:(r+1)*cols])
 		g.sanitizeWideEdges(dr, dstLeft, dstLeft+cols)
 		g.markDirty(dr)
 	}
@@ -358,7 +358,7 @@ func (g *grid) sanitizeWideEdges(r, from, to int) {
 	if from >= to {
 		return
 	}
-	row := g.Cells[r*g.Cols : (r+1)*g.Cols]
+	row := g.row(r)
 	if head := row[from]; head.Width == 0 && head.Ch == 0 {
 		row[from] = blankCell(head.FG, head.BG, head.Attrs)
 	}

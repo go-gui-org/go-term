@@ -341,7 +341,26 @@ type grid struct {
 	// Empty until the shell emits an OSC 7.
 	Cwd string
 
-	Cells []cell // row-major, len = Rows*Cols
+	// Cells is the screen's cell storage, len = Rows*Cols. It is NOT row-major:
+	// screen row r lives in slot rowMap[r], so read and write rows through
+	// row(r). Whole-buffer fills that touch every cell may still range over
+	// Cells directly, because the order does not matter to them.
+	Cells []cell
+
+	// rowMap[r] is the Cells slot that holds screen row r. It is always a
+	// permutation of [0, Rows). Scrolls rotate this table instead of moving
+	// cells: a line feed at the bottom of a 50x200 screen used to memmove
+	// ~240 KB (the whole screen), which made `yes`-style output ~100x slower
+	// than other terminals. Now it moves Rows int32s and clears one row.
+	// Code that hands Cells to something that assumes row-major order (the
+	// alt-screen stash, reflow) calls linearize first.
+	rowMap []int32
+	// rowTmp is scratch for rotateRowsUp/Down, len Rows, so a scroll never
+	// allocates.
+	rowTmp []int32
+	// linearBuf is the spare buffer linearize fills and swaps with Cells. It
+	// never aliases Cells or mainSaved.cells.
+	linearBuf []cell
 
 	// RowWrapped[r] is true when row r ended with an autowrap (the cursor
 	// reached the right margin and wrapped onto row r+1). During Resize,
@@ -920,6 +939,7 @@ func newGrid(rows, cols int) *grid {
 	for i := range g.Cells {
 		g.Cells[i] = defaultCell()
 	}
+	g.resetRowMap()
 	for c := 8; c < MaxGridDim; c += 8 {
 		g.TabStops[c] = true
 	}
@@ -965,7 +985,7 @@ func (g *grid) At(r, c int) *cell {
 	if r < 0 || c < 0 || r >= g.Rows || c >= g.Cols {
 		return nil
 	}
-	return &g.Cells[r*g.Cols+c]
+	return &g.row(r)[c]
 }
 
 // translateRune maps printable bytes through the active GL charset.
@@ -1104,13 +1124,13 @@ func (g *grid) ViewCellAt(r, c int) cell {
 	sb := g.Scrollback.Len()
 	off := clamp(g.ViewOffset, 0, sb)
 	if off == 0 {
-		return g.Cells[r*g.Cols+c]
+		return g.row(r)[c]
 	}
 	n := min(off, g.Rows)
 	if r < n {
 		return g.Scrollback.Row(sb - off + r)[c]
 	}
-	return g.Cells[(r-n)*g.Cols+c]
+	return g.row(r - n)[c]
 }
 
 // ContentRows returns the total number of content rows (scrollback + live).
@@ -1127,7 +1147,7 @@ func (g *grid) ContentCellAt(row, col int) cell {
 	if row < sb {
 		return g.Scrollback.Row(row)[col]
 	}
-	return g.Cells[(row-sb)*g.Cols+col]
+	return g.row(row - sb)[col]
 }
 
 // ContentRowToViewport maps a content row to its viewport row at the current

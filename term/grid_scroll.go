@@ -2,6 +2,76 @@ package term
 
 import "math"
 
+// row returns the cells of screen row r (0 <= r < Rows). The slice is capped
+// at Cols so an append can never spill into the next slot. Caller holds Mu.
+func (g *grid) row(r int) []cell {
+	o := int(g.rowMap[r]) * g.Cols
+	return g.Cells[o : o+g.Cols : o+g.Cols]
+}
+
+// resetRowMap makes rowMap the identity for the current Rows. Call it after
+// Cells is replaced by a row-major buffer (newGrid, ExitAlt, Resize).
+func (g *grid) resetRowMap() {
+	if cap(g.rowMap) < g.Rows {
+		g.rowMap = make([]int32, g.Rows)
+		g.rowTmp = make([]int32, g.Rows)
+	}
+	g.rowMap = g.rowMap[:g.Rows]
+	g.rowTmp = g.rowTmp[:g.Rows]
+	for i := range g.rowMap {
+		g.rowMap[i] = int32(i)
+	}
+}
+
+// linearize rewrites Cells into row-major order and resets rowMap to the
+// identity. It is a no-op when the map is already the identity, which is the
+// common case outside heavy scrolling. The spare buffer is swapped, not
+// copied back, so this costs one screen copy and no allocation after the
+// first call. Caller holds Mu.
+func (g *grid) linearize() {
+	identity := true
+	for i, s := range g.rowMap {
+		if int(s) != i {
+			identity = false
+			break
+		}
+	}
+	if identity {
+		return
+	}
+	n := g.Rows * g.Cols
+	if cap(g.linearBuf) < n {
+		g.linearBuf = make([]cell, n)
+	}
+	buf := g.linearBuf[:n]
+	for r := range g.Rows {
+		copy(buf[r*g.Cols:(r+1)*g.Cols], g.row(r))
+	}
+	g.Cells, g.linearBuf = buf, g.Cells
+	g.resetRowMap()
+}
+
+// rotateRowsUp moves screen rows [top+n..bottom] to [top..bottom-n] by
+// rotating rowMap. The n slots that fell off the top land at
+// [bottom-n+1..bottom] still holding their old cells; the caller blanks
+// them. Requires 0 < n <= bottom-top+1. RowWrapped is not touched.
+func (g *grid) rotateRowsUp(top, bottom, n int) {
+	tmp := g.rowTmp[:n]
+	copy(tmp, g.rowMap[top:top+n])
+	copy(g.rowMap[top:], g.rowMap[top+n:bottom+1])
+	copy(g.rowMap[bottom+1-n:bottom+1], tmp)
+}
+
+// rotateRowsDown is the mirror of rotateRowsUp: rows [top..bottom-n] move to
+// [top+n..bottom], and the n slots pushed off the bottom land at
+// [top..top+n-1] for the caller to blank.
+func (g *grid) rotateRowsDown(top, bottom, n int) {
+	tmp := g.rowTmp[:n]
+	copy(tmp, g.rowMap[bottom+1-n:bottom+1])
+	copy(g.rowMap[top+n:bottom+1], g.rowMap[top:bottom+1-n])
+	copy(g.rowMap[top:top+n], tmp)
+}
+
 // scrollUpRegion shifts rows [Top..Bottom] up by n, clearing the bottom
 // n rows of the region with default cells. When the region starts at row 0
 // and ScrollbackCap > 0, the displaced top rows are pushed to the scrollback
@@ -20,7 +90,7 @@ func (g *grid) scrollUpRegion(n int) {
 		g.Scrollback.EnsureGeom(g.ScrollbackCap, g.Cols)
 		evicted := 0
 		for r := 0; r < n; r++ {
-			src := g.Cells[(g.Top+r)*g.Cols : (g.Top+r+1)*g.Cols]
+			src := g.row(g.Top + r)
 			if g.Scrollback.Push(src, g.RowWrapped[g.Top+r]) {
 				evicted++
 			}
@@ -52,15 +122,12 @@ func (g *grid) scrollUpRegion(n int) {
 	}
 
 	if n < height {
-		copy(
-			g.Cells[g.Top*g.Cols:(g.Bottom+1)*g.Cols],
-			g.Cells[(g.Top+n)*g.Cols:(g.Bottom+1)*g.Cols],
-		)
+		g.rotateRowsUp(g.Top, g.Bottom, n)
 		copy(g.RowWrapped[g.Top:g.Bottom+1-n], g.RowWrapped[g.Top+n:g.Bottom+1])
 	}
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	for r := g.Bottom + 1 - n; r <= g.Bottom; r++ {
-		row := g.Cells[r*g.Cols : (r+1)*g.Cols]
+		row := g.row(r)
 		for i := range row {
 			row[i] = blank
 		}
@@ -85,17 +152,12 @@ func (g *grid) scrollDownRegion(n int) {
 	g.scrollGraphicsRegion(g.Top, g.Bottom, n, true)
 	if n < height {
 
-		for r := g.Bottom; r >= g.Top+n; r-- {
-			copy(
-				g.Cells[r*g.Cols:(r+1)*g.Cols],
-				g.Cells[(r-n)*g.Cols:(r-n+1)*g.Cols],
-			)
-			g.RowWrapped[r] = g.RowWrapped[r-n]
-		}
+		g.rotateRowsDown(g.Top, g.Bottom, n)
+		copy(g.RowWrapped[g.Top+n:g.Bottom+1], g.RowWrapped[g.Top:g.Bottom+1-n])
 	}
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	for r := g.Top; r < g.Top+n && r <= g.Bottom; r++ {
-		row := g.Cells[r*g.Cols : (r+1)*g.Cols]
+		row := g.row(r)
 		for i := range row {
 			row[i] = blank
 		}
