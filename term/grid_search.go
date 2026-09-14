@@ -81,8 +81,7 @@ func (g *grid) searchRow(row int, rrBuf []rune, colBuf []int) (rr []rune, colMap
 		if liveRow < 0 || liveRow >= g.Rows || g.Cols == 0 {
 			return nil, nil
 		}
-		base := liveRow * g.Cols
-		src = g.Cells[base : base+g.Cols]
+		src = g.row(liveRow)
 	}
 
 	n := len(src)

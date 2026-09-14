@@ -14,7 +14,7 @@ func putPlaceholder(g *grid, r, c int, id uint32, row, col int) {
 		string(kgpDiacritics[row].r) + string(kgpDiacritics[col].r)
 	g.Cells[r*g.Cols+c] = cell{
 		Ch:        kgpPlaceholderRune,
-		clusterID: g.internCluster(text),
+		clusterID: g.internCluster([]byte(text)),
 		FG:        paletteColor(uint8(id)),
 		BG:        defaultColor,
 		ULColor:   defaultColor,

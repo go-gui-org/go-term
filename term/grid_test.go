@@ -77,9 +77,11 @@ func TestGrid_ClearAll(t *testing.T) {
 	if g.CursorR != 0 || g.CursorC != 0 {
 		t.Errorf("clear should home cursor")
 	}
-	for i, c := range g.Cells {
-		if c.Ch != ' ' {
-			t.Fatalf("cell[%d] not cleared: %v", i, c.Ch)
+	for r := range g.Rows {
+		for i, c := range g.row(r) {
+			if c.Ch != ' ' {
+				t.Fatalf("cell[%d,%d] not cleared: %v", r, i, c.Ch)
+			}
 		}
 	}
 }

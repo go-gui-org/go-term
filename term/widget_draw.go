@@ -104,7 +104,8 @@ type drawState struct {
 	now           time.Time
 	dc            *gui.DrawContext
 	g             *grid
-	cells         []cell
+	slots         [][]cell // grid.slots alias: live row r is slots[rowMap[r]]
+	rowMap        []int32
 	vMatchesByRow [][]vMatch
 	rowSel        []rowBounds
 	rowURL        []rowBounds // hover-detected implicit-URL span per viewport row
@@ -131,11 +132,11 @@ type drawState struct {
 }
 
 // resolveCell returns the cell at viewport (r, c), applying the selection
-// tint and search-highlight inversion. Uses the fast path (direct Cells
+// tint and search-highlight inversion. Uses the fast path (direct live-row
 // index) when ds.live; otherwise goes through ViewCellAt.
 func (ds *drawState) resolveCell(r, c int) cell {
 	if ds.live {
-		return ds.cells[r*ds.cols+c]
+		return ds.slots[ds.rowMap[r]][c]
 	}
 	cell := ds.g.ViewCellAt(r, c)
 	// Search matches invert; selection tints. Search runs first so a cell that
@@ -163,7 +164,7 @@ func (ds *drawState) resolveCell(r, c int) cell {
 // color, and highlightSelected rewrites exactly that.
 func (ds *drawState) rawCell(r, c int) cell {
 	if ds.live {
-		return ds.cells[r*ds.cols+c]
+		return ds.slots[ds.rowMap[r]][c]
 	}
 	return ds.g.ViewCellAt(r, c)
 }
@@ -387,13 +388,13 @@ func (t *Term) prepareResize(ds *drawState) {
 }
 
 // prepareFastPath computes the fast-path flag, the effective render row count
-// (accounting for search-bar overlap), and aliases the grid and cell buffer.
+// (accounting for search-bar overlap), and aliases the grid and its live rows.
 func (t *Term) prepareFastPath(ds *drawState) {
 	g := ds.g
 	ds.renderYOff = g.ViewSubPx
 	ds.live = g.ViewOffset == 0 && ds.renderYOff == 0 && !g.SelActive &&
 		!t.search.active && !t.copy.active
-	ds.cells = g.Cells
+	ds.slots, ds.rowMap = g.slots, g.rowMap
 	ds.renderRows = ds.rows
 	// Copy mode's bar occupies the top cellH pixels. Reserving from the *top*
 	// (rather than the bottom, as the search bar does) keeps the last row on
@@ -545,7 +546,7 @@ func (t *Term) prepareBiDi(ds *drawState) {
 	for r := ds.renderTop; r < renderRows; r++ {
 		var hasRTL bool
 		if ds.live {
-			hasRTL = rowHasRTL(ds.cells[r*cols:(r+1)*cols], cols)
+			hasRTL = rowHasRTL(ds.slots[ds.rowMap[r]], cols)
 		} else {
 			for c := range cols {
 				if isRTLRune(ds.g.ViewCellAt(r, c).Ch) {

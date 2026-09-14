@@ -2,6 +2,138 @@ package term
 
 import "math"
 
+// row returns the cells of screen row r (0 <= r < Rows). Caller holds Mu.
+func (g *grid) row(r int) []cell { return g.slots[g.rowMap[r]] }
+
+// fillScreen sets every screen cell to c without per-row bookkeeping (no
+// eraseSpan, no occlusion, no dirty marks). It goes row by row, never flat over
+// Cells: the screen slab also holds rows that were swapped into scrollback.
+func (g *grid) fillScreen(c cell) {
+	for r := range g.Rows {
+		row := g.row(r)
+		for i := range row {
+			row[i] = c
+		}
+	}
+}
+
+// rowsOver carves cells (row-major, nRows*cols) into capped per-row slices,
+// reusing dst's backing array when it is large enough.
+func rowsOver(dst [][]cell, cells []cell, nRows, cols int) [][]cell {
+	if cap(dst) >= nRows {
+		dst = dst[:nRows]
+	} else {
+		dst = make([][]cell, nRows)
+	}
+	for r := range dst {
+		o := r * cols
+		dst[r] = cells[o : o+cols : o+cols]
+	}
+	return dst
+}
+
+// identityMap fills dst (reallocating if short) with 0..n-1.
+func identityMap(dst []int32, n int) []int32 {
+	if cap(dst) >= n {
+		dst = dst[:n]
+	} else {
+		dst = make([]int32, n)
+	}
+	for i := range dst {
+		dst[i] = int32(i)
+	}
+	return dst
+}
+
+// resetRows lays the screen rows over Cells in order. Call it after Cells is
+// replaced by a row-major buffer (newGrid, EnterAlt, Resize). The slots and
+// rowMap arrays are reused, so a caller that stashed them elsewhere must nil
+// them first.
+func (g *grid) resetRows() {
+	g.slots = rowsOver(g.slots, g.Cells, g.Rows, g.Cols)
+	g.rowMap = identityMap(g.rowMap, g.Rows)
+	if cap(g.rowTmp) < g.Rows {
+		g.rowTmp = make([]int32, g.Rows)
+	}
+	g.rowTmp = g.rowTmp[:g.Rows]
+	g.rowsBorrowed = false
+}
+
+// flatScreen returns screen rows (slots indexed through rowMap) as a row-major
+// buffer of len(rowMap)*cols cells. When the rows still sit in order over
+// cells — no scroll since the slab was laid out — it returns cells itself and
+// copies nothing. Pass cells == nil to force a fresh copy.
+func flatScreen(slots [][]cell, rowMap []int32, cells []cell, cols int) []cell {
+	inOrder := len(cells) == len(rowMap)*cols
+	for r := 0; inOrder && r < len(rowMap); r++ {
+		row := slots[rowMap[r]]
+		inOrder = len(row) > 0 && &row[0] == &cells[r*cols]
+	}
+	if inOrder {
+		return cells
+	}
+	out := make([]cell, len(rowMap)*cols)
+	for r, s := range rowMap {
+		copy(out[r*cols:(r+1)*cols], slots[s])
+	}
+	return out
+}
+
+// reclaimRows copies every screen row into a fresh slab of our own. Used when
+// the ring re-carved its slab while the screen still held rows borrowed from
+// it: those rows may now alias live ring slots. A fresh slab is required —
+// copying in place over the old one would overwrite rows still being read.
+func (g *grid) reclaimRows() {
+	g.Cells = flatScreen(g.slots, g.rowMap, nil, g.Cols)
+	g.resetRows()
+}
+
+// syncScrollbackGen reclaims borrowed rows, on the live screen and on a main
+// screen parked behind the alt screen, once the ring has re-carved or dropped its
+// slab. Call it right after every grid-side ring change (ED 3, RIS, a cap change):
+// until then the borrowed rows keep the old slab alive — up to ScrollbackCap×Cols
+// cells after the ring meant to free it — and a reused slab can alias live ring
+// slots. scrollUpRegion calls it too, as the backstop for ring changes made
+// anywhere else. One screen-sized allocation, only on those rare paths.
+func (g *grid) syncScrollbackGen() {
+	if g.Scrollback.gen == g.sbGen {
+		return
+	}
+	g.sbGen = g.Scrollback.gen
+	if g.rowsBorrowed {
+		g.reclaimRows()
+	}
+	// The alt screen never swaps rows with the ring, but the main screen it
+	// hides may still hold rows it borrowed before EnterAlt.
+	if m := &g.mainSaved; g.AltActive && m.rowsBorrowed && len(m.rowMap) == g.Rows {
+		m.cells = flatScreen(m.slots, m.rowMap, nil, g.Cols)
+		m.slots = rowsOver(m.slots, m.cells, g.Rows, g.Cols)
+		m.rowMap = identityMap(m.rowMap, g.Rows)
+		m.rowsBorrowed = false
+	}
+}
+
+// rotateRowsUp moves screen rows [top+n..bottom] to [top..bottom-n] by
+// rotating rowMap. The n rows that fell off the top land at
+// [bottom-n+1..bottom] still holding their old cells; the caller blanks
+// them. Requires 0 < n <= bottom-top+1. RowWrapped is not touched.
+func (g *grid) rotateRowsUp(top, bottom, n int) {
+	tmp := g.rowTmp[:n]
+	copy(tmp, g.rowMap[top:top+n])
+	copy(g.rowMap[top:], g.rowMap[top+n:bottom+1])
+	copy(g.rowMap[bottom+1-n:bottom+1], tmp)
+}
+
+// rotateRowsDown is the mirror of rotateRowsUp: rows [top..bottom-n] move to
+// [top+n..bottom], and the n rows pushed off the bottom land at
+// [top..top+n-1] for the caller to blank.
+func (g *grid) rotateRowsDown(top, bottom, n int) {
+	tmp := g.rowTmp[:n]
+	copy(tmp, g.rowMap[bottom+1-n:bottom+1])
+	copy(g.rowMap[top+n:bottom+1], g.rowMap[top:bottom+1-n])
+	copy(g.rowMap[top:top+n], tmp)
+}
+
 // scrollUpRegion shifts rows [Top..Bottom] up by n, clearing the bottom
 // n rows of the region with default cells. When the region starts at row 0
 // and ScrollbackCap > 0, the displaced top rows are pushed to the scrollback
@@ -18,13 +150,26 @@ func (g *grid) scrollUpRegion(n int) {
 	feeds := g.regionFeedsScrollback()
 	if feeds && g.ScrollbackCap > 0 && !g.AltActive {
 		g.Scrollback.EnsureGeom(g.ScrollbackCap, g.Cols)
+		// The ring re-carved its slab since our borrowed rows were taken, so
+		// they may alias ring slots now. Move them to our own slab before any
+		// more rows cross over. Rare: a cap change, ED 3, RIS or a reflow.
+		if g.Scrollback.gen != g.sbGen { // inline test: this runs every line feed
+			g.syncScrollbackGen()
+		}
 		evicted := 0
 		for r := 0; r < n; r++ {
-			src := g.Cells[(g.Top+r)*g.Cols : (g.Top+r+1)*g.Cols]
-			if g.Scrollback.Push(src, g.RowWrapped[g.Top+r]) {
+			// Hand the row to the ring by reference; copying it was a third of
+			// vtebench's scrolling time. The spare row the ring gives back takes
+			// its place and, once the rotation below moves it to the bottom of
+			// the region, is blanked with the other exposed rows.
+			s := g.rowMap[g.Top+r]
+			spare, ev := g.Scrollback.PushSwap(g.slots[s], g.RowWrapped[g.Top+r])
+			g.slots[s] = spare
+			if ev {
 				evicted++
 			}
 		}
+		g.rowsBorrowed = true
 		if evicted > 0 {
 			g.trimMarks(evicted)
 			g.trimGraphics(evicted)
@@ -52,15 +197,12 @@ func (g *grid) scrollUpRegion(n int) {
 	}
 
 	if n < height {
-		copy(
-			g.Cells[g.Top*g.Cols:(g.Bottom+1)*g.Cols],
-			g.Cells[(g.Top+n)*g.Cols:(g.Bottom+1)*g.Cols],
-		)
+		g.rotateRowsUp(g.Top, g.Bottom, n)
 		copy(g.RowWrapped[g.Top:g.Bottom+1-n], g.RowWrapped[g.Top+n:g.Bottom+1])
 	}
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	for r := g.Bottom + 1 - n; r <= g.Bottom; r++ {
-		row := g.Cells[r*g.Cols : (r+1)*g.Cols]
+		row := g.row(r)
 		for i := range row {
 			row[i] = blank
 		}
@@ -85,17 +227,12 @@ func (g *grid) scrollDownRegion(n int) {
 	g.scrollGraphicsRegion(g.Top, g.Bottom, n, true)
 	if n < height {
 
-		for r := g.Bottom; r >= g.Top+n; r-- {
-			copy(
-				g.Cells[r*g.Cols:(r+1)*g.Cols],
-				g.Cells[(r-n)*g.Cols:(r-n+1)*g.Cols],
-			)
-			g.RowWrapped[r] = g.RowWrapped[r-n]
-		}
+		g.rotateRowsDown(g.Top, g.Bottom, n)
+		copy(g.RowWrapped[g.Top+n:g.Bottom+1], g.RowWrapped[g.Top:g.Bottom+1-n])
 	}
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	for r := g.Top; r < g.Top+n && r <= g.Bottom; r++ {
-		row := g.Cells[r*g.Cols : (r+1)*g.Cols]
+		row := g.row(r)
 		for i := range row {
 			row[i] = blank
 		}

@@ -1089,7 +1089,7 @@ func TestDrawBgResolved_BottomBleedOnlyForAUniformRow(t *testing.T) {
 		dc := gui.NewDrawContext(cols*cellW, rows*cellH+6,
 			testTextMeasurer{cellW: cellW, cellH: cellH})
 		ds := &drawState{
-			dc: dc, g: tm.grid, cells: tm.grid.Cells, live: true,
+			dc: dc, g: tm.grid, slots: tm.grid.slots, rowMap: tm.grid.rowMap, live: true,
 			rows: rows, cols: cols, renderRows: rows,
 			bidiVisRows: make([][]cell, rows),
 		}

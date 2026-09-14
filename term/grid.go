@@ -341,7 +341,34 @@ type grid struct {
 	// Empty until the shell emits an OSC 7.
 	Cwd string
 
-	Cells []cell // row-major, len = Rows*Cols
+	// Cells is the screen's own cell slab, len = Rows*Cols. It is neither
+	// row-major nor complete: screen row r is slots[rowMap[r]], which may be any
+	// piece of Cells or a row that came over from the scrollback ring. Read and
+	// write rows through row(r). Only a freshly allocated slab (newGrid,
+	// EnterAlt) may be indexed flat.
+	Cells []cell
+
+	// Screen row r lives in slots[rowMap[r]]. Two levels, because the two hot
+	// operations want different things:
+	//   - Scrolls, IL and DL rotate rowMap. It holds plain int32s, so the rotation
+	//     is a memmove with no GC write barriers. (Rotating the []cell headers
+	//     directly cost +10 ns per scroll.) A line feed on a 50x200 screen used to
+	//     memmove ~240 KB of cells.
+	//   - A row scrolling into history is handed to the ring by reference in
+	//     exchange for the ring's spare row (scrollbackRing.PushSwap). That
+	//     rewrites one slots entry.
+	// Code that needs row-major cells (reflow) goes through flatScreen.
+	slots  [][]cell
+	rowMap []int32
+	// rowTmp is scratch for rotateRowsUp/Down, len Rows, so a scroll never
+	// allocates.
+	rowTmp []int32
+	// rowsBorrowed is true once slots may hold storage carved from the ring's
+	// slab. sbGen is the ring generation those rows were taken under. When the
+	// ring reuses or drops its slab its gen moves on, and borrowed rows are
+	// copied to a slab of our own before the next swap — see scrollUpRegion.
+	rowsBorrowed bool
+	sbGen        uint32
 
 	// RowWrapped[r] is true when row r ended with an autowrap (the cursor
 	// reached the right margin and wrapped onto row r+1). During Resize,
@@ -920,6 +947,7 @@ func newGrid(rows, cols int) *grid {
 	for i := range g.Cells {
 		g.Cells[i] = defaultCell()
 	}
+	g.resetRows()
 	for c := 8; c < MaxGridDim; c += 8 {
 		g.TabStops[c] = true
 	}
@@ -965,7 +993,7 @@ func (g *grid) At(r, c int) *cell {
 	if r < 0 || c < 0 || r >= g.Rows || c >= g.Cols {
 		return nil
 	}
-	return &g.Cells[r*g.Cols+c]
+	return &g.row(r)[c]
 }
 
 // translateRune maps printable bytes through the active GL charset.
@@ -1058,12 +1086,10 @@ func (g *grid) ReverseIndex() {
 
 // ClearAll wipes every cell to default and homes the cursor.
 func (g *grid) ClearAll() {
-	for i := range g.Cells {
-		g.Cells[i] = defaultCell()
-	}
+	g.fillScreen(defaultCell())
 	// Sixel/iTerm2 images are removed only by painting over their cells, so
-	// the flat fill has to do it explicitly — eraseSpan, which normally
-	// carries this, is bypassed here. Matches ED 2's flat-fill path.
+	// the direct fill has to do it explicitly — eraseSpan, which normally
+	// carries this, is bypassed here. Matches ED 2's direct-fill path.
 	if len(g.Graphics) != 0 {
 		g.occludeGraphics(0, g.Rows, 0, g.Cols)
 	}
@@ -1104,13 +1130,13 @@ func (g *grid) ViewCellAt(r, c int) cell {
 	sb := g.Scrollback.Len()
 	off := clamp(g.ViewOffset, 0, sb)
 	if off == 0 {
-		return g.Cells[r*g.Cols+c]
+		return g.row(r)[c]
 	}
 	n := min(off, g.Rows)
 	if r < n {
 		return g.Scrollback.Row(sb - off + r)[c]
 	}
-	return g.Cells[(r-n)*g.Cols+c]
+	return g.row(r - n)[c]
 }
 
 // ContentRows returns the total number of content rows (scrollback + live).
@@ -1127,7 +1153,7 @@ func (g *grid) ContentCellAt(row, col int) cell {
 	if row < sb {
 		return g.Scrollback.Row(row)[col]
 	}
-	return g.Cells[(row-sb)*g.Cols+col]
+	return g.row(row - sb)[col]
 }
 
 // ContentRowToViewport maps a content row to its viewport row at the current
