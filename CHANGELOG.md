@@ -6,24 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-14
+
 ### Added
 
-- `term.select-all` (`Cmd+A`) selects all text, including the scrollback
-  buffer. On the alt screen it selects the visible screen only; in copy
-  mode it expands the copy selection; with the Find bar open it still
-  runs. The viewport does not move. Rebindable via `[keybindings]` like
-  every other `term.*` action.
+- `term.select-all` (`Cmd+A`) selects all text, including the scrollback buffer.
+  On the alt screen it selects the visible screen only; in copy mode it expands
+  the copy selection; with the Find bar open it still runs. The viewport does
+  not move. Rebindable via `[keybindings]` like every other `term.*` action.
+
+### Changed
+
+- Scrolling no longer copies the screen. Screen rows live in slots addressed
+  through a row map, so scrolls and insert/delete lines rotate the map and blank
+  the exposed rows instead of moving every cell.
+- Scrolled-off rows move to the scrollback ring by reference instead of by copy.
+  The ring hands back its spare slot storage, so no cells move on a line feed.
+- Unicode input is faster. Runs of CJK ideographs and Hangul syllables commit
+  without a grapheme pass, Brahmic width checks return early without a lookup
+  when no virama or mark is present, and interned cluster lookups no longer copy
+  the bytes.
+- The `falcon` About dialog follows the Ghostty layout. It names the app, shows
+  Version / Built / Commit rows with the commit linked to GitHub, and links Docs
+  and GitHub along the bottom. There is no OK button; Escape, Enter, and a click
+  on the terminal behind it all close it.
+- Bumped go-gui v0.74.0 → v0.76.1.
+
+### Fixed
+
+- Answer XTWINOPS character-geometry and state reports (CSI 11/13/15/18/
+  19/20/21t). The missing CSI 18t reply stalled tools that reset with it,
+  waiting out a read timeout after every screen clear.
+- Free the scrollback ring slab as soon as scrollback is dropped or resized.
+  Screen rows swapped in from the old slab no longer pin it, so lowering the cap
+  or switching scrollback off shrinks the footprint at once.
 
 ## [0.12.0] - 2026-09-11
 
 ### Added
 
-- The `falcon` example gains a Help menu with Show/Hide Shortcuts (Cmd+/,
-  via the workspace command registry) and About. The app-menu About entry is
-  omitted in favor of the Help one. Unstamped dev builds prefix the
-  VCS/dev fallback with the release line, so About shows e.g. v0.12.0
-  (dev-1a2b3c4) instead of a bare hash. `releaseVersion` is test-guarded
-  against the newest CHANGELOG entry.
+- The `falcon` example gains a Help menu with Show/Hide Shortcuts (Cmd+/, via
+  the workspace command registry) and About. The app-menu About entry is omitted
+  in favor of the Help one. Unstamped dev builds prefix the VCS/dev fallback
+  with the release line, so About shows e.g. v0.12.0 (dev-1a2b3c4) instead of a
+  bare hash. `releaseVersion` is test-guarded against the newest CHANGELOG
+  entry.
 
 ### Security
 
@@ -34,11 +61,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   and up to 4 KB of text into both. Every other caller-visible OSC string was
   already sanitized or capped.
 - Notification delivery puts `--` ahead of the `notify-send` and `osascript`
-  positionals, so a child emitting OSC 9/777 with a leading-dash title or
-  body cannot have its output parsed as delivery options (icon, urgency, or
-  app-name spoofing). Notification titles go through `sanitizeOSCString` and
-  bodies through a variant that keeps newline and tab, which `notify-send`
-  renders.
+  positionals, so a child emitting OSC 9/777 with a leading-dash title or body
+  cannot have its output parsed as delivery options (icon, urgency, or app-name
+  spoofing). Notification titles go through `sanitizeOSCString` and bodies
+  through a variant that keeps newline and tab, which `notify-send` renders.
 
 ### Changed
 
@@ -46,8 +72,8 @@ adheres to [Semantic Versioning](https://semver.org/).
   quits. The dialog is only reached after a deliberate quit gesture; Esc and the
   "No" button still cancel.
 
-- Bumped go-glyph to v1.25.1 and go-gui to v0.74.0 (via v0.71.0–v0.73.0,
-  which re-exports `DialogCfg.DefaultButton` and renames `UpdateWindow` to
+- Bumped go-glyph to v1.25.1 and go-gui to v0.74.0 (via v0.71.0–v0.73.0, which
+  re-exports `DialogCfg.DefaultButton` and renames `UpdateWindow` to
   `InvalidateLayout` and `UpdateView` to `SetView`).
 
 ### Fixed
@@ -67,24 +93,23 @@ adheres to [Semantic Versioning](https://semver.org/).
   child.
 
 - The default (SGR 58-less) underline color follows dimmed, contrast-adjusted,
-  and hovered text instead of the base foreground, so underlines stay legible
-  on faded runs and visible against the hover highlight.
+  and hovered text instead of the base foreground, so underlines stay legible on
+  faded runs and visible against the hover highlight.
 
-- Bounded the Kitty graphics stores that grew without limit. Re-transmitting
-  an image id replaces its store entry and now releases the PNG the old entry
-  owned (content-addressed files stay alive while another id shares them via
-  a use count), and existing placements — on screen, parked, and virtual —
-  retarget at the new file instead of orphaning or blanking. A full
-  pending-chunk table evicts the oldest transfer with an error reply instead
-  of refusing every new image for the life of the pane. `RIS` now clears the
-  in-flight transfers, their buffered base64, the open slot, the image store
-  with its files, and the OSC 8 link registry alongside the title stack, so
-  `reset` recovers a pane that hit any of those caps. A Kitty-flags push past
-  the 8-entry cap evicts the oldest entry instead of dropping the save while
-  still ORing the flags in, which had shifted every later pop one level out;
-  replacing an existing store id no longer evicts a bystander. `addMark` trims
-  by copying down so the backing array stays at `maxMarks` instead of drifting
-  and doubling.
+- Bounded the Kitty graphics stores that grew without limit. Re-transmitting an
+  image id replaces its store entry and now releases the PNG the old entry owned
+  (content-addressed files stay alive while another id shares them via a use
+  count), and existing placements — on screen, parked, and virtual — retarget at
+  the new file instead of orphaning or blanking. A full pending-chunk table
+  evicts the oldest transfer with an error reply instead of refusing every new
+  image for the life of the pane. `RIS` now clears the in-flight transfers,
+  their buffered base64, the open slot, the image store with its files, and the
+  OSC 8 link registry alongside the title stack, so `reset` recovers a pane that
+  hit any of those caps. A Kitty-flags push past the 8-entry cap evicts the
+  oldest entry instead of dropping the save while still ORing the flags in,
+  which had shifted every later pop one level out; replacing an existing store
+  id no longer evicts a bystander. `addMark` trims by copying down so the
+  backing array stays at `maxMarks` instead of drifting and doubling.
 
 ## [0.11.0] - 2026-09-07
 
