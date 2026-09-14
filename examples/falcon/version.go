@@ -23,13 +23,13 @@ var version string
 // CHANGELOG entry — TestReleaseVersionMatchesChangelog fails otherwise.
 // (A hand-maintained literal sat stale at 0.1.0 once before; the test is
 // what makes this one safe to keep.)
-const releaseVersion = "v0.12.0"
+const releaseVersion = "v0.13.0"
 
 // aboutVersion resolves the version string for the About dialog. A
 // linker-stamped tag, a post-tag describe string, or a module-proxy
 // version already names its release, so those are shown verbatim.
 // A build that names no release falls back to the release line plus a
-// dev marker: "v0.12.0 (dev)". Which revision that dev build came from is
+// dev marker: "v0.13.0 (dev)". Which revision that dev build came from is
 // the Commit row's job, not this string's.
 func aboutVersion() string {
 	return aboutVersionFor(appVersion())
