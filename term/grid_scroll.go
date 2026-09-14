@@ -2,57 +2,82 @@ package term
 
 import "math"
 
-// row returns the cells of screen row r (0 <= r < Rows). The slice is capped
-// at Cols so an append can never spill into the next slot. Caller holds Mu.
-func (g *grid) row(r int) []cell {
-	o := int(g.rowMap[r]) * g.Cols
-	return g.Cells[o : o+g.Cols : o+g.Cols]
+// row returns the cells of screen row r (0 <= r < Rows). Caller holds Mu.
+func (g *grid) row(r int) []cell { return g.slots[g.rowMap[r]] }
+
+// rowsOver carves cells (row-major, nRows*cols) into capped per-row slices,
+// reusing dst's backing array when it is large enough.
+func rowsOver(dst [][]cell, cells []cell, nRows, cols int) [][]cell {
+	if cap(dst) >= nRows {
+		dst = dst[:nRows]
+	} else {
+		dst = make([][]cell, nRows)
+	}
+	for r := range dst {
+		o := r * cols
+		dst[r] = cells[o : o+cols : o+cols]
+	}
+	return dst
 }
 
-// resetRowMap makes rowMap the identity for the current Rows. Call it after
-// Cells is replaced by a row-major buffer (newGrid, ExitAlt, Resize).
-func (g *grid) resetRowMap() {
-	if cap(g.rowMap) < g.Rows {
-		g.rowMap = make([]int32, g.Rows)
+// identityMap fills dst (reallocating if short) with 0..n-1.
+func identityMap(dst []int32, n int) []int32 {
+	if cap(dst) >= n {
+		dst = dst[:n]
+	} else {
+		dst = make([]int32, n)
+	}
+	for i := range dst {
+		dst[i] = int32(i)
+	}
+	return dst
+}
+
+// resetRows lays the screen rows over Cells in order. Call it after Cells is
+// replaced by a row-major buffer (newGrid, EnterAlt, Resize). The slots and
+// rowMap arrays are reused, so a caller that stashed them elsewhere must nil
+// them first.
+func (g *grid) resetRows() {
+	g.slots = rowsOver(g.slots, g.Cells, g.Rows, g.Cols)
+	g.rowMap = identityMap(g.rowMap, g.Rows)
+	if cap(g.rowTmp) < g.Rows {
 		g.rowTmp = make([]int32, g.Rows)
 	}
-	g.rowMap = g.rowMap[:g.Rows]
 	g.rowTmp = g.rowTmp[:g.Rows]
-	for i := range g.rowMap {
-		g.rowMap[i] = int32(i)
-	}
+	g.rowsBorrowed = false
 }
 
-// linearize rewrites Cells into row-major order and resets rowMap to the
-// identity. It is a no-op when the map is already the identity, which is the
-// common case outside heavy scrolling. The spare buffer is swapped, not
-// copied back, so this costs one screen copy and no allocation after the
-// first call. Caller holds Mu.
-func (g *grid) linearize() {
-	identity := true
-	for i, s := range g.rowMap {
-		if int(s) != i {
-			identity = false
-			break
-		}
+// flatScreen returns screen rows (slots indexed through rowMap) as a row-major
+// buffer of len(rowMap)*cols cells. When the rows still sit in order over
+// cells — no scroll since the slab was laid out — it returns cells itself and
+// copies nothing. Pass cells == nil to force a fresh copy.
+func flatScreen(slots [][]cell, rowMap []int32, cells []cell, cols int) []cell {
+	inOrder := len(cells) == len(rowMap)*cols
+	for r := 0; inOrder && r < len(rowMap); r++ {
+		row := slots[rowMap[r]]
+		inOrder = len(row) > 0 && &row[0] == &cells[r*cols]
 	}
-	if identity {
-		return
+	if inOrder {
+		return cells
 	}
-	n := g.Rows * g.Cols
-	if cap(g.linearBuf) < n {
-		g.linearBuf = make([]cell, n)
+	out := make([]cell, len(rowMap)*cols)
+	for r, s := range rowMap {
+		copy(out[r*cols:(r+1)*cols], slots[s])
 	}
-	buf := g.linearBuf[:n]
-	for r := range g.Rows {
-		copy(buf[r*g.Cols:(r+1)*g.Cols], g.row(r))
-	}
-	g.Cells, g.linearBuf = buf, g.Cells
-	g.resetRowMap()
+	return out
+}
+
+// reclaimRows copies every screen row into a fresh slab of our own. Used when
+// the ring re-carved its slab while the screen still held rows borrowed from
+// it: those rows may now alias live ring slots. A fresh slab is required —
+// copying in place over the old one would overwrite rows still being read.
+func (g *grid) reclaimRows() {
+	g.Cells = flatScreen(g.slots, g.rowMap, nil, g.Cols)
+	g.resetRows()
 }
 
 // rotateRowsUp moves screen rows [top+n..bottom] to [top..bottom-n] by
-// rotating rowMap. The n slots that fell off the top land at
+// rotating rowMap. The n rows that fell off the top land at
 // [bottom-n+1..bottom] still holding their old cells; the caller blanks
 // them. Requires 0 < n <= bottom-top+1. RowWrapped is not touched.
 func (g *grid) rotateRowsUp(top, bottom, n int) {
@@ -63,7 +88,7 @@ func (g *grid) rotateRowsUp(top, bottom, n int) {
 }
 
 // rotateRowsDown is the mirror of rotateRowsUp: rows [top..bottom-n] move to
-// [top+n..bottom], and the n slots pushed off the bottom land at
+// [top+n..bottom], and the n rows pushed off the bottom land at
 // [top..top+n-1] for the caller to blank.
 func (g *grid) rotateRowsDown(top, bottom, n int) {
 	tmp := g.rowTmp[:n]
@@ -88,13 +113,29 @@ func (g *grid) scrollUpRegion(n int) {
 	feeds := g.regionFeedsScrollback()
 	if feeds && g.ScrollbackCap > 0 && !g.AltActive {
 		g.Scrollback.EnsureGeom(g.ScrollbackCap, g.Cols)
+		// The ring re-carved its slab since our borrowed rows were taken, so
+		// they may alias ring slots now. Move them to our own slab before any
+		// more rows cross over. Rare: a cap change, ED 3, RIS or a reflow.
+		if g.Scrollback.gen != g.sbGen {
+			if g.rowsBorrowed {
+				g.reclaimRows()
+			}
+			g.sbGen = g.Scrollback.gen
+		}
 		evicted := 0
 		for r := 0; r < n; r++ {
-			src := g.row(g.Top + r)
-			if g.Scrollback.Push(src, g.RowWrapped[g.Top+r]) {
+			// Hand the row to the ring by reference; copying it was a third of
+			// vtebench's scrolling time. The spare row the ring gives back takes
+			// its place and, once the rotation below moves it to the bottom of
+			// the region, is blanked with the other exposed rows.
+			s := g.rowMap[g.Top+r]
+			spare, ev := g.Scrollback.PushSwap(g.slots[s], g.RowWrapped[g.Top+r])
+			g.slots[s] = spare
+			if ev {
 				evicted++
 			}
 		}
+		g.rowsBorrowed = true
 		if evicted > 0 {
 			g.trimMarks(evicted)
 			g.trimGraphics(evicted)

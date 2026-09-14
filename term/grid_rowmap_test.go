@@ -22,23 +22,24 @@ func col0(g *grid) string {
 	return string(b)
 }
 
-// rowMapIsPermutation reports whether rowMap holds each slot exactly once.
-func rowMapIsPermutation(g *grid) bool {
+// rowsAreDistinct reports whether every screen row has its own storage.
+func rowsAreDistinct(g *grid) bool {
 	if len(g.rowMap) != g.Rows {
 		return false
 	}
-	seen := make([]bool, g.Rows)
-	for _, s := range g.rowMap {
-		if s < 0 || int(s) >= g.Rows || seen[s] {
+	seen := map[*cell]bool{}
+	for r := range g.Rows {
+		row := g.row(r)
+		if seen[&row[0]] {
 			return false
 		}
-		seen[s] = true
+		seen[&row[0]] = true
 	}
 	return true
 }
 
-// Scrolls now rotate rowMap instead of moving cells. Every row-moving edit must
-// give the same screen as the old memmove version, keep rowMap a permutation,
+// Scrolls now rotate row headers instead of moving cells. Every row-moving edit must
+// give the same screen as the old memmove version, keep every row on its own storage,
 // and leave the rows it exposes blank.
 func TestGrid_RowMap_RotatingEdits(t *testing.T) {
 	g := newGrid(6, 4)
@@ -69,21 +70,21 @@ func TestGrid_RowMap_RotatingEdits(t *testing.T) {
 	if got, want := col0(g), "AB  CF"; got != want {
 		t.Fatalf("InsertLines: got %q want %q", got, want)
 	}
-	if !rowMapIsPermutation(g) {
-		t.Fatalf("rowMap not a permutation: %v", g.rowMap)
+	if !rowsAreDistinct(g) {
+		t.Fatal("screen rows share storage")
 	}
 }
 
-// A rotated rowMap must not leak into consumers that read Cells as row-major:
+// Rotated rows must not leak into consumers that read Cells as row-major:
 // the alt-screen stash (restored by ExitAlt) and Resize's reflow.
 func TestGrid_RowMap_SurvivesAltAndResize(t *testing.T) {
 	g := newGrid(4, 3)
 	g.ScrollbackCap = 10
 	labelRows(g)
 	g.scrollUpRegion(1)
-	labelRows(g) // screen now "ABCD" but rowMap is rotated
-	if g.rowMap[0] == 0 {
-		t.Fatalf("setup: expected rotated rowMap, got %v", g.rowMap)
+	labelRows(g) // screen now "ABCD" but rows are rotated
+	if &g.row(0)[0] == &g.Cells[0] {
+		t.Fatal("setup: expected rotated rows")
 	}
 
 	g.EnterAlt()
@@ -99,8 +100,8 @@ func TestGrid_RowMap_SurvivesAltAndResize(t *testing.T) {
 	// Reflow keeps rows only down to the cursor; park it on the last written row.
 	g.CursorR = 3
 	g.Resize(4, 5)
-	if !rowMapIsPermutation(g) {
-		t.Fatalf("rowMap after resize: %v", g.rowMap)
+	if !rowsAreDistinct(g) {
+		t.Fatal("screen rows share storage after resize")
 	}
 	sb := g.Scrollback.Len()
 	var got []rune
@@ -113,7 +114,7 @@ func TestGrid_RowMap_SurvivesAltAndResize(t *testing.T) {
 }
 
 // BenchmarkGrid_LineFeedScroll mirrors vtebench's "scrolling" test: 1 MiB of
-// "y\n" into a 50x200 screen. Before rowMap every line feed memmoved the whole
+// "y\n" into a 50x200 screen. Before row rotation every line feed memmoved the whole
 // screen (~1.7 s per MiB).
 func BenchmarkGrid_LineFeedScroll(b *testing.B) {
 	g := newGrid(50, 200)

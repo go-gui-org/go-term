@@ -10,7 +10,13 @@ package term
 // state and the DECSC slot (so DECSC/DECRC inside the alt buffer don't
 // clobber the main-buffer save).
 type altSavedScreen struct {
-	cells            []cell
+	cells []cell
+	// slots, rowMap and rowsBorrowed are the main screen's row layout and borrow
+	// state (see grid.slots). Stashing the layout, not a flattened copy, keeps
+	// ?1049 toggles free of screen-sized copies.
+	slots            [][]cell
+	rowMap           []int32
+	rowsBorrowed     bool
 	rowWrapped       []bool
 	cursorR, cursorC int
 	curFG, curBG     uint32
@@ -50,30 +56,30 @@ func (g *grid) EnterAlt() {
 	if g.AltActive {
 		return
 	}
-	// The stash is read back row-major by Resize's reflow, and ExitAlt restores
-	// it with an identity rowMap, so it must leave in row order.
-	g.linearize()
 	g.mainSaved = altSavedScreen{
-		cells:       g.Cells,
-		rowWrapped:  g.RowWrapped,
-		cursorR:     g.CursorR,
-		cursorC:     g.CursorC,
-		curFG:       g.CurFG,
-		curBG:       g.CurBG,
-		curAttrs:    g.CurAttrs,
-		curULStyle:  g.CurULStyle,
-		curULColor:  g.CurULColor,
-		charsetG0:   g.CharsetG0,
-		charsetG1:   g.CharsetG1,
-		activeG:     g.ActiveG,
-		autoWrap:    g.AutoWrap,
-		originMode:  g.OriginMode,
-		insertMode:  g.InsertMode,
-		top:         g.Top,
-		bottom:      g.Bottom,
-		saved:       g.saved,
-		graphics:    g.Graphics,
-		occludeMaxR: g.occludeMaxR,
+		cells:        g.Cells,
+		slots:        g.slots,
+		rowMap:       g.rowMap,
+		rowsBorrowed: g.rowsBorrowed,
+		rowWrapped:   g.RowWrapped,
+		cursorR:      g.CursorR,
+		cursorC:      g.CursorC,
+		curFG:        g.CurFG,
+		curBG:        g.CurBG,
+		curAttrs:     g.CurAttrs,
+		curULStyle:   g.CurULStyle,
+		curULColor:   g.CurULColor,
+		charsetG0:    g.CharsetG0,
+		charsetG1:    g.CharsetG1,
+		activeG:      g.ActiveG,
+		autoWrap:     g.AutoWrap,
+		originMode:   g.OriginMode,
+		insertMode:   g.InsertMode,
+		top:          g.Top,
+		bottom:       g.Bottom,
+		saved:        g.saved,
+		graphics:     g.Graphics,
+		occludeMaxR:  g.occludeMaxR,
 	}
 	// The alt screen starts with no images of its own. Parking the main
 	// screen's list is what hides a sixel behind a full-screen app and, in
@@ -87,6 +93,8 @@ func (g *grid) EnterAlt() {
 		cells[i] = blank
 	}
 	g.Cells = cells
+	g.slots, g.rowMap = nil, nil // mainSaved owns the main layout arrays now
+	g.resetRows()
 	g.RowWrapped = make([]bool, g.Rows)
 	g.CursorR, g.CursorC = 0, 0
 	g.CurFG, g.CurBG, g.CurAttrs = defaultColor, defaultColor, 0
@@ -114,7 +122,11 @@ func (g *grid) ExitAlt() {
 		return
 	}
 	g.Cells = g.mainSaved.cells
-	g.resetRowMap() // stashed row-major by EnterAlt
+	g.slots, g.rowMap = g.mainSaved.slots, g.mainSaved.rowMap
+	g.rowsBorrowed = g.mainSaved.rowsBorrowed
+	if len(g.rowMap) != g.Rows {
+		g.resetRows()
+	}
 	g.RowWrapped = g.mainSaved.rowWrapped
 	g.CursorR, g.CursorC = g.mainSaved.cursorR, g.mainSaved.cursorC
 	g.CurFG = g.mainSaved.curFG

@@ -640,8 +640,12 @@ func (g *grid) Resize(rows, cols int) {
 		trackRows = append(trackRows, g.resizeTrack...)
 	}
 
-	// reflowBuffer and logicalReflow read Cells as row-major.
-	g.linearize()
+	// reflowBuffer and logicalReflow read cells row-major. Scrolls rotate and
+	// swap rows, so hand them a flat copy when the order has changed.
+	g.Cells = flatScreen(g.slots, g.rowMap, g.Cells, g.Cols)
+	if g.AltActive && len(g.mainSaved.rowMap) == g.Rows {
+		g.mainSaved.cells = flatScreen(g.mainSaved.slots, g.mainSaved.rowMap, g.mainSaved.cells, g.Cols)
+	}
 
 	sbRows := make([][]cell, oldSbLen)
 	sbWrap := make([]bool, oldSbLen)
@@ -687,6 +691,9 @@ func (g *grid) Resize(rows, cols int) {
 			})
 			tracked = res.trackedRows
 			g.mainSaved.cells = res.cells
+			g.mainSaved.slots = rowsOver(nil, res.cells, rows, cols)
+			g.mainSaved.rowMap = identityMap(nil, rows)
+			g.mainSaved.rowsBorrowed = false
 			g.mainSaved.rowWrapped = res.rowWrapped
 			g.repopulateScrollback(res.scrollback, res.sbWrapped, cols)
 			g.mainSaved.cursorR = res.cursorR
@@ -720,10 +727,9 @@ func (g *grid) Resize(rows, cols int) {
 
 	g.Rows = rows
 	g.Cols = cols
-	// Both reflow paths produced a fresh row-major buffer at the new size. The
-	// old spare no longer fits, so drop it rather than keep dead memory.
-	g.resetRowMap()
-	g.linearBuf = nil
+	// Both reflow paths produced a fresh row-major buffer at the new size, and
+	// the ring was re-carved by repopulateScrollback, so no row is borrowed.
+	g.resetRows()
 	g.Dirty = make([]bool, rows)
 	g.markAllDirty()
 

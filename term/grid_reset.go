@@ -64,8 +64,11 @@ func (g *grid) ScreenAlignment() {
 	// as the plain character, and vttest reads the result visually.
 	fill := defaultCell()
 	fill.Ch = 'E'
-	for i := range g.Cells {
-		g.Cells[i] = fill
+	for r := range g.Rows {
+		row := g.row(r)
+		for i := range row {
+			row[i] = fill
+		}
 	}
 	// Flat fill, so occlusion is not carried by eraseSpan — see ClearAll.
 	if len(g.Graphics) != 0 {
@@ -190,8 +193,11 @@ func (g *grid) HardReset() {
 	// Screen + history. Dropping scrollback shifts the content-row coordinate
 	// space, so marks, graphics and any selection (all content-row based) go
 	// with it — the same bookkeeping ED 3 performs.
-	for i := range g.Cells {
-		g.Cells[i] = defaultCell()
+	for r := range g.Rows {
+		row := g.row(r)
+		for i := range row {
+			row[i] = defaultCell()
+		}
 	}
 	for r := range g.RowWrapped {
 		g.RowWrapped[r] = false

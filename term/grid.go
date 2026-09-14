@@ -341,26 +341,34 @@ type grid struct {
 	// Empty until the shell emits an OSC 7.
 	Cwd string
 
-	// Cells is the screen's cell storage, len = Rows*Cols. It is NOT row-major:
-	// screen row r lives in slot rowMap[r], so read and write rows through
-	// row(r). Whole-buffer fills that touch every cell may still range over
-	// Cells directly, because the order does not matter to them.
+	// Cells is the screen's own cell slab, len = Rows*Cols. It is neither
+	// row-major nor complete: screen row r is slots[rowMap[r]], which may be any
+	// piece of Cells or a row that came over from the scrollback ring. Read and
+	// write rows through row(r). Only a freshly allocated slab (newGrid,
+	// EnterAlt) may be indexed flat.
 	Cells []cell
 
-	// rowMap[r] is the Cells slot that holds screen row r. It is always a
-	// permutation of [0, Rows). Scrolls rotate this table instead of moving
-	// cells: a line feed at the bottom of a 50x200 screen used to memmove
-	// ~240 KB (the whole screen), which made `yes`-style output ~100x slower
-	// than other terminals. Now it moves Rows int32s and clears one row.
-	// Code that hands Cells to something that assumes row-major order (the
-	// alt-screen stash, reflow) calls linearize first.
+	// Screen row r lives in slots[rowMap[r]]. Two levels, because the two hot
+	// operations want different things:
+	//   - Scrolls, IL and DL rotate rowMap. It holds plain int32s, so the rotation
+	//     is a memmove with no GC write barriers. (Rotating the []cell headers
+	//     directly cost +10 ns per scroll.) A line feed on a 50x200 screen used to
+	//     memmove ~240 KB of cells.
+	//   - A row scrolling into history is handed to the ring by reference in
+	//     exchange for the ring's spare row (scrollbackRing.PushSwap). That
+	//     rewrites one slots entry.
+	// Code that needs row-major cells (reflow) goes through flatScreen.
+	slots  [][]cell
 	rowMap []int32
 	// rowTmp is scratch for rotateRowsUp/Down, len Rows, so a scroll never
 	// allocates.
 	rowTmp []int32
-	// linearBuf is the spare buffer linearize fills and swaps with Cells. It
-	// never aliases Cells or mainSaved.cells.
-	linearBuf []cell
+	// rowsBorrowed is true once slots may hold storage carved from the ring's
+	// slab. sbGen is the ring generation those rows were taken under. When the
+	// ring reuses or drops its slab its gen moves on, and borrowed rows are
+	// copied to a slab of our own before the next swap — see scrollUpRegion.
+	rowsBorrowed bool
+	sbGen        uint32
 
 	// RowWrapped[r] is true when row r ended with an autowrap (the cursor
 	// reached the right margin and wrapped onto row r+1). During Resize,
@@ -939,7 +947,7 @@ func newGrid(rows, cols int) *grid {
 	for i := range g.Cells {
 		g.Cells[i] = defaultCell()
 	}
-	g.resetRowMap()
+	g.resetRows()
 	for c := 8; c < MaxGridDim; c += 8 {
 		g.TabStops[c] = true
 	}
@@ -1078,8 +1086,13 @@ func (g *grid) ReverseIndex() {
 
 // ClearAll wipes every cell to default and homes the cursor.
 func (g *grid) ClearAll() {
-	for i := range g.Cells {
-		g.Cells[i] = defaultCell()
+	// Row by row, never flat over Cells: rows swapped into scrollback still
+	// live in the screen slab.
+	for r := range g.Rows {
+		row := g.row(r)
+		for i := range row {
+			row[i] = defaultCell()
+		}
 	}
 	// Sixel/iTerm2 images are removed only by painting over their cells, so
 	// the flat fill has to do it explicitly — eraseSpan, which normally

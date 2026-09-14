@@ -629,8 +629,11 @@ func (g *grid) eraseInDisplay(mode int, selective bool) {
 			// Flat fill: clearing the screen is common enough to keep the
 			// per-row bookkeeping out of it.
 			blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
-			for i := range g.Cells {
-				g.Cells[i] = blank
+			for r := range g.Rows {
+				row := g.row(r)
+				for i := range row {
+					row[i] = blank
+				}
 			}
 			// The flat fill skips eraseSpan, so clear the images itself.
 			if len(g.Graphics) != 0 {
