@@ -129,3 +129,42 @@ func BenchmarkGrid_LineFeedScroll(b *testing.B) {
 		g.Mu.Unlock()
 	}
 }
+
+// After a scroll, rowMap is no longer the identity, so an edit that still indexed
+// Cells flat would land on the wrong row. A fresh grid cannot catch that, so every
+// per-row reader and writer is checked on a rotated layout.
+func TestGrid_RowMap_RowEditsFollowRotatedLayout(t *testing.T) {
+	g := newGrid(4, 6)
+	g.scrollUpRegion(1)
+	if g.rowMap[0] == 0 {
+		t.Fatal("setup: scroll did not rotate the row map")
+	}
+	for r, s := range []string{"abcdef", "ghijkl", "mnopqr", "stuvwx"} {
+		labelLine(g, r, s)
+	}
+	bl := string(blankCell(g.CurFG, g.CurBG, g.CurAttrs).Ch)
+
+	g.CopyRect(1, 1, 1, 2, 4, 5) // DECCRA: row 1 cols 1-2 to row 4 col 5 (1-based)
+	g.MoveCursor(2, 0)
+	g.InsertChars(1)
+	g.MoveCursor(1, 1)
+	g.DeleteChars(2)
+	wantRows(t, g, []string{"abcdef", "gjkl" + bl + bl, bl + "mnopq", "stuvab"})
+
+	rr, _ := g.searchRow(g.Scrollback.Len()+3, nil, nil)
+	if got := string(rr); got != "stuvab" {
+		t.Errorf("searchRow(live 3) = %q, want %q", got, "stuvab")
+	}
+	if got := g.ContentCellAt(g.Scrollback.Len()+3, 5).Ch; got != 'b' {
+		t.Errorf("ContentCellAt(live 3, 5) = %q, want 'b'", got)
+	}
+
+	g.MoveCursor(3, 4)
+	g.EraseInLine(0) // EL 0
+	g.MoveCursor(0, 1)
+	g.EraseChars(2) // ECH 2
+	g.MoveCursor(2, 5)
+	g.Put('Z') // putCell
+	g.FlushGrapheme()
+	wantRows(t, g, []string{"a" + bl + bl + "def", "gjkl" + bl + bl, bl + "mnopZ", "stuv" + bl + bl})
+}

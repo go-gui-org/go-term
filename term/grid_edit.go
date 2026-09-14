@@ -626,16 +626,10 @@ func (g *grid) eraseInDisplay(mode int, selective bool) {
 				g.eraseSpan(r, 0, g.Cols, true)
 			}
 		} else {
-			// Flat fill: clearing the screen is common enough to keep the
+			// Direct fill: clearing the screen is common enough to keep the
 			// per-row bookkeeping out of it.
-			blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
-			for r := range g.Rows {
-				row := g.row(r)
-				for i := range row {
-					row[i] = blank
-				}
-			}
-			// The flat fill skips eraseSpan, so clear the images itself.
+			g.fillScreen(blankCell(g.CurFG, g.CurBG, g.CurAttrs))
+			// The direct fill skips eraseSpan, so clear the images itself.
 			if len(g.Graphics) != 0 {
 				g.occludeGraphics(0, g.Rows, 0, g.Cols)
 			}
@@ -650,6 +644,8 @@ func (g *grid) eraseInDisplay(mode int, selective bool) {
 		if mode == 3 {
 			if sb := g.Scrollback.Len(); sb > 0 {
 				g.Scrollback.DropBacking()
+				// Screen rows swapped in from the ring would keep its slab alive.
+				g.syncScrollbackGen()
 				// Reflow scratch too: with history gone there is nothing
 				// for the next Resize to re-carve.
 				g.reflowArena = rowArena{}

@@ -7,7 +7,7 @@ import "testing"
 func fillGrid(g *grid, ch rune) {
 	for r := range g.Rows {
 		for c := range g.Cols {
-			g.Cells[r*g.Cols+c] = cell{
+			g.row(r)[c] = cell{
 				Ch: ch, FG: defaultColor, BG: defaultColor,
 				ULColor: defaultColor, Width: 1,
 			}

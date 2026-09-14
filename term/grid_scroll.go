@@ -5,6 +5,18 @@ import "math"
 // row returns the cells of screen row r (0 <= r < Rows). Caller holds Mu.
 func (g *grid) row(r int) []cell { return g.slots[g.rowMap[r]] }
 
+// fillScreen sets every screen cell to c without per-row bookkeeping (no
+// eraseSpan, no occlusion, no dirty marks). It goes row by row, never flat over
+// Cells: the screen slab also holds rows that were swapped into scrollback.
+func (g *grid) fillScreen(c cell) {
+	for r := range g.Rows {
+		row := g.row(r)
+		for i := range row {
+			row[i] = c
+		}
+	}
+}
+
 // rowsOver carves cells (row-major, nRows*cols) into capped per-row slices,
 // reusing dst's backing array when it is large enough.
 func rowsOver(dst [][]cell, cells []cell, nRows, cols int) [][]cell {
@@ -76,6 +88,31 @@ func (g *grid) reclaimRows() {
 	g.resetRows()
 }
 
+// syncScrollbackGen reclaims borrowed rows, on the live screen and on a main
+// screen parked behind the alt screen, once the ring has re-carved or dropped its
+// slab. Call it right after every grid-side ring change (ED 3, RIS, a cap change):
+// until then the borrowed rows keep the old slab alive — up to ScrollbackCap×Cols
+// cells after the ring meant to free it — and a reused slab can alias live ring
+// slots. scrollUpRegion calls it too, as the backstop for ring changes made
+// anywhere else. One screen-sized allocation, only on those rare paths.
+func (g *grid) syncScrollbackGen() {
+	if g.Scrollback.gen == g.sbGen {
+		return
+	}
+	g.sbGen = g.Scrollback.gen
+	if g.rowsBorrowed {
+		g.reclaimRows()
+	}
+	// The alt screen never swaps rows with the ring, but the main screen it
+	// hides may still hold rows it borrowed before EnterAlt.
+	if m := &g.mainSaved; g.AltActive && m.rowsBorrowed && len(m.rowMap) == g.Rows {
+		m.cells = flatScreen(m.slots, m.rowMap, nil, g.Cols)
+		m.slots = rowsOver(m.slots, m.cells, g.Rows, g.Cols)
+		m.rowMap = identityMap(m.rowMap, g.Rows)
+		m.rowsBorrowed = false
+	}
+}
+
 // rotateRowsUp moves screen rows [top+n..bottom] to [top..bottom-n] by
 // rotating rowMap. The n rows that fell off the top land at
 // [bottom-n+1..bottom] still holding their old cells; the caller blanks
@@ -116,11 +153,8 @@ func (g *grid) scrollUpRegion(n int) {
 		// The ring re-carved its slab since our borrowed rows were taken, so
 		// they may alias ring slots now. Move them to our own slab before any
 		// more rows cross over. Rare: a cap change, ED 3, RIS or a reflow.
-		if g.Scrollback.gen != g.sbGen {
-			if g.rowsBorrowed {
-				g.reclaimRows()
-			}
-			g.sbGen = g.Scrollback.gen
+		if g.Scrollback.gen != g.sbGen { // inline test: this runs every line feed
+			g.syncScrollbackGen()
 		}
 		evicted := 0
 		for r := 0; r < n; r++ {

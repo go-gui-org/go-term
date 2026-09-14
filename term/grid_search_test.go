@@ -342,8 +342,7 @@ func (g *grid) rowRunesBuf(contentRow int, buf []rune) []rune {
 		if liveRow < 0 || liveRow >= g.Rows || g.Cols == 0 {
 			return nil
 		}
-		base := liveRow * g.Cols
-		src = g.Cells[base : base+g.Cols]
+		src = g.row(liveRow)
 	}
 	if cap(buf) < len(src) {
 		buf = make([]rune, len(src))

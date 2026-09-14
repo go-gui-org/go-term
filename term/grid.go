@@ -1086,17 +1086,10 @@ func (g *grid) ReverseIndex() {
 
 // ClearAll wipes every cell to default and homes the cursor.
 func (g *grid) ClearAll() {
-	// Row by row, never flat over Cells: rows swapped into scrollback still
-	// live in the screen slab.
-	for r := range g.Rows {
-		row := g.row(r)
-		for i := range row {
-			row[i] = defaultCell()
-		}
-	}
+	g.fillScreen(defaultCell())
 	// Sixel/iTerm2 images are removed only by painting over their cells, so
-	// the flat fill has to do it explicitly — eraseSpan, which normally
-	// carries this, is bypassed here. Matches ED 2's flat-fill path.
+	// the direct fill has to do it explicitly — eraseSpan, which normally
+	// carries this, is bypassed here. Matches ED 2's direct-fill path.
 	if len(g.Graphics) != 0 {
 		g.occludeGraphics(0, g.Rows, 0, g.Cols)
 	}

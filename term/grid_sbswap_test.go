@@ -171,3 +171,91 @@ func TestScrollbackSwap_ClearScreenKeepsScrollback(t *testing.T) {
 		}
 	}
 }
+
+// rowsInSlab lists the live rows (screen, plus the main screen parked behind the
+// alt screen) whose storage lies inside slab.
+func rowsInSlab(g *grid, slab []cell) []string {
+	if len(slab) == 0 {
+		return nil
+	}
+	lo := uintptr(unsafe.Pointer(&slab[0]))
+	hi := lo + uintptr(len(slab))*unsafe.Sizeof(slab[0])
+	var hits []string
+	check := func(row []cell, who string) {
+		if p := uintptr(rowPtr(row)); p >= lo && p < hi {
+			hits = append(hits, who)
+		}
+	}
+	for r := range g.Rows {
+		check(g.row(r), fmt.Sprintf("screen row %d", r))
+	}
+	if g.AltActive {
+		for r, s := range g.mainSaved.rowMap {
+			check(g.mainSaved.slots[s], fmt.Sprintf("main row %d", r))
+		}
+	}
+	return hits
+}
+
+// Dropping or replacing the ring's slab must free it at once. Screen rows swapped in
+// from it used to keep all ScrollbackCap×Cols cells alive until the next scroll, and
+// forever once scrollback was switched off.
+func TestScrollbackSwap_SlabChangeReleasesBorrowedRows(t *testing.T) {
+	// borrow fills a grid until its screen holds rows carved from the ring's slab,
+	// and returns that slab.
+	borrow := func(t *testing.T, g *grid) []cell {
+		t.Helper()
+		g.ScrollbackCap = 20
+		p := newParser(g)
+		for i := range 10 {
+			p.Feed([]byte(fmt.Sprintf("\r\nL%03d", i)))
+		}
+		slab := g.Scrollback.cells
+		if len(rowsInSlab(g, slab)) == 0 {
+			t.Fatal("setup: no screen row borrowed from the ring")
+		}
+		return slab
+	}
+
+	for _, tc := range []struct {
+		name, seq string
+		// exit is fed after the slab check; bottom is the bottom row expected
+		// after it ("" to skip). ED 3 and RIS blank the screen, so only the alt
+		// case has content left to check: the main screen it restores.
+		exit, bottom string
+	}{
+		{"ED 3", "\x1b[3J", "", ""},
+		{"RIS", "\x1bc", "", ""},
+		{"ED 3 inside alt", "\x1b[?1049h\x1b[3J", "\x1b[?1049l", "L009"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newGrid(4, 5)
+			slab := borrow(t, g)
+			newParser(g).Feed([]byte(tc.seq))
+			if g.Scrollback.Len() != 0 {
+				t.Fatalf("setup: scrollback not dropped, len %d", g.Scrollback.Len())
+			}
+			if hits := rowsInSlab(g, slab); len(hits) != 0 {
+				t.Fatalf("dropped slab still referenced by %v", hits)
+			}
+			newParser(g).Feed([]byte(tc.exit))
+			if tc.bottom != "" {
+				if got := lineText(g.row(g.Rows-1), 4); got != tc.bottom {
+					t.Fatalf("bottom row = %q, want %q", got, tc.bottom)
+				}
+			}
+		})
+	}
+
+	t.Run("cap change", func(t *testing.T) {
+		tm := newSettingsTerm(Cfg{})
+		slab := borrow(t, tm.grid)
+		tm.SetScrollbackRows(40)
+		if hits := rowsInSlab(tm.grid, slab); len(hits) != 0 {
+			t.Fatalf("replaced slab still referenced by %v", hits)
+		}
+		if got := lineText(tm.grid.row(tm.grid.CursorR), 4); got != "L009" {
+			t.Fatalf("cursor row = %q, want L009", got)
+		}
+	})
+}

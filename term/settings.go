@@ -83,6 +83,9 @@ func (t *Term) resizeScrollback(capRows int) bool {
 	// column count: a differing value would reset the content, and the ring
 	// is repopulated at the live column count by scrollUpRegion anyway.
 	t.grid.Scrollback.EnsureGeom(capRows, t.grid.Scrollback.cols)
+	// A new or dropped ring slab must not stay pinned by screen rows swapped in
+	// from the old one — at cap 0 no scroll would ever reclaim them.
+	t.grid.syncScrollbackGen()
 	// The reflow scratch scales with the ring: a cap change invalidates it,
 	// so return its blocks with the ring's so a user lowering the cap
 	// actually shrinks the footprint.
