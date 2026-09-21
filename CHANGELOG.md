@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-21
+
 - Migrate mono rungs to go-gui semantic text roles and bump go-gui
   v0.77.0 → v0.78.0.
 
