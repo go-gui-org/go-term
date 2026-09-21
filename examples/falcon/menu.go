@@ -291,7 +291,7 @@ func aboutDialogCfg(theme gui.Theme) gui.DialogCfg {
 	// the icon artwork on purpose: the icon is decoration, and a panel
 	// whose only statement of what it is sits inside a picture reads as
 	// unnamed — and says nothing at all to a screen reader.
-	name := theme.B1
+	name := theme.TextStyleDisplay
 	name.Align = gui.TextAlignCenter
 	// The tagline sets a step below body text: it is a caption for the
 	// icon, and at body size it competed with the metadata rows for the
@@ -383,7 +383,7 @@ func aboutMetadata(theme gui.Theme) gui.View {
 	// The values sit in the theme's mono face so the hash and the version
 	// digits line up column-wise, at the dialog's own text size rather than
 	// M3's slightly larger default.
-	value := theme.M3
+	value := theme.TextStyleCode
 	value.Size = gui.DefaultDialogStyle.TextStyle.Size
 	rows := []gui.View{
 		aboutRow(theme, "Version", gui.Text(gui.TextCfg{

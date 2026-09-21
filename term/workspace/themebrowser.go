@@ -451,7 +451,7 @@ func (ws *Workspace) themeListColumn(theme gui.Theme, w, h float32) gui.View {
 	col.Padding = gui.NewPadding(browserPad, browserPad, browserPad, browserPad)
 	col.Spacing = gui.SomeF(10)
 
-	head := theme.M5
+	head := theme.TextStyleCodeSmall
 	head.Typeface = glyph.TypefaceBold
 
 	col.Content = []gui.View{
@@ -482,7 +482,7 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 
 	b := &ws.browser
 	if len(b.matches) == 0 {
-		empty := theme.M5
+		empty := theme.TextStyleCodeSmall
 		list.Content = []gui.View{gui.Text(gui.TextCfg{
 			Text:      "No themes match " + strconv.Quote(ws.browser.filter),
 			TextStyle: empty,
@@ -495,8 +495,8 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 	// are a fixed height and the container's spacing is zero, so row N sits at
 	// exactly N*rowH — the arithmetic both the virtualisation and the
 	// keep-cursor-visible reveal depend on.
-	rowH := listRowH(theme.M5.Size, browserRowFactor)
-	listH := browserListHeight(h, theme.M5.Size)
+	rowH := listRowH(theme.TextStyleCodeSmall.Size, browserRowFactor)
+	listH := browserListHeight(h, theme.TextStyleCodeSmall.Size)
 	b.rowH, b.listH = rowH, listH
 	list.Spacing = gui.SomeF(0)
 	if b.revealPending {
@@ -556,7 +556,7 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 		}
 		row.Content = []gui.View{
 			themeChip(nt.Theme),
-			gui.Text(gui.TextCfg{Text: mark + nt.Name, TextStyle: theme.M5}),
+			gui.Text(gui.TextCfg{Text: mark + nt.Name, TextStyle: theme.TextStyleCodeSmall}),
 		}
 		rows = append(rows, gui.Row(row))
 	}
@@ -678,7 +678,7 @@ func (ws *Workspace) themePreviewColumn(theme gui.Theme) gui.View {
 	}
 	th := nt.Theme
 
-	title := theme.M5
+	title := theme.TextStyleCodeSmall
 	title.Typeface = glyph.TypefaceBold
 
 	character := "dark"
@@ -692,7 +692,7 @@ func (ws *Workspace) themePreviewColumn(theme gui.Theme) gui.View {
 		gui.Text(gui.TextCfg{Text: nt.Name, TextStyle: styled(title, th.DefaultFG)}),
 		gui.Text(gui.TextCfg{
 			Text:      character + " · " + strconv.Itoa(len(ws.browser.matches)) + " shown",
-			TextStyle: styled(theme.M6, th.ANSI[8]),
+			TextStyle: styled(theme.TextStyleCodeTiny, th.ANSI[8]),
 		}),
 		swatchGrid(th, theme),
 		ws.themeCodeSample(th),
@@ -726,7 +726,7 @@ func swatchGrid(th term.Theme, theme gui.Theme) gui.View {
 	grid := tight(gui.FillFit)
 	grid.Spacing = gui.SomeF(browserSwatchGap)
 
-	label := theme.M6
+	label := theme.TextStyleCodeTiny
 
 	// Every label gets the same box, wide enough for two digits. Without it
 	// the cell's width tracks its label ("8" vs "15"), so the bottom row's
@@ -977,7 +977,7 @@ func (ws *Workspace) themeBrowserFooter(theme gui.Theme) gui.View {
 	bar.Spacing = gui.SomeF(18)
 
 	hint := func(s string) gui.View {
-		return gui.Text(gui.TextCfg{Text: s, TextStyle: theme.M6})
+		return gui.Text(gui.TextCfg{Text: s, TextStyle: theme.TextStyleCodeTiny})
 	}
 	// Spacer pushes the count to the right edge, away from the key hints.
 	fill := tight(gui.FillFit)

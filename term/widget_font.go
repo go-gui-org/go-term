@@ -12,7 +12,7 @@ import "github.com/go-gui-org/go-gui/gui"
 func (t *Term) style() gui.TextStyle {
 	ts := t.cfg.TextStyle
 	if ts == (gui.TextStyle{}) {
-		ts = gui.CurrentTheme().M5
+		ts = gui.CurrentTheme().TextStyleCodeSmall
 	}
 	if t.fontSize > 0 {
 		ts.Size = t.fontSize

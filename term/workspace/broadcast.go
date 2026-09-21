@@ -48,7 +48,7 @@ func dividerColor(tab *tab) gui.Color {
 // Purely a readout — no OnClick, so it cannot swallow a click meant for the
 // pane underneath, and it sits below the help and theme overlays in z-order.
 func (ws *Workspace) broadcastPill() gui.View {
-	style := gui.CurrentTheme().M5
+	style := gui.CurrentTheme().TextStyleCodeSmall
 	style.Color = gui.RGB(20, 16, 4) // dark text on the amber fill
 
 	pill := tight(gui.FitFit)
