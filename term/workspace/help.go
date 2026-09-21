@@ -209,8 +209,8 @@ func (ws *Workspace) helpPanel(ww, wh int) gui.View {
 	theme := gui.CurrentTheme()
 	// M6 is the mono style at SizeTextTiny+1; derive the line height from the
 	// same size so a themed font shifts the column choice with it.
-	rowStyle := theme.M6
-	headStyle := theme.M6
+	rowStyle := theme.TextStyleCodeTiny
+	headStyle := theme.TextStyleCodeTiny
 	headStyle.Typeface = glyph.TypefaceBold
 	rowH := (theme.SizeTextTiny + 1) * helpLineFactor
 

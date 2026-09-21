@@ -356,7 +356,7 @@ func (ws *Workspace) paletteBackdrop(ww, wh int) gui.View {
 // palettePanel builds the floating palette: filter box above a scrolling list.
 func (ws *Workspace) palettePanel(ww, wh int) gui.View {
 	theme := gui.CurrentTheme()
-	head := theme.M5
+	head := theme.TextStyleCodeSmall
 	head.Typeface = glyph.TypefaceBold
 
 	inner := tight(gui.FixedFit)
@@ -393,7 +393,7 @@ func (ws *Workspace) paletteRows(theme gui.Theme, wh float32) gui.View {
 	list.Spacing = gui.SomeF(paletteRowGap)
 
 	p := &ws.palette
-	rowStyle := theme.M6
+	rowStyle := theme.TextStyleCodeTiny
 
 	// Publish the geometry the reveal arithmetic needs. Rows are fixed-height
 	// so row N's offset is exactly N*rowH — a Fit height would make it depend

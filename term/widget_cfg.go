@@ -148,7 +148,7 @@ type Cfg struct {
 	Identity string
 
 	// TextStyle overrides the default monospace text style. When set to
-	// the zero value, the widget falls back to gui.CurrentTheme().M5.
+	// the zero value, the widget falls back to gui.CurrentTheme().TextStyleCodeSmall.
 	// To use a custom style you must set at least one field (typically
 	// Size or Typeface) — a zero-value TextStyle is treated as "unset."
 	TextStyle gui.TextStyle

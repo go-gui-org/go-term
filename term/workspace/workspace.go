@@ -657,7 +657,7 @@ func (ws *Workspace) tabBarView() gui.View {
 // tabButton renders a single tab.
 func (ws *Workspace) tabButton(theme gui.Theme, tab *tab, isActive bool, idx int) gui.View {
 	bg := theme.ColorPanel
-	style := theme.M5
+	style := theme.TextStyleCodeSmall
 	if isActive {
 		bg = theme.ColorActive
 	} else {
@@ -675,7 +675,7 @@ func (ws *Workspace) tabButton(theme gui.Theme, tab *tab, isActive bool, idx int
 		markStyle := style
 		// Undimmed title color: an inactive tab's text is faded to 0.65, and
 		// the marker is the one thing on it that should catch the eye.
-		markStyle.Color = theme.M5.Color
+		markStyle.Color = theme.TextStyleCodeSmall.Color
 		content = append(content, gui.Text(gui.TextCfg{
 			Text: g + " ", TextStyle: markStyle,
 		}))
@@ -729,7 +729,7 @@ func (ws *Workspace) tabButton(theme gui.Theme, tab *tab, isActive bool, idx int
 	// The child closeBtn's own OnHover (above) takes over when the pointer
 	// is directly on the glyph, brightening it to full opacity.
 	if len(ws.tabs) > 1 && !isActive {
-		revealColor := theme.M5.Color.WithOpacity(0.6)
+		revealColor := theme.TextStyleCodeSmall.Color.WithOpacity(0.6)
 		outer.OnHover = func(ctx gui.EventCtx) {
 			setTextColorByID(ctx.Layout, closeID, revealColor)
 		}
@@ -837,7 +837,7 @@ func (ws *Workspace) splitView(node *splitNode, tab *tab, boxW, boxH float32) gu
 // measurer that reports a non-finite or non-positive line height is ignored
 // so the content-area height can never be poisoned by a bad measurement.
 func (ws *Workspace) tabBarHeight() float32 {
-	style := gui.CurrentTheme().M5
+	style := gui.CurrentTheme().TextStyleCodeSmall
 	if tm := ws.w.TextMeasurer(); tm != nil {
 		if h := tm.FontHeight(style); h > 0 && !math.IsInf(float64(h), 1) {
 			return h + 2

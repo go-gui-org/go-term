@@ -19,7 +19,7 @@ import (
 
 // SetTextStyle replaces the terminal's base text style — family, size,
 // typeface — and forces a remeasure. Mirrors Cfg.TextStyle: the zero value
-// means "fall back to gui.CurrentTheme().M5".
+// means "fall back to gui.CurrentTheme().TextStyleCodeSmall".
 //
 // This also clears any runtime zoom, exactly as ResetFontSize does. t.fontSize
 // is an *absolute* size derived from the previous base and wins over

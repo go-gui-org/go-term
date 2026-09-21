@@ -2982,7 +2982,7 @@ func TestTerm_Theme_ReturnsActiveTheme(t *testing.T) {
 func TestTerm_Style_ZeroValueTextStyleFallsBack(t *testing.T) {
 	term := &Term{grid: newGrid(2, 4)}
 	// cfg.TextStyle is the zero value → should fall back to M5.
-	if got, fallback := term.style(), gui.CurrentTheme().M5; got != fallback {
+	if got, fallback := term.style(), gui.CurrentTheme().TextStyleCodeSmall; got != fallback {
 		t.Errorf("zero-value TextStyle should fall back: got %+v, want M5 %+v",
 			got, fallback)
 	}
@@ -3710,7 +3710,7 @@ func TestAdjustFontSize_ZeroFontSizeInitsFromStyle(t *testing.T) {
 }
 
 func TestAdjustFontSize_ZeroFontSizeZeroStyleNoPanic(t *testing.T) {
-	cfg := Cfg{} // no TextStyle, fallback to gui.CurrentTheme().M5
+	cfg := Cfg{} // no TextStyle, fallback to gui.CurrentTheme().TextStyleCodeSmall
 	term, _ := newTestTermWithScheduler(0, cfg)
 	term.fontSize = 0
 	term.cfg = Cfg{} // zero cfg
