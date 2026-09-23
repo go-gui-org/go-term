@@ -2,13 +2,30 @@ package term
 
 import (
 	"regexp"
+	"sort"
 	"unicode"
 	"unicode/utf8"
 )
 
-// equalFoldRune reports whether a and b are equal under Unicode case-folding.
+// maxSearchQueryRunes caps a plain-text query at the grid layer. Matches are
+// single-row, so anything longer than a row can never hit; the widget already
+// caps its search box here, and this guards direct grid callers (and bounds
+// the O(n*m) per-row scan) the same way.
+const maxSearchQueryRunes = MaxGridDim
+
+// equalFoldRune reports whether a and b are equal under Unicode case-folding,
+// following the full SimpleFold orbit (so U+017F matches s/S, etc.), not just
+// ToLower. The a == b fast path keeps the ASCII common case branch-free.
 func equalFoldRune(a, b rune) bool {
-	return unicode.ToLower(a) == unicode.ToLower(b)
+	if a == b {
+		return true
+	}
+	for r := unicode.SimpleFold(b); r != b; r = unicode.SimpleFold(r) {
+		if r == a {
+			return true
+		}
+	}
+	return false
 }
 
 // runeSliceSearch returns the first column index >= fromCol where needle
@@ -63,11 +80,16 @@ func runeSliceSearchLast(haystack, needle []rune, upToCol int) int {
 }
 
 // searchRow prepares a content row for searching by stripping continuation
-// cells (Ch == 0). It returns a "clean" rune slice and a mapping table
-// where colMap[cleanIdx] is the original grid column index.
+// cells (Ch == 0). Multi-rune grapheme clusters expand in place, so a query
+// can match inside a ZWJ sequence or a base+mark cluster instead of only its
+// base rune; every rune of one cluster maps back to the same grid column.
+// It returns a "clean" rune slice and a mapping table where colMap[cleanIdx]
+// is the original grid column index.
 //
 // Buffers are grown once to src length, then reused across calls via
-// direct indexing — no per-cell append/capacity checks in the hot loop.
+// direct indexing — no per-cell append/capacity checks in the hot loop
+// beyond one bounds check that only fires while a row of wide clusters
+// expands past its cell count.
 func (g *grid) searchRow(row int, rrBuf []rune, colBuf []int) (rr []rune, colMap []int) {
 	sb := g.Scrollback.Len()
 	var src []cell
@@ -94,34 +116,54 @@ func (g *grid) searchRow(row int, rrBuf []rune, colBuf []int) (rr []rune, colMap
 	rr = rrBuf[:n]
 	colMap = colBuf[:n]
 	cnt := 0
+	// grow makes room for one more expanded rune. A row of multi-rune
+	// clusters holds more runes than cells; growth is geometric and only
+	// ever triggers on such rows.
+	grow := func() {
+		nrr := make([]rune, len(rr)*2+1)
+		copy(nrr, rr[:cnt])
+		rr = nrr
+		ncols := make([]int, len(colMap)*2+1)
+		copy(ncols, colMap[:cnt])
+		colMap = ncols
+	}
 	for i, cell := range src {
-		if cell.Ch != 0 {
-			rr[cnt] = cell.Ch
-			colMap[cnt] = i
-			cnt++
+		if cell.Ch == 0 {
+			continue
 		}
+		if cell.clusterID != 0 && int(cell.clusterID) < len(g.clusters) {
+			for _, r := range g.clusters[cell.clusterID] {
+				if cnt >= len(rr) {
+					grow()
+				}
+				rr[cnt] = r
+				colMap[cnt] = i
+				cnt++
+			}
+			continue
+		}
+		if cnt >= len(rr) {
+			grow()
+		}
+		rr[cnt] = cell.Ch
+		colMap[cnt] = i
+		cnt++
 	}
 	return rr[:cnt], colMap[:cnt]
 }
 
 // cleanIdxGT returns the first index i in colMap where colMap[i] > gridCol.
-// Returns len(colMap) if no entry qualifies.
+// Returns len(colMap) if no entry qualifies. colMap is non-decreasing, so
+// this is a binary search, not the linear scan it replaced.
 func cleanIdxGT(colMap []int, gridCol int) int {
-	for i, orig := range colMap {
-		if orig > gridCol {
-			return i
-		}
-	}
-	return len(colMap)
+	return sort.Search(len(colMap), func(i int) bool { return colMap[i] > gridCol })
 }
 
 // cleanIdxGE returns the first index i in colMap where colMap[i] >= gridCol.
 // Returns -1 if no entry qualifies.
 func cleanIdxGE(colMap []int, gridCol int) int {
-	for i, orig := range colMap {
-		if orig >= gridCol {
-			return i
-		}
+	if i := sort.SearchInts(colMap, gridCol); i < len(colMap) {
+		return i
 	}
 	return -1
 }
@@ -159,6 +201,9 @@ func (g *grid) Find(query string, start contentPos, forward bool) (contentPos, b
 		return contentPos{}, false
 	}
 	qRunes := []rune(query)
+	if len(qRunes) > maxSearchQueryRunes {
+		return contentPos{}, false
+	}
 	total := g.ContentRows()
 	if total == 0 {
 		return contentPos{}, false
@@ -209,6 +254,9 @@ func (g *grid) ViewportMatches(query string) []searchMatch {
 		return nil
 	}
 	qRunes := []rune(query)
+	if len(qRunes) > maxSearchQueryRunes {
+		return nil
+	}
 	qLen := len(qRunes)
 	sb := g.Scrollback.Len()
 	off := clamp(g.ViewOffset, 0, sb)
@@ -246,14 +294,39 @@ func (g *grid) ViewportMatches(query string) []searchMatch {
 // column >= fromCol. s holds the grid row's content runes encoded as UTF-8
 // (see appendSearchBytes). Zero-width matches (a*, x?) are skipped: they
 // have no cell to highlight and their length would underflow matchGridSpan.
+//
+// Single linear pass: the fromCol→byte offset conversion scans once, and
+// each retry advances past the skipped match, so every byte is counted at
+// most twice — not once per match like the FindAllIndex + RuneCount loop
+// this replaced.
 func regexSearchForward(s []byte, re *regexp.Regexp, fromCol int) (col, matchLen int, found bool) {
-	for _, loc := range re.FindAllIndex(s, -1) {
-		c := utf8.RuneCount(s[:loc[0]])
-		if c >= fromCol {
-			if l := utf8.RuneCount(s[loc[0]:loc[1]]); l > 0 {
-				return c, l, true
-			}
+	// Byte offset of the fromCol-th rune.
+	byteOff := 0
+	runeIdx := 0
+	for runeIdx < fromCol && byteOff < len(s) {
+		_, w := utf8.DecodeRune(s[byteOff:])
+		byteOff += w
+		runeIdx++
+	}
+	for byteOff <= len(s) {
+		loc := re.FindIndex(s[byteOff:])
+		if loc == nil {
+			return 0, 0, false
 		}
+		// Runes between the search start and the match start.
+		gap := utf8.RuneCount(s[byteOff : byteOff+loc[0]])
+		l := utf8.RuneCount(s[byteOff+loc[0] : byteOff+loc[1]])
+		if l > 0 {
+			return runeIdx + gap, l, true
+		}
+		// Zero-width match: step one rune past its start and retry.
+		// A zero-width match at the very end of input cannot advance.
+		_, w := utf8.DecodeRune(s[byteOff+loc[0]:])
+		if w == 0 {
+			return 0, 0, false
+		}
+		byteOff += loc[0] + w
+		runeIdx += gap + 1
 	}
 	return 0, 0, false
 }
@@ -261,21 +334,39 @@ func regexSearchForward(s []byte, re *regexp.Regexp, fromCol int) (col, matchLen
 // regexSearchLast returns the last non-empty regex match in s with rune
 // column < upToCol. Zero-width matches are skipped, as in
 // regexSearchForward.
+//
+// One FindAllIndex plus one linear byte→rune walk: the old code paid a
+// full RuneCount(s[:loc]) per match, quadratic in row length.
 func regexSearchLast(s []byte, re *regexp.Regexp, upToCol int) (col, matchLen int, found bool) {
-	col = -1
-	for _, loc := range re.FindAllIndex(s, -1) {
-		c := utf8.RuneCount(s[:loc[0]])
-		if c < upToCol {
-			if l := utf8.RuneCount(s[loc[0]:loc[1]]); l > 0 {
-				col = c
-				matchLen = l
-			}
-		}
-	}
-	if col < 0 {
+	locs := re.FindAllIndex(s, -1)
+	if len(locs) == 0 {
 		return 0, 0, false
 	}
-	return col, matchLen, true
+	// Walk the row once, left to right: FindAllIndex returns starts in
+	// order, so one monotonic (bytePos, runeIdx) cursor converts every
+	// start exactly once.
+	bestCol, bestLen := -1, 0
+	bytePos, runeIdx := 0, 0
+	for _, loc := range locs {
+		for bytePos < loc[0] {
+			_, w := utf8.DecodeRune(s[bytePos:])
+			bytePos += w
+			runeIdx++
+		}
+		l := utf8.RuneCount(s[loc[0]:loc[1]])
+		if l > 0 && runeIdx < upToCol {
+			bestCol, bestLen = runeIdx, l
+		}
+		for bytePos < loc[1] {
+			_, w := utf8.DecodeRune(s[bytePos:])
+			bytePos += w
+			runeIdx++
+		}
+	}
+	if bestCol < 0 {
+		return 0, 0, false
+	}
+	return bestCol, bestLen, true
 }
 
 // appendSearchBytes encodes rr as UTF-8 into the grid's reused scratch

@@ -52,6 +52,9 @@ type rect struct{ top, left, bottom, right int }
 // between), so the column ordering is only enforced when stream is false or
 // the area is a single row.
 func (g *grid) rectBounds(pt, pl, pb, pr int, stream bool) (rect, bool) {
+	if g.Rows < 1 || g.Cols < 1 {
+		return rect{}, false
+	}
 	rowOrigin, rowLast := 0, g.Rows-1
 	if g.OriginMode && g.regionValid() {
 		rowOrigin, rowLast = g.Top, g.Bottom

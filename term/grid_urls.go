@@ -83,7 +83,7 @@ func (g *grid) detectURLAt(cp contentPos) (url string, spans []urlSpan, ok bool)
 	}
 
 	// Pick the match covering cpRune.
-	g.urlMatches = urlRangesIn(runes, bytes, byteLen, g.urlMatches[:0])
+	g.urlMatches = g.urlRangesIn(runes, bytes, byteLen, g.urlMatches[:0])
 	for _, m := range g.urlMatches {
 		if cpRune >= m[0] && cpRune < m[1] {
 			return string(runes[m[0]:m[1]]), spansFor(rows, cols, m[0], m[1]), true
@@ -152,11 +152,18 @@ func (g *grid) joinRows(start, end int) (runes []rune, rows, cols, bytes []int, 
 // urlRangesIn appends the rune range [is, ie) of every implicit URL in a joined
 // line to dst, in left-to-right order, with trailing punctuation already
 // trimmed. Empty ranges (a match that trimmed away to nothing) are skipped.
-func urlRangesIn(runes []rune, bytes []int, byteLen int, dst [][2]int) [][2]int {
+// The regexp runs over the grid's reused searchText scratch instead of a
+// per-call string(runes), so repeated hover/hint scans stay allocation-light
+// after warmup. Caller holds Mu.
+func (g *grid) urlRangesIn(runes []rune, bytes []int, byteLen int, dst [][2]int) [][2]int {
 	// Regexp works on the byte string; map each match's byte span back to rune
 	// indices via the byte-offset table.
-	line := string(runes)
-	for _, m := range urlRe.FindAllStringIndex(line, -1) {
+	b := g.searchText[:0]
+	for _, r := range runes {
+		b = utf8.AppendRune(b, r)
+	}
+	g.searchText = b
+	for _, m := range urlRe.FindAllIndex(b, -1) {
 		is := sort.SearchInts(bytes, m[0])
 		ie := runeIndexForByte(bytes, byteLen, m[1])
 		ie = is + trimTrailingURL(runes[is:ie])

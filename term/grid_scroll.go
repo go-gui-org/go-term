@@ -62,7 +62,9 @@ func (g *grid) resetRows() {
 // flatScreen returns screen rows (slots indexed through rowMap) as a row-major
 // buffer of len(rowMap)*cols cells. When the rows still sit in order over
 // cells — no scroll since the slab was laid out — it returns cells itself and
-// copies nothing. Pass cells == nil to force a fresh copy.
+// copies nothing. Pass cells == nil to force a fresh copy. Short source rows
+// (a slot narrower than cols, possible after the ring re-carved its slab)
+// are padded with default cells so no zero-value cell leaks through.
 func flatScreen(slots [][]cell, rowMap []int32, cells []cell, cols int) []cell {
 	inOrder := len(cells) == len(rowMap)*cols
 	for r := 0; inOrder && r < len(rowMap); r++ {
@@ -74,7 +76,10 @@ func flatScreen(slots [][]cell, rowMap []int32, cells []cell, cols int) []cell {
 	}
 	out := make([]cell, len(rowMap)*cols)
 	for r, s := range rowMap {
-		copy(out[r*cols:(r+1)*cols], slots[s])
+		n := copy(out[r*cols:(r+1)*cols], slots[s])
+		for i := n; i < cols; i++ {
+			out[r*cols+i] = defaultCell()
+		}
 	}
 	return out
 }
@@ -292,7 +297,8 @@ func (g *grid) ScrollView(delta int) {
 // into a whole-row ViewOffset and a fractional ViewSubPx remainder.
 // Clamped to [0, Scrollback.Len()*cellH]. cellH <= 0 is a no-op.
 func (g *grid) ScrollViewPx(deltaPx, cellH float32) {
-	if cellH <= 0 || math.IsNaN(float64(cellH)) || math.IsInf(float64(cellH), 0) || math.IsNaN(float64(deltaPx)) {
+	if cellH <= 0 || math.IsNaN(float64(cellH)) || math.IsInf(float64(cellH), 0) ||
+		math.IsNaN(float64(deltaPx)) || math.IsInf(float64(deltaPx), 0) {
 		return
 	}
 	total := float64(g.ViewOffset)*float64(cellH) + float64(g.ViewSubPx) + float64(deltaPx)
@@ -338,7 +344,8 @@ func (g *grid) ScrollViewTop() {
 // the scrollbar thumb tracks the pointer sub-cell smoothly. Clamped to
 // [0, Scrollback.Len()]. Non-finite off or cellH <= 0 is a no-op.
 func (g *grid) SetViewFractional(off, cellH float32) {
-	if cellH <= 0 || math.IsNaN(float64(off)) || math.IsInf(float64(off), 0) {
+	if cellH <= 0 || math.IsNaN(float64(cellH)) || math.IsInf(float64(cellH), 0) ||
+		math.IsNaN(float64(off)) || math.IsInf(float64(off), 0) {
 		return
 	}
 	maxOff := float32(g.Scrollback.Len())

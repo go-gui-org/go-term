@@ -388,6 +388,58 @@ func TestGrid_DeleteChars(t *testing.T) {
 	}
 }
 
+// Inserting in front of a wide pair must not strand its head at the right
+// margin when the shift pushes it past the last cell.
+func TestGrid_InsertChars_WideStrandedAtMargin(t *testing.T) {
+	g := newGrid(1, 6)
+	for c, r := range "abc" {
+		g.At(0, c).Ch = r
+	}
+	g.At(0, 3).Ch = '中'
+	g.At(0, 3).Width = 2
+	g.At(0, 3).FG, g.At(0, 3).BG = defaultColor, defaultColor
+	g.At(0, 4).Ch = 0
+	g.At(0, 4).Width = 0
+	g.At(0, 5).Ch = 'f'
+	g.CursorR, g.CursorC = 0, 0
+	g.InsertChars(2)
+	// The pair moved from cols 3-4 to cols 5-6; col 6 fell off, so col 5
+	// must be a blank, not a Width==2 head without its continuation.
+	if c := g.At(0, 5); c.Width == 2 {
+		t.Errorf("orphan wide head at margin: %+v", c)
+	}
+	if c := g.At(0, 5); c.Ch != ' ' || c.Width != 1 {
+		t.Errorf("margin cell = %q width=%d, want blank", c.Ch, c.Width)
+	}
+	if got := []rune{g.At(0, 0).Ch, g.At(0, 1).Ch, g.At(0, 2).Ch}; got[0] != ' ' || got[1] != ' ' || got[2] != 'a' {
+		t.Errorf("insert gap = %q, want two blanks then a", got)
+	}
+}
+
+// Deleting where the first surviving cell is a wide continuation must leave
+// a blank there, not an orphaned second half.
+func TestGrid_DeleteChars_WideContinuationAtPoint(t *testing.T) {
+	g := newGrid(1, 6)
+	g.At(0, 0).Ch = 'a'
+	g.At(0, 1).Ch = '中'
+	g.At(0, 1).Width = 2
+	g.At(0, 2).Ch = 0
+	g.At(0, 2).Width = 0
+	for c, r := range "def" {
+		g.At(0, 3+c).Ch = r
+	}
+	g.CursorR, g.CursorC = 0, 2 // on the continuation
+	g.DeleteChars(1)
+	if c := g.At(0, 1); c.Width == 2 {
+		t.Errorf("head at col 1 survived its deleted continuation: %+v", c)
+	}
+	for c := 0; c < g.Cols; c++ {
+		if cell := g.At(0, c); cell.Width == 0 && cell.Ch == 0 {
+			t.Errorf("orphan continuation at col %d: %+v", c, cell)
+		}
+	}
+}
+
 func TestRuneWidth_ASCII(t *testing.T) {
 	cases := []struct {
 		r    rune

@@ -219,27 +219,18 @@ func (g *grid) commandText() string {
 // rowTextFrom extracts content row text from col to the end of the row,
 // trimming trailing blanks. Mirrors the cell decoding in SelectedText —
 // interned grapheme clusters expand, Kitty Unicode placeholders count as
-// blank — without the selection geometry. Caller holds Mu.
+// blank — without the selection geometry. Single pass: cells are read once
+// and the builder is truncated to the last non-blank write. Caller holds Mu.
 func (g *grid) rowTextFrom(row, col int) string {
 	if row < 0 || col < 0 || col >= g.Cols {
 		return ""
 	}
-	// Find the last non-blank cell first so the builder is sized once and no
-	// trailing run of spaces is emitted.
-	end := col - 1
+	var b strings.Builder
+	b.Grow(g.Cols - col)
+	kept := 0
 	for c := col; c < g.Cols; c++ {
 		cell := g.ContentCellAt(row, c)
-		if cell.Ch != ' ' && cell.Ch != 0 && !isPlaceholderCell(cell) {
-			end = c
-		}
-	}
-	if end < col {
-		return ""
-	}
-	var b strings.Builder
-	b.Grow(end - col + 1)
-	for c := col; c <= end; c++ {
-		cell := g.ContentCellAt(row, c)
+		nonBlank := cell.Ch != ' ' && cell.Ch != 0 && !isPlaceholderCell(cell)
 		switch {
 		case isPlaceholderCell(cell):
 			b.WriteByte(' ')
@@ -248,8 +239,15 @@ func (g *grid) rowTextFrom(row, col int) string {
 		case cell.Ch != 0:
 			b.WriteRune(cell.Ch)
 		}
+		if nonBlank {
+			kept = b.Len()
+		}
 	}
-	return b.String()
+	if kept == 0 {
+		return ""
+	}
+	s := b.String()
+	return s[:kept]
 }
 
 // commandAt returns the span whose region contains row — from its prompt

@@ -18,6 +18,33 @@ func wordGrid(cols int, rows ...string) *grid {
 	return g
 }
 
+// A wide continuation cell belongs to its head's word, and Unicode spaces
+// (NBSP, ideographic space) separate words like ASCII blanks do.
+func TestBlankCellAt_WideAndUnicodeSpaces(t *testing.T) {
+	g := newGrid(1, 8)
+	g.At(0, 0).Ch = '中'
+	g.At(0, 0).Width = 2
+	g.At(0, 1).Ch = 0
+	g.At(0, 1).Width = 0
+	g.At(0, 2).Ch = 'x'
+	g.At(0, 3).Ch = '\u00a0' // NO-BREAK SPACE
+	g.At(0, 4).Ch = 'y'
+	g.At(0, 5).Ch = '\u3000' // IDEOGRAPHIC SPACE
+	g.At(0, 6).Ch = 'z'
+	if g.blankCellAt(0, 1) {
+		t.Error("wide continuation counted as blank: splits CJK words")
+	}
+	if g.blankCellAt(0, 0) || g.blankCellAt(0, 2) {
+		t.Error("word cell counted as blank")
+	}
+	if !g.blankCellAt(0, 3) {
+		t.Error("NBSP not counted as blank")
+	}
+	if !g.blankCellAt(0, 5) {
+		t.Error("U+3000 ideographic space not counted as blank")
+	}
+}
+
 func TestWordFwd(t *testing.T) {
 	g := wordGrid(20, "alpha beta  gamma")
 	cases := []struct {

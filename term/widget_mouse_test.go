@@ -1408,7 +1408,8 @@ func TestOnClick_TripleClickSelectsLine(t *testing.T) {
 }
 
 // A triple-click on a soft-wrapped logical line selects all of it, not just
-// the screen row under the pointer.
+// the screen row under the pointer — joined as one line, since the wrap is
+// layout, not content.
 func TestOnClick_TripleClickSpansWrappedRows(t *testing.T) {
 	tm, _ := newMouseTerm(4, 5)
 	writeRowText(tm.grid, 0, "abcde")
@@ -1421,7 +1422,7 @@ func TestOnClick_TripleClickSpansWrappedRows(t *testing.T) {
 
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
-	if got, want := tm.grid.SelectedText(), "abcde\nfghij"; got != want {
+	if got, want := tm.grid.SelectedText(), "abcdefghij"; got != want {
 		t.Errorf("triple-click on a wrapped line selected %q, want %q", got, want)
 	}
 }

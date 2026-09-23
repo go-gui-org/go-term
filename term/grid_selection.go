@@ -63,7 +63,8 @@ func (g *grid) selRowSpan(r int, s, e contentPos) (c0, c1 int, ok bool) {
 const maxSelGrow = 1 << 20
 
 // SelectedText extracts the selection as a UTF-8 string. Trailing
-// blanks per row are trimmed; row breaks emit '\n' (kitty convention).
+// blanks per row are trimmed; row breaks emit '\n' (kitty convention),
+// except across soft-wrapped rows, which join as one logical line.
 // Returns "" when nothing is selected. Column coordinates are cell
 // *boundaries* (0..Cols) and the span is half-open [s.Col, e.Col), so a
 // one-cell drag yields one cell. Coordinates are content-relative and are
@@ -74,9 +75,15 @@ func (g *grid) SelectedText() string {
 		return ""
 	}
 	total := g.Scrollback.Len() + g.Rows
+	lo, hi := 0, total-1
+	if g.AltActive {
+		// The alt screen owns no scrollback: stale main-screen history
+		// below it must not leak into the copy.
+		lo = g.Scrollback.Len()
+	}
 	s, e := g.selOrder()
-	s.Row, s.Col = clamp(s.Row, 0, total-1), clamp(s.Col, 0, g.Cols)
-	e.Row, e.Col = clamp(e.Row, 0, total-1), clamp(e.Col, 0, g.Cols)
+	s.Row, s.Col = clamp(s.Row, lo, hi), clamp(s.Col, 0, g.Cols)
+	e.Row, e.Col = clamp(e.Row, lo, hi), clamp(e.Col, 0, g.Cols)
 	if s == e {
 		return ""
 	}
@@ -122,7 +129,11 @@ func (g *grid) SelectedText() string {
 				b.WriteRune(cell.Ch)
 			}
 		}
-		if r < e.Row {
+		// Soft-wrapped rows are one logical line: joining them keeps a
+		// wrapped path/URL copy-pasteable instead of splitting it with a
+		// newline. Block selections keep every row broken — the rectangle
+		// is the unit there, not the logical line.
+		if r < e.Row && (g.SelMode == selBlock || !g.contentRowWrapped(r)) {
 			b.WriteByte('\n')
 		}
 	}

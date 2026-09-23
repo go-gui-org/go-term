@@ -324,14 +324,17 @@ func (g *grid) cellsForPixels(widthPx, heightPx int) (int, int) {
 // addGraphicCells is AddGraphic with an explicit cell footprint. Non-positive
 // cols/rows mean "derive from the pixel size", which is what every caller but
 // the OSC 1337 width=/height= path wants. The clamps apply either way: an
-// explicit size is still capped to MaxGridDim rows and truncated at the right
-// margin. Caller holds Mu.
+// explicit size is still capped to MaxGridDim in both axes and truncated at
+// the right margin. Caller holds Mu.
 func (g *grid) addGraphicCells(src string, widthPx, heightPx, cols, rows int) (int, int) {
 	if src == "" || widthPx <= 0 || heightPx <= 0 {
 		return 0, 0
 	}
 	if cols <= 0 || rows <= 0 {
 		cols, rows = g.cellsForPixels(widthPx, heightPx)
+	}
+	if cols > MaxGridDim {
+		cols = MaxGridDim
 	}
 	if rows > MaxGridDim {
 		rows = MaxGridDim

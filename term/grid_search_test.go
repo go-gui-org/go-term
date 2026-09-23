@@ -567,3 +567,38 @@ func TestSearchRow_ScrollbackWide(t *testing.T) {
 		t.Errorf("expected colMap[0]=0, colMap[1]=2, got %v", colMap)
 	}
 }
+
+// A multi-rune cluster expands in the search row (all runes mapping to the
+// same column) so a query can match inside it, not just its base rune.
+func TestSearchRow_ExpandsClusters(t *testing.T) {
+	g := newGrid(1, 4)
+	id := g.internCluster([]byte("é"))
+	if id == 0 {
+		t.Fatal("setup: cluster did not intern")
+	}
+	g.At(0, 0).Ch = 'e'
+	g.At(0, 0).clusterID = id
+	g.At(0, 1).Ch = 'x'
+	rr, colMap := g.searchRow(0, nil, nil)
+	if len(rr) != 5 { // e, combining acute, x, two trailing spaces
+		t.Fatalf("rr = %q, want 5 runes", rr)
+	}
+	if colMap[0] != 0 || colMap[1] != 0 || colMap[2] != 1 {
+		t.Errorf("colMap = %v, want [0 0 1 ...]", colMap)
+	}
+	if pos, ok := g.Find("é", contentPos{Row: 0, Col: 2}, false); !ok || pos.Col != 0 {
+		t.Errorf("Find combining query = %v,%v, want {0 0},true", pos, ok)
+	}
+}
+
+// Queries longer than MaxGridDim cannot match a single row; the grid
+// rejects them instead of running an unbounded O(n*m) scan per row.
+func TestFind_OverlongQueryRejected(t *testing.T) {
+	g := newGrid(2, 8)
+	if _, ok := g.Find(string(make([]rune, MaxGridDim+1)), contentPos{}, true); ok {
+		t.Error("overlong query matched")
+	}
+	if got := g.ViewportMatches(string(make([]rune, MaxGridDim+1))); got != nil {
+		t.Errorf("overlong viewport query = %v, want nil", got)
+	}
+}

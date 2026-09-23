@@ -65,6 +65,11 @@ func (g *grid) hintTargets(dst []hintTarget) []hintTarget {
 func (g *grid) viewportRowRange() (first, last int) {
 	sb := g.Scrollback.Len()
 	first = sb - clamp(g.ViewOffset, 0, sb)
+	if g.AltActive && first < sb {
+		// The alt screen owns no scrollback: never scan main-screen
+		// history sitting below it.
+		first = sb
+	}
 	last = min(first+g.Rows-1, g.ContentRows()-1)
 	return first, last
 }
@@ -90,12 +95,15 @@ func (g *grid) collectOSCLinks(dst *[]hintTarget, first, last int) {
 			// Merge into the previous target when this is the continuation of a
 			// wrapped link rather than a second link that happens to share the
 			// URL (identical URLs intern to one ID, so the ID alone can't tell
-			// them apart). A real wrap runs to the right margin and resumes at
-			// column 0 on the very next row.
+			// them apart). A real wrap runs to the right margin, resumes at
+			// column 0 on the very next row, and has the wrap flag set —
+			// without that flag two adjacent hard-broken lines sharing a URL
+			// would fuse into one target.
 			if n := len(*dst); n > start && c0 == 0 {
 				prev := &(*dst)[n-1]
 				tail := prev.spans[len(prev.spans)-1]
-				if tail.Row == row-1 && tail.C1 == g.Cols-1 && prev.url == g.LinkURL(id) {
+				if tail.Row == row-1 && tail.C1 == g.Cols-1 && prev.url == g.LinkURL(id) &&
+					g.contentRowWrapped(row-1) {
 					prev.spans = append(prev.spans, urlSpan{Row: row, C0: c0, C1: c1})
 					continue
 				}
@@ -127,7 +135,7 @@ func (g *grid) collectImplicitURLs(dst *[]hintTarget, first, last int, osc []hin
 		end := g.logicalLineEnd(row, maxURLScanRows)
 		runes, rows, cols, bytes, byteLen := g.joinRows(start, end)
 		if len(runes) > 0 {
-			g.urlMatches = urlRangesIn(runes, bytes, byteLen, g.urlMatches[:0])
+			g.urlMatches = g.urlRangesIn(runes, bytes, byteLen, g.urlMatches[:0])
 			for _, m := range g.urlMatches {
 				if len(*dst) >= maxHintTargets {
 					return

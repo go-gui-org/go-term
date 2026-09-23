@@ -62,6 +62,21 @@ func TestHintTargets_WrappedURLIsOneTarget(t *testing.T) {
 	}
 }
 
+// The same URL on two adjacent hard-broken rows is two links, not one
+// wrapped one: merging requires the wrap flag, not just margin-to-col-0
+// adjacency (identical URLs share one registry ID).
+func TestHintTargets_OSC8HardBreakStaysSplit(t *testing.T) {
+	g := newGrid(3, 10)
+	linkCells(g, 0, 0, 9, "https://same.example")
+	linkCells(g, 1, 0, 4, "https://same.example")
+	g.RowWrapped[0] = false // hard break: no wrap
+
+	targets := g.hintTargets(nil)
+	if len(targets) != 2 {
+		t.Fatalf("got %d targets %v, want 2", len(targets), urls(targets))
+	}
+}
+
 func TestHintTargets_OSC8Link(t *testing.T) {
 	g := newGrid(3, 40)
 	putRowAt(g, 0, "click here please")

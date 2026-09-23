@@ -209,6 +209,7 @@ func (g *grid) HardReset() {
 	clear(g.links)
 	clear(g.linkIDs)
 	g.nextLink = 1
+	clear(g.Graphics)
 	g.Graphics = g.Graphics[:0]
 	g.occludeMaxR = 0
 	// Virtual placements go too: RIS wipes the screen, so every placeholder
