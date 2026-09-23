@@ -30,6 +30,13 @@ type kittyPending struct {
 // Only the Kitty Graphics Protocol (payload starting with 'G') is handled;
 // everything else is silently dropped.
 func (p *parser) dispatchAPC() {
+	// A payload that hit maxAPCBytes is missing its tail. The KGP control
+	// data leads the payload, so a truncated chunk can still parse — and
+	// then act on parameters whose payload never arrived. Drop it like the
+	// OSC and DCS paths do.
+	if p.apcTrunc {
+		return
+	}
 	if len(p.apc) < 1 || p.apc[0] != 'G' {
 		return
 	}

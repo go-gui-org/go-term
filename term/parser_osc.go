@@ -470,10 +470,9 @@ func sanitizeDownloadName(b64 string) string {
 	if name == "" || name == "." || name == ".." {
 		return defaultDownloadName
 	}
-	if len(name) > maxDownloadName {
-		name = name[:maxDownloadName]
-	}
-	return name
+	// Rune-boundary cut, like every other truncation on this path: a byte
+	// cut can split a multibyte rune and hand the host an invalid name.
+	return truncatePaste(name, maxDownloadName)
 }
 
 // handleOSC1337 implements the iTerm2 File= protocol, which carries both

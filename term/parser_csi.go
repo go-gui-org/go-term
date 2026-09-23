@@ -598,21 +598,58 @@ func (p *parser) param(i, def int) int {
 }
 
 // applyExtendedColor handles SGR 38/48/58 sub-forms (;5;n and ;2;r;g;b)
-// starting at params[i] (the 38/48/58 itself). target receives the result.
-// Returns the new value of i; the outer loop's `i++` advances past the last
-// param consumed. On truncation, returns len(params)-1.
-func applyExtendedColor(params []int, i int, target *uint32) int {
+// starting at params[i] (the 38/48/58 itself). sub parallels params —
+// sub[k] true when params[k] was colon-separated — so the ITU T.416 colon
+// forms (38:5:n, 38:2:<cs>:r:g:b) decode correctly. target receives the
+// result. Returns the new value of i; the outer loop's `i++` advances past
+// the last param consumed. On truncation, returns len(params)-1.
+func applyExtendedColor(params []int, sub []bool, i int, target *uint32) int {
 	if i < 0 || i+1 >= len(params) {
 		return len(params) - 1
 	}
+	colon := func(idx int) bool { return idx < len(sub) && sub[idx] }
 	switch params[i+1] {
 	case 5:
+		// Colon form is 38:5:n like the semicolon form; a fourth
+		// colon number would be a color-space id (38:5:cs:n), which
+		// takes precedence when present so it is not read as the index.
+		if colon(i+1) && i+3 < len(params) && colon(i+3) {
+			*target = paletteColor(clampU8(params[i+3]))
+			return i + 3
+		}
 		if i+2 >= len(params) {
 			return len(params) - 1
 		}
 		*target = paletteColor(clampU8(params[i+2]))
 		return i + 2
 	case 2:
+		if colon(i + 1) {
+			// Colon form carries a color-space id the semicolon form
+			// lacks: 38:2:<cs>:r:g:b. An empty id encodes as 0, so a
+			// six-number run is [38,2,0,r,g,b]. A five-number run is
+			// the cs-less shape some emitters send ([38,2,r,g,b]).
+			// The trailing separator disambiguates a six-number run
+			// from five colon numbers plus a semicolon SGR: only the
+			// former has its sixth number colon-joined.
+			if i+5 < len(params) && colon(i+2) && colon(i+3) &&
+				colon(i+4) && colon(i+5) {
+				*target = rgbColor(
+					clampU8(params[i+3]),
+					clampU8(params[i+4]),
+					clampU8(params[i+5]),
+				)
+				return i + 5
+			}
+			if i+4 >= len(params) {
+				return len(params) - 1
+			}
+			*target = rgbColor(
+				clampU8(params[i+2]),
+				clampU8(params[i+3]),
+				clampU8(params[i+4]),
+			)
+			return i + 4
+		}
 		if i+4 >= len(params) {
 			return len(params) - 1
 		}
@@ -737,10 +774,10 @@ func (p *parser) applySGR() {
 			if n == 48 {
 				target = &g.CurBG
 			}
-			i = applyExtendedColor(p.params, i, target)
+			i = applyExtendedColor(p.params, p.paramSub, i, target)
 		case n == 58:
 
-			i = applyExtendedColor(p.params, i, &g.CurULColor)
+			i = applyExtendedColor(p.params, p.paramSub, i, &g.CurULColor)
 		case n == 59:
 
 			g.CurULColor = defaultColor

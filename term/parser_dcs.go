@@ -452,9 +452,19 @@ func (p *parser) replyXTGETTCAP(body []byte) {
 		p.onReply(appendReply(nil, []byte("0+r")))
 		return
 	}
-	payload := make([]byte, 0, len(body)+32)
+	// Bounded seed: every part contributes at most maxXTGETTCAPNameLen
+	// plus a small reply overhead, so the buffer never scales with a
+	// hostile body length. It grows by append only for real output.
+	payload := make([]byte, 0, 128)
 	payload = append(payload, "1+r"...)
 	for i, part := range parts {
+		if len(part) > maxXTGETTCAPNameLen {
+			// Truncate the echo rather than reflecting megabytes: the
+			// prefix still identifies the offending query.
+			part = part[:maxXTGETTCAPNameLen]
+			p.onReply(appendReply(nil, append([]byte("0+r"), part...)))
+			return
+		}
 		name, ok := decodeHexBytes(part)
 		if !ok {
 			p.onReply(appendReply(nil, append([]byte("0+r"), part...)))
