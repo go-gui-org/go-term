@@ -8,6 +8,7 @@ func posLess(a, b contentPos) bool {
 }
 
 // selOrder returns the selection bounds in forward order (start <= end).
+// Caller holds Mu.
 func (g *grid) selOrder() (start, end contentPos) {
 	a, b := g.SelAnchor, g.SelHead
 	if posLess(b, a) {
@@ -26,7 +27,7 @@ func (g *grid) selOrder() (start, end contentPos) {
 // highlight can never disagree with what actually lands on the clipboard —
 // they used to hold two independent copies of this arithmetic. Caller
 // guarantees s.Row <= r <= e.Row and that columns are already clamped to
-// [0, Cols].
+// [0, Cols]. Caller holds Mu.
 func (g *grid) selRowSpan(r int, s, e contentPos) (c0, c1 int, ok bool) {
 	if g.SelMode == selBlock {
 		// A rectangle: every row gets the same column band, taken from the
@@ -56,12 +57,18 @@ func (g *grid) selRowSpan(r int, s, e contentPos) (c0, c1 int, ok bool) {
 	return c0, c1, c1 >= c0
 }
 
+// maxSelGrow caps SelectedText's upfront reservation. The builder still
+// grows to the true size, so output is unchanged; the cap only stops a
+// select-all over a deep scrollback from grabbing ~100 MB up front.
+const maxSelGrow = 1 << 20
+
 // SelectedText extracts the selection as a UTF-8 string. Trailing
 // blanks per row are trimmed; row breaks emit '\n' (kitty convention).
 // Returns "" when nothing is selected. Column coordinates are cell
 // *boundaries* (0..Cols) and the span is half-open [s.Col, e.Col), so a
 // one-cell drag yields one cell. Coordinates are content-relative and are
 // clamped so stale coords from a Resize never produce a negative span.
+// Caller holds Mu.
 func (g *grid) SelectedText() string {
 	if !g.SelActive || g.Rows <= 0 || g.Cols <= 0 {
 		return ""
@@ -79,7 +86,7 @@ func (g *grid) SelectedText() string {
 		return ""
 	}
 	var b strings.Builder
-	b.Grow((e.Row-s.Row+1)*g.Cols + (e.Row - s.Row))
+	b.Grow(min((e.Row-s.Row+1)*g.Cols+(e.Row-s.Row), maxSelGrow))
 	for r := s.Row; r <= e.Row; r++ {
 		c0, c1, ok := g.selRowSpan(r, s, e)
 		if !ok {
@@ -122,7 +129,7 @@ func (g *grid) SelectedText() string {
 	return b.String()
 }
 
-// ClearSelection drops any active selection.
+// ClearSelection drops any active selection. Caller holds Mu.
 func (g *grid) ClearSelection() {
 	g.SelActive = false
 	g.SelAnchor = contentPos{}

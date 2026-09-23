@@ -193,6 +193,12 @@ func (r *scrollbackRing) EnsureGeom(capacity, cols int) {
 		r.SetGeom(capacity, cols)
 		return
 	}
+	// Belt and braces, mirroring SetGeom: a wild capacity must not hand
+	// make() a multi-petabyte length.
+	const maxCells = 1 << 28
+	if capacity > maxCells/cols {
+		capacity = maxCells / cols
+	}
 	keep := min(r.size, capacity)
 	newCells := make([]cell, capacity*cols)
 	newWrap := make([]bool, capacity)

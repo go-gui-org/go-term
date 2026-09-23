@@ -210,6 +210,7 @@ func (g *grid) HardReset() {
 	clear(g.linkIDs)
 	g.nextLink = 1
 	g.Graphics = g.Graphics[:0]
+	g.occludeMaxR = 0
 	// Virtual placements go too: RIS wipes the screen, so every placeholder
 	// cell that could have named one is gone as well.
 	g.deleteAllVirtualImages()

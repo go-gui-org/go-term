@@ -327,6 +327,11 @@ func (g *grid) internCluster(b []byte) uint16 {
 // if only one column remains. Width and any clustering are resolved by the
 // caller; this is the shared write path for Put and commitCluster.
 func (g *grid) putCell(ch rune, clusterID uint16, w int) {
+	// Belt and braces behind the resize clamps: a cursor row outside the
+	// live screen would index RowWrapped out of range below.
+	if g.CursorR < 0 || g.CursorR >= g.Rows || g.Cols <= 0 {
+		return
+	}
 	justWrapped := false
 	if !g.AutoWrap {
 		if g.CursorC >= g.Cols {
@@ -509,9 +514,9 @@ func (g *grid) TabBackward(n int) {
 	if n < 1 {
 		n = 1
 	}
-	if g.CursorC > g.Cols {
-		g.CursorC = g.Cols
-	}
+	// Settle a pending wrap first, like Tab does: scanning from the raw
+	// CursorC == Cols starts one column too far right.
+	g.CursorC = max(g.settledCol(), 0)
 	for range n {
 		if g.CursorC <= 0 {
 			g.CursorC = 0
@@ -592,14 +597,20 @@ func (g *grid) eraseInLine(mode int, selective bool) {
 
 // eraseSpan blanks columns [from,to) of row r to the current SGR bg/attrs
 // (BCE). When selective is set — DECSEL/DECSED/DECSERA — cells carrying
-// attrProtected are stepped over. Callers have already clamped the span and
-// sanitized any wide pair straddling its edges. Caller holds Mu.
+// attrProtected are stepped over. The span is clamped to the row: most
+// callers pre-clamp, but a stale cursor column must not panic here.
+// Caller holds Mu.
 func (g *grid) eraseSpan(r, from, to int, selective bool) {
 	if r < 0 || r >= g.Rows || from >= to {
 		return
 	}
-	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	row := g.row(r)
+	from = clamp(from, 0, len(row))
+	to = clamp(to, 0, len(row))
+	if from >= to {
+		return
+	}
+	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	for c := from; c < to; c++ {
 		if selective && row[c].Attrs&attrProtected != 0 {
 			continue
@@ -681,6 +692,12 @@ func (g *grid) eraseInDisplay(mode int, selective bool) {
 			// Direct fill: clearing the screen is common enough to keep the
 			// per-row bookkeeping out of it.
 			g.fillScreen(blankCell(g.CurFG, g.CurBG, g.CurAttrs))
+			// The fill joins nothing: drop the wrap flags with the text,
+			// matching ClearAll, or the next Resize splices blank rows
+			// into one logical line.
+			for r := range g.RowWrapped {
+				g.RowWrapped[r] = false
+			}
 			// The direct fill skips eraseSpan, so clear the images itself.
 			if len(g.Graphics) != 0 {
 				g.occludeGraphics(0, g.Rows, 0, g.Cols)

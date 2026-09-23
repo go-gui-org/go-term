@@ -108,7 +108,7 @@ func TestDetectURLAt_WrappedLine(t *testing.T) {
 	putRow(g, link)
 	sb := g.Scrollback.Len()
 
-	if !g.rowWrapped(sb) {
+	if !g.contentRowWrapped(sb) {
 		t.Fatal("expected live row 0 to be flagged wrapped")
 	}
 	// Hover on both the first and the continuation row.

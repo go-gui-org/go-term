@@ -140,6 +140,14 @@ func rewrapLine(cells []cell, newCols int, arena *rowArena, dest *[]physRow) int
 		if c.Width == 2 {
 			w = 2
 		}
+		// A wide glyph on a grid narrower than itself (a 1-column pane):
+		// narrow it to one cell, as putCell does. Pushing head plus
+		// continuation would overrun the row and strand a Width==2 head
+		// with no continuation once the row is copied out.
+		if w > newCols {
+			w = 1
+			c.Width = 1
+		}
 
 		if len(cur)+w > newCols {
 
@@ -324,7 +332,14 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 		phys[nSB+r] = physRow{cells: row, wrapped: w}
 	}
 
-	cursorPhys := nSB + clamp(cursorR, 0, oldRows-1)
+	cursorPhys := nSB - 1
+	if oldRows > 0 {
+		cursorPhys = nSB + clamp(cursorR, 0, oldRows-1)
+	}
+	// oldRows reaches 0 when the cap above truncates the whole live
+	// buffer; clamp needs lo <= hi, so the cursor then stays on the
+	// last scrollback row (or off-grid when nothing survived, which
+	// the fallbacks below already handle).
 
 	// --- Identify logical lines and the one containing the cursor ---
 	type logLine struct {
@@ -665,6 +680,11 @@ func (g *grid) Resize(rows, cols int) {
 		newRW := make([]bool, rows)
 		copy(newRW, g.RowWrapped)
 		g.RowWrapped = newRW
+		// The alt buffer is only cropped and padded, so unlike the main
+		// path above no reflow clamps the cursor: pin it here, or the
+		// next Put indexes RowWrapped out of range.
+		g.CursorR = clamp(g.CursorR, 0, rows-1)
+		g.CursorC = clamp(g.CursorC, 0, cols-1)
 
 		if len(g.mainSaved.cells) == g.Rows*g.Cols {
 			savedRW := g.mainSaved.rowWrapped

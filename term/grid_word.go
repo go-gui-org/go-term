@@ -76,7 +76,7 @@ func (g *grid) stepBack(p contentPos) (contentPos, bool) {
 // when the next line starts a new word; here it simply means the run of
 // non-blanks cannot continue across the boundary. Caller holds Mu.
 func (g *grid) rowBreakFwd(p contentPos) bool {
-	return p.Col == g.Cols-1 && !g.rowWrapped(p.Row)
+	return p.Col == g.Cols-1 && !g.contentRowWrapped(p.Row)
 }
 
 // wordFwd returns the position of the start of the next word after p, vim `w`.
@@ -142,7 +142,7 @@ func (g *grid) wordBoundsAt(p contentPos) (start, end contentPos) {
 		}
 		// Crossing back into a row that did not soft-wrap ends the unit: the
 		// rows are separate logical lines that happen to be adjacent.
-		if prev.Row != start.Row && !g.rowWrapped(prev.Row) {
+		if prev.Row != start.Row && !g.contentRowWrapped(prev.Row) {
 			break
 		}
 		start = prev
@@ -181,10 +181,10 @@ func (g *grid) lineBoundsAt(row int) (startRow, endRow int) {
 		lo = g.Scrollback.Len()
 	}
 	startRow, endRow = row, row
-	for startRow > lo && startRow > row-maxLineScanRows && g.rowWrapped(startRow-1) {
+	for startRow > lo && startRow > row-maxLineScanRows && g.contentRowWrapped(startRow-1) {
 		startRow--
 	}
-	for endRow < total-1 && endRow < row+maxLineScanRows && g.rowWrapped(endRow) {
+	for endRow < total-1 && endRow < row+maxLineScanRows && g.contentRowWrapped(endRow) {
 		endRow++
 	}
 	return startRow, endRow
@@ -226,7 +226,7 @@ func (g *grid) wordBack(p contentPos) contentPos {
 			return cur
 		}
 		// Crossing back into a row that didn't soft-wrap ends the word.
-		if prev.Row != cur.Row && !g.rowWrapped(prev.Row) {
+		if prev.Row != cur.Row && !g.contentRowWrapped(prev.Row) {
 			return cur
 		}
 		cur = prev

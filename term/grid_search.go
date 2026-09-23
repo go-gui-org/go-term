@@ -127,11 +127,16 @@ func cleanIdxGE(colMap []int, gridCol int) int {
 }
 
 // matchGridSpan returns the grid column and column-span for a match at
-// clean-index ci with clean rune length cl. colMap and rr come from searchRow.
-func matchGridSpan(colMap []int, rr []rune, ci, cl int) (col, width int) {
+// clean-index ci with clean rune length cl. colMap and rr come from
+// searchRow. ok is false when the span is empty or runs past the row, so a
+// zero-width regex match can never index out of range. Caller holds Mu.
+func matchGridSpan(colMap []int, rr []rune, ci, cl int) (col, width int, ok bool) {
+	if cl <= 0 || ci < 0 || ci+cl > len(colMap) || ci+cl > len(rr) {
+		return 0, 0, false
+	}
 	col = colMap[ci]
 	lastCol := colMap[ci+cl-1]
-	return col, lastCol - col + runeWidth(rr[ci+cl-1])
+	return col, lastCol - col + runeWidth(rr[ci+cl-1]), true
 }
 
 // viewportContentRow maps a viewport row vr to a content row given the
@@ -219,8 +224,11 @@ func (g *grid) ViewportMatches(query string) []searchMatch {
 			if idx < 0 {
 				break
 			}
-			col, matchWidth := matchGridSpan(colMap, rr, idx, qLen)
-
+			col, matchWidth, ok := matchGridSpan(colMap, rr, idx, qLen)
+			if !ok {
+				idx++
+				continue
+			}
 			matches = append(matches, searchMatch{
 				contentPos: contentPos{Row: contentRow, Col: col},
 				Len:        matchWidth,
@@ -234,36 +242,53 @@ func (g *grid) ViewportMatches(query string) []searchMatch {
 	return matches
 }
 
-// regexSearchForward returns the first regex match in s with rune column >=
-// fromCol. s must be a string of the grid row's content runes (e.g. from
-// searchRow). Returns column, match length in rune columns, and true on
-// success.
-func regexSearchForward(s string, re *regexp.Regexp, fromCol int) (col, matchLen int, found bool) {
-	for _, loc := range re.FindAllStringIndex(s, -1) {
-		c := utf8.RuneCountInString(s[:loc[0]])
+// regexSearchForward returns the first non-empty regex match in s with rune
+// column >= fromCol. s holds the grid row's content runes encoded as UTF-8
+// (see appendSearchBytes). Zero-width matches (a*, x?) are skipped: they
+// have no cell to highlight and their length would underflow matchGridSpan.
+func regexSearchForward(s []byte, re *regexp.Regexp, fromCol int) (col, matchLen int, found bool) {
+	for _, loc := range re.FindAllIndex(s, -1) {
+		c := utf8.RuneCount(s[:loc[0]])
 		if c >= fromCol {
-			return c, utf8.RuneCountInString(s[:loc[1]]) - c, true
+			if l := utf8.RuneCount(s[loc[0]:loc[1]]); l > 0 {
+				return c, l, true
+			}
 		}
 	}
 	return 0, 0, false
 }
 
-// regexSearchLast returns the last regex match in s with rune column <
-// upToCol. s must be a string of the grid row's content runes (e.g. from
-// searchRow).
-func regexSearchLast(s string, re *regexp.Regexp, upToCol int) (col, matchLen int, found bool) {
+// regexSearchLast returns the last non-empty regex match in s with rune
+// column < upToCol. Zero-width matches are skipped, as in
+// regexSearchForward.
+func regexSearchLast(s []byte, re *regexp.Regexp, upToCol int) (col, matchLen int, found bool) {
 	col = -1
-	for _, loc := range re.FindAllStringIndex(s, -1) {
-		c := utf8.RuneCountInString(s[:loc[0]])
+	for _, loc := range re.FindAllIndex(s, -1) {
+		c := utf8.RuneCount(s[:loc[0]])
 		if c < upToCol {
-			col = c
-			matchLen = utf8.RuneCountInString(s[:loc[1]]) - c
+			if l := utf8.RuneCount(s[loc[0]:loc[1]]); l > 0 {
+				col = c
+				matchLen = l
+			}
 		}
 	}
 	if col < 0 {
 		return 0, 0, false
 	}
 	return col, matchLen, true
+}
+
+// appendSearchBytes encodes rr as UTF-8 into the grid's reused scratch
+// buffer, so regex search costs no per-row allocation after warmup. The
+// returned slice aliases grid state; consume it before the next call.
+// Caller holds Mu.
+func (g *grid) appendSearchBytes(rr []rune) []byte {
+	b := g.searchText[:0]
+	for _, r := range rr {
+		b = utf8.AppendRune(b, r)
+	}
+	g.searchText = b
+	return b
 }
 
 // FindRegex searches for the first match of re starting at start, walking
@@ -288,14 +313,17 @@ func (g *grid) FindRegex(re *regexp.Regexp, start contentPos, forward bool) (con
 		}
 		rr, colMap := g.searchRow(row, g.searchRunes, g.searchCols)
 		g.searchRunes, g.searchCols = rr, colMap
-		s := string(rr)
+		s := g.appendSearchBytes(rr)
 		if forward {
 			fromCleanIdx := 0
 			if i == 0 {
 				fromCleanIdx = cleanIdxGT(colMap, start.Col)
 			}
 			if c, l, ok := regexSearchForward(s, re, fromCleanIdx); ok {
-				col, width := matchGridSpan(colMap, rr, c, l)
+				col, width, ok := matchGridSpan(colMap, rr, c, l)
+				if !ok {
+					continue
+				}
 				return contentPos{Row: row, Col: col}, width, true
 			}
 		} else {
@@ -306,7 +334,10 @@ func (g *grid) FindRegex(re *regexp.Regexp, start contentPos, forward bool) (con
 				}
 			}
 			if c, l, ok := regexSearchLast(s, re, upToCleanIdx); ok {
-				col, width := matchGridSpan(colMap, rr, c, l)
+				col, width, ok := matchGridSpan(colMap, rr, c, l)
+				if !ok {
+					continue
+				}
 				return contentPos{Row: row, Col: col}, width, true
 			}
 		}
@@ -329,14 +360,18 @@ func (g *grid) ViewportMatchesRegex(re *regexp.Regexp) []searchMatch {
 		contentRow := viewportContentRow(vr, sb, off, n)
 		rr, colMap := g.searchRow(contentRow, g.searchRunes, g.searchCols)
 		g.searchRunes, g.searchCols = rr, colMap
-		s := string(rr)
+		s := g.appendSearchBytes(rr)
 		idx := 0
 		for {
 			c, l, ok := regexSearchForward(s, re, idx)
 			if !ok {
 				break
 			}
-			col, width := matchGridSpan(colMap, rr, c, l)
+			col, width, ok := matchGridSpan(colMap, rr, c, l)
+			if !ok {
+				idx = c + 1
+				continue
+			}
 			matches = append(matches, searchMatch{
 				contentPos: contentPos{Row: contentRow, Col: col},
 				Len:        width,

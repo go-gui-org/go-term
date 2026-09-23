@@ -185,7 +185,10 @@ func (g *grid) SaveCursor() {
 }
 
 // RestoreCursor restores the snapshot from SaveCursor. If no save has
-// occurred, homes the cursor and resets SGR per VT100 spec.
+// occurred, homes the cursor and resets SGR per VT100 spec. A pending-wrap
+// column (CursorC == Cols) survives the round trip: SaveCursor keeps it and
+// the restore below allows it, rather than funnelling through MoveCursor
+// which would clamp it onto the last cell.
 func (g *grid) RestoreCursor() {
 	if !g.saved.valid {
 		g.MoveCursor(0, 0)
@@ -194,7 +197,10 @@ func (g *grid) RestoreCursor() {
 		g.CurULColor = defaultColor
 		return
 	}
-	g.MoveCursor(g.saved.r, g.saved.c)
+	g.markDirty(g.CursorR)
+	g.CursorR = clamp(g.saved.r, 0, g.Rows-1)
+	g.CursorC = clamp(g.saved.c, 0, g.Cols)
+	g.markDirty(g.CursorR)
 	g.CurFG = g.saved.fg
 	g.CurBG = g.saved.bg
 	g.CurAttrs = g.saved.attrs

@@ -23,6 +23,7 @@ type altSavedScreen struct {
 	curAttrs         uint16
 	curULStyle       uint8
 	curULColor       uint32
+	curLinkID        uint16
 	charsetG0        byte
 	charsetG1        byte
 	activeG          uint8
@@ -69,6 +70,7 @@ func (g *grid) EnterAlt() {
 		curAttrs:     g.CurAttrs,
 		curULStyle:   g.CurULStyle,
 		curULColor:   g.CurULColor,
+		curLinkID:    g.CurLinkID,
 		charsetG0:    g.CharsetG0,
 		charsetG1:    g.CharsetG1,
 		activeG:      g.ActiveG,
@@ -100,6 +102,7 @@ func (g *grid) EnterAlt() {
 	g.CurFG, g.CurBG, g.CurAttrs = defaultColor, defaultColor, 0
 	g.CurULStyle = 0
 	g.CurULColor = defaultColor
+	g.CurLinkID = 0
 	g.CharsetG0 = charsetASCII
 	g.CharsetG1 = charsetASCII
 	g.ActiveG = 0
@@ -134,6 +137,7 @@ func (g *grid) ExitAlt() {
 	g.CurAttrs = g.mainSaved.curAttrs
 	g.CurULStyle = g.mainSaved.curULStyle
 	g.CurULColor = g.mainSaved.curULColor
+	g.CurLinkID = g.mainSaved.curLinkID
 	g.CharsetG0 = g.mainSaved.charsetG0
 	g.CharsetG1 = g.mainSaved.charsetG1
 	g.ActiveG = g.mainSaved.activeG

@@ -21,9 +21,9 @@ type searchMatch struct {
 
 // runeWidth returns the display width of r in cells: 0 (drop / combining),
 // 1 (normal), or 2 (east-asian wide, emoji). ASCII fast-paths to 1
-// without entering uniseg. Non-ASCII allocates a 1- to 4-byte string for
-// the uniseg call — acceptable for correctness, optimized later if the
-// Put path becomes hot.
+// without entering uniseg. Non-ASCII costs one small allocation for the
+// uniseg call — uniseg takes a string, and borrowing a stack buffer via
+// unsafe still escapes it to the heap, so the plain conversion is kept.
 func runeWidth(r rune) int {
 	if r < 0x80 {
 		if r < 0x20 {
@@ -445,9 +445,12 @@ type grid struct {
 
 	// searchRunes and searchCols are reusable buffers for searchRow,
 	// persisted on the grid so repeated Find / ViewportMatches calls
-	// don't re-allocate them from nil every time.
+	// don't re-allocate them from nil every time. searchText is the
+	// matching scratch for the regex path: the row's UTF-8 encoding,
+	// rebuilt per row by appendSearchBytes without allocating.
 	searchRunes []rune
 	searchCols  []int
+	searchText  []byte
 
 	// URL-detection scratch (joinRows, shared by detectURLAt and hintTargets),
 	// persisted for the same reason. urlRunes is the joined clean text of a
@@ -989,6 +992,7 @@ func (g *grid) LinkURL(id uint16) string {
 }
 
 // At returns a pointer to the cell at (r,c) or nil if out of range.
+// Caller holds Mu.
 func (g *grid) At(r, c int) *cell {
 	if r < 0 || c < 0 || r >= g.Rows || c >= g.Cols {
 		return nil
@@ -1085,8 +1089,14 @@ func (g *grid) ReverseIndex() {
 }
 
 // ClearAll wipes every cell to default and homes the cursor.
+// Caller holds Mu.
 func (g *grid) ClearAll() {
 	g.fillScreen(defaultCell())
+	// The fill joins nothing: drop the wrap flags with the text, or the
+	// next Resize splices blank rows into one logical line.
+	for r := range g.RowWrapped {
+		g.RowWrapped[r] = false
+	}
 	// Sixel/iTerm2 images are removed only by painting over their cells, so
 	// the direct fill has to do it explicitly — eraseSpan, which normally
 	// carries this, is bypassed here. Matches ED 2's direct-fill path.
@@ -1123,6 +1133,7 @@ func (g *grid) regionFeedsScrollback() bool {
 // that row's stored cells are returned. Outside-range coords yield a
 // default cell (never panics). Resize keeps scrollback row widths in
 // sync with Cols, so no per-row width clamp is needed here.
+// Caller holds Mu.
 func (g *grid) ViewCellAt(r, c int) cell {
 	if r < 0 || r >= g.Rows || c < 0 || c >= g.Cols {
 		return defaultCell()

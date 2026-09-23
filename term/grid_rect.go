@@ -178,6 +178,12 @@ func (g *grid) eraseRect(pt, pl, pb, pr int, selective bool) {
 			row[c] = blank
 		}
 	})
+	// Text painted over an image's cells removes it; the eachRectRow path
+	// above bypasses eraseSpan, so occlude explicitly like the flat fills
+	// do. Caller holds Mu.
+	if len(g.Graphics) != 0 {
+		g.occludeGraphics(rc.top, rc.bottom-rc.top+1, rc.left, rc.right+1)
+	}
 }
 
 // FillRect implements DECFRA (CSI Pch;Pt;Pl;Pb;Pr $ x): fill the rectangle
@@ -201,6 +207,11 @@ func (g *grid) FillRect(pch, pt, pl, pb, pr int) {
 			row[c] = fill
 		}
 	})
+	// A fill paints every cell it covers, so it occludes images there.
+	// Caller holds Mu.
+	if len(g.Graphics) != 0 {
+		g.occludeGraphics(rc.top, rc.bottom-rc.top+1, rc.left, rc.right+1)
+	}
 	// A fill is a graphic write, so REP repeats it.
 	g.lastGraphic, g.lastGraphicID, g.lastGraphicW = fill.Ch, 0, 1
 }

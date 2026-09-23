@@ -28,10 +28,12 @@ type urlSpan struct {
 	Row, C0, C1 int
 }
 
-// rowWrapped reports whether content row contentRow ended with an autowrap,
-// i.e. it continues into contentRow+1 as one logical line. Scrollback rows
-// carry the flag in the ring; live rows in g.RowWrapped. Caller holds Mu.
-func (g *grid) rowWrapped(contentRow int) bool {
+// contentRowWrapped reports whether content row contentRow ended with an
+// autowrap, i.e. it continues into contentRow+1 as one logical line.
+// Scrollback rows carry the flag in the ring; live rows in g.RowWrapped.
+// (Named for its coordinate space to tell it apart from the RowWrapped
+// field, which covers live rows only.) Caller holds Mu.
+func (g *grid) contentRowWrapped(contentRow int) bool {
 	sb := g.Scrollback.Len()
 	if contentRow < sb {
 		return g.Scrollback.Wrapped(contentRow)
@@ -101,7 +103,7 @@ func (g *grid) logicalLineStart(row int) int {
 		lo = g.Scrollback.Len()
 	}
 	start := row
-	for start > lo && start > row-maxURLScanRows && g.rowWrapped(start-1) {
+	for start > lo && start > row-maxURLScanRows && g.contentRowWrapped(start-1) {
 		start--
 	}
 	return start
@@ -113,7 +115,7 @@ func (g *grid) logicalLineStart(row int) int {
 func (g *grid) logicalLineEnd(row, maxRows int) int {
 	total := g.ContentRows()
 	end := row
-	for end < total-1 && end < row+maxRows && g.rowWrapped(end) {
+	for end < total-1 && end < row+maxRows && g.contentRowWrapped(end) {
 		end++
 	}
 	return end
