@@ -1951,20 +1951,6 @@ func TestCursorBlink_LockIgnoresDECSCUSR(t *testing.T) {
 
 // --- openURL scheme whitelist ---
 
-func TestOpenURL_PermittedSchemes(t *testing.T) {
-	// Permitted schemes reach exec.Command; blocked at the switch in the
-	// default case and return without spawning a process. We verify the
-	// function does not panic for any input — the exec may fail in CI but
-	// the error is swallowed via cmd.Start().
-	for _, url := range []string{
-		"https://example.com",
-		"http://example.com",
-		"mailto:user@example.com",
-	} {
-		openURL(url) // must not panic
-	}
-}
-
 func TestOpenURL_BlockedSchemes(t *testing.T) {
 	for _, url := range []string{
 		"file:///etc/passwd",

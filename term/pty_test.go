@@ -33,10 +33,13 @@ func TestPTY_StartResizeClose(t *testing.T) {
 	if err := p.Resize(30, 100); err != nil {
 		t.Errorf("Resize: %v", err)
 	}
-	// Close kills the child and reaps it; the file.Close error is what
-	// is returned. Either nil or "file already closed" is acceptable —
-	// the contract is that it doesn't panic and is safe to call.
-	_ = p.Close()
+	// Close is idempotent best-effort teardown: always nil, safe to repeat.
+	if err := p.Close(); err != nil {
+		t.Errorf("first Close: %v", err)
+	}
+	if err := p.Close(); err != nil {
+		t.Errorf("second Close: %v", err)
+	}
 }
 
 func TestHasLocaleEnv(t *testing.T) {
@@ -70,6 +73,7 @@ func TestNormalizeLocaleName(t *testing.T) {
 		{"  fr_CA  ", "fr_CA"},
 		{"en-US", "en_US"},
 		{"pt_BR@calendar=gregorian", "pt_BR"},
+		{"es_419", "es_419"}, // CLDR numeric regions are real locales
 		{"en", "en"},
 		{"", ""},
 		{"@calendar=gregorian", ""},
@@ -121,6 +125,124 @@ func TestDropEnv(t *testing.T) {
 	// The caller's slice must come through untouched — cfg.Env may be shared.
 	if in[1] != "TERM_PROGRAM=iTerm.app" {
 		t.Errorf("dropEnv mutated its input: %q", in)
+	}
+}
+
+// envValue returns the last value for key in an env slice ("" when absent).
+// It mirrors execve's last-wins rule, which is what makes it useful for
+// asserting effective values; countKey asserts the stronger no-duplicates
+// invariant the cross-platform code now guarantees.
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	val := ""
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			val = e[len(prefix):]
+		}
+	}
+	return val
+}
+
+// countKey tallies entries naming key (exact-case: these tests run the Unix
+// matching path; Windows case-insensitivity is a two-line branch in
+// envKeysEqual with no logic worth forking a VM over).
+func countKey(env []string, key string) int {
+	n := 0
+	for _, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok && k == key {
+			n++
+		}
+	}
+	return n
+}
+
+func TestSetEnvEntry(t *testing.T) {
+	// Replace in place: position kept, no duplicate left behind.
+	got := setEnvEntry([]string{"A=1", "B=2"}, "A=9")
+	if len(got) != 2 || got[0] != "A=9" || got[1] != "B=2" {
+		t.Errorf("replace: got %q", got)
+	}
+	// Append when absent.
+	got = setEnvEntry([]string{"A=1"}, "B=2")
+	if len(got) != 2 || got[1] != "B=2" {
+		t.Errorf("append: got %q", got)
+	}
+	// Bare words carry no key and pass through untouched.
+	got = setEnvEntry([]string{"A=1"}, "JUSTAWORD")
+	if len(got) != 2 || got[1] != "JUSTAWORD" {
+		t.Errorf("bare word: got %q", got)
+	}
+	// The input's elements are never modified.
+	in := []string{"A=1"}
+	_ = setEnvEntry(in, "A=9")
+	if in[0] != "A=1" {
+		t.Errorf("input mutated: %q", in)
+	}
+}
+
+// The child environment must force this terminal's description even when the
+// parent disagrees, and must never carry duplicate keys (Windows resolves
+// those differently than Unix, so duplicates are a portability bug, not a
+// style nit).
+func TestBaseChildEnv(t *testing.T) {
+	parent := []string{
+		"TERM=dumb",
+		"COLORTERM=8bit",
+		"COLORFGBG=0;15",
+		"TERM_PROGRAM=iTerm.app",
+		"PATH=/bin",
+	}
+	got := baseChildEnv(Cfg{}, parent)
+	if v := envValue(got, "TERM"); v != "xterm-256color" {
+		t.Errorf("TERM = %q, want xterm-256color", v)
+	}
+	if v := envValue(got, "COLORTERM"); v != "truecolor" {
+		t.Errorf("COLORTERM = %q, want truecolor", v)
+	}
+	for _, k := range []string{"TERM", "COLORTERM", "COLORFGBG",
+		"TERM_PROGRAM", "TERM_PROGRAM_VERSION"} {
+		if n := countKey(got, k); n != 1 {
+			t.Errorf("%s appears %d times, want exactly 1", k, n)
+		}
+	}
+	if v := envValue(got, "PATH"); v != "/bin" {
+		t.Errorf("PATH = %q, want it passed through", v)
+	}
+}
+
+// applyCfgEnv folds caller entries over the defaults in place: the override
+// wins and no duplicate remains for the platform to disambiguate.
+func TestApplyCfgEnvOverrides(t *testing.T) {
+	got := applyCfgEnv([]string{"TERM=xterm-256color", "A=1"},
+		[]string{"TERM=screen", "B=2"})
+	if v := envValue(got, "TERM"); v != "screen" {
+		t.Errorf("TERM = %q, want screen", v)
+	}
+	if n := countKey(got, "TERM"); n != 1 {
+		t.Errorf("TERM appears %d times, want 1: %q", n, got)
+	}
+	if v := envValue(got, "B"); v != "2" {
+		t.Errorf("B = %q, want 2", v)
+	}
+}
+
+func TestCheckIdentity(t *testing.T) {
+	for _, ok := range []string{"", "go-term", "Falcon", "a=b", "a\nb"} {
+		if err := checkIdentity(ok); err != nil {
+			t.Errorf("checkIdentity(%q) = %v, want nil", ok, err)
+		}
+	}
+	if err := checkIdentity("a\x00b"); err == nil {
+		t.Error("checkIdentity(NUL) = nil, want an error")
+	}
+}
+
+// Close on a zero ptyDev must not panic: the reply-path tests construct
+// ptyDev without a cmd, and Close used to dereference p.cmd unguarded.
+func TestPTY_CloseNilCmd(t *testing.T) {
+	p := &ptyDev{}
+	if err := p.Close(); err != nil {
+		t.Errorf("Close = %v, want nil", err)
 	}
 }
 
