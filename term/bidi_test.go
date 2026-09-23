@@ -572,3 +572,26 @@ func BenchmarkVisualReorder_AllLTR(b *testing.B) {
 		_, _ = visualReorder(row, cols)
 	}
 }
+
+// Pointer hover and motion reports map through v2lForViewportRow on every
+// move; an LTR-only row must cost no allocation, and an RTL row must still
+// get its map.
+func TestV2LForViewportRow_LTRNoAlloc(t *testing.T) {
+	tm, _ := newTestTermCapture()
+	for c, r := range "hello" {
+		tm.grid.At(0, c).Ch = r
+	}
+	if allocs := testing.AllocsPerRun(100, func() {
+		if tm.v2lForViewportRow(0) != nil {
+			t.Fatal("LTR row got a v2l map")
+		}
+	}); allocs != 0 {
+		t.Errorf("LTR row: %v allocs per call, want 0", allocs)
+	}
+	for c, r := range "שלום" {
+		tm.grid.At(1, c).Ch = r
+	}
+	if tm.v2lForViewportRow(1) == nil {
+		t.Error("RTL row: v2l map is nil")
+	}
+}

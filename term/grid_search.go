@@ -178,7 +178,15 @@ func matchGridSpan(colMap []int, rr []rune, ci, cl int) (col, width int, ok bool
 	}
 	col = colMap[ci]
 	lastCol := colMap[ci+cl-1]
-	return col, lastCol - col + runeWidth(rr[ci+cl-1]), true
+	// The last matched rune can sit inside a multi-rune cluster, where a
+	// combining mark or VS16 measures zero columns. Size the last cell by
+	// where the next one starts instead (continuations are stripped, so a
+	// wide cell leaves a gap); only a row's final cell falls back to the
+	// rune's own width, floored at one cell.
+	if j := cleanIdxGT(colMap, lastCol); j < len(colMap) {
+		return col, colMap[j] - col, true
+	}
+	return col, lastCol - col + max(runeWidth(rr[ci+cl-1]), 1), true
 }
 
 // viewportContentRow maps a viewport row vr to a content row given the
@@ -290,83 +298,59 @@ func (g *grid) ViewportMatches(query string) []searchMatch {
 	return matches
 }
 
-// regexSearchForward returns the first non-empty regex match in s with rune
-// column >= fromCol. s holds the grid row's content runes encoded as UTF-8
-// (see appendSearchBytes). Zero-width matches (a*, x?) are skipped: they
-// have no cell to highlight and their length would underflow matchGridSpan.
+// regexRuneMatches reports every non-empty match of re in s as a rune column
+// and a rune length, left to right, until yield returns false. s holds the
+// grid row's content runes encoded as UTF-8 (see appendSearchBytes).
 //
-// Single linear pass: the fromCol→byte offset conversion scans once, and
-// each retry advances past the skipped match, so every byte is counted at
-// most twice — not once per match like the FindAllIndex + RuneCount loop
-// this replaced.
-func regexSearchForward(s []byte, re *regexp.Regexp, fromCol int) (col, matchLen int, found bool) {
-	// Byte offset of the fromCol-th rune.
-	byteOff := 0
-	runeIdx := 0
-	for runeIdx < fromCol && byteOff < len(s) {
-		_, w := utf8.DecodeRune(s[byteOff:])
-		byteOff += w
-		runeIdx++
-	}
-	for byteOff <= len(s) {
-		loc := re.FindIndex(s[byteOff:])
-		if loc == nil {
-			return 0, 0, false
-		}
-		// Runes between the search start and the match start.
-		gap := utf8.RuneCount(s[byteOff : byteOff+loc[0]])
-		l := utf8.RuneCount(s[byteOff+loc[0] : byteOff+loc[1]])
-		if l > 0 {
-			return runeIdx + gap, l, true
-		}
-		// Zero-width match: step one rune past its start and retry.
-		// A zero-width match at the very end of input cannot advance.
-		_, w := utf8.DecodeRune(s[byteOff+loc[0]:])
-		if w == 0 {
-			return 0, 0, false
-		}
-		byteOff += loc[0] + w
-		runeIdx += gap + 1
-	}
-	return 0, 0, false
-}
-
-// regexSearchLast returns the last non-empty regex match in s with rune
-// column < upToCol. Zero-width matches are skipped, as in
-// regexSearchForward.
-//
-// One FindAllIndex plus one linear byte→rune walk: the old code paid a
-// full RuneCount(s[:loc]) per match, quadratic in row length.
-func regexSearchLast(s []byte, re *regexp.Regexp, upToCol int) (col, matchLen int, found bool) {
-	locs := re.FindAllIndex(s, -1)
-	if len(locs) == 0 {
-		return 0, 0, false
-	}
-	// Walk the row once, left to right: FindAllIndex returns starts in
-	// order, so one monotonic (bytePos, runeIdx) cursor converts every
-	// start exactly once.
-	bestCol, bestLen := -1, 0
+// One FindAllIndex runs over the whole row, so ^, $ and \b stay anchored to
+// the row edges: re-running the regexp on a slice that starts mid-row would
+// let them fire at the slice start. Zero-width matches (a*, x?) are skipped:
+// they have no cell to highlight. One monotonic byte→rune cursor converts
+// every span, so the walk is linear in the row length.
+func regexRuneMatches(s []byte, re *regexp.Regexp, yield func(col, n int) bool) {
 	bytePos, runeIdx := 0, 0
-	for _, loc := range locs {
+	for _, loc := range re.FindAllIndex(s, -1) {
 		for bytePos < loc[0] {
 			_, w := utf8.DecodeRune(s[bytePos:])
 			bytePos += w
 			runeIdx++
 		}
-		l := utf8.RuneCount(s[loc[0]:loc[1]])
-		if l > 0 && runeIdx < upToCol {
-			bestCol, bestLen = runeIdx, l
-		}
+		start := runeIdx
 		for bytePos < loc[1] {
 			_, w := utf8.DecodeRune(s[bytePos:])
 			bytePos += w
 			runeIdx++
 		}
+		if n := runeIdx - start; n > 0 && !yield(start, n) {
+			return
+		}
 	}
-	if bestCol < 0 {
-		return 0, 0, false
-	}
-	return bestCol, bestLen, true
+}
+
+// regexSearchForward returns the first non-empty regex match in s with rune
+// column >= fromCol.
+func regexSearchForward(s []byte, re *regexp.Regexp, fromCol int) (col, matchLen int, found bool) {
+	regexRuneMatches(s, re, func(c, n int) bool {
+		if c < fromCol {
+			return true
+		}
+		col, matchLen, found = c, n, true
+		return false
+	})
+	return col, matchLen, found
+}
+
+// regexSearchLast returns the last non-empty regex match in s with rune
+// column < upToCol.
+func regexSearchLast(s []byte, re *regexp.Regexp, upToCol int) (col, matchLen int, found bool) {
+	regexRuneMatches(s, re, func(c, n int) bool {
+		if c >= upToCol {
+			return false
+		}
+		col, matchLen, found = c, n, true
+		return true
+	})
+	return col, matchLen, found
 }
 
 // appendSearchBytes encodes rr as UTF-8 into the grid's reused scratch
@@ -452,25 +436,19 @@ func (g *grid) ViewportMatchesRegex(re *regexp.Regexp) []searchMatch {
 		rr, colMap := g.searchRow(contentRow, g.searchRunes, g.searchCols)
 		g.searchRunes, g.searchCols = rr, colMap
 		s := g.appendSearchBytes(rr)
-		idx := 0
-		for {
-			c, l, ok := regexSearchForward(s, re, idx)
-			if !ok {
-				break
+		// One pass per row: every match comes from a single FindAllIndex, so
+		// anchors keep their whole-row meaning (see regexRuneMatches).
+		regexRuneMatches(s, re, func(c, l int) bool {
+			if col, width, ok := matchGridSpan(colMap, rr, c, l); ok {
+				matches = append(matches, searchMatch{
+					contentPos: contentPos{Row: contentRow, Col: col},
+					Len:        width,
+				})
 			}
-			col, width, ok := matchGridSpan(colMap, rr, c, l)
-			if !ok {
-				idx = c + 1
-				continue
-			}
-			matches = append(matches, searchMatch{
-				contentPos: contentPos{Row: contentRow, Col: col},
-				Len:        width,
-			})
-			if len(matches) >= maxSearchHighlights {
-				return matches
-			}
-			idx = c + max(l, 1)
+			return len(matches) < maxSearchHighlights
+		})
+		if len(matches) >= maxSearchHighlights {
+			return matches
 		}
 	}
 	return matches

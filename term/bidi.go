@@ -231,6 +231,19 @@ func (t *Term) v2lForViewportRow(r int) []int {
 	if cols <= 0 || r < 0 || r >= g.Rows {
 		return nil
 	}
+	// Gate before allocating: hover and motion reports call this on every
+	// pointer move, and almost every row is LTR-only. Same check as
+	// prepareBiDi's scrolled-view path.
+	needBidi := false
+	for c := range cols {
+		if ch := g.ViewCellAt(r, c).Ch; ch != 0 && needsReorder(ch) {
+			needBidi = true
+			break
+		}
+	}
+	if !needBidi {
+		return nil
+	}
 	scratch := make([]cell, cols)
 	for c := range scratch {
 		scratch[c] = g.ViewCellAt(r, c)

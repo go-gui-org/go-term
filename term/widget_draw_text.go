@@ -271,8 +271,8 @@ func (t *Term) drawFgPass(ds *drawState) {
 	// Hover coordinates are visual; cellRunKey resolves the hovered cell
 	// through ViewCellAt, which addresses the logical grid — map first so
 	// the Cmd-hover recolor compares the LinkID actually under the pointer.
-	if hR >= 0 && hC >= 0 && hR < len(ds.bidiV2LRows) && ds.bidiV2LRows[hR] != nil {
-		hC = logicalCell(ds.bidiV2LRows[hR], hC, cols)
+	if v2l := ds.rowV2L(hR); v2l != nil && hC >= 0 {
+		hC = logicalCell(v2l, hC, cols)
 	}
 	cmdHeld := t.mouse.cmdHeld.Load()
 

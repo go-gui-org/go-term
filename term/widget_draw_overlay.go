@@ -717,8 +717,8 @@ func (t *Term) drawCopyCursor(ds *drawState) {
 	cc := clamp(t.copy.cursor.Col, 0, max(ds.cols-1, 0))
 	// Copy cursor lives in logical columns like the text cursor: map to
 	// visual through the row's reorder map, mirroring drawCursor.
-	if vr >= 0 && vr < len(ds.bidiV2LRows) && ds.bidiV2LRows[vr] != nil {
-		if v := visualPoint(ds.bidiV2LRows[vr], t.copy.cursor.Col); v >= 0 {
+	if v2l := ds.rowV2L(vr); v2l != nil {
+		if v := visualPoint(v2l, t.copy.cursor.Col); v >= 0 {
 			cc = v
 		}
 	}
@@ -838,9 +838,9 @@ func (t *Term) drawHints(ds *drawState) {
 				continue
 			}
 			c0, c1 := sp.C0, sp.C1
-			if vr >= 0 && vr < len(ds.bidiV2LRows) && ds.bidiV2LRows[vr] != nil {
+			if v2l := ds.rowV2L(vr); v2l != nil {
 				// Link spans are logical; the pill geometry is visual.
-				if v0, v1, ok := visualSpan(ds.bidiV2LRows[vr], sp.C0, sp.C1); ok {
+				if v0, v1, ok := visualSpan(v2l, sp.C0, sp.C1); ok {
 					c0, c1 = v0, v1
 				}
 			}
@@ -866,11 +866,11 @@ func (t *Term) drawHints(ds *drawState) {
 		// almost always has a space before a link, so the fallback is rare.
 		col := hintLabelCol(ds.g, target.spans[0], len(label))
 		w := float32(len(label)) * t.cellW
-		if vr >= 0 && vr < len(ds.bidiV2LRows) && ds.bidiV2LRows[vr] != nil {
+		if v2l := ds.rowV2L(vr); v2l != nil {
 			// hintLabelCol returns logical columns; the pill is visual.
 			// The label covers logical [col, col+len): map to the
 			// covering visual span so the pill sits on the right glyphs.
-			if v0, v1, ok := visualSpan(ds.bidiV2LRows[vr], col, col+len(label)-1); ok {
+			if v0, v1, ok := visualSpan(v2l, col, col+len(label)-1); ok {
 				col, w = v0, float32(v1-v0+1)*t.cellW
 			}
 		}

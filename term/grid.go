@@ -446,8 +446,9 @@ type grid struct {
 	// searchRunes and searchCols are reusable buffers for searchRow,
 	// persisted on the grid so repeated Find / ViewportMatches calls
 	// don't re-allocate them from nil every time. searchText is the
-	// matching scratch for the regex path: the row's UTF-8 encoding,
-	// rebuilt per row by appendSearchBytes without allocating.
+	// matching scratch for the regex search and URL-detection paths: the
+	// row's UTF-8 encoding, rebuilt per call by appendSearchBytes without
+	// allocating.
 	searchRunes []rune
 	searchCols  []int
 	searchText  []byte

@@ -158,12 +158,7 @@ func (g *grid) joinRows(start, end int) (runes []rune, rows, cols, bytes []int, 
 func (g *grid) urlRangesIn(runes []rune, bytes []int, byteLen int, dst [][2]int) [][2]int {
 	// Regexp works on the byte string; map each match's byte span back to rune
 	// indices via the byte-offset table.
-	b := g.searchText[:0]
-	for _, r := range runes {
-		b = utf8.AppendRune(b, r)
-	}
-	g.searchText = b
-	for _, m := range urlRe.FindAllIndex(b, -1) {
+	for _, m := range urlRe.FindAllIndex(g.appendSearchBytes(runes), -1) {
 		is := sort.SearchInts(bytes, m[0])
 		ie := runeIndexForByte(bytes, byteLen, m[1])
 		ie = is + trimTrailingURL(runes[is:ie])

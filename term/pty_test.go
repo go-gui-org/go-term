@@ -172,6 +172,13 @@ func TestSetEnvEntry(t *testing.T) {
 	if len(got) != 2 || got[1] != "JUSTAWORD" {
 		t.Errorf("bare word: got %q", got)
 	}
+	// A key the parent already duplicates collapses to one entry: os/exec
+	// resolves duplicates last-wins, so a surviving later copy would beat
+	// the override.
+	got = setEnvEntry([]string{"A=1", "B=2", "A=3"}, "A=9")
+	if len(got) != 2 || got[0] != "A=9" || got[1] != "B=2" {
+		t.Errorf("duplicate: got %q", got)
+	}
 	// The input's elements are never modified.
 	in := []string{"A=1"}
 	_ = setEnvEntry(in, "A=9")

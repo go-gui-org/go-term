@@ -104,8 +104,20 @@ func (g *grid) SelectedText() string {
 			continue
 		}
 
+		// Soft-wrapped rows are one logical line: joining them keeps a
+		// wrapped path/URL copy-pasteable instead of splitting it with a
+		// newline. Block selections keep every row broken — the rectangle
+		// is the unit there, not the logical line.
+		joined := r < e.Row && g.SelMode != selBlock && g.contentRowWrapped(r)
+
 		end := c0 - 1
-		for c := c0; c <= c1; c++ {
+		if joined {
+			// Blanks before a soft wrap are real text, not padding: trimming
+			// them would fuse the last word of this row with the first word
+			// of the next ("foo " + "bar" → "foobar").
+			end = c1
+		}
+		for c := c0; c <= c1 && !joined; c++ {
 			// A Kitty Unicode placeholder is an image, not text. Copying it
 			// verbatim would paste a private-use character plus combining
 			// diacritics into the user's clipboard, so it counts as blank here
@@ -129,11 +141,7 @@ func (g *grid) SelectedText() string {
 				b.WriteRune(cell.Ch)
 			}
 		}
-		// Soft-wrapped rows are one logical line: joining them keeps a
-		// wrapped path/URL copy-pasteable instead of splitting it with a
-		// newline. Block selections keep every row broken — the rectangle
-		// is the unit there, not the logical line.
-		if r < e.Row && (g.SelMode == selBlock || !g.contentRowWrapped(r)) {
+		if r < e.Row && !joined {
 			b.WriteByte('\n')
 		}
 	}

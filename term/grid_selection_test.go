@@ -333,6 +333,25 @@ func TestGrid_SelectedText_SoftWrapJoins(t *testing.T) {
 	}
 }
 
+// A blank that lands on the last cell before a soft wrap is real text:
+// the join keeps it rather than fusing the two words.
+func TestGrid_SelectedText_SoftWrapKeepsBlankAtMargin(t *testing.T) {
+	g := newGrid(2, 5)
+	for c, r := range "abcd " {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "efg" {
+		g.At(1, c).Ch = r
+	}
+	g.RowWrapped[0] = true
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 5}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "abcd efg"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 // Block selections keep every row broken across a soft wrap: the
 // rectangle is the unit, not the logical line.
 func TestGrid_SelectedText_BlockKeepsRowBreaksAcrossWrap(t *testing.T) {

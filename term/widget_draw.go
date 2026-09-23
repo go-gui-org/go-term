@@ -142,6 +142,15 @@ type drawState struct {
 	imeW, imeH float32
 }
 
+// rowV2L returns viewport row vr's visual→logical column map, or nil when
+// the row is not reordered or vr is out of range.
+func (ds *drawState) rowV2L(vr int) []int {
+	if vr < 0 || vr >= len(ds.bidiV2LRows) {
+		return nil
+	}
+	return ds.bidiV2LRows[vr]
+}
+
 // resolveCell returns the cell at viewport (r, c), applying the selection
 // tint and search-highlight inversion. Uses the fast path (direct live-row
 // index) when ds.live; otherwise goes through ViewCellAt.
@@ -549,11 +558,11 @@ func (t *Term) prepareHoverURL(ds *drawState) {
 			continue
 		}
 		c0, c1 := sp.C0, sp.C1
-		if vr >= 0 && vr < len(ds.bidiV2LRows) && ds.bidiV2LRows[vr] != nil {
+		if v2l := ds.rowV2L(vr); v2l != nil {
 			// Logical span → covering visual span; same approximation
 			// as selection (see logicalSpan): gap glyphs between runs
 			// highlight along.
-			if v0, v1, ok := visualSpan(ds.bidiV2LRows[vr], sp.C0, sp.C1); ok {
+			if v0, v1, ok := visualSpan(v2l, sp.C0, sp.C1); ok {
 				c0, c1 = v0, v1
 			}
 		}

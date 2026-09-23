@@ -151,24 +151,33 @@ func envKeysEqual(a, b string) bool {
 }
 
 // setEnvEntry sets entry ("KEY=value", or a bare word with no '=') in env,
-// replacing any existing entry for the same key or appending when absent.
-// Unlike a bare append this never leaves duplicate keys behind, so the result
-// does not depend on whether the platform resolves duplicates first-wins or
-// last-wins — which is what lets caller overrides hold on both Unix and
-// Windows. The input's existing elements are never modified; use the returned
+// replacing the first entry for the same key and dropping any later copies,
+// or appending when absent. Leaving no duplicate keys means the result does
+// not depend on whether the platform resolves duplicates first-wins or
+// last-wins (os/exec is last-wins), which is what lets caller overrides hold
+// on both Unix and Windows. The input is never modified; use the returned
 // slice.
 func setEnvEntry(env []string, entry string) []string {
-	if key, _, ok := strings.Cut(entry, "="); ok {
-		for i, e := range env {
-			if k, _, ok := strings.Cut(e, "="); ok && envKeysEqual(k, key) {
-				out := make([]string, len(env))
-				copy(out, env)
-				out[i] = entry
-				return out
-			}
-		}
+	key, _, ok := strings.Cut(entry, "=")
+	if !ok {
+		return append(env, entry)
 	}
-	return append(env, entry)
+	out := make([]string, 0, len(env)+1)
+	placed := false
+	for _, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok && envKeysEqual(k, key) {
+			if !placed {
+				out = append(out, entry)
+				placed = true
+			}
+			continue
+		}
+		out = append(out, e)
+	}
+	if !placed {
+		out = append(out, entry)
+	}
+	return out
 }
 
 // baseChildEnv builds the child environment every startPTY shares: the host

@@ -234,26 +234,43 @@ func TestFinite(t *testing.T) {
 	}
 }
 
-func TestStripPasteEnd_NoMarker(t *testing.T) {
+func TestStripPasteMarkers_NoMarker(t *testing.T) {
 	in := "hello world\nlinetwo"
-	if got := stripPasteEnd(in); got != in {
+	if got := stripPasteMarkers(in); got != in {
 		t.Errorf("got %q, want unchanged", got)
 	}
 }
 
-func TestStripPasteEnd_RemovesEmbeddedMarker(t *testing.T) {
+func TestStripPasteMarkers_RemovesEmbeddedMarker(t *testing.T) {
 	in := "before\x1b[201~middle\x1b[201~after"
 	want := "beforemiddleafter"
-	if got := stripPasteEnd(in); got != want {
+	if got := stripPasteMarkers(in); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
-func TestStripPasteEnd_PartialMarkerLeftAlone(t *testing.T) {
+func TestStripPasteMarkers_PartialMarkerLeftAlone(t *testing.T) {
 	// "\x1b[20" alone is not a marker.
 	in := "x\x1b[20y"
-	if got := stripPasteEnd(in); got != in {
+	if got := stripPasteMarkers(in); got != in {
 		t.Errorf("got %q, want unchanged", got)
+	}
+}
+
+// Removing one marker must not splice its neighbors into a new one: a
+// single ReplaceAll pass turns "ESC[201" + "ESC[201~" + "~" back into a
+// live ESC[201~ that ends bracketed paste early.
+func TestStripPasteMarkers_NoReassembly(t *testing.T) {
+	for _, in := range []string{
+		"\x1b[201" + pasteEnd + "~rm -rf ~\r",
+		"\x1b[20" + pasteStart + "1~x",
+		"\x1b[2" + pasteEnd + "00~x",
+		"\x1b[20\x1b[20" + pasteEnd + "1~1~x",
+	} {
+		got := stripPasteMarkers(in)
+		if strings.Contains(got, pasteEnd) || strings.Contains(got, pasteStart) {
+			t.Errorf("stripPasteMarkers(%q) = %q, still holds a marker", in, got)
+		}
 	}
 }
 
