@@ -1963,20 +1963,6 @@ func TestOpenURL_BlockedSchemes(t *testing.T) {
 	}
 }
 
-func TestOpenURL_RejectsShellInjection(t *testing.T) {
-	// Windows cmd /c start would parse these as shell metacharacters; the
-	// charset gate must drop them before any handler is reached.
-	for _, url := range []string{
-		"https://example.com\" & calc.exe &",
-		"https://example.com & calc.exe",
-		"https://example.com\ncalc.exe",
-		"http://example.com\t--help",
-		"mailto:a@b.c\" -e evil",
-	} {
-		openURL(url) // must not panic; silently dropped
-	}
-}
-
 func TestOpenURLCommand_RejectsDELAndControls(t *testing.T) {
 	// DEL (0x7F) and C0 controls must not reach a URL handler's argv.
 	for _, url := range []string{

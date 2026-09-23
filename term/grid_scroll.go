@@ -162,19 +162,29 @@ func (g *grid) scrollUpRegion(n int) {
 			g.syncScrollbackGen()
 		}
 		evicted := 0
+		swapped := false
 		for r := 0; r < n; r++ {
 			// Hand the row to the ring by reference; copying it was a third of
 			// vtebench's scrolling time. The spare row the ring gives back takes
 			// its place and, once the rotation below moves it to the bottom of
 			// the region, is blanked with the other exposed rows.
 			s := g.rowMap[g.Top+r]
-			spare, ev := g.Scrollback.PushSwap(g.slots[s], g.RowWrapped[g.Top+r])
+			row := g.slots[s]
+			spare, ev := g.Scrollback.PushSwap(row, g.RowWrapped[g.Top+r])
 			g.slots[s] = spare
+			// A short row (possible after the ring re-carved its slab — see
+			// flatScreen) takes the copying Push fallback, which returns the
+			// row itself: nothing was borrowed, so don't mark it as such.
+			if len(row) == g.Scrollback.cols {
+				swapped = true
+			}
 			if ev {
 				evicted++
 			}
 		}
-		g.rowsBorrowed = true
+		if swapped {
+			g.rowsBorrowed = true
+		}
 		if evicted > 0 {
 			g.trimMarks(evicted)
 			g.trimGraphics(evicted)
