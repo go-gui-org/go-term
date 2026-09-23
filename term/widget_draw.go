@@ -129,6 +129,17 @@ type drawState struct {
 	blinkOff bool
 	// IME composition state, populated by drawIME and consumed by drawCursor.
 	imeComposing bool
+	// scrollInset is the window-edge gap for the scrollbar thumb, snapshotted
+	// from the window before grid.Mu is taken (see onDraw). A window call
+	// under the grid lock risks deadlock against the reader goroutine.
+	scrollInset float32
+	// pendingIME carries the IME candidate-window rect out from under
+	// grid.Mu: drawCursor computes it, onDraw reports it after unlocking.
+	// t.win is main-thread only and onDraw runs there, so reading it after
+	// the unlock is still safe.
+	pendingIME bool
+	imeX, imeY float32
+	imeW, imeH float32
 }
 
 // resolveCell returns the cell at viewport (r, c), applying the selection
@@ -218,16 +229,29 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.draw.runBuf.Grow(cols * 4) // one row of text, worst-case UTF-8; no-op when cap sufficient
 
 	now := time.Now()
+	// Window-state reads stay outside grid.Mu: scrollbarEdgeInset reaches
+	// t.win.WindowSize, and the grid lock must never be held across a
+	// go-gui call — the PTY reader goroutine takes the same lock, so a
+	// blocking window call here can stall or deadlock it. t.win and
+	// t.ime.layoutX are main-thread only and onDraw runs there.
+	scrollInset := t.scrollbarEdgeInset(dc.Width)
 	ds := drawState{
-		dc:       dc,
-		style:    style,
-		g:        t.grid,
-		rows:     rows,
-		cols:     cols,
-		now:      now,
-		blinkOff: textBlinkOff(now),
+		dc:          dc,
+		style:       style,
+		g:           t.grid,
+		rows:        rows,
+		cols:        cols,
+		now:         now,
+		blinkOff:    textBlinkOff(now),
+		scrollInset: scrollInset,
 	}
 
+	// The paint passes below (drawBgPass/drawFgPass/dc.Text and friends)
+	// run under grid.Mu deliberately: dc.* are immediate-mode draws that
+	// need a consistent grid snapshot, and copying the grid per frame
+	// would trade the lock for a far larger allocation. True window-state
+	// calls (IMESetRect, WindowSize) stay out — see scrollInset above and
+	// the pendingIME flush after the unlock.
 	t.grid.Mu.Lock()
 
 	// Cancel selection drag when canvas dimensions change between frames.
@@ -239,10 +263,11 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	// motion spuriously extends the selection.
 	if t.mouse.dragging && !t.mouse.dragReport {
 		if rows != t.grid.Rows || cols != t.grid.Cols {
-			t.mouse.dragging = false
-			t.setAutoScrollDir(0)
+			// cancelMomentum inside the helper takes only momentum.mu;
+			// no path holds that lock while acquiring grid.Mu, so this
+			// nesting cannot deadlock (see momentumLoop).
+			t.cancelSelectDrag()
 			t.grid.ClearSelection()
-			t.unlockMouse(t.win)
 		}
 	}
 	// Same rationale for a scrollbar thumb drag: a resize gesture can steal
@@ -253,8 +278,8 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		t.unlockMouse(t.win)
 	}
 
-	// Phase order matters: prepareFastPath sets ds.renderRows / ds.live which
-	// which all subsequent phases read. prepareBiDi sets ds.bidiVisRows consumed
+	// Phase order matters: prepareFastPath sets ds.renderRows / ds.live, which
+	// all subsequent phases read. prepareBiDi sets ds.bidiVisRows consumed
 	// by drawBgPass / drawFgPass / drawCursor. drawIME populates ds.ime* fields
 	// consumed by drawCursor.
 	t.prepareResize(&ds)
@@ -272,6 +297,12 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.drawCursor(&ds)
 	t.drawOverlays(&ds)
 	t.grid.Mu.Unlock()
+
+	// Deferred IME candidate-window report: computed under the lock by
+	// drawCursor, delivered here where no grid lock is held.
+	if ds.pendingIME && t.win != nil {
+		t.win.IMESetRect(ds.imeX, ds.imeY, ds.imeW, ds.imeH)
+	}
 
 	if ds.doResize {
 		// Defer pty resize to the resizeLoop goroutine so the

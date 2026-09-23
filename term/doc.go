@@ -42,7 +42,8 @@
 //
 // OSC 52 clipboard write is disabled by default. Set
 // [Cfg.AllowOSC52Write] to true only in trusted environments —
-// untrusted terminal output can silently replace the clipboard.
+// untrusted terminal output can silently replace the clipboard, and a
+// planted payload runs with the user's privileges at the next paste.
 //
 // # Theme configuration
 //

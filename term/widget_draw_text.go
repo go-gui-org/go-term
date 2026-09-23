@@ -18,6 +18,13 @@ var asciiStr = func() [128]string {
 	return a
 }()
 
+// maxRuneCacheEntries bounds the per-Term non-ASCII string cache. The grid
+// is child-driven, so an unbounded map is a memory DoS: a stream of distinct
+// runes grows it without limit. At capacity the cache is dropped and rebuilt
+// — hot working sets re-cache within a frame, and only pathological streams
+// pay repeated conversions.
+const maxRuneCacheEntries = 4096
+
 // termRuneStr returns string(r) without allocating for runes already in the
 // per-Term cache. Wide-char cells and the cursor call this once per distinct
 // rune seen, then reuse the cached string every subsequent frame.
@@ -31,6 +38,8 @@ func (t *Term) termRuneStr(r rune) string {
 	s := string(r)
 	if t.draw.runeCache == nil {
 		t.draw.runeCache = make(map[rune]string, 64)
+	} else if len(t.draw.runeCache) >= maxRuneCacheEntries {
+		clear(t.draw.runeCache)
 	}
 	t.draw.runeCache[r] = s
 	return s
@@ -292,6 +301,9 @@ func (t *Term) drawFgPass(ds *drawState) {
 		fr.open = false
 		t.draw.runBuf.Reset()
 		fr.cols = 0
+		// rowY is constant across the row: hoist it out of the per-cell
+		// emit path (each call pays a float64 Round plus a snap).
+		rowY := t.rowY(r, yOff)
 		for c := range cols {
 			cell := ds.resolveVisual(r, c)
 			if cell.Width == 0 && cell.Ch == 0 {
@@ -309,8 +321,9 @@ func (t *Term) drawFgPass(ds *drawState) {
 			isPlainSpace := cell.Ch == ' ' && cell.Attrs&attrVisual == 0 && cell.LinkID == 0
 			if cell.Width == 2 {
 				t.flushRun(dc, r, style, yOff, &fr)
-				t.emitCell(dc, t.colX(c), t.rowY(r, yOff),
-					t.spanW(c, c+int(cell.Width)), cell, k, style)
+				x := t.colX(c)
+				t.emitCell(dc, x, rowY,
+					t.colX(c+int(cell.Width))-x, cell, k, style)
 				continue
 			}
 			// Non-ASCII glyphs may trigger font fallback with metrics
@@ -322,8 +335,9 @@ func (t *Term) drawFgPass(ds *drawState) {
 			// full cluster string is drawn even when the base rune is ASCII.
 			if cell.Ch > 0x7F || cell.clusterID != 0 {
 				t.flushRun(dc, r, style, yOff, &fr)
-				t.emitCell(dc, t.colX(c), t.rowY(r, yOff),
-					t.spanW(c, c+int(cell.Width)), cell, k, style)
+				x := t.colX(c)
+				t.emitCell(dc, x, rowY,
+					t.colX(c+int(cell.Width))-x, cell, k, style)
 				continue
 			}
 			if isPlainSpace {

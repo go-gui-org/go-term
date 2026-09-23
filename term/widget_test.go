@@ -1991,6 +1991,32 @@ func TestOpenURL_RejectsShellInjection(t *testing.T) {
 	}
 }
 
+func TestOpenURLCommand_RejectsDELAndControls(t *testing.T) {
+	// DEL (0x7F) and C0 controls must not reach a URL handler's argv.
+	for _, url := range []string{
+		"http://example.com\x7f",
+		"https://example.com\x00",
+		"https://example.com\x1b[0m",
+		"mailto:a@b.c\x7f",
+	} {
+		if cmd := openURLCommand(url); cmd != nil {
+			t.Errorf("openURLCommand(%q) built %v, want nil", url, cmd.Args)
+		}
+	}
+}
+
+func TestOpenURLCommand_PermitsCleanURLs(t *testing.T) {
+	for _, url := range []string{
+		"https://example.com/path?q=1",
+		"http://example.com",
+		"mailto:user@example.com",
+	} {
+		if cmd := openURLCommand(url); cmd == nil {
+			t.Errorf("openURLCommand(%q) = nil, want a command", url)
+		}
+	}
+}
+
 // --- reply writer (enqueueReplies + writeLoop) ---
 
 // startReplyWriter starts tm.writeLoop with a fresh cond var and returns a
@@ -4039,5 +4065,53 @@ func TestCellRunKey_DefaultULColorFollowsHover(t *testing.T) {
 	if hovered.ulColor != hovered.color {
 		t.Errorf("ulColor = %+v, want hovered text color %+v",
 			hovered.ulColor, hovered.color)
+	}
+}
+
+// cancelSelectDrag clears a stranded selection drag: the flags, the
+// auto-scroll direction, and any trackpad coast in flight.
+func TestCancelSelectDrag_ClearsState(t *testing.T) {
+	tm, _ := newKeyboardTerm(24, 80)
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.cancelSelectDrag()
+	if tm.mouse.dragging || tm.mouse.dragReport {
+		t.Errorf("dragging=%v dragReport=%v, want both false",
+			tm.mouse.dragging, tm.mouse.dragReport)
+	}
+}
+
+// HandleWindowEvent on a bare Term (no grid, no pty, no window) must not
+// panic: queueCommand and kick already tolerate that state.
+func TestHandleWindowEvent_BareTerm(t *testing.T) {
+	tm := &Term{}
+	for _, typ := range []gui.EventType{
+		gui.EventMouseUp, gui.EventResized,
+		gui.EventFocused, gui.EventUnfocused,
+	} {
+		tm.HandleWindowEvent(&gui.Event{Type: typ}) // must not panic
+	}
+	tm.HandleWindowEvent(nil) // must not panic
+}
+
+// A nil window must not panic the pointer-shape path: hover and move run
+// in tests without a window.
+func TestApplyPointerShape_NilWindow(t *testing.T) {
+	applyPointerShape(nil, pointerIBeam) // must not panic
+}
+
+// The non-ASCII string cache is child-driven, so it stays bounded: past
+// capacity it rebuilds instead of growing without limit.
+func TestTermRuneStr_CacheBounded(t *testing.T) {
+	tm, _ := newKeyboardTerm(24, 80)
+	for r := rune(0x1000); r < rune(0x1000+2*maxRuneCacheEntries); r++ {
+		tm.termRuneStr(r)
+	}
+	if n := len(tm.draw.runeCache); n > maxRuneCacheEntries {
+		t.Errorf("rune cache holds %d entries, want at most %d",
+			n, maxRuneCacheEntries)
+	}
+	if got := tm.termRuneStr('é'); got != "é" {
+		t.Errorf("termRuneStr('é') = %q, want %q", got, "é")
 	}
 }

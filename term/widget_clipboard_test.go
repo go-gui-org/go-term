@@ -432,3 +432,49 @@ func TestCopySelection_SetsPrimary(t *testing.T) {
 		t.Errorf("clipboard = %q, primary = %q, want both %q", clip, prim, "hello")
 	}
 }
+
+// An embedded paste-entry marker must be stripped too: without this a
+// clipboard carrying ESC[200~ nests inside the bracketed wrapper and a
+// naive child parser splits the single paste into two inputs.
+func TestCleanPaste_StripsPasteStart(t *testing.T) {
+	in := "a" + pasteStart + "b"
+	if got := cleanPaste(in); got != "ab" {
+		t.Errorf("got %q, want %q", got, "ab")
+	}
+	// A lone partial marker is not a marker.
+	if got := cleanPaste("x\x1b[200y"); got != "x\x1b[200y" {
+		t.Errorf("got %q, want unchanged", got)
+	}
+}
+
+func TestPasteFromClipboard_StripsEmbeddedStartMarker(t *testing.T) {
+	buf := make([]byte, 0, 128)
+	tm := &Term{
+		grid: newGrid(4, 8),
+		pw: writerFunc(func(b []byte) (int, error) {
+			buf = append(buf, b...)
+			return len(b), nil
+		}),
+	}
+	tm.grid.BracketedPaste = true
+	w := &gui.Window{}
+	w.SetClipboardGetFn(func() string { return "a" + pasteStart + "b" })
+	tm.pasteFromClipboard(w)
+	want := pasteStart + "ab" + pasteEnd
+	if string(buf) != want {
+		t.Errorf("got %q, want %q", buf, want)
+	}
+}
+
+// The injection path strips entry markers as well, or a broadcast payload
+// could forge a frame boundary in a receiving pane.
+func TestSendInput_StripsEmbeddedStartMarker(t *testing.T) {
+	var buf []byte
+	tm := newPasteTerm(&buf)
+	tm.grid.BracketedPaste = true
+	tm.SendInput([]byte("safe"+pasteStart+"payload"), InputPaste)
+	want := pasteStart + "safepayload" + pasteEnd
+	if string(buf) != want {
+		t.Errorf("got %q, want %q", buf, want)
+	}
+}

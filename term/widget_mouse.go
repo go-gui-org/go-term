@@ -455,7 +455,9 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 		if inHit != t.scrollbar.hovered {
 			t.scrollbar.hovered = inHit
 			t.bumpVersion()
-			ctx.Window.InvalidateLayout()
+			if ctx.Window != nil {
+				ctx.Window.InvalidateLayout()
+			}
 		}
 	}
 
@@ -595,8 +597,12 @@ func (t *Term) pointerShapeSnap() pointerShape {
 
 // applyPointerShape maps an OSC 22 shape onto go-gui's window cursor calls.
 // The only place in the widget that knows both vocabularies; pointer.go owns
-// the grid-side enum and stays free of go-gui.
+// the grid-side enum and stays free of go-gui. Nil-safe: hover and move paths
+// run in tests without a window.
 func applyPointerShape(w *gui.Window, s pointerShape) {
+	if w == nil {
+		return
+	}
 	switch s {
 	case pointerIBeam:
 		w.SetMouseCursorIBeam()
@@ -777,7 +783,9 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 		}()
 	}
 	t.bumpVersion()
-	ctx.Window.InvalidateLayout()
+	if ctx.Window != nil {
+		ctx.Window.InvalidateLayout()
+	}
 	ctx.Event.IsHandled = true
 }
 
@@ -802,39 +810,49 @@ func (t *Term) linkURLAt(r, c int) string {
 // real browser. Production never reassigns it.
 var openURLFn = openURL
 
-// openURL opens url with the OS default browser/handler.
-// Only http, https, and mailto schemes are permitted; other URI schemes
-// (file://, custom handlers, javascript:) are silently dropped to prevent
-// a malicious OSC 8 hyperlink from invoking arbitrary OS handlers.
+// openURLCommand builds the OS command that opens url with the default
+// browser/handler, or nil when the URL is not permitted. Only http, https,
+// and mailto schemes are permitted; other URI schemes (file://, custom
+// handlers, javascript:) are silently dropped to prevent a malicious OSC 8
+// hyperlink from invoking arbitrary OS handlers.
 // The URL is terminal output — untrusted — so it must never reach a shell:
 // every branch below passes it as an argv element of a non-shell program
 // (open, rundll32, xdg-open), and the charset check keeps control characters
-// and quotes out of even that argv.
-func openURL(rawURL string) {
+// (including DEL), 0x7F, and quotes out of even that argv.
+func openURLCommand(rawURL string) *exec.Cmd {
 	switch {
 	case strings.HasPrefix(rawURL, "https://"),
 		strings.HasPrefix(rawURL, "http://"),
 		strings.HasPrefix(rawURL, "mailto:"):
 		// permitted
 	default:
-		return
+		return nil
 	}
 	for i := 0; i < len(rawURL); i++ {
-		if rawURL[i] < 0x20 || rawURL[i] == '"' {
-			return // invalid in a URL; reject before it reaches any handler
+		if rawURL[i] < 0x20 || rawURL[i] == 0x7F || rawURL[i] == '"' {
+			return nil // invalid in a URL; reject before it reaches any handler
 		}
 	}
-	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", rawURL)
+		return exec.Command("open", rawURL)
 	case "windows":
 		// rundll32 takes the URL as argv with no shell parsing — cmd /c start
 		// would let '&' or quotes in the URL escape into cmd.exe. Same choice
 		// falcon's openPath makes.
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
 	default:
-		cmd = exec.Command("xdg-open", rawURL)
+		return exec.Command("xdg-open", rawURL)
+	}
+}
+
+// openURL opens url with the OS default browser/handler. A URL
+// openURLCommand rejects is silently dropped. See openURLCommand for the
+// permit rules.
+func openURL(rawURL string) {
+	cmd := openURLCommand(rawURL)
+	if cmd == nil {
+		return
 	}
 	if err := cmd.Start(); err == nil {
 		go func() { _ = cmd.Wait() }()
@@ -1085,7 +1103,7 @@ func (t *Term) cancelMomentum() {
 	t.momentum.coasting = false
 }
 
-// kickMomentum is the AfterFunc callback fired 80 ms after the last scroll
+// kickMomentum is the AfterFunc callback fired 50 ms after the last scroll
 // event. It marks the momentum state as coasting and wakes momentumLoop.
 func (t *Term) kickMomentum() {
 	t.momentum.mu.Lock()

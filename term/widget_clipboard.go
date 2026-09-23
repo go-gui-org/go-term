@@ -9,8 +9,9 @@ import (
 )
 
 // Bracketed-paste markers (DEC ?2004). Sent around clipboard payloads
-// when the application has enabled the mode; stripped from incoming
-// payloads unconditionally so a clipboard exit-marker can't break out.
+// when the application has enabled the mode; both markers are stripped
+// from incoming payloads (see stripPasteEnd/stripPasteStart) so clipboard
+// content cannot forge frame boundaries.
 const (
 	pasteStart = "\x1b[200~"
 	pasteEnd   = "\x1b[201~"
@@ -49,11 +50,21 @@ func stripPasteEnd(s string) string {
 	return strings.ReplaceAll(s, pasteEnd, "")
 }
 
-// cleanPaste caps s at maxPasteBytes and removes any embedded paste-end
-// marker. Both paste entry points — SendInput and the clipboard path — share
-// it so they can never disagree on what a sanitized payload is.
+// stripPasteStart removes any embedded paste-entry markers from s. A
+// clipboard carrying pasteStart would otherwise nest inside the bracketed
+// wrapper pasteText adds, and a naive child parser splits the single paste
+// into two inputs at the inner marker. Same pass-through tradeoff as
+// stripPasteEnd: literal marker text in the clipboard is mangled, which
+// beats handing the child a forged frame boundary.
+func stripPasteStart(s string) string {
+	return strings.ReplaceAll(s, pasteStart, "")
+}
+
+// cleanPaste caps s at maxPasteBytes and removes any embedded paste markers
+// (entry and exit). Both paste entry points — SendInput and the clipboard
+// path — share it so they can never disagree on what a sanitized payload is.
 func cleanPaste(s string) string {
-	return stripPasteEnd(truncatePaste(s, maxPasteBytes))
+	return stripPasteEnd(stripPasteStart(truncatePaste(s, maxPasteBytes)))
 }
 
 // pasteText snaps to live, brackets clean according to this pane's own DEC

@@ -97,16 +97,19 @@ input) lives in `term/CLAUDE.md`, loaded when working under `term/`.
   config file drives. Style and blink are _defaults_ (what `reset` restores),
   never draw-time overrides; the lock is the separate axis that decides whether
   a child's DECSCUSR is honored, and it is enforced in `ApplyDECSCUSR` so the
-  draw path and DECRQSS stay in agreement, plus `ActivityKind`/`Cfg.OnActivity`
-  — the pane-event tap a tab bar needs for its bell and command-result
-  indicators (bells and OSC 133 command ends only; screen output is deliberately
-  not reported — see the type's doc), plus `InputKind`/`Cfg.OnInput`/`SendInput`
-  — the symmetric input tap and injection pair a pane manager needs to mirror
-  keys and pastes to sibling panes (`term/workspace` broadcast mode). What the
-  tap hands out, `SendInput` takes back in; keep them symmetric, and keep the
-  per-kind encoding rules in `SendInput` rather than in the embedder. Keep it
-  that way; add unexported helpers freely. The recording _format_ stays in
-  `internal/recfmt` precisely so it never becomes public API.
+  draw path and DECRQSS stay in agreement, plus `FocusID` (pane identity for
+  click routing) and the font-zoom quartet
+  `AdjustFontSize`/`SetFontSize`/`ResetFontSize`/`FontSize`, plus
+  `ActivityKind`/`Cfg.OnActivity` — the pane-event tap a tab bar needs for its
+  bell and command-result indicators (bells and OSC 133 command ends only;
+  screen output is deliberately not reported — see the type's doc), plus
+  `InputKind`/`Cfg.OnInput`/`SendInput` — the symmetric input tap and injection
+  pair a pane manager needs to mirror keys and pastes to sibling panes
+  (`term/workspace` broadcast mode). What the tap hands out, `SendInput` takes
+  back in; keep them symmetric, and keep the per-kind encoding rules in
+  `SendInput` rather than in the embedder. Keep it that way; add unexported
+  helpers freely. The recording _format_ stays in `internal/recfmt` precisely so
+  it never becomes public API.
 - User settings (fonts, theme, terminal settings, keybindings) are parsed and
   applied by `term/workspace`, never by `term/` — `term.Cfg` has no
   serialization. `term/workspace/config.go` owns the INI; the settings it

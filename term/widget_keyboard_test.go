@@ -1,7 +1,9 @@
 package term
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/go-gui-org/go-gui/gui"
 )
@@ -797,5 +799,57 @@ func TestKittyPrintableSeq(t *testing.T) {
 		if string(got) != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A nil window (bare test Terms) must not panic the search-bar paths:
+// the edit handlers repaint, and there is no window to repaint.
+func TestHandleSearchKey_NilWindow(t *testing.T) {
+	tm, _ := newKeyboardTerm(24, 80)
+	tm.search.active = true
+	tm.search.query = "ab"
+	e := &gui.Event{KeyCode: gui.KeyBackspace}
+	if !tm.handleSearchKey(e, nil) {
+		t.Fatal("backspace in search mode should be consumed")
+	}
+	if got := tm.search.query; got != "a" {
+		t.Errorf("query = %q, want %q", got, "a")
+	}
+	tm.search.query = "x"
+	if !tm.handleSearchKey(&gui.Event{KeyCode: gui.KeyEscape}, nil) {
+		t.Fatal("escape in search mode should be consumed")
+	}
+	if tm.search.active {
+		t.Error("escape should leave search mode")
+	}
+}
+
+// A rogue IME handing over megabytes on the main thread must not stall
+// pty writes: the commit is truncated at a rune boundary.
+func TestOnChar_HugeIMECommitTruncated(t *testing.T) {
+	tm, buf := newKeyboardTerm(24, 80)
+	big := strings.Repeat("あ", 30000) // ~90KB
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: uint32('あ'), IMEText: big}, Window: nil})
+	if len(*buf) > maxIMECommitBytes {
+		t.Errorf("pty saw %d bytes, want at most %d", len(*buf), maxIMECommitBytes)
+	}
+	if !utf8.Valid(*buf) {
+		t.Error("truncated commit is not valid UTF-8")
+	}
+	if len(*buf) == 0 {
+		t.Error("truncated commit should keep a prefix, got nothing")
+	}
+}
+
+// A single bulk commit must not overshoot the query cap the per-keystroke
+// path enforces: it is trimmed to the remaining rune budget.
+func TestOnChar_SearchQueryCappedOnBulkCommit(t *testing.T) {
+	tm, _ := newKeyboardTerm(24, 80)
+	tm.cmd = &gui.Window{} // the search path schedules a redraw
+	tm.search.active = true
+	tm.search.query = strings.Repeat("a", MaxGridDim-2)
+	tm.onChar(gui.EventCtx{Layout: nil, Event: &gui.Event{CharCode: uint32('日'), IMEText: "日本語"}, Window: nil})
+	if got := utf8.RuneCountInString(tm.search.query); got != MaxGridDim {
+		t.Errorf("query rune count = %d, want exactly %d", got, MaxGridDim)
 	}
 }

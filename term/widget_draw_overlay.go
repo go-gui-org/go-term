@@ -290,11 +290,15 @@ func (t *Term) drawCursor(ds *drawState) {
 	}
 	t.drawCursorShape(ds.dc, cc, g.CursorR, cursorCell, g.cursorShape, ds.style)
 
-	// Report cursor rect to the platform for candidate window placement.
-	if ds.imeComposing && t.win != nil {
-		imeX := t.ime.layoutX + float32(cc)*t.cellW
-		imeY := t.ime.layoutY + float32(g.CursorR)*t.cellH
-		t.win.IMESetRect(imeX, imeY, t.cellW, t.cellH)
+	// Stage the candidate-window rect for onDraw to report after it drops
+	// grid.Mu. IMESetRect reaches the platform, so calling it here would
+	// hold the grid lock across a go-gui call.
+	if ds.imeComposing {
+		ds.pendingIME = true
+		ds.imeX = t.ime.layoutX + float32(cc)*t.cellW
+		ds.imeY = t.ime.layoutY + float32(g.CursorR)*t.cellH
+		ds.imeW = t.cellW
+		ds.imeH = t.cellH
 	}
 }
 
@@ -312,9 +316,10 @@ func (t *Term) drawOverlays(ds *drawState) {
 	t.scrollbar.active = active
 
 	// Inset the thumb from the window's right edge only for panes flush
-	// against it, so the thumb clears the OS window-resize band. Hoisted
-	// above the active check because the failure ticks share it.
-	inset := t.scrollbarEdgeInset(ds.dc.Width)
+	// against it, so the thumb clears the OS window-resize band. Snapshotted
+	// before grid.Mu in onDraw (ds.scrollInset) because the computation
+	// reads window state.
+	inset := ds.scrollInset
 
 	// Progress fill first, failure ticks over it, thumb over both — each is
 	// more specific than the last, and the thumb's alpha 120 lets everything
