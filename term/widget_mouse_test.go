@@ -1307,6 +1307,79 @@ func TestUpdateHover_CmdReleasedClearsURLHighlight(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// BiDi hit-testing: pointer geometry is visual, grid coordinates logical
+// ---------------------------------------------------------------------------
+
+// rtlRowTerm builds a 4x8 term whose row 0 holds "שלום    " (4 Hebrew +
+// 4 spaces). The row reorders to "    םולש" with v2l [7 6 5 4 3 2 1 0].
+// Runes are stored per cell: writeRowText is byte-indexed and splits
+// multi-byte runes across cells.
+func rtlRowTerm(t *testing.T) *Term {
+	t.Helper()
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	for c, ch := range []rune("שלום    ") {
+		tm.grid.At(0, c).Ch = ch
+		tm.grid.At(0, c).Width = 1
+	}
+	return tm
+}
+
+func TestOnClick_RTLRowAnchorMapsVisualToLogical(t *testing.T) {
+	tm := rtlRowTerm(t)
+	// x=12 → visual cell 1, boundary 1 → logical v2l[1] = 6.
+	clickAt(tm, 12, 10, 0)
+	func() {
+		tm.grid.Mu.Lock()
+		defer tm.grid.Mu.Unlock()
+		if tm.grid.SelAnchor != (contentPos{Row: 0, Col: 6}) {
+			t.Errorf("SelAnchor = %v, want {Row:0 Col:6}", tm.grid.SelAnchor)
+		}
+	}()
+}
+
+func TestOnMouseMove_RTLRowDragSelectsVisualGlyphs(t *testing.T) {
+	tm := rtlRowTerm(t)
+	// Down at visual boundary 4 (x=36): between the leading spaces and
+	// the reversed Hebrew.
+	down := &gui.Event{MouseX: 36, MouseY: 10, MouseButton: gui.MouseLeft}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: down, Window: &gui.Window{}})
+	// Drag to visual boundary 8: visual glyphs 4..7 are logical {3,2,1,0}.
+	move := &gui.Event{MouseX: 78, MouseY: 10}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: move, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelAnchor != (contentPos{Row: 0, Col: 0}) {
+		t.Errorf("SelAnchor = %v, want {Row:0 Col:0}", tm.grid.SelAnchor)
+	}
+	if tm.grid.SelHead != (contentPos{Row: 0, Col: 4}) {
+		t.Errorf("SelHead = %v, want {Row:0 Col:4}", tm.grid.SelHead)
+	}
+	if got := tm.grid.SelectedText(); got != "שלום" {
+		t.Errorf("RTL drag selected %q, want %q", got, "שלום")
+	}
+}
+
+func TestOnClick_RTLRowReportMapsToLogical(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	for c, ch := range []rune("שלום    ") {
+		tm.grid.At(0, c).Ch = ch
+		tm.grid.At(0, c).Width = 1
+	}
+	tm.grid.MouseTrack = true // ?1000 press reports
+	tm.grid.MouseSGR = true   // ?1006
+	tm.grid.Mu.Unlock()
+	// Visual cell 1 → logical 6 → SGR col 7, row 1.
+	clickAt(tm, 12, 10, 0)
+	if got := string(*buf); got != "\x1b[<0;7;1M" {
+		t.Errorf("press report = %q, want %q", got, "\x1b[<0;7;1M")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Multi-click gestures (Phase 48)
 // ---------------------------------------------------------------------------
 

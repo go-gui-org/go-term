@@ -241,6 +241,15 @@ type mouseState struct {
 	// grid's SelMode is selWord or selLine.
 	selUnitStart contentPos
 	selUnitEnd   contentPos
+
+	// BiDi drag origin: visual selection boundary and content row where
+	// the current gesture started. A same-row char drag maps its full
+	// visual range to the covering logical span (see logicalSpan) so the
+	// selected glyphs match the drag exactly. False for shift-extends,
+	// whose anchor predates the gesture — those point-map the head.
+	selStartV   int
+	selStartRow int // content row
+	selStartSet bool
 }
 
 // drawBufs holds per-frame scratch buffers reused across onDraw calls.

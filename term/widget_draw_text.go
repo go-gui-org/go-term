@@ -268,6 +268,12 @@ func (t *Term) drawFgPass(ds *drawState) {
 	cols := ds.cols
 	g := ds.g
 	hR, hC := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
+	// Hover coordinates are visual; cellRunKey resolves the hovered cell
+	// through ViewCellAt, which addresses the logical grid — map first so
+	// the Cmd-hover recolor compares the LinkID actually under the pointer.
+	if hR >= 0 && hC >= 0 && hR < len(ds.bidiV2LRows) && ds.bidiV2LRows[hR] != nil {
+		hC = logicalCell(ds.bidiV2LRows[hR], hC, cols)
+	}
 	cmdHeld := t.mouse.cmdHeld.Load()
 
 	// sawBlink tracks whether any painted cell carries SGR 5/6, so the blink

@@ -360,7 +360,8 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 			return
 		}
 		cb := base + mouseModBits(ctx.Event.Modifiers)
-		t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
+		// The child grid is logical; the pointer is visual.
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
 		t.mouse.dragging = true
 		t.mouse.dragButton = ctx.Event.MouseButton
 		t.mouse.dragReport = true
@@ -401,20 +402,26 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
 		contentR := t.grid.viewportToContent(r)
-		head := contentPos{Row: contentR, Col: selCol}
+		cols := t.grid.Cols
+		v2l := t.v2lForViewportRow(r)
+		// Pointer geometry is visual; grid coordinates are logical.
+		head := contentPos{Row: contentR, Col: logicalBoundary(v2l, selCol, cols)}
+		lc := logicalCell(v2l, c, cols)
+		extended := false
 		switch {
 		case shiftExtend && t.grid.hasSelAnchor:
 			// Keep SelAnchor; move only the head to the click point. A one-cell
 			// span (head == anchor) is not a real selection, so leave inactive.
 			t.grid.SelHead = head
 			t.grid.SelActive = head != t.grid.SelAnchor
+			extended = true
 		case count == 2:
 			// Double click: the word under the *cell*, not the boundary.
 			t.grid.SelMode = selWord
-			t.selectUnitAt(contentPos{Row: contentR, Col: c})
+			t.selectUnitAt(contentPos{Row: contentR, Col: lc})
 		case count == 3:
 			t.grid.SelMode = selLine
-			t.selectUnitAt(contentPos{Row: contentR, Col: c})
+			t.selectUnitAt(contentPos{Row: contentR, Col: lc})
 		default:
 			t.grid.SelMode = selChar
 			if block {
@@ -425,6 +432,8 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 			t.grid.SelActive = false
 		}
 		t.grid.hasSelAnchor = true
+		t.mouse.selStartV, t.mouse.selStartRow = selCol, contentR
+		t.mouse.selStartSet = !extended
 	}()
 	t.mouse.dragging = true
 	t.mouse.dragButton = ctx.Event.MouseButton
@@ -534,13 +543,29 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 			}
 		}
 		contentR := t.grid.viewportToContent(r)
+		cols := t.grid.Cols
+		v2l := t.v2lForViewportRow(r)
 		// A drag begun with a double or triple click keeps that granularity:
 		// the selection snaps to whole words / lines as the pointer moves.
 		if t.grid.SelMode == selWord || t.grid.SelMode == selLine {
-			t.extendUnitSelection(contentPos{Row: contentR, Col: c})
+			t.extendUnitSelection(contentPos{Row: contentR, Col: logicalCell(v2l, c, cols)})
 			return
 		}
-		t.grid.SelHead = contentPos{Row: contentR, Col: selCol}
+		if t.mouse.selStartSet && contentR == t.mouse.selStartRow && t.grid.SelMode == selChar {
+			// Same-row char drag: map the whole visual range to its
+			// covering logical span so the selected glyphs are exactly
+			// the dragged ones (point-mapping each end would drift by
+			// a cell on reversed rows).
+			if l0, l1, ok := logicalSpan(v2l, t.mouse.selStartV, selCol, cols); ok {
+				t.grid.SelAnchor = contentPos{Row: contentR, Col: l0}
+				t.grid.SelHead = contentPos{Row: contentR, Col: l1}
+				t.grid.SelActive = true
+				return
+			}
+		}
+		// Cross-row drags (and the block band): the anchor row runs to its
+		// edge via selRowSpan, so only the head needs mapping here.
+		t.grid.SelHead = contentPos{Row: contentR, Col: logicalBoundary(v2l, selCol, cols)}
 		if t.grid.SelHead != t.grid.SelAnchor {
 			t.grid.SelActive = true
 		}
@@ -574,12 +599,12 @@ func (t *Term) motionReport(e *gui.Event, snap mouseSnap, r, c int) bool {
 			return true
 		}
 		cb := base + mouseModBits(e.Modifiers) + 32
-		t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap.pixels, true)
 		t.mouse.lastR, t.mouse.lastC = r, c
 		return true
 	case !t.mouse.dragging && snap.any:
 		cb := 35 + mouseModBits(e.Modifiers) // 3+32 = motion, no button
-		t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap.pixels, true)
 		t.mouse.lastR, t.mouse.lastC = r, c
 		return true
 	}
@@ -669,12 +694,20 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 	func() {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
+		v2l := t.v2lForViewportRow(r)
+		cols := t.grid.Cols
+		// Pointer geometry is visual; grid coordinates are logical.
+		lc := logicalCell(v2l, c, cols)
 		if oldR >= 0 && oldC >= 0 {
-			prevLink = t.grid.ViewCellAt(oldR, oldC).LinkID
+			oldLC := oldC
+			if oldV2L := t.v2lForViewportRow(oldR); oldV2L != nil {
+				oldLC = logicalCell(oldV2L, oldC, cols)
+			}
+			prevLink = t.grid.ViewCellAt(oldR, oldLC).LinkID
 		}
-		curLink = t.grid.ViewCellAt(r, c).LinkID
+		curLink = t.grid.ViewCellAt(r, lc).LinkID
 		if cmd && curLink == 0 {
-			cp := contentPos{Row: t.grid.viewportToContent(r), Col: c}
+			cp := contentPos{Row: t.grid.viewportToContent(r), Col: lc}
 			url, spans, _ = t.grid.detectURLAt(cp)
 		}
 		shape = t.grid.PointerShape
@@ -747,7 +780,7 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 			base, ok := mouseSGRBaseButton(t.mouse.dragButton)
 			if ok {
 				cb := base + mouseModBits(ctx.Event.Modifiers)
-				t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, false)
+				t.writeMouse(cb, t.logicalMouseCol(r, c), r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, false)
 			}
 		}
 		t.mouse.dragging = false
@@ -789,18 +822,19 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 	ctx.Event.IsHandled = true
 }
 
-// linkURLAt resolves the link at viewport cell (r,c). An explicit OSC 8
-// destination wins; otherwise implicit URL detection runs at the same cell,
-// matching the precedence the Cmd-hover highlight uses. Returns "" when the
-// cell carries no link.
+// linkURLAt resolves the link at viewport cell (r,c) in visual coordinates.
+// An explicit OSC 8 destination wins; otherwise implicit URL detection runs
+// at the same cell, matching the precedence the Cmd-hover highlight uses.
+// Returns "" when the cell carries no link.
 func (t *Term) linkURLAt(r, c int) string {
 	t.grid.Mu.Lock()
 	defer t.grid.Mu.Unlock()
-	cell := t.grid.ViewCellAt(r, c)
+	lc := logicalCell(t.v2lForViewportRow(r), c, t.grid.Cols)
+	cell := t.grid.ViewCellAt(r, lc)
 	if u := t.grid.LinkURL(cell.LinkID); u != "" {
 		return u
 	}
-	cp := contentPos{Row: t.grid.viewportToContent(r), Col: c}
+	cp := contentPos{Row: t.grid.viewportToContent(r), Col: lc}
 	u, _, _ := t.grid.detectURLAt(cp)
 	return u
 }
@@ -1013,8 +1047,9 @@ func (t *Term) onMouseScroll(ctx gui.EventCtx) {
 			base = 65
 		}
 		cb := base + mouseModBits(ctx.Event.Modifiers)
+		lc := t.logicalMouseCol(r, c)
 		for range t.wheelReportTicks(ctx.Event.ScrollY, ctx.Event.ScrollPrecise) {
-			t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
+			t.writeMouse(cb, lc, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
 		}
 		ctx.Event.IsHandled = true
 		return

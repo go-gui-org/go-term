@@ -280,14 +280,15 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 
 	// Phase order matters: prepareFastPath sets ds.renderRows / ds.live, which
 	// all subsequent phases read. prepareBiDi sets ds.bidiVisRows consumed
-	// by drawBgPass / drawFgPass / drawCursor. drawIME populates ds.ime* fields
-	// consumed by drawCursor.
+	// by drawBgPass / drawFgPass / drawCursor, and ds.bidiV2LRows consumed
+	// by prepareHoverURL — so BiDi runs before hover. drawIME populates
+	// ds.ime* fields consumed by drawCursor.
 	t.prepareResize(&ds)
 	t.prepareFastPath(&ds)
 	t.prepareSearch(&ds)
 	t.prepareSelection(&ds)
-	t.prepareHoverURL(&ds)
 	t.prepareBiDi(&ds)
+	t.prepareHoverURL(&ds)
 	t.preparePartialRow(&ds)
 	t.drawBgPass(&ds)
 	t.drawFgPass(&ds)
@@ -526,8 +527,10 @@ func (t *Term) prepareSelection(ds *drawState) {
 
 // prepareHoverURL translates the Cmd-hovered implicit-URL span (issue 72),
 // stored by updateHover in content coordinates, into a per-viewport-row column
-// range consumed by drawFgPass. No-op unless Cmd is held and a URL is under the
-// pointer, so the render path pays nothing in the common case.
+// range consumed by drawFgPass. Runs after prepareBiDi so logical spans can
+// be mapped to the visual columns the foreground loop actually iterates.
+// No-op unless Cmd is held and a URL is under the pointer, so the render
+// path pays nothing in the common case.
 func (t *Term) prepareHoverURL(ds *drawState) {
 	if !t.mouse.cmdHeld.Load() || len(t.mouse.hoverSpans) == 0 {
 		return
@@ -545,7 +548,16 @@ func (t *Term) prepareHoverURL(ds *drawState) {
 		if !ok {
 			continue
 		}
-		t.draw.urlBuf[vr] = rowBounds{sp.C0, sp.C1, true}
+		c0, c1 := sp.C0, sp.C1
+		if vr >= 0 && vr < len(ds.bidiV2LRows) && ds.bidiV2LRows[vr] != nil {
+			// Logical span → covering visual span; same approximation
+			// as selection (see logicalSpan): gap glyphs between runs
+			// highlight along.
+			if v0, v1, ok := visualSpan(ds.bidiV2LRows[vr], sp.C0, sp.C1); ok {
+				c0, c1 = v0, v1
+			}
+		}
+		t.draw.urlBuf[vr] = rowBounds{c0, c1, true}
 		active = true
 	}
 	if active {
@@ -553,9 +565,9 @@ func (t *Term) prepareHoverURL(ds *drawState) {
 	}
 }
 
-// prepareBiDi detects viewport rows containing RTL characters and computes
-// their visual-reordered cell slices + logical→visual column maps. For live
-// LTR-only terminals rowHasRTL returns false immediately — zero allocations.
+// prepareBiDi detects viewport rows containing reorder triggers and computes
+// their visual-reordered cell slices + visual→logical column maps. For live
+// LTR-only terminals rowNeedsBidi returns false immediately — zero allocations.
 func (t *Term) prepareBiDi(ds *drawState) {
 	renderRows := ds.renderRows
 	if renderRows == 0 {
@@ -575,18 +587,18 @@ func (t *Term) prepareBiDi(ds *drawState) {
 	ds.bidiV2LRows = t.draw.bidiV2LRows
 	cols := ds.cols
 	for r := ds.renderTop; r < renderRows; r++ {
-		var hasRTL bool
+		var needBidi bool
 		if ds.live {
-			hasRTL = rowHasRTL(ds.slots[ds.rowMap[r]], cols)
+			needBidi = rowNeedsBidi(ds.slots[ds.rowMap[r]], cols)
 		} else {
 			for c := range cols {
-				if isRTLRune(ds.g.ViewCellAt(r, c).Ch) {
-					hasRTL = true
+				if ch := ds.g.ViewCellAt(r, c).Ch; ch != 0 && needsReorder(ch) {
+					needBidi = true
 					break
 				}
 			}
 		}
-		if !hasRTL {
+		if !needBidi {
 			continue
 		}
 		if cap(t.draw.bidiScratch) < cols {
@@ -610,7 +622,7 @@ func (t *Term) preparePartialRow(ds *drawState) {
 		return
 	}
 	row := ds.g.partialTopRow()
-	if row != nil && rowHasRTL(row, ds.cols) {
+	if row != nil && rowNeedsBidi(row, ds.cols) {
 		if vis, _ := visualReorder(row, ds.cols); vis != nil {
 			row = vis
 		}
