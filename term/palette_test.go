@@ -175,6 +175,27 @@ func TestPalette_OverrideHonorsInverse(t *testing.T) {
 	}
 }
 
+func TestPalette_SetPaletteColorRejectsUntagged(t *testing.T) {
+	g := newGrid(2, 4)
+	// Only rgbColor-tagged values may enter the override layer. A
+	// mis-tagged value must be ignored before the layer is touched, so
+	// it neither allocates the table nor poisons the effective palette.
+	g.SetPaletteColor(1, paletteColor(9))
+	if g.palOverride != nil {
+		t.Fatal("untagged value allocated the override table")
+	}
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 1}), DefaultTheme.ANSI[1]; got != want {
+		t.Errorf("untagged set changed index 1: got %+v want %+v", got, want)
+	}
+	g.SetPaletteColor(1, defaultColor)
+	if g.palOverride != nil {
+		t.Fatal("defaultColor allocated the override table")
+	}
+	if got, want := g.fgOf(cell{Ch: ' ', FG: 1}), DefaultTheme.ANSI[1]; got != want {
+		t.Errorf("defaultColor set changed index 1: got %+v want %+v", got, want)
+	}
+}
+
 func TestPalette_NoOverrideMatchesTheme(t *testing.T) {
 	g := newGrid(2, 4)
 	if g.palOverride != nil {
