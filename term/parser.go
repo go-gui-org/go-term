@@ -77,9 +77,10 @@ type parser struct {
 	// Program Command). Used by the Kitty Graphics Protocol (payload
 	// starts with 'G'). Capped at maxAPCBytes per-chunk; chunked images
 	// accumulate base64 text in kittyChunks.
-	apc    []byte
-	curP   int // value being accumulated
-	utfLen int
+	apc      []byte
+	apcTrunc bool // true once a byte was dropped for exceeding the APC cap
+	curP     int  // value being accumulated
+	utfLen   int
 
 	utf                 [4]byte // UTF-8 carry-over between Feed calls
 	state               parserState
@@ -122,6 +123,12 @@ func (p *parser) oscReset() {
 func (p *parser) dcsReset() {
 	p.dcs = resetPayload(p.dcs, maxDCSRetain)
 	p.dcsTrunc = false
+}
+
+// apcReset starts a fresh APC payload.
+func (p *parser) apcReset() {
+	p.apc = resetPayload(p.apc, maxAPCBytes)
+	p.apcTrunc = false
 }
 
 // SetTitleHandler registers a callback for OSC 0/1/2. Pass nil to

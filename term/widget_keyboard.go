@@ -48,7 +48,9 @@ func (t *Term) isAltActive() bool {
 
 // recompileSearchRE compiles searchQuery into searchRE when regex mode is
 // active. Clears searchRE and searchREErr when not in regex mode or when the
-// query is empty.
+// query is empty. Go's regexp is RE2 (linear-time, no backtracking), so a
+// hostile pattern cannot wedge the main thread the way a backtracker could;
+// the query is length-capped at MaxGridDim regardless.
 func (t *Term) recompileSearchRE() {
 	if t.search.regex && t.search.query != "" {
 		t.search.re, t.search.reErr = regexp.Compile(t.search.query)
@@ -57,6 +59,12 @@ func (t *Term) recompileSearchRE() {
 		t.search.reErr = nil
 	}
 }
+
+// maxIMECommitBytes caps a single IME commit delivered to the pty. Real
+// commits are tens of bytes; a rogue IME handing over megabytes on the main
+// thread would stall pty writes, so truncate at a rune boundary instead.
+// truncatePaste already implements exactly that policy — reuse it.
+const maxIMECommitBytes = 1 << 14
 
 // onChar receives printable character input from the OS.
 func (t *Term) onChar(ctx gui.EventCtx) {
@@ -102,8 +110,14 @@ func (t *Term) onChar(ctx gui.EventCtx) {
 	if text == "" {
 		text = string(rune(ctx.Event.CharCode))
 	}
+	text = truncatePaste(text, maxIMECommitBytes)
 	if t.search.active {
-		if utf8.RuneCountInString(t.search.query) < MaxGridDim {
+		// A single bulk commit must not overshoot the cap the per-keystroke
+		// path enforces: trim the commit to the remaining rune budget.
+		if n := utf8.RuneCountInString(t.search.query); n < MaxGridDim {
+			if rs := []rune(text); len(rs) > MaxGridDim-n {
+				text = string(rs[:MaxGridDim-n])
+			}
 			t.search.query += text
 			t.recompileSearchRE()
 		}
@@ -627,7 +641,9 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 			t.search.regex = !t.search.regex
 			t.recompileSearchRE()
 			t.bumpVersion()
-			w.InvalidateLayout()
+			if w != nil {
+				w.InvalidateLayout()
+			}
 		// Backspace and Escape are text editing, not rebindable shortcuts.
 		case e.KeyCode == gui.KeyBackspace:
 			if len(t.search.query) > 0 {
@@ -635,7 +651,9 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 				t.search.query = string(rr[:len(rr)-1])
 				t.recompileSearchRE()
 				t.bumpVersion()
-				w.InvalidateLayout()
+				if w != nil {
+					w.InvalidateLayout()
+				}
 			}
 		case e.KeyCode == gui.KeyEscape:
 			t.search.active = false
@@ -648,7 +666,9 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 				break
 			}
 			t.bumpVersion()
-			w.InvalidateLayout()
+			if w != nil {
+				w.InvalidateLayout()
+			}
 		}
 		e.IsHandled = true
 		return true
@@ -809,36 +829,28 @@ func (t *Term) encodeKeyEvent(e *gui.Event, w *gui.Window, shift, ctrl bool) []b
 	case gui.KeyRight:
 		if mod := modParam(shift, false, ctrl); mod != 0 {
 			out = modSS3('C', mod)
-		} else if modes.appCursor {
-			out = []byte("\x1bOC")
 		} else {
-			out = []byte("\x1b[C")
+			out = arrowSeq('C', modes.appCursor)
 		}
 	case gui.KeyLeft:
 		if mod := modParam(shift, false, ctrl); mod != 0 {
 			out = modSS3('D', mod)
-		} else if modes.appCursor {
-			out = []byte("\x1bOD")
 		} else {
-			out = []byte("\x1b[D")
+			out = arrowSeq('D', modes.appCursor)
 		}
 	case gui.KeyHome:
 		if mod := modParam(false, false, ctrl); mod != 0 {
 			// Shift excluded from modifier: Shift+Home scrolls, Ctrl+Shift+Home emits Ctrl+Home.
 			out = modSS3('H', mod)
-		} else if modes.appCursor {
-			out = []byte("\x1bOH")
 		} else {
-			out = []byte("\x1b[H")
+			out = arrowSeq('H', modes.appCursor)
 		}
 	case gui.KeyEnd:
 		if mod := modParam(false, false, ctrl); mod != 0 {
 			// Shift excluded from modifier: Shift+End scrolls, Ctrl+Shift+End emits Ctrl+End.
 			out = modSS3('F', mod)
-		} else if modes.appCursor {
-			out = []byte("\x1bOF")
 		} else {
-			out = []byte("\x1b[F")
+			out = arrowSeq('F', modes.appCursor)
 		}
 	case gui.KeyDelete:
 		out = []byte("\x1b[3~")

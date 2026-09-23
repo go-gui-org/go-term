@@ -140,6 +140,14 @@ func rewrapLine(cells []cell, newCols int, arena *rowArena, dest *[]physRow) int
 		if c.Width == 2 {
 			w = 2
 		}
+		// A wide glyph on a grid narrower than itself (a 1-column pane):
+		// narrow it to one cell, as putCell does. Pushing head plus
+		// continuation would overrun the row and strand a Width==2 head
+		// with no continuation once the row is copied out.
+		if w > newCols {
+			w = 1
+			c.Width = 1
+		}
 
 		if len(cur)+w > newCols {
 
@@ -324,7 +332,14 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 		phys[nSB+r] = physRow{cells: row, wrapped: w}
 	}
 
-	cursorPhys := nSB + clamp(cursorR, 0, oldRows-1)
+	cursorPhys := nSB - 1
+	if oldRows > 0 {
+		cursorPhys = nSB + clamp(cursorR, 0, oldRows-1)
+	}
+	// oldRows reaches 0 when the cap above truncates the whole live
+	// buffer; clamp needs lo <= hi, so the cursor then stays on the
+	// last scrollback row (or off-grid when nothing survived, which
+	// the fallbacks below already handle).
 
 	// --- Identify logical lines and the one containing the cursor ---
 	type logLine struct {
@@ -391,9 +406,13 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 	// invalidated by every subsequent trim.
 	dropped := 0
 	var lineBase, lineRows []int
+	var lineContent []int
 	if len(trackPhys) > 0 {
 		lineBase = make([]int, len(lines))
 		lineRows = make([]int, len(lines))
+		// Trimmed cell count per logical line, for exact tracked-row
+		// mapping below.
+		lineContent = make([]int, len(lines))
 	}
 
 	// lineCells is reused across logical lines to avoid per-line allocation.
@@ -455,6 +474,7 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 		}
 		if lineBase != nil {
 			lineBase[li] = len(allNew) + dropped
+			lineContent[li] = len(lineCells)
 		}
 		n := rewrapLine(lineCells, newCols, arena, &allNew)
 		if li == cursorLineIdx {
@@ -528,7 +548,12 @@ func logicalReflow(cfg reflowConfig) reflowResult {
 			if li >= len(lines) || p < lines[li].start {
 				continue
 			}
-			rowInLine := min((p-lines[li].start)*oldCols/newCols, lineRows[li]-1)
+			// A tracked row sits at its physical row's start, so its offset
+			// into the line is (p-start) full rows — clamped to the trimmed
+			// content length, since trailing blanks never survived the rewrap
+			// and would otherwise push the row one too far down.
+			off := min((p-lines[li].start)*oldCols, lineContent[li])
+			rowInLine := min(off/newCols, lineRows[li]-1)
 			idx := lineBase[li] + rowInLine - dropped
 			if idx < sbTrim || idx >= liveEnd {
 				continue // scrolled out of the capped scrollback, or past the live buffer
@@ -665,6 +690,11 @@ func (g *grid) Resize(rows, cols int) {
 		newRW := make([]bool, rows)
 		copy(newRW, g.RowWrapped)
 		g.RowWrapped = newRW
+		// The alt buffer is only cropped and padded, so unlike the main
+		// path above no reflow clamps the cursor: pin it here, or the
+		// next Put indexes RowWrapped out of range.
+		g.CursorR = clamp(g.CursorR, 0, rows-1)
+		g.CursorC = clamp(g.CursorC, 0, cols-1)
 
 		if len(g.mainSaved.cells) == g.Rows*g.Cols {
 			savedRW := g.mainSaved.rowWrapped
@@ -785,6 +815,9 @@ func (g *grid) Resize(rows, cols int) {
 	}
 	if nWidget == 0 {
 		for i, row := range g.resizeTrack {
+			if row < 0 {
+				continue
+			}
 			g.resizeTrack[i] = clamp(row+delta, 0, total-1)
 		}
 	}

@@ -127,7 +127,7 @@ func (p *parser) feedChunk(b []byte) {
 				p.oscReset()
 			case '_':
 				p.state = stAPC
-				p.apc = p.apc[:0]
+				p.apcReset()
 			case 'P':
 				p.state = stDCS
 				p.dcsReset()
@@ -274,6 +274,15 @@ func (p *parser) feedChunk(b []byte) {
 			}
 			i++
 		case stDCS:
+			// CAN/SUB cancel the sequence (ECMA-48 §5.4), like the
+			// execute path in stEsc/stCSI. Any other control is payload.
+			if p.abortsSequence(c) {
+				p.dcsReset()
+				p.state = stGround
+				p.execC0(c)
+				i++
+				continue
+			}
 			switch c {
 			case 0x1B:
 				p.state = stDCSEsc
@@ -290,7 +299,12 @@ func (p *parser) feedChunk(b []byte) {
 			}
 			i++
 		case stDCSEsc:
-			if c == '\\' {
+			if p.abortsSequence(c) {
+				p.dcsReset()
+				p.state = stGround
+				p.execC0(c)
+				i++
+			} else if c == '\\' {
 				p.dispatchDCS()
 				// Release the payload immediately, as the OSC path does.
 				// dispatchDCS keeps no reference to p.dcs (handleSixel
@@ -306,6 +320,14 @@ func (p *parser) feedChunk(b []byte) {
 				p.state = stEsc
 			}
 		case stOSC:
+			// See stDCS: CAN/SUB cancel rather than joining the payload.
+			if p.abortsSequence(c) {
+				p.oscReset()
+				p.state = stGround
+				p.execC0(c)
+				i++
+				continue
+			}
 			switch c {
 			case 0x07:
 				p.dispatchOSC()
@@ -334,7 +356,12 @@ func (p *parser) feedChunk(b []byte) {
 			}
 			i++
 		case stOSCEsc:
-			if c == '\\' {
+			if p.abortsSequence(c) {
+				p.oscReset()
+				p.state = stGround
+				p.execC0(c)
+				i++
+			} else if c == '\\' {
 				p.dispatchOSC()
 				p.oscReset()
 				p.state = stGround
@@ -344,23 +371,41 @@ func (p *parser) feedChunk(b []byte) {
 				p.state = stEsc
 			}
 		case stAPC:
+			// See stDCS: CAN/SUB cancel rather than joining the payload.
+			if p.abortsSequence(c) {
+				p.apcReset()
+				p.state = stGround
+				p.execC0(c)
+				i++
+				continue
+			}
 			switch c {
 			case 0x1B:
 				p.state = stAPCEsc
 			default:
 				if len(p.apc) < maxAPCBytes {
 					p.apc = append(p.apc, c)
+				} else {
+					// Over the cap: remember it so dispatchAPC drops
+					// the sequence instead of acting on truncated
+					// control data, mirroring the OSC/DCS paths.
+					p.apcTrunc = true
 				}
 			}
 			i++
 		case stAPCEsc:
-			if c == '\\' {
+			if p.abortsSequence(c) {
+				p.apcReset()
+				p.state = stGround
+				p.execC0(c)
+				i++
+			} else if c == '\\' {
 				p.dispatchAPC()
-				p.apc = p.apc[:0]
+				p.apcReset()
 				p.state = stGround
 				i++
 			} else {
-				p.apc = p.apc[:0]
+				p.apcReset()
 				p.state = stEsc
 			}
 		}

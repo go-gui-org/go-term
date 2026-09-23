@@ -399,6 +399,10 @@ func TestGrid_ScrollViewPx_NaNDeltaIsNoOp(t *testing.T) {
 	if g.ViewOffset != offset || g.ViewSubPx != subPx {
 		t.Errorf("NaN delta changed state: (%d,%v) → (%d,%v)", offset, subPx, g.ViewOffset, g.ViewSubPx)
 	}
+	g.ScrollViewPx(float32(math.Inf(1)), 20)
+	if g.ViewOffset != offset || g.ViewSubPx != subPx {
+		t.Errorf("Inf delta changed state: (%d,%v) → (%d,%v)", offset, subPx, g.ViewOffset, g.ViewSubPx)
+	}
 }
 
 func TestGrid_ScrollViewPx_ZeroCellHIsNoOp(t *testing.T) {
@@ -508,6 +512,8 @@ func TestGrid_SetViewFractional_NoOpGuards(t *testing.T) {
 	}{
 		{2, 0, "zero cellH"},
 		{2, -1, "negative cellH"},
+		{2, float32(math.NaN()), "NaN cellH"},
+		{2, float32(math.Inf(1)), "Inf cellH"},
 		{float32(math.NaN()), 20, "NaN off"},
 		{float32(math.Inf(1)), 20, "Inf off"},
 	} {

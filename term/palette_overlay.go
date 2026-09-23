@@ -188,8 +188,9 @@ const (
 	// against its fill. Higher: this is text being read, not chrome being
 	// noticed.
 	minTextDist = 250
-	// The bell wash gets its own, much lower floor: bellFlashPeakAlpha is 22,
-	// so even a pure white wash over pure black composites to 66. The wash is
+	// The bell wash gets its own, much lower floor: at the baseline
+	// bellFlashPeakAlpha even a pure white wash over pure black composites
+	// to 3*bellFlashPeakAlpha. The wash is
 	// meant to be caught peripherally, not read — what this floor rules out is
 	// the case that motivated the whole pass, a wash on the same side of the
 	// spectrum as the background.
@@ -373,6 +374,14 @@ func deriveOverlay(th Theme) overlayColors {
 			hover = cand
 			break
 		}
+	}
+	// Explicit fallback, mirroring pushOff's pole return: if even the
+	// extreme cannot beat idle (unseen in the bundled corpus —
+	// TestOverlayContrast pins hover above idle for every shipped theme),
+	// the pole is still the best available answer. Without this the seed
+	// above would stand silently, leaving hover at or below idle.
+	if overlayDist(hover, bg, thumbHoverAlpha) <= overlayDist(thumb, bg, thumbAlpha) {
+		hover = extreme
 	}
 	ov.thumbHover = withAlpha(hover, thumbHoverAlpha)
 

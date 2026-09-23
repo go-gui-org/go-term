@@ -467,6 +467,233 @@ func TestScrollbackRing_SetGeom_ShrinkRegrow(t *testing.T) {
 	}
 }
 
+// ---- slot / zero-ring hardening ----
+
+func TestScrollbackRing_ZeroRing_NoPanic(t *testing.T) {
+	var r scrollbackRing // never had SetGeom: cap 0, cols 0
+	if r.Len() != 0 {
+		t.Errorf("Len() = %d, want 0", r.Len())
+	}
+	if r.Row(0) != nil {
+		t.Error("Row(0) on zero ring want nil")
+	}
+	if r.Wrapped(0) {
+		t.Error("Wrapped(0) on zero ring want false")
+	}
+	if r.Wrapped(-1) {
+		t.Error("Wrapped(-1) on zero ring want false")
+	}
+}
+
+func TestScrollbackRing_Wrapped_ZeroCols(t *testing.T) {
+	r := scrollbackRing{}
+	r.SetGeom(3, 0)
+	r.Push(nil, false)
+	if r.Wrapped(0) {
+		t.Error("Wrapped(0) with cols=0 want false")
+	}
+}
+
+// ---- PushSwap ----
+
+func TestScrollbackRing_PushSwap_MovesStorageByReference(t *testing.T) {
+	r := scrollbackRing{}
+	r.SetGeom(3, 5)
+	mk := func(ch rune) []cell {
+		row := make([]cell, 5)
+		for i := range row {
+			row[i] = cell{Ch: ch, Width: 1}
+		}
+		return row
+	}
+	r1, r2, r3 := mk('1'), mk('2'), mk('3')
+
+	spare, evicted := r.PushSwap(r1, false)
+	if evicted {
+		t.Error("first PushSwap want evicted=false")
+	}
+	if len(spare) != 5 {
+		t.Fatalf("spare len = %d, want 5", len(spare))
+	}
+	if &spare[0] == &r1[0] {
+		t.Error("spare aliases the just-stored row: swap did not exchange")
+	}
+	// Newest entry is the caller's slice itself, not a copy.
+	if newest := r.Row(r.Len() - 1); len(newest) == 0 || &newest[0] != &r1[0] {
+		t.Error("ring did not keep the caller's row by reference")
+	}
+
+	if _, evicted := r.PushSwap(r2, true); evicted {
+		t.Error("second PushSwap want evicted=false")
+	}
+	if _, evicted := r.PushSwap(r3, false); evicted {
+		t.Error("third PushSwap at cap want evicted=false")
+	}
+	if !r.Wrapped(1) {
+		t.Error("Wrapped(1) want true after swapped push with wrapped=true")
+	}
+
+	// Full ring: the next swap evicts the oldest and hands its storage back.
+	r4 := mk('4')
+	spare, evicted = r.PushSwap(r4, false)
+	if !evicted {
+		t.Error("PushSwap past cap want evicted=true")
+	}
+	if len(spare) == 0 || &spare[0] != &r1[0] {
+		t.Error("spare past cap is not the evicted oldest row's storage")
+	}
+	if newest := r.Row(r.Len() - 1); len(newest) == 0 || &newest[0] != &r4[0] {
+		t.Error("newest row past cap is not the caller's slice")
+	}
+	if got := r.Row(0)[0].Ch; got != '2' {
+		t.Errorf("Row(0)[0] = %c, want 2 after eviction", got)
+	}
+}
+
+func TestScrollbackRing_PushSwap_Fallback_WrongLen(t *testing.T) {
+	r := scrollbackRing{}
+	r.SetGeom(2, 5)
+	short := []cell{{Ch: 'a', Width: 1}, {Ch: 'b', Width: 1}}
+
+	spare, evicted := r.PushSwap(short, false)
+	if evicted {
+		t.Error("fallback PushSwap want evicted=false")
+	}
+	// Fallback returns the row itself: same backing signals "not swapped".
+	if len(spare) == 0 || &spare[0] != &short[0] {
+		t.Error("fallback spare is not the input row itself")
+	}
+	if r.Len() != 1 {
+		t.Fatalf("Len() = %d, want 1", r.Len())
+	}
+	got := r.Row(0)
+	if len(got) != 5 {
+		t.Fatalf("Row(0) len = %d, want 5", len(got))
+	}
+	if got[0].Ch != 'a' || got[1].Ch != 'b' {
+		t.Error("fallback copy lost the input cells")
+	}
+	if got[2].Ch != 0 {
+		t.Errorf("fallback copy: trailing Ch=%d, want 0-padded", got[2].Ch)
+	}
+	if &got[0] == &short[0] {
+		t.Error("fallback stored an alias of the input, want a copy")
+	}
+}
+
+func TestScrollbackRing_PushSwap_Fallback_Disabled(t *testing.T) {
+	r := scrollbackRing{}
+	r.SetGeom(0, 80)
+	row := makeRow("hi")
+	spare, evicted := r.PushSwap(row, false)
+	if evicted {
+		t.Error("disabled PushSwap want evicted=false")
+	}
+	if len(spare) == 0 || &spare[0] != &row[0] {
+		t.Error("disabled spare is not the input row itself")
+	}
+	if r.Len() != 0 {
+		t.Errorf("Len() = %d, want 0", r.Len())
+	}
+}
+
+func TestScrollbackRing_PushSwap_LazyReallocAfterDrop(t *testing.T) {
+	r := scrollbackRing{}
+	r.SetGeom(3, 5)
+	row := make([]cell, 5)
+	for i := range row {
+		row[i] = cell{Ch: 'a', Width: 1}
+	}
+	if _, evicted := r.PushSwap(row, false); evicted {
+		t.Fatal("setup PushSwap want evicted=false")
+	}
+	r.DropBacking()
+	next := make([]cell, 5)
+	for i := range next {
+		next[i] = cell{Ch: 'z', Width: 1}
+	}
+	spare, evicted := r.PushSwap(next, true)
+	if evicted {
+		t.Error("first PushSwap after drop want evicted=false")
+	}
+	if len(spare) != 5 {
+		t.Fatalf("spare len = %d, want 5", len(spare))
+	}
+	if r.Len() != 1 {
+		t.Fatalf("Len() = %d, want 1", r.Len())
+	}
+	if got := r.Row(0); len(got) == 0 || &got[0] != &next[0] {
+		t.Error("ring did not keep the swapped row by reference after drop")
+	}
+	if !r.Wrapped(0) {
+		t.Error("Wrapped(0) want true")
+	}
+	// The spare must be live ring-slab storage, safe for the caller to reuse.
+	for i := range spare {
+		spare[i] = cell{Ch: 'q', Width: 1}
+	}
+	if got := r.Row(0)[0].Ch; got != 'z' {
+		t.Errorf("writing spare corrupted the ring: Ch=%c, want z", got)
+	}
+}
+
+// ---- gen ----
+
+func TestScrollbackRing_Gen(t *testing.T) {
+	r := scrollbackRing{}
+	r.SetGeom(3, 5)
+	base := r.gen
+	r.Push(makeRow("aaa"), false)
+	if r.gen != base {
+		t.Error("Push bumped gen: copies never alias, want unchanged")
+	}
+	r.Reset()
+	if r.gen != base {
+		t.Error("Reset bumped gen: slab unchanged, want unchanged")
+	}
+	r.SetGeom(3, 5)
+	if r.gen == base {
+		t.Error("SetGeom did not bump gen")
+	}
+	base = r.gen
+	r.Push(makeRow("aaa"), false)
+	r.EnsureGeom(3, 5) // noop
+	if r.gen != base {
+		t.Error("noop EnsureGeom bumped gen")
+	}
+	r.EnsureGeom(5, 5) // realloc: newest rows preserved on a new slab
+	if r.gen == base {
+		t.Error("EnsureGeom realloc did not bump gen")
+	}
+	base = r.gen
+	r.DropBacking()
+	if r.gen == base {
+		t.Error("DropBacking did not bump gen")
+	}
+}
+
+// ---- wild-capacity clamp ----
+
+// The clamp is allocation-free by construction: clampRingGeom bounds the
+// product before any make(), so pin it directly instead of allocating a
+// maxRingCells slab in the test.
+func TestClampRingGeom(t *testing.T) {
+	capacity, cols := clampRingGeom(1<<40, 80)
+	if want := maxRingCells / 80; capacity != want || cols != 80 {
+		t.Errorf("clampRingGeom(1<<40, 80) = (%d, %d), want (%d, 80)",
+			capacity, cols, want)
+	}
+	if int64(capacity)*int64(cols) > maxRingCells {
+		t.Errorf("product %d exceeds maxRingCells", int64(capacity)*int64(cols))
+	}
+	if c, co := clampRingGeom(-5, -10); c != 0 || co != 0 {
+		t.Errorf("clampRingGeom(-5, -10) = (%d, %d), want (0, 0)", c, co)
+	}
+	if c, co := clampRingGeom(10, 80); c != 10 || co != 80 {
+		t.Errorf("clampRingGeom(10, 80) = (%d, %d), want (10, 80)", c, co)
+	}
+}
+
 // ---- Benchmarks ----
 
 func BenchmarkScrollback_EnsureGeom(b *testing.B) {

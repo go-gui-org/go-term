@@ -567,3 +567,103 @@ func TestSearchRow_ScrollbackWide(t *testing.T) {
 		t.Errorf("expected colMap[0]=0, colMap[1]=2, got %v", colMap)
 	}
 }
+
+// A multi-rune cluster expands in the search row (all runes mapping to the
+// same column) so a query can match inside it, not just its base rune.
+func TestSearchRow_ExpandsClusters(t *testing.T) {
+	g := newGrid(1, 4)
+	id := g.internCluster([]byte("é"))
+	if id == 0 {
+		t.Fatal("setup: cluster did not intern")
+	}
+	g.At(0, 0).Ch = 'e'
+	g.At(0, 0).clusterID = id
+	g.At(0, 1).Ch = 'x'
+	rr, colMap := g.searchRow(0, nil, nil)
+	if len(rr) != 5 { // e, combining acute, x, two trailing spaces
+		t.Fatalf("rr = %q, want 5 runes", rr)
+	}
+	if colMap[0] != 0 || colMap[1] != 0 || colMap[2] != 1 {
+		t.Errorf("colMap = %v, want [0 0 1 ...]", colMap)
+	}
+	if pos, ok := g.Find("é", contentPos{Row: 0, Col: 2}, false); !ok || pos.Col != 0 {
+		t.Errorf("Find combining query = %v,%v, want {0 0},true", pos, ok)
+	}
+}
+
+// Queries longer than MaxGridDim cannot match a single row; the grid
+// rejects them instead of running an unbounded O(n*m) scan per row.
+func TestFind_OverlongQueryRejected(t *testing.T) {
+	g := newGrid(2, 8)
+	if _, ok := g.Find(string(make([]rune, MaxGridDim+1)), contentPos{}, true); ok {
+		t.Error("overlong query matched")
+	}
+	if got := g.ViewportMatches(string(make([]rune, MaxGridDim+1))); got != nil {
+		t.Errorf("overlong viewport query = %v, want nil", got)
+	}
+}
+
+// Anchors see the whole row: `^` fires only at column 0 and `\b` needs a
+// real boundary, even when the scan resumes mid-row after a prior match.
+func TestGrid_ViewportMatchesRegex_AnchorsSeeWholeRow(t *testing.T) {
+	g := newGrid(2, 30)
+	putRow(g, "aaa xaa")
+	if m := g.ViewportMatchesRegex(regexp.MustCompile(`^a`)); len(m) != 1 {
+		t.Errorf("^a: got %d matches, want 1 (%v)", len(m), m)
+	}
+	if m := g.ViewportMatchesRegex(regexp.MustCompile(`\ba`)); len(m) != 1 {
+		t.Errorf(`\ba: got %d matches, want 1 (%v)`, len(m), m)
+	}
+}
+
+// Find-next from a `^` match must not re-anchor at the resume column.
+func TestGrid_FindRegex_ForwardAnchorDoesNotReanchor(t *testing.T) {
+	g := newGrid(3, 20)
+	putRow(g, "aaa")
+	sb := g.Scrollback.Len()
+	pos, _, ok := g.FindRegex(regexp.MustCompile(`^a`), contentPos{Row: sb, Col: 0}, true)
+	if ok && pos.Row == sb && pos.Col != 0 {
+		t.Errorf("^a re-anchored mid-row at col %d", pos.Col)
+	}
+}
+
+// A match ending on a zero-width rune inside a cluster (a combining mark,
+// VS16) still highlights the whole cell, not zero columns.
+func TestViewportMatches_ClusterTailHighlightsCell(t *testing.T) {
+	g := newGrid(1, 4)
+	id := g.internCluster([]byte("é"))
+	if id == 0 {
+		t.Fatal("setup: cluster did not intern")
+	}
+	g.At(0, 0).Ch = 'e'
+	g.At(0, 0).clusterID = id
+	g.At(0, 1).Ch = 'x'
+	m := g.ViewportMatches("é")
+	if len(m) != 1 || m[0].Col != 0 || m[0].Len != 1 {
+		t.Errorf("matches = %v, want one at col 0 len 1", m)
+	}
+}
+
+// Zero-width regex matches (a*, x?) have no cell to highlight: they are
+// skipped, and the scan still finds the real matches around them.
+func TestGrid_Regex_ZeroWidthMatchesSkipped(t *testing.T) {
+	g := newGrid(2, 20)
+	putRow(g, "bab aab")
+	sb := g.Scrollback.Len()
+	re := regexp.MustCompile(`a*`)
+	m := g.ViewportMatchesRegex(re)
+	if len(m) != 2 || m[0].Col != 1 || m[0].Len != 1 || m[1].Col != 4 || m[1].Len != 2 {
+		t.Errorf("ViewportMatchesRegex(a*) = %v, want col 1 len 1, col 4 len 2", m)
+	}
+	pos, l, ok := g.FindRegex(re, contentPos{Row: sb, Col: 1}, true)
+	if !ok || pos.Col != 4 || l != 2 {
+		t.Errorf("FindRegex forward = %v,%d,%v, want col 4 len 2", pos, l, ok)
+	}
+	pos, l, ok = g.FindRegex(re, contentPos{Row: sb, Col: 4}, false)
+	if !ok || pos.Col != 1 || l != 1 {
+		t.Errorf("FindRegex backward = %v,%d,%v, want col 1 len 1", pos, l, ok)
+	}
+	if _, _, ok := g.FindRegex(regexp.MustCompile(`x?`), contentPos{Row: sb, Col: -1}, true); ok {
+		t.Error("x? matched a zero-width span")
+	}
+}

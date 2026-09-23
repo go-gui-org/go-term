@@ -20,7 +20,9 @@ func (g *grid) mainGraphics() (*[]graphic, *int) {
 }
 
 // gfxTrim drops `extra` rows from the front of every origin in list,
-// discarding any whose covered range falls entirely above row 0.
+// discarding any whose covered range falls entirely above row 0. The
+// vacated tail is cleared so dropped placements (and their file paths)
+// are not pinned by the backing array.
 func gfxTrim(list []graphic, extra int) []graphic {
 	if len(list) == 0 {
 		return list
@@ -33,6 +35,7 @@ func gfxTrim(list []graphic, extra int) []graphic {
 			j++
 		}
 	}
+	clear(list[j:])
 	return list[:j]
 }
 
@@ -51,6 +54,7 @@ func gfxShift(list *[]graphic, bound *int, delta, total int) {
 			j++
 		}
 	}
+	clear((*list)[j:])
 	*list = (*list)[:j]
 	if delta > 0 {
 		*bound = occludeBoundUnknown
@@ -58,7 +62,8 @@ func gfxShift(list *[]graphic, bound *int, delta, total int) {
 }
 
 // gfxDropSrc removes every placement in list drawing the file at src,
-// reporting how many went.
+// reporting how many went. The vacated tail is cleared so the dropped
+// file paths are not pinned by the backing array.
 func gfxDropSrc(list []graphic, src string) ([]graphic, int) {
 	j, removed := 0, 0
 	for _, gr := range list {
@@ -69,6 +74,7 @@ func gfxDropSrc(list []graphic, src string) ([]graphic, int) {
 		list[j] = gr
 		j++
 	}
+	clear(list[j:])
 	return list[:j], removed
 }
 
@@ -105,6 +111,7 @@ func (g *grid) scrollGraphicsRegion(top, bottom, n int, down bool) {
 		g.Graphics[j] = gr
 		j++
 	}
+	clear(g.Graphics[j:])
 	g.Graphics = g.Graphics[:j]
 	if down {
 		g.occludeMaxR = occludeBoundUnknown // origins moved down
@@ -144,6 +151,7 @@ func (g *grid) remapGraphics(rows []int) {
 		(*list)[j] = gr
 		j++
 	}
+	clear((*list)[j:])
 	*list = (*list)[:j]
 	*bound = occludeBoundUnknown // re-wrap moved origins arbitrarily
 }
@@ -226,6 +234,7 @@ func (g *grid) occludeGraphics(lr, n, from, to int) {
 	// one place it is ever allowed to shrink.
 	g.occludeMaxR = maxR
 	if removed > 0 {
+		clear(g.Graphics[j:])
 		g.Graphics = g.Graphics[:j]
 		g.markAllDirty()
 	}
@@ -294,6 +303,7 @@ func (g *grid) deleteGraphics(id uint32, all bool) {
 		j++
 	}
 	if j != len(g.Graphics) {
+		clear(g.Graphics[j:])
 		g.Graphics = g.Graphics[:j]
 		g.markAllDirty()
 	}
@@ -314,14 +324,17 @@ func (g *grid) cellsForPixels(widthPx, heightPx int) (int, int) {
 // addGraphicCells is AddGraphic with an explicit cell footprint. Non-positive
 // cols/rows mean "derive from the pixel size", which is what every caller but
 // the OSC 1337 width=/height= path wants. The clamps apply either way: an
-// explicit size is still capped to MaxGridDim rows and truncated at the right
-// margin. Caller holds Mu.
+// explicit size is still capped to MaxGridDim in both axes and truncated at
+// the right margin. Caller holds Mu.
 func (g *grid) addGraphicCells(src string, widthPx, heightPx, cols, rows int) (int, int) {
 	if src == "" || widthPx <= 0 || heightPx <= 0 {
 		return 0, 0
 	}
 	if cols <= 0 || rows <= 0 {
 		cols, rows = g.cellsForPixels(widthPx, heightPx)
+	}
+	if cols > MaxGridDim {
+		cols = MaxGridDim
 	}
 	if rows > MaxGridDim {
 		rows = MaxGridDim
@@ -396,6 +409,7 @@ func (g *grid) clearKittyGraphics(all bool) {
 		j++
 	}
 	if j != len(g.Graphics) {
+		clear(g.Graphics[j:])
 		g.Graphics = g.Graphics[:j]
 		g.markAllDirty()
 	}
@@ -414,6 +428,7 @@ func (g *grid) clearKittyGraphics(all bool) {
 			j++
 		}
 		if j != len(g.mainSaved.graphics) {
+			clear(g.mainSaved.graphics[j:])
 			g.mainSaved.graphics = g.mainSaved.graphics[:j]
 			// No repaint: the alt screen is visible.
 		}

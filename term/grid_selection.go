@@ -8,6 +8,7 @@ func posLess(a, b contentPos) bool {
 }
 
 // selOrder returns the selection bounds in forward order (start <= end).
+// Caller holds Mu.
 func (g *grid) selOrder() (start, end contentPos) {
 	a, b := g.SelAnchor, g.SelHead
 	if posLess(b, a) {
@@ -26,7 +27,7 @@ func (g *grid) selOrder() (start, end contentPos) {
 // highlight can never disagree with what actually lands on the clipboard —
 // they used to hold two independent copies of this arithmetic. Caller
 // guarantees s.Row <= r <= e.Row and that columns are already clamped to
-// [0, Cols].
+// [0, Cols]. Caller holds Mu.
 func (g *grid) selRowSpan(r int, s, e contentPos) (c0, c1 int, ok bool) {
 	if g.SelMode == selBlock {
 		// A rectangle: every row gets the same column band, taken from the
@@ -56,20 +57,33 @@ func (g *grid) selRowSpan(r int, s, e contentPos) (c0, c1 int, ok bool) {
 	return c0, c1, c1 >= c0
 }
 
+// maxSelGrow caps SelectedText's upfront reservation. The builder still
+// grows to the true size, so output is unchanged; the cap only stops a
+// select-all over a deep scrollback from grabbing ~100 MB up front.
+const maxSelGrow = 1 << 20
+
 // SelectedText extracts the selection as a UTF-8 string. Trailing
-// blanks per row are trimmed; row breaks emit '\n' (kitty convention).
+// blanks per row are trimmed; row breaks emit '\n' (kitty convention),
+// except across soft-wrapped rows, which join as one logical line.
 // Returns "" when nothing is selected. Column coordinates are cell
 // *boundaries* (0..Cols) and the span is half-open [s.Col, e.Col), so a
 // one-cell drag yields one cell. Coordinates are content-relative and are
 // clamped so stale coords from a Resize never produce a negative span.
+// Caller holds Mu.
 func (g *grid) SelectedText() string {
 	if !g.SelActive || g.Rows <= 0 || g.Cols <= 0 {
 		return ""
 	}
 	total := g.Scrollback.Len() + g.Rows
+	lo, hi := 0, total-1
+	if g.AltActive {
+		// The alt screen owns no scrollback: stale main-screen history
+		// below it must not leak into the copy.
+		lo = g.Scrollback.Len()
+	}
 	s, e := g.selOrder()
-	s.Row, s.Col = clamp(s.Row, 0, total-1), clamp(s.Col, 0, g.Cols)
-	e.Row, e.Col = clamp(e.Row, 0, total-1), clamp(e.Col, 0, g.Cols)
+	s.Row, s.Col = clamp(s.Row, lo, hi), clamp(s.Col, 0, g.Cols)
+	e.Row, e.Col = clamp(e.Row, lo, hi), clamp(e.Col, 0, g.Cols)
 	if s == e {
 		return ""
 	}
@@ -79,7 +93,7 @@ func (g *grid) SelectedText() string {
 		return ""
 	}
 	var b strings.Builder
-	b.Grow((e.Row-s.Row+1)*g.Cols + (e.Row - s.Row))
+	b.Grow(min((e.Row-s.Row+1)*g.Cols+(e.Row-s.Row), maxSelGrow))
 	for r := s.Row; r <= e.Row; r++ {
 		c0, c1, ok := g.selRowSpan(r, s, e)
 		if !ok {
@@ -90,8 +104,20 @@ func (g *grid) SelectedText() string {
 			continue
 		}
 
+		// Soft-wrapped rows are one logical line: joining them keeps a
+		// wrapped path/URL copy-pasteable instead of splitting it with a
+		// newline. Block selections keep every row broken — the rectangle
+		// is the unit there, not the logical line.
+		joined := r < e.Row && g.SelMode != selBlock && g.contentRowWrapped(r)
+
 		end := c0 - 1
-		for c := c0; c <= c1; c++ {
+		if joined {
+			// Blanks before a soft wrap are real text, not padding: trimming
+			// them would fuse the last word of this row with the first word
+			// of the next ("foo " + "bar" → "foobar").
+			end = c1
+		}
+		for c := c0; c <= c1 && !joined; c++ {
 			// A Kitty Unicode placeholder is an image, not text. Copying it
 			// verbatim would paste a private-use character plus combining
 			// diacritics into the user's clipboard, so it counts as blank here
@@ -115,14 +141,14 @@ func (g *grid) SelectedText() string {
 				b.WriteRune(cell.Ch)
 			}
 		}
-		if r < e.Row {
+		if r < e.Row && !joined {
 			b.WriteByte('\n')
 		}
 	}
 	return b.String()
 }
 
-// ClearSelection drops any active selection.
+// ClearSelection drops any active selection. Caller holds Mu.
 func (g *grid) ClearSelection() {
 	g.SelActive = false
 	g.SelAnchor = contentPos{}

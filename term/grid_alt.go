@@ -23,6 +23,7 @@ type altSavedScreen struct {
 	curAttrs         uint16
 	curULStyle       uint8
 	curULColor       uint32
+	curLinkID        uint16
 	charsetG0        byte
 	charsetG1        byte
 	activeG          uint8
@@ -69,6 +70,7 @@ func (g *grid) EnterAlt() {
 		curAttrs:     g.CurAttrs,
 		curULStyle:   g.CurULStyle,
 		curULColor:   g.CurULColor,
+		curLinkID:    g.CurLinkID,
 		charsetG0:    g.CharsetG0,
 		charsetG1:    g.CharsetG1,
 		activeG:      g.ActiveG,
@@ -100,6 +102,7 @@ func (g *grid) EnterAlt() {
 	g.CurFG, g.CurBG, g.CurAttrs = defaultColor, defaultColor, 0
 	g.CurULStyle = 0
 	g.CurULColor = defaultColor
+	g.CurLinkID = 0
 	g.CharsetG0 = charsetASCII
 	g.CharsetG1 = charsetASCII
 	g.ActiveG = 0
@@ -121,19 +124,39 @@ func (g *grid) ExitAlt() {
 	if !g.AltActive {
 		return
 	}
-	g.Cells = g.mainSaved.cells
-	g.slots, g.rowMap = g.mainSaved.slots, g.mainSaved.rowMap
-	g.rowsBorrowed = g.mainSaved.rowsBorrowed
-	if len(g.rowMap) != g.Rows {
+	// The stashed save is trusted only when its dimensions still match:
+	// a short cells/rowWrapped slice (or a stale cursor/region) would
+	// panic or misplace in resetRows below. Rebuild blank on mismatch.
+	if len(g.mainSaved.cells) == g.Rows*g.Cols {
+		g.Cells = g.mainSaved.cells
+		g.slots, g.rowMap = g.mainSaved.slots, g.mainSaved.rowMap
+		g.rowsBorrowed = g.mainSaved.rowsBorrowed
+		if len(g.rowMap) != g.Rows {
+			g.resetRows()
+		}
+	} else {
+		g.Cells = make([]cell, g.Rows*g.Cols)
+		blank := defaultCell()
+		for i := range g.Cells {
+			g.Cells[i] = blank
+		}
+		g.slots, g.rowMap = nil, nil
+		g.rowsBorrowed = false
 		g.resetRows()
 	}
-	g.RowWrapped = g.mainSaved.rowWrapped
-	g.CursorR, g.CursorC = g.mainSaved.cursorR, g.mainSaved.cursorC
+	if len(g.mainSaved.rowWrapped) == g.Rows {
+		g.RowWrapped = g.mainSaved.rowWrapped
+	} else {
+		g.RowWrapped = make([]bool, g.Rows)
+	}
+	g.CursorR = clamp(g.mainSaved.cursorR, 0, max(g.Rows-1, 0))
+	g.CursorC = clamp(g.mainSaved.cursorC, 0, max(g.Cols, 0))
 	g.CurFG = g.mainSaved.curFG
 	g.CurBG = g.mainSaved.curBG
 	g.CurAttrs = g.mainSaved.curAttrs
 	g.CurULStyle = g.mainSaved.curULStyle
 	g.CurULColor = g.mainSaved.curULColor
+	g.CurLinkID = g.mainSaved.curLinkID
 	g.CharsetG0 = g.mainSaved.charsetG0
 	g.CharsetG1 = g.mainSaved.charsetG1
 	g.ActiveG = g.mainSaved.activeG
@@ -141,6 +164,9 @@ func (g *grid) ExitAlt() {
 	g.OriginMode = g.mainSaved.originMode
 	g.InsertMode = g.mainSaved.insertMode
 	g.Top, g.Bottom = g.mainSaved.top, g.mainSaved.bottom
+	if g.Top < 0 || g.Bottom >= g.Rows || g.Top > g.Bottom {
+		g.Top, g.Bottom = 0, g.Rows-1
+	}
 	g.saved = g.mainSaved.saved
 	// Images the alt screen placed die with it; the main screen's come back.
 	g.Graphics = g.mainSaved.graphics

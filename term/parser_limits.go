@@ -113,3 +113,9 @@ const maxTitleBytes = 512
 // query so a pathological DCS (4096 semicolons) can't force a large
 // allocation or iteration. Real apps query 1–3 caps at a time.
 const maxXTGETTCAPParts = 32
+
+// maxXTGETTCAPNameLen caps one hex-encoded capability name in an XTGETTCAP
+// query. Real names are a few bytes ("TN", "setaf"); anything longer is
+// hostile, and echoing it back in the 0+r failure reply would turn the
+// query into a reflection amplifier.
+const maxXTGETTCAPNameLen = 64

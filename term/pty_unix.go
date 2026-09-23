@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/creack/pty"
 )
@@ -15,6 +16,10 @@ import (
 type ptyDev struct {
 	cmd  *exec.Cmd
 	file *os.File
+	// closeOnce makes Close idempotent: the first call closes and reaps,
+	// later calls are no-ops. Matches the Windows Once-guarded teardown so
+	// both platforms honor one contract.
+	closeOnce sync.Once
 }
 
 // startPTY spawns the shell configured in cfg (default $SHELL, fallback
@@ -35,18 +40,21 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 		}
 	}
 	cmd := exec.Command(shell, args...)
+	if err := checkIdentity(cfg.Identity); err != nil {
+		return nil, err
+	}
 	// Identity of the *host* terminal is replaced by this one's first: what
 	// follows describes this terminal, and a leftover TERM_PROGRAM would
 	// outrank it. cfg.Identity names it; empty falls back to "go-term".
-	env := setTerminalIdentity(os.Environ(), cfg.Identity)
+	env := baseChildEnv(cfg, os.Environ())
 	// On macOS, GUI apps inherit a minimal PATH from launchd that omits
 	// Homebrew directories (/opt/homebrew/bin, /usr/local/bin). Run
 	// path_helper to construct the full system PATH from /etc/paths and
 	// /etc/paths.d so tools such as starship and fzf are reachable from
 	// shell startup files.
 	if runtime.GOOS == "darwin" {
-		if sp := darwinSystemPath(); sp != "" {
-			env = replaceEnv(env, "PATH", sp)
+		if sp := cachedDarwinSystemPath(); sp != "" {
+			env = setEnvEntry(env, "PATH="+sp)
 		}
 	}
 	// A GUI launch (Finder, or any parent shell without LANG set) leaves the
@@ -54,21 +62,12 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	// wide glyphs arrive as mangled bytes. Supply a UTF-8 locale only when
 	// the inherited environment pins none, so an explicit LC_ALL=C is kept.
 	if !hasLocaleEnv(env) {
-		env = replaceEnv(env, "LANG", defaultUTF8Locale())
+		env = setEnvEntry(env, "LANG="+defaultUTF8Locale())
 	}
-	env = append(env, "TERM=xterm-256color")
-	// The widget renders 24-bit color, but TERM=xterm-256color only promises
-	// the 256-color palette — TUI toolkits (lipgloss/bubbletea, among others)
-	// probe COLORTERM to decide whether to emit SGR 38;2;r;g;b or quantize to
-	// the palette. Without it the child downgrades truecolor output for no
-	// reason.
-	env = append(env, "COLORTERM=truecolor")
-	env = append(env, colorFGBGEnv(cfg))
 	// cfg.Env goes last so callers can override anything set above.
-	env = append(env, cfg.Env...)
-	cmd.Env = env
+	cmd.Env = applyCfgEnv(env, cfg.Env)
 	if cfg.Dir != "" {
-		if _, err := os.Stat(cfg.Dir); err == nil {
+		if st, err := os.Stat(cfg.Dir); err == nil && st.IsDir() {
 			cmd.Dir = cfg.Dir
 		} else if home, err := os.UserHomeDir(); err == nil {
 			cmd.Dir = home
@@ -100,13 +99,18 @@ func (p *ptyDev) Resize(rows, cols int) error {
 }
 
 // Close releases the pty master and reaps the child if still alive.
+// Idempotent best-effort teardown on the shared cross-platform contract: the
+// first call closes and reaps, later calls are no-ops, and the return is
+// always nil — a pty close error carries nothing the caller can act on.
 func (p *ptyDev) Close() error {
-	err := p.file.Close()
-	if p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
-		_, _ = p.cmd.Process.Wait()
-	}
-	return err
+	p.closeOnce.Do(func() {
+		_ = p.file.Close()
+		if p.cmd != nil && p.cmd.Process != nil {
+			_ = p.cmd.Process.Kill()
+			_, _ = p.cmd.Process.Wait()
+		}
+	})
+	return nil
 }
 
 // PID returns the child process ID, or 0 when not started.
@@ -116,6 +120,12 @@ func (p *ptyDev) PID() int {
 	}
 	return p.cmd.Process.Pid
 }
+
+// cachedDarwinSystemPath memoizes darwinSystemPath: it forks path_helper on
+// every call, and /etc/paths rarely changes under a running process. A ""
+// (helper missing or unparseable) is cached too, avoiding a failing exec per
+// spawn.
+var cachedDarwinSystemPath = sync.OnceValue(darwinSystemPath)
 
 // darwinSystemPath returns the standard macOS system PATH by running
 // /usr/libexec/path_helper, which reads /etc/paths and /etc/paths.d/*.
@@ -137,21 +147,4 @@ func darwinSystemPath() string {
 		return s[:j]
 	}
 	return ""
-}
-
-// replaceEnv replaces the first occurrence of key in env with key=val,
-// or appends key=val if key is not present. The caller's slice is not
-// mutated; a new slice is returned only when a replacement is made.
-func replaceEnv(env []string, key, val string) []string {
-	prefix := key + "="
-	entry := prefix + val
-	for i, e := range env {
-		if strings.HasPrefix(e, prefix) {
-			out := make([]string, len(env))
-			copy(out, env)
-			out[i] = entry
-			return out
-		}
-	}
-	return append(env, entry)
 }

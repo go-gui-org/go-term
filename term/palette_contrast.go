@@ -70,7 +70,9 @@ func contrastRatio(a, b gui.Color) float64 {
 }
 
 // clampContrast returns fg adjusted so it reaches at least ratio against bg,
-// or fg unchanged when it already does.
+// or fg unchanged when it already does. A NaN ratio is a no-op: every
+// comparison against it is false, so without this guard the search below
+// would wash the text out to the pure extreme for nothing.
 //
 // The adjustment is a blend toward white or black rather than a jump to one:
 // a red that fails by a little should stay recognizably red, because the
@@ -86,6 +88,9 @@ func contrastRatio(a, b gui.Color) float64 {
 // integer search land within 1% of the minimum change that works, and the
 // whole call is memoized by contrastMemo below.
 func clampContrast(fg, bg gui.Color, ratio float64) gui.Color {
+	if math.IsNaN(ratio) {
+		return fg
+	}
 	if ratio <= contrastDisabled {
 		return fg
 	}

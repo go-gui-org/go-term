@@ -327,6 +327,11 @@ func (g *grid) internCluster(b []byte) uint16 {
 // if only one column remains. Width and any clustering are resolved by the
 // caller; this is the shared write path for Put and commitCluster.
 func (g *grid) putCell(ch rune, clusterID uint16, w int) {
+	// Belt and braces behind the resize clamps: a cursor row outside the
+	// live screen would index RowWrapped out of range below.
+	if g.CursorR < 0 || g.CursorR >= g.Rows || g.Cols <= 0 {
+		return
+	}
 	justWrapped := false
 	if !g.AutoWrap {
 		if g.CursorC >= g.Cols {
@@ -509,9 +514,9 @@ func (g *grid) TabBackward(n int) {
 	if n < 1 {
 		n = 1
 	}
-	if g.CursorC > g.Cols {
-		g.CursorC = g.Cols
-	}
+	// Settle a pending wrap first, like Tab does: scanning from the raw
+	// CursorC == Cols starts one column too far right.
+	g.CursorC = max(g.settledCol(), 0)
 	for range n {
 		if g.CursorC <= 0 {
 			g.CursorC = 0
@@ -533,9 +538,13 @@ func (g *grid) TabBackward(n int) {
 }
 
 // SetTabStop sets a tab stop at the current cursor column. Implements ESC H (HTS).
+// The pending-wrap column (CursorC == Cols) settles onto the last cell, and
+// stops past the right margin are refused: a stop at Cols would never fire
+// (Tab scans c < Cols) and would only surface after a widen.
 func (g *grid) SetTabStop() {
-	if g.CursorC >= 0 && g.CursorC < MaxGridDim {
-		g.TabStops[g.CursorC] = true
+	c := g.settledCol()
+	if c >= 0 && c < g.Cols && c < MaxGridDim {
+		g.TabStops[c] = true
 	}
 }
 
@@ -592,14 +601,20 @@ func (g *grid) eraseInLine(mode int, selective bool) {
 
 // eraseSpan blanks columns [from,to) of row r to the current SGR bg/attrs
 // (BCE). When selective is set — DECSEL/DECSED/DECSERA — cells carrying
-// attrProtected are stepped over. Callers have already clamped the span and
-// sanitized any wide pair straddling its edges. Caller holds Mu.
+// attrProtected are stepped over. The span is clamped to the row: most
+// callers pre-clamp, but a stale cursor column must not panic here.
+// Caller holds Mu.
 func (g *grid) eraseSpan(r, from, to int, selective bool) {
 	if r < 0 || r >= g.Rows || from >= to {
 		return
 	}
-	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	row := g.row(r)
+	from = clamp(from, 0, len(row))
+	to = clamp(to, 0, len(row))
+	if from >= to {
+		return
+	}
+	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	for c := from; c < to; c++ {
 		if selective && row[c].Attrs&attrProtected != 0 {
 			continue
@@ -681,6 +696,12 @@ func (g *grid) eraseInDisplay(mode int, selective bool) {
 			// Direct fill: clearing the screen is common enough to keep the
 			// per-row bookkeeping out of it.
 			g.fillScreen(blankCell(g.CurFG, g.CurBG, g.CurAttrs))
+			// The fill joins nothing: drop the wrap flags with the text,
+			// matching ClearAll, or the next Resize splices blank rows
+			// into one logical line.
+			for r := range g.RowWrapped {
+				g.RowWrapped[r] = false
+			}
 			// The direct fill skips eraseSpan, so clear the images itself.
 			if len(g.Graphics) != 0 {
 				g.occludeGraphics(0, g.Rows, 0, g.Cols)
@@ -785,7 +806,10 @@ func (g *grid) DeleteLines(n int) {
 
 // InsertChars implements CSI Ps @ (ICH): insert n blanks at the cursor,
 // shifting existing cells right within the row; cells past the right
-// margin are discarded. Blanks use current SGR bg/attrs.
+// margin are discarded. Blanks use current SGR bg/attrs. A shift can strand
+// half a wide pair at the gap's right edge or leave a head without room for
+// its continuation at the margin; both degrade to blanks in their own
+// colors, like sanitizeWideEdges.
 func (g *grid) InsertChars(n int) {
 	if n <= 0 || g.CursorR < 0 || g.CursorR >= g.Rows {
 		return
@@ -807,11 +831,21 @@ func (g *grid) InsertChars(n int) {
 	for c := g.CursorC; c < g.CursorC+n; c++ {
 		row[c] = blank
 	}
+	if g.CursorC+n < g.Cols {
+		if orphan := &row[g.CursorC+n]; orphan.Width == 0 && orphan.Ch == 0 {
+			*orphan = blankCell(orphan.FG, orphan.BG, orphan.Attrs)
+		}
+	}
+	if tail := &row[g.Cols-1]; tail.Width == 2 {
+		*tail = blankCell(tail.FG, tail.BG, tail.Attrs)
+	}
 	g.markDirty(g.CursorR)
 }
 
 // DeleteChars implements CSI Ps P (DCH): delete n cells at the cursor,
 // shifting cells from the right inward; blanks fill at the right edge.
+// Stranded wide halves at the deletion point and at the end of the shifted
+// run degrade to blanks in their own colors.
 func (g *grid) DeleteChars(n int) {
 	if n <= 0 || g.CursorR < 0 || g.CursorR >= g.Rows {
 		return
@@ -832,6 +866,14 @@ func (g *grid) DeleteChars(n int) {
 	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
 	for c := g.Cols - n; c < g.Cols; c++ {
 		row[c] = blank
+	}
+	if orphan := &row[g.CursorC]; orphan.Width == 0 && orphan.Ch == 0 {
+		*orphan = blankCell(orphan.FG, orphan.BG, orphan.Attrs)
+	}
+	if n < width {
+		if tail := &row[g.Cols-n-1]; tail.Width == 2 {
+			*tail = blankCell(tail.FG, tail.BG, tail.Attrs)
+		}
 	}
 	g.markDirty(g.CursorR)
 }

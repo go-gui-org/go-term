@@ -1,5 +1,7 @@
 package term
 
+import "math"
+
 // Virtual (Unicode-placeholder) Kitty images.
 //
 // A normal KGP placement owns a rectangle of cells: it has an origin row, a
@@ -158,10 +160,17 @@ func kgpCellRect(cols, rows, widthPx, heightPx int, cellPxW, cellPxH float32) (i
 	if cols <= 0 && rows <= 0 {
 		return 0, 0
 	}
+	// Client-supplied axes are capped before any float derivation, so a
+	// hostile c=/r= cannot overflow the int conversion or hand the render
+	// scan an unbounded footprint.
+	cols = min(cols, MaxGridDim)
+	rows = min(rows, MaxGridDim)
 	if cols > 0 && rows > 0 {
 		return cols, rows
 	}
-	if widthPx <= 0 || heightPx <= 0 || cellPxW <= 0 || cellPxH <= 0 {
+	if widthPx <= 0 || heightPx <= 0 || cellPxW <= 0 || cellPxH <= 0 ||
+		math.IsNaN(float64(cellPxW)) || math.IsInf(float64(cellPxW), 0) ||
+		math.IsNaN(float64(cellPxH)) || math.IsInf(float64(cellPxH), 0) {
 		// Nothing to derive the missing dimension from. One-cell fallback for
 		// the given axis keeps the placement non-degenerate.
 		if cols <= 0 {
@@ -174,11 +183,28 @@ func kgpCellRect(cols, rows, widthPx, heightPx int, cellPxW, cellPxH float32) (i
 	}
 	if cols > 0 {
 		// Height in pixels the image will have once scaled to cols columns.
+		// Capped before the float→int conversion (out-of-range conversion
+		// is implementation-defined), so a hostile pixel size cannot hand
+		// the render scan an unbounded footprint.
 		px := float64(heightPx) * (float64(cols) * float64(cellPxW) / float64(widthPx))
-		rows = max(int(px/float64(cellPxH)+0.5), 1)
+		rows = clampDerivedCells(px / float64(cellPxH))
 		return cols, rows
 	}
 	px := float64(widthPx) * (float64(rows) * float64(cellPxH) / float64(heightPx))
-	cols = max(int(px/float64(cellPxW)+0.5), 1)
+	cols = clampDerivedCells(px / float64(cellPxW))
 	return cols, rows
+}
+
+// clampDerivedCells converts a cell-count estimate to [1, MaxGridDim]
+// without an out-of-range float→int conversion (which Go leaves
+// implementation-defined): non-finite or huge estimates saturate at the cap.
+func clampDerivedCells(est float64) int {
+	est += 0.5
+	if math.IsNaN(est) || math.IsInf(est, 0) || est > MaxGridDim {
+		return MaxGridDim
+	}
+	if est < 1 {
+		return 1
+	}
+	return int(est)
 }

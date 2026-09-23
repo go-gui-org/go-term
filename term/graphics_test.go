@@ -422,6 +422,24 @@ func TestGrid_AddGraphic_CapEvictsOldest(t *testing.T) {
 	}
 }
 
+// A hostile explicit footprint must be capped to MaxGridDim before the
+// per-cell blanking loops: without the cap, cols near MaxInt skips the
+// margin truncation via integer overflow and hangs in `for c := range cols`.
+func TestGrid_AddGraphicCells_HostileDimsCapped(t *testing.T) {
+	g := newGrid(4, 20)
+	g.CellPxW, g.CellPxH = 8, 16
+	cols, rows := g.addGraphicCells("/tmp/fake.png", 10, 10, 1<<30, 1<<30)
+	if cols > g.Cols || rows > MaxGridDim {
+		t.Errorf("footprint = %dx%d, want cols<=%d rows<=%d", cols, rows, g.Cols, MaxGridDim)
+	}
+	if len(g.Graphics) != 1 {
+		t.Fatalf("len(Graphics) = %d, want 1", len(g.Graphics))
+	}
+	if gr := g.Graphics[0]; gr.Cols > MaxGridDim || gr.Rows > MaxGridDim {
+		t.Errorf("stored footprint = %dx%d, want capped", gr.Cols, gr.Rows)
+	}
+}
+
 func TestIndexSixelFinal(t *testing.T) {
 	tests := []struct {
 		in   string

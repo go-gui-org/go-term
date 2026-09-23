@@ -313,3 +313,88 @@ func TestClearSelection_ResetsMode(t *testing.T) {
 		t.Errorf("SelMode = %v after ClearSelection, want selChar", g.SelMode)
 	}
 }
+
+// Soft-wrapped rows are one logical line: a linear selection joins
+// them instead of splitting the copy with a newline.
+func TestGrid_SelectedText_SoftWrapJoins(t *testing.T) {
+	g := newGrid(2, 5)
+	for c, r := range "abcde" {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "fghij" {
+		g.At(1, c).Ch = r
+	}
+	g.RowWrapped[0] = true
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 5}
+	g.SelActive = true
+	if got := g.SelectedText(); got != "abcdefghij" {
+		t.Errorf("got %q, want %q", got, "abcdefghij")
+	}
+}
+
+// A blank that lands on the last cell before a soft wrap is real text:
+// the join keeps it rather than fusing the two words.
+func TestGrid_SelectedText_SoftWrapKeepsBlankAtMargin(t *testing.T) {
+	g := newGrid(2, 5)
+	for c, r := range "abcd " {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "efg" {
+		g.At(1, c).Ch = r
+	}
+	g.RowWrapped[0] = true
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 5}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "abcd efg"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// Block selections keep every row broken across a soft wrap: the
+// rectangle is the unit, not the logical line.
+func TestGrid_SelectedText_BlockKeepsRowBreaksAcrossWrap(t *testing.T) {
+	g := newGrid(2, 5)
+	for c, r := range "abcde" {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "fghij" {
+		g.At(1, c).Ch = r
+	}
+	g.RowWrapped[0] = true
+	g.SelMode = selBlock
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 5}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "abcde\nfghij"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// While the alt screen is up the copy must not reach into main-screen
+// scrollback parked below it.
+func TestGrid_SelectedText_AltExcludesScrollback(t *testing.T) {
+	g := newGrid(2, 3)
+	g.ScrollbackCap = 10
+	for c, r := range "OLD" {
+		g.At(0, c).Ch = r
+	}
+	g.scrollUpRegion(1)
+	g.EnterAlt()
+	if g.Scrollback.Len() != 1 {
+		t.Fatalf("setup: scrollback len=%d, want 1", g.Scrollback.Len())
+	}
+	for c, r := range "XY" {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "ZW" {
+		g.At(1, c).Ch = r
+	}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 2, Col: 3}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "XY\nZW"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

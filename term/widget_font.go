@@ -1,5 +1,7 @@
 package term
 
+import "github.com/go-gui-org/go-gui/gui"
+
 // style returns the resolved text style for this terminal. When fontSize
 // is non-zero it overrides the configured Size.
 //
@@ -7,8 +9,6 @@ package term
 // zoom path enforces. Doing it here rather than only in AdjustFontSize means a
 // configured size (Cfg.TextStyle, SetTextStyle, a user config file) is bounded
 // too, so no caller has to re-derive the limits.
-import "github.com/go-gui-org/go-gui/gui"
-
 func (t *Term) style() gui.TextStyle {
 	ts := t.cfg.TextStyle
 	if ts == (gui.TextStyle{}) {

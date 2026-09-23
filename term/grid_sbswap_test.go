@@ -143,6 +143,42 @@ func TestScrollbackSwap_NoSharedRowsAcrossSlabChanges(t *testing.T) {
 	}
 }
 
+// A short screen row (possible after the ring re-carved its slab — see
+// flatScreen) takes the copying Push fallback, which returns the row itself.
+// Nothing was borrowed, so rowsBorrowed must stay false; a needless reclaim
+// would cost a screen-sized allocation on the next slab change.
+func TestScrollUp_ShortRowFallback_DoesNotBorrow(t *testing.T) {
+	g := newGrid(3, 5)
+	g.ScrollbackCap = 10
+	short := []cell{{Ch: 'a', Width: 1}, {Ch: 'b', Width: 1}}
+	g.slots[g.rowMap[0]] = short
+
+	g.scrollUpRegion(1)
+
+	if g.rowsBorrowed {
+		t.Error("rowsBorrowed = true after a fallback copy, want false")
+	}
+	if g.Scrollback.Len() != 1 {
+		t.Fatalf("scrollback len = %d, want 1", g.Scrollback.Len())
+	}
+	sb := g.Scrollback.Row(0)
+	if len(sb) != 5 {
+		t.Fatalf("scrollback row len = %d, want 5", len(sb))
+	}
+	if sb[0].Ch != 'a' || sb[1].Ch != 'b' || sb[2].Ch != 0 {
+		t.Errorf("scrollback row = %q,%q,%d; want a,b,0-padded",
+			sb[0].Ch, sb[1].Ch, sb[2].Ch)
+	}
+	assertRowsDisjoint(t, g, "after short-row fallback")
+
+	// A full-width row on the next scroll swaps for real and marks borrowed.
+	g.scrollUpRegion(1)
+	if !g.rowsBorrowed {
+		t.Error("rowsBorrowed = false after a real swap, want true")
+	}
+	assertRowsDisjoint(t, g, "after swap following fallback")
+}
+
 // Clearing the screen after rows have been swapped must clear only the screen:
 // a flat fill over the screen slab would wipe scrollback rows stored in it.
 func TestScrollbackSwap_ClearScreenKeepsScrollback(t *testing.T) {

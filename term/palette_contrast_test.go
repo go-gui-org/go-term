@@ -121,6 +121,15 @@ func TestClampContrast(t *testing.T) {
 			t.Errorf("got %v, want pure black or white", got)
 		}
 	})
+
+	t.Run("nan_ratio_is_identity", func(t *testing.T) {
+		// Every comparison against NaN is false, so without an explicit
+		// guard the search below would wash the text out to the pure
+		// extreme for nothing.
+		if got := clampContrast(orange, latte, math.NaN()); got != orange {
+			t.Errorf("NaN ratio changed %v to %v", orange, got)
+		}
+	})
 }
 
 // TestContrastMemo checks the cache returns what clampContrast would have, and

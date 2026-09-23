@@ -1,10 +1,12 @@
 package term
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 // ptyIO is the PTY interface: platform-specific implementations
@@ -113,24 +115,108 @@ func colorFGBGEnv(cfg Cfg) string {
 }
 
 // dropEnv returns env without any entry naming one of keys. The input slice is
-// never mutated: os.Environ() hands back a fresh slice, but cfg.Env may not.
+// never mutated: out is always freshly allocated. Name matching follows each
+// platform's environment semantics (see envKeysEqual), so a differently-cased
+// host identity cannot leak through on Windows.
 func dropEnv(env []string, keys []string) []string {
 	// Sized for the common case (nothing dropped) so the append loop never
 	// grows the backing array.
 	out := make([]string, 0, len(env))
 	for _, e := range env {
-		drop := false
-		for _, k := range keys {
-			if len(e) > len(k) && e[len(k)] == '=' && e[:len(k)] == k {
-				drop = true
-				break
+		if k, _, ok := strings.Cut(e, "="); ok {
+			drop := false
+			for _, want := range keys {
+				if envKeysEqual(k, want) {
+					drop = true
+					break
+				}
+			}
+			if drop {
+				continue
 			}
 		}
-		if !drop {
-			out = append(out, e)
-		}
+		out = append(out, e)
 	}
 	return out
+}
+
+// envKeysEqual reports whether two environment variable names address the
+// same variable: exact match on Unix, case-insensitive on Windows (where the
+// OS treats "Path" and "PATH" as one variable).
+func envKeysEqual(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+// setEnvEntry sets entry ("KEY=value", or a bare word with no '=') in env,
+// replacing the first entry for the same key and dropping any later copies,
+// or appending when absent. Leaving no duplicate keys means the result does
+// not depend on whether the platform resolves duplicates first-wins or
+// last-wins (os/exec is last-wins), which is what lets caller overrides hold
+// on both Unix and Windows. The input is never modified; use the returned
+// slice.
+func setEnvEntry(env []string, entry string) []string {
+	key, _, ok := strings.Cut(entry, "=")
+	if !ok {
+		return append(env, entry)
+	}
+	out := make([]string, 0, len(env)+1)
+	placed := false
+	for _, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok && envKeysEqual(k, key) {
+			if !placed {
+				out = append(out, entry)
+				placed = true
+			}
+			continue
+		}
+		out = append(out, e)
+	}
+	if !placed {
+		out = append(out, entry)
+	}
+	return out
+}
+
+// baseChildEnv builds the child environment every startPTY shares: the host
+// terminal's identity scrubbed and replaced (setTerminalIdentity), then TERM,
+// COLORTERM and COLORFGBG forced to describe this terminal. cfg.Env is
+// deliberately not applied here — applyCfgEnv runs after any platform fixups
+// (macOS PATH, LANG) so caller overrides always win.
+func baseChildEnv(cfg Cfg, parent []string) []string {
+	env := setTerminalIdentity(parent, cfg.Identity)
+	env = setEnvEntry(env, "TERM=xterm-256color")
+	// The widget renders 24-bit color, but TERM=xterm-256color only promises
+	// the 256-color palette — TUI toolkits (lipgloss/bubbletea, among others)
+	// probe COLORTERM to decide whether to emit SGR 38;2;r;g;b or quantize to
+	// the palette. Without it the child downgrades truecolor output for no
+	// reason.
+	env = setEnvEntry(env, "COLORTERM=truecolor")
+	env = setEnvEntry(env, colorFGBGEnv(cfg))
+	return env
+}
+
+// applyCfgEnv folds cfg.Env over env one entry at a time so a caller entry
+// replaces the default in place instead of shadowing it as a duplicate.
+func applyCfgEnv(env []string, cfgEnv []string) []string {
+	for _, e := range cfgEnv {
+		env = setEnvEntry(env, e)
+	}
+	return env
+}
+
+// checkIdentity rejects a Cfg.Identity that can never become an environment
+// value. NUL terminates C strings and the Windows UTF-16 env block alike, so
+// it fails the spawn late with a confusing error; fail here instead. '=' and
+// newlines are legal in a value (getenv returns them verbatim) and need no
+// special handling.
+func checkIdentity(name string) error {
+	if strings.IndexByte(name, 0) >= 0 {
+		return errors.New("term: Identity contains NUL")
+	}
+	return nil
 }
 
 // localeEnvKeys lists the variables that select the child's character-set
@@ -159,7 +245,7 @@ func hasLocaleEnv(env []string) bool {
 // for the same reason.
 func defaultUTF8Locale() string {
 	if runtime.GOOS == "darwin" {
-		if name := darwinUTF8Locale(); name != "" {
+		if name := cachedDarwinUTF8Locale(); name != "" {
 			return name
 		}
 		return "en_US.UTF-8"
@@ -170,6 +256,13 @@ func defaultUTF8Locale() string {
 	// this cannot regress anything.
 	return "C.UTF-8"
 }
+
+// cachedDarwinUTF8Locale memoizes darwinUTF8Locale: it shells out to
+// `defaults` on every call, and AppleLocale does not change often enough to
+// pay a fork+exec per spawned pane. A process restart picks up a changed
+// region; a lookup failure ("") is cached too, avoiding a failing exec per
+// spawn.
+var cachedDarwinUTF8Locale = sync.OnceValue(darwinUTF8Locale)
 
 // darwinUTF8Locale derives a UTF-8 locale name from the user's macOS region
 // setting (AppleLocale, e.g. "en_US" or "pt_BR@calendar=gregorian"). Returns
@@ -207,9 +300,11 @@ func normalizeLocaleName(s string) string {
 	}
 	// Reject anything that could not be a locale directory name, so a
 	// surprising `defaults` payload can never be pasted into a path.
+	// Digits stay allowed: CLDR numeric regions such as es_419 are real.
 	for _, r := range s {
 		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9', r == '_':
 		default:
 			return ""
 		}

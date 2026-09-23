@@ -171,6 +171,8 @@ func TestKGPCellRect(t *testing.T) {
 		{"unmeasured cells fall back to one", 4, 0, 32, 32, 0, 0, 4, 1},
 		{"zero pixel size falls back to one", 0, 3, 0, 0, cellW, cellH, 1, 3},
 		{"negative treated as unspecified", -5, -5, 32, 32, cellW, cellH, 0, 0},
+		{"hostile cols clamp to MaxGridDim", 5000, 3, 32, 32, cellW, cellH, MaxGridDim, 3},
+		{"hostile derived cols clamp", 0, 2, 1 << 30, 32, cellW, cellH, MaxGridDim, 2},
 	}
 	for _, tc := range cases {
 		cols, rows := kgpCellRect(tc.cols, tc.rows, tc.wPx, tc.hPx, tc.cellW, tc.cellH)

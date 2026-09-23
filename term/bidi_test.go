@@ -3,9 +3,29 @@ package term
 import "testing"
 
 // makeTestRow builds a cols-wide row of cells from the given runes.
-// Cells beyond len(runes) are zero-initialized (Ch=0, Width=0), matching
-// the uninitialized state of a newGrid cell buffer, so bidi ignores them.
+// Cells beyond len(runes) are space-filled (Ch=' ', Width=1), matching
+// the production grid — newGrid fills every cell with defaultCell, so
+// real rows never hold Ch==0 outside wide-char continuations. A bidi
+// test that leaves them null would reorder differently from production
+// (nulls are excluded from the paragraph, spaces participate).
 func makeTestRow(runes []rune, cols int) []cell {
+	row := make([]cell, cols)
+	for i := range row {
+		row[i] = cell{Ch: ' ', Width: 1, FG: defaultColor, BG: defaultColor}
+	}
+	for i, r := range runes {
+		if i >= cols {
+			break
+		}
+		row[i] = cell{Ch: r, Width: 1, FG: defaultColor, BG: defaultColor}
+	}
+	return row
+}
+
+// makeNullRow builds a cols-wide row where untouched cells stay
+// zero-initialized (Ch=0). Only for pinning the null-exclusion rule;
+// production code paths must prefer makeTestRow.
+func makeNullRow(runes []rune, cols int) []cell {
 	row := make([]cell, cols) // zero-value: Ch=0, Width=0
 	for i, r := range runes {
 		if i >= cols {
@@ -16,7 +36,7 @@ func makeTestRow(runes []rune, cols int) []cell {
 	return row
 }
 
-func TestRowHasRTL(t *testing.T) {
+func TestRowNeedsBidi(t *testing.T) {
 	cases := []struct {
 		name  string
 		runes []rune
@@ -32,22 +52,22 @@ func TestRowHasRTL(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			row := makeTestRow(tc.runes, 20)
-			got := rowHasRTL(row, 20)
+			got := rowNeedsBidi(row, 20)
 			if got != tc.want {
-				t.Errorf("rowHasRTL = %v, want %v", got, tc.want)
+				t.Errorf("rowNeedsBidi = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestRowHasRTL_SkipsContinuation(t *testing.T) {
+func TestRowNeedsBidi_SkipsContinuation(t *testing.T) {
 	// A row with only continuation cells (Width=0, Ch=0) should return false
 	// even though they occupy non-zero positions.
 	row := []cell{
 		{Width: 2, Ch: '日', FG: defaultColor, BG: defaultColor}, // wide LTR
 		{Width: 0, Ch: 0, FG: defaultColor, BG: defaultColor},   // continuation
 	}
-	if rowHasRTL(row, 2) {
+	if rowNeedsBidi(row, 2) {
 		t.Error("continuation cell wrongly flagged as RTL")
 	}
 }
@@ -69,8 +89,11 @@ func TestVisualReorder_Empty(t *testing.T) {
 }
 
 func TestVisualReorder_PureRTL(t *testing.T) {
-	// "שלום" — Hebrew for "shalom". Logical order: ש ל ו ם (indices 0-3).
-	// Visual order in RTL paragraph: ם ו ל ש.
+	// "שלום" on a space-filled row — the production shape. Spaces
+	// participate in the paragraph, so an RTL-base row renders
+	// paragraph-aligned: trailing spaces swing to the front.
+	// Logical:  ש ל ו ם ' ' ' ' ' ' ' '   (indices 0–7)
+	// Visual:   ' ' ' ' ' ' ' ' ם ו ל ש
 	runes := []rune{'ש', 'ל', 'ו', 'ם'}
 	const cols = 8
 	row := makeTestRow(runes, cols)
@@ -86,15 +109,44 @@ func TestVisualReorder_PureRTL(t *testing.T) {
 		t.Fatalf("len(v2l) = %d, want %d", len(v2l), cols)
 	}
 
-	// First four visual positions carry the reversed Hebrew chars.
+	// Leading positions carry the swung-forward spaces.
+	for i := 0; i < 4; i++ {
+		if vis[i].Ch != ' ' {
+			t.Errorf("vis[%d].Ch = %q, want space", i, string(vis[i].Ch))
+		}
+		if v2l[i] != 7-i {
+			t.Errorf("v2l[%d] = %d, want %d", i, v2l[i], 7-i)
+		}
+	}
+	// Trailing positions carry the reversed Hebrew chars.
+	wantVis := []rune{'ם', 'ו', 'ל', 'ש'}
+	for i, want := range wantVis {
+		if vis[4+i].Ch != want {
+			t.Errorf("vis[%d].Ch = %q, want %q", 4+i, string(vis[4+i].Ch), string(want))
+		}
+		if v2l[4+i] != 3-i {
+			t.Errorf("v2l[%d] = %d, want %d", 4+i, v2l[4+i], 3-i)
+		}
+	}
+}
+
+func TestVisualReorder_NullExcluded(t *testing.T) {
+	// Null cells (continuations, never-written buffer) stay out of the
+	// paragraph; the output pads with blanks carrying v2l -1.
+	runes := []rune{'ש', 'ל', 'ו', 'ם'}
+	const cols = 8
+	row := makeNullRow(runes, cols)
+
+	vis, v2l := visualReorder(row, cols)
+	if vis == nil {
+		t.Fatal("expected visual reordering for RTL content, got nil")
+	}
 	wantVis := []rune{'ם', 'ו', 'ל', 'ש'}
 	for i, want := range wantVis {
 		if vis[i].Ch != want {
 			t.Errorf("vis[%d].Ch = %q, want %q", i, string(vis[i].Ch), string(want))
 		}
 	}
-
-	// v2l: visual[0] maps to logical 3 (ם), and so on; padding = -1.
 	wantV2L := []int{3, 2, 1, 0, -1, -1, -1, -1}
 	for i, want := range wantV2L {
 		if v2l[i] != want {
@@ -143,6 +195,157 @@ func TestVisualReorder_Mixed(t *testing.T) {
 	}
 }
 
+func TestRowNeedsBidi_ExplicitFormats(t *testing.T) {
+	// Explicit controls without strong content are display-inert
+	// (single LTR run through x/text), so the gate skips them — the
+	// reorder pass would be identity. RLM is class R: a real trigger.
+	cases := []struct {
+		name  string
+		runes []rune
+		want  bool
+	}{
+		{"rlo_only", []rune{'\u202B', 'a', 'b', 'c', '\u202C'}, false},
+		{"lro_only", []rune{'\u202D', 'a', '\u202C'}, false},
+		{"rli_pdi_only", []rune{'\u2067', 'a', '\u2069'}, false},
+		{"rlo_with_hebrew", []rune{'\u202B', 'ש', 'ל', '\u202C'}, true},
+		{"rlm", []rune{'\u200F'}, true}, // RLM is class R
+		{"lrm_only", []rune{'\u200E', 'a'}, false},
+		{"digits_only", []rune("123 456"), false},
+		{"arabic_digits_only", []rune("١٢٣"), false}, // AN without strong RTL: no reorder
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := makeTestRow(tc.runes, 12)
+			if got := rowNeedsBidi(row, 12); got != tc.want {
+				t.Errorf("rowNeedsBidi = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestVisualReorder_ExplicitOnlyInert(t *testing.T) {
+	// No strong content: the gate skips and display stays logical.
+	row := makeNullRow([]rune{'\u202B', 'a', 'b', 'c', '\u202C'}, 5)
+	if vis, v2l := visualReorder(row, 5); vis != nil || v2l != nil {
+		t.Errorf("expected nil, nil for explicit-only row, got %v %v", vis, v2l)
+	}
+}
+
+func TestVisualReorder_ExplicitWithStrong(t *testing.T) {
+	// Strong content inside an override still reorders via its run.
+	row := makeNullRow([]rune{'\u202B', 'ש', 'ל', '\u202C'}, 4)
+	vis, _ := visualReorder(row, 4)
+	if vis == nil {
+		t.Fatal("expected reordering, got nil")
+	}
+	if vis[1].Ch != 'ל' || vis[2].Ch != 'ש' {
+		t.Errorf("Hebrew run not reversed: %q %q", vis[1].Ch, vis[2].Ch)
+	}
+}
+
+func TestVisualReorder_Mirroring(t *testing.T) {
+	// UAX#9 rule L4: ASCII brackets in RTL runs render mirrored, so a
+	// parenthesized Hebrew word keeps its parens outside, not swapped.
+	row := makeNullRow([]rune{'(', 'א', 'ב', ')'}, 4)
+
+	vis, _ := visualReorder(row, 4)
+	if vis == nil {
+		t.Fatal("expected reordering, got nil")
+	}
+	want := []rune{'(', 'ב', 'א', ')'}
+	for i, w := range want {
+		if vis[i].Ch != w {
+			t.Errorf("vis[%d].Ch = %q, want %q", i, string(vis[i].Ch), string(w))
+		}
+	}
+}
+
+func TestMirrorRTL_Table(t *testing.T) {
+	pairs := map[rune]rune{'(': ')', ')': '(', '[': ']', ']': '[', '{': '}', '}': '{', '<': '>', '>': '<'}
+	for in, want := range pairs {
+		if got := mirrorRTL(in); got != want {
+			t.Errorf("mirrorRTL(%q) = %q, want %q", string(in), string(got), string(want))
+		}
+	}
+	if got := mirrorRTL('א'); got != 'א' {
+		t.Errorf("mirrorRTL must pass non-brackets through, got %q", string(got))
+	}
+}
+
+func TestScanBidiCells_OneRunePerEntry(t *testing.T) {
+	// The run.Pos()→entries index alignment depends on exactly one rune
+	// per entry, even for cluster cells (tails dropped by design).
+	row := makeTestRow([]rune{'a', 'ש', 'b'}, 6)
+	row[1].clusterID = 1 // pretend the Hebrew cell carries a cluster tail
+	entries, s := scanBidiCells(row, 6)
+	if len(entries) != len([]rune(s)) {
+		t.Errorf("entries=%d, runes=%d: alignment broken", len(entries), len([]rune(s)))
+	}
+	// Spaces participate: 3 content + 3 fill = 6 entries.
+	if len(entries) != 6 {
+		t.Errorf("len(entries) = %d, want 6 (spaces included)", len(entries))
+	}
+}
+
+func TestFastPath_ZeroAlloc(t *testing.T) {
+	row := makeTestRow([]rune("hello world"), 40)
+	if n := testing.AllocsPerRun(50, func() { _ = rowNeedsBidi(row, 40) }); n != 0 {
+		t.Errorf("rowNeedsBidi allocated %v times; want 0", n)
+	}
+	if n := testing.AllocsPerRun(50, func() {
+		vis, v2l := visualReorder(row, 40)
+		if vis != nil || v2l != nil {
+			t.Error("expected nil for LTR row")
+		}
+	}); n != 0 {
+		t.Errorf("visualReorder LTR path allocated %v times; want 0", n)
+	}
+}
+
+func TestLogicalMappings(t *testing.T) {
+	// Pure reversal of 8 columns, as a space-filled RTL row produces.
+	v2l := []int{7, 6, 5, 4, 3, 2, 1, 0}
+	const cols = 8
+	if got := logicalCell(v2l, 0, cols); got != 7 {
+		t.Errorf("logicalCell(v=0) = %d, want 7", got)
+	}
+	if got := logicalBoundary(v2l, 0, cols); got != 0 {
+		t.Errorf("logicalBoundary(b=0) = %d, want 0", got)
+	}
+	if got := logicalBoundary(v2l, 8, cols); got != 8 {
+		t.Errorf("logicalBoundary(b=8) = %d, want 8", got)
+	}
+	// Visual glyphs [2,5) are logical {5,4,3} → span [3,6).
+	if l0, l1, ok := logicalSpan(v2l, 2, 5, cols); !ok || l0 != 3 || l1 != 6 {
+		t.Errorf("logicalSpan(2,5) = (%d,%d,%v), want (3,6,true)", l0, l1, ok)
+	}
+	// Reversed args normalize.
+	if l0, l1, ok := logicalSpan(v2l, 5, 2, cols); !ok || l0 != 3 || l1 != 6 {
+		t.Errorf("logicalSpan(5,2) = (%d,%d,%v), want (3,6,true)", l0, l1, ok)
+	}
+	// Logical [3,5] covers visual {4,3,2} → [2,4].
+	if v0, v1, ok := visualSpan(v2l, 3, 5); !ok || v0 != 2 || v1 != 4 {
+		t.Errorf("visualSpan(3,5) = (%d,%d,%v), want (2,4,true)", v0, v1, ok)
+	}
+	if got := visualPoint(v2l, 5); got != 2 {
+		t.Errorf("visualPoint(5) = %d, want 2", got)
+	}
+	if got := visualPoint(v2l, 99); got != -1 {
+		t.Errorf("visualPoint(missing) = %d, want -1", got)
+	}
+	// Nil map is identity; padding (-1) holds position.
+	if got := logicalCell(nil, 3, cols); got != 3 {
+		t.Errorf("logicalCell(nil) = %d, want 3", got)
+	}
+	pad := []int{1, 0, -1, -1}
+	if got := logicalCell(pad, 2, 4); got != 2 {
+		t.Errorf("logicalCell(padding) = %d, want 2", got)
+	}
+	if _, _, ok := logicalSpan(pad, 2, 4, 4); ok {
+		t.Error("logicalSpan over padding only must report !ok")
+	}
+}
+
 func TestVisualReorder_OutputLen(t *testing.T) {
 	// Output length must always equal cols regardless of content.
 	for _, cols := range []int{1, 5, 10, 80} {
@@ -185,19 +388,19 @@ func TestVisualReorder_V2L_Roundtrip(t *testing.T) {
 	}
 }
 
-func TestRowHasRTL_ColsExceedsSliceLen(t *testing.T) {
+func TestRowNeedsBidi_ColsExceedsSliceLen(t *testing.T) {
 	// cols larger than the slice must not panic (scrollback-resize scenario).
 	row := []cell{
 		{Ch: 'ש', Width: 1, FG: defaultColor, BG: defaultColor},
 		{Ch: 'ל', Width: 1, FG: defaultColor, BG: defaultColor},
 	}
-	got := rowHasRTL(row, 100)
+	got := rowNeedsBidi(row, 100)
 	if !got {
 		t.Error("expected true: RTL chars present in the available cells")
 	}
 	// LTR slice narrower than cols must also not panic.
 	ltr := []cell{{Ch: 'A', Width: 1, FG: defaultColor, BG: defaultColor}}
-	if rowHasRTL(ltr, 50) {
+	if rowNeedsBidi(ltr, 50) {
 		t.Error("expected false: no RTL chars")
 	}
 }
@@ -367,5 +570,28 @@ func BenchmarkVisualReorder_AllLTR(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		_, _ = visualReorder(row, cols)
+	}
+}
+
+// Pointer hover and motion reports map through v2lForViewportRow on every
+// move; an LTR-only row must cost no allocation, and an RTL row must still
+// get its map.
+func TestV2LForViewportRow_LTRNoAlloc(t *testing.T) {
+	tm, _ := newTestTermCapture()
+	for c, r := range "hello" {
+		tm.grid.At(0, c).Ch = r
+	}
+	if allocs := testing.AllocsPerRun(100, func() {
+		if tm.v2lForViewportRow(0) != nil {
+			t.Fatal("LTR row got a v2l map")
+		}
+	}); allocs != 0 {
+		t.Errorf("LTR row: %v allocs per call, want 0", allocs)
+	}
+	for c, r := range "שלום" {
+		tm.grid.At(1, c).Ch = r
+	}
+	if tm.v2lForViewportRow(1) == nil {
+		t.Error("RTL row: v2l map is nil")
 	}
 }

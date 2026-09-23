@@ -28,10 +28,12 @@ type urlSpan struct {
 	Row, C0, C1 int
 }
 
-// rowWrapped reports whether content row contentRow ended with an autowrap,
-// i.e. it continues into contentRow+1 as one logical line. Scrollback rows
-// carry the flag in the ring; live rows in g.RowWrapped. Caller holds Mu.
-func (g *grid) rowWrapped(contentRow int) bool {
+// contentRowWrapped reports whether content row contentRow ended with an
+// autowrap, i.e. it continues into contentRow+1 as one logical line.
+// Scrollback rows carry the flag in the ring; live rows in g.RowWrapped.
+// (Named for its coordinate space to tell it apart from the RowWrapped
+// field, which covers live rows only.) Caller holds Mu.
+func (g *grid) contentRowWrapped(contentRow int) bool {
 	sb := g.Scrollback.Len()
 	if contentRow < sb {
 		return g.Scrollback.Wrapped(contentRow)
@@ -81,7 +83,7 @@ func (g *grid) detectURLAt(cp contentPos) (url string, spans []urlSpan, ok bool)
 	}
 
 	// Pick the match covering cpRune.
-	g.urlMatches = urlRangesIn(runes, bytes, byteLen, g.urlMatches[:0])
+	g.urlMatches = g.urlRangesIn(runes, bytes, byteLen, g.urlMatches[:0])
 	for _, m := range g.urlMatches {
 		if cpRune >= m[0] && cpRune < m[1] {
 			return string(runes[m[0]:m[1]]), spansFor(rows, cols, m[0], m[1]), true
@@ -101,7 +103,7 @@ func (g *grid) logicalLineStart(row int) int {
 		lo = g.Scrollback.Len()
 	}
 	start := row
-	for start > lo && start > row-maxURLScanRows && g.rowWrapped(start-1) {
+	for start > lo && start > row-maxURLScanRows && g.contentRowWrapped(start-1) {
 		start--
 	}
 	return start
@@ -113,7 +115,7 @@ func (g *grid) logicalLineStart(row int) int {
 func (g *grid) logicalLineEnd(row, maxRows int) int {
 	total := g.ContentRows()
 	end := row
-	for end < total-1 && end < row+maxRows && g.rowWrapped(end) {
+	for end < total-1 && end < row+maxRows && g.contentRowWrapped(end) {
 		end++
 	}
 	return end
@@ -150,11 +152,13 @@ func (g *grid) joinRows(start, end int) (runes []rune, rows, cols, bytes []int, 
 // urlRangesIn appends the rune range [is, ie) of every implicit URL in a joined
 // line to dst, in left-to-right order, with trailing punctuation already
 // trimmed. Empty ranges (a match that trimmed away to nothing) are skipped.
-func urlRangesIn(runes []rune, bytes []int, byteLen int, dst [][2]int) [][2]int {
+// The regexp runs over the grid's reused searchText scratch instead of a
+// per-call string(runes), so repeated hover/hint scans stay allocation-light
+// after warmup. Caller holds Mu.
+func (g *grid) urlRangesIn(runes []rune, bytes []int, byteLen int, dst [][2]int) [][2]int {
 	// Regexp works on the byte string; map each match's byte span back to rune
 	// indices via the byte-offset table.
-	line := string(runes)
-	for _, m := range urlRe.FindAllStringIndex(line, -1) {
+	for _, m := range urlRe.FindAllIndex(g.appendSearchBytes(runes), -1) {
 		is := sort.SearchInts(bytes, m[0])
 		ie := runeIndexForByte(bytes, byteLen, m[1])
 		ie = is + trimTrailingURL(runes[is:ie])

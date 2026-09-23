@@ -234,7 +234,10 @@ type Cfg struct {
 
 	// AllowOSC52Write permits host applications to write the system clipboard
 	// via OSC 52. Disabled by default so untrusted terminal output cannot
-	// silently replace the user's clipboard.
+	// silently replace the user's clipboard. Enable only in trusted
+	// environments: a clipboard payload the user later pastes runs with
+	// their privileges, so a hostile child can plant commands for the next
+	// paste.
 	AllowOSC52Write bool
 
 	// DisableGraphics, when true, skips Sixel, Kitty, and iTerm2 inline

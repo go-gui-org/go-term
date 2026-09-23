@@ -267,7 +267,9 @@ func (t *Term) drawCursor(ds *drawState) {
 		cc = ds.cols - 1
 	}
 	// When the cursor's row has bidi reordering, find the visual column
-	// that corresponds to the logical cursor column.
+	// that corresponds to the logical cursor column. Skipped while IME is
+	// composing: the composition strip itself is drawn at logical columns,
+	// so the cursor must stay in that space until the text commits.
 	if cr := g.CursorR; cr >= 0 && cr < ds.renderRows && ds.bidiV2LRows[cr] != nil {
 		if !ds.imeComposing {
 			for v, l := range ds.bidiV2LRows[cr] {
@@ -290,11 +292,15 @@ func (t *Term) drawCursor(ds *drawState) {
 	}
 	t.drawCursorShape(ds.dc, cc, g.CursorR, cursorCell, g.cursorShape, ds.style)
 
-	// Report cursor rect to the platform for candidate window placement.
-	if ds.imeComposing && t.win != nil {
-		imeX := t.ime.layoutX + float32(cc)*t.cellW
-		imeY := t.ime.layoutY + float32(g.CursorR)*t.cellH
-		t.win.IMESetRect(imeX, imeY, t.cellW, t.cellH)
+	// Stage the candidate-window rect for onDraw to report after it drops
+	// grid.Mu. IMESetRect reaches the platform, so calling it here would
+	// hold the grid lock across a go-gui call.
+	if ds.imeComposing {
+		ds.pendingIME = true
+		ds.imeX = t.ime.layoutX + float32(cc)*t.cellW
+		ds.imeY = t.ime.layoutY + float32(g.CursorR)*t.cellH
+		ds.imeW = t.cellW
+		ds.imeH = t.cellH
 	}
 }
 
@@ -312,9 +318,10 @@ func (t *Term) drawOverlays(ds *drawState) {
 	t.scrollbar.active = active
 
 	// Inset the thumb from the window's right edge only for panes flush
-	// against it, so the thumb clears the OS window-resize band. Hoisted
-	// above the active check because the failure ticks share it.
-	inset := t.scrollbarEdgeInset(ds.dc.Width)
+	// against it, so the thumb clears the OS window-resize band. Snapshotted
+	// before grid.Mu in onDraw (ds.scrollInset) because the computation
+	// reads window state.
+	inset := ds.scrollInset
 
 	// Progress fill first, failure ticks over it, thumb over both — each is
 	// more specific than the last, and the thumb's alpha 120 lets everything
@@ -708,6 +715,13 @@ func (t *Term) drawCopyCursor(ds *drawState) {
 		return
 	}
 	cc := clamp(t.copy.cursor.Col, 0, max(ds.cols-1, 0))
+	// Copy cursor lives in logical columns like the text cursor: map to
+	// visual through the row's reorder map, mirroring drawCursor.
+	if v2l := ds.rowV2L(vr); v2l != nil {
+		if v := visualPoint(v2l, t.copy.cursor.Col); v >= 0 {
+			cc = v
+		}
+	}
 	x := t.colX(cc)
 	y := t.rowY(vr, ds.renderYOff)
 
@@ -823,8 +837,15 @@ func (t *Term) drawHints(ds *drawState) {
 			if !ok || vr < ds.renderTop || vr >= ds.renderRows {
 				continue
 			}
-			x := float32(sp.C0) * t.cellW
-			w := float32(sp.C1-sp.C0+1) * t.cellW
+			c0, c1 := sp.C0, sp.C1
+			if v2l := ds.rowV2L(vr); v2l != nil {
+				// Link spans are logical; the pill geometry is visual.
+				if v0, v1, ok := visualSpan(v2l, sp.C0, sp.C1); ok {
+					c0, c1 = v0, v1
+				}
+			}
+			x := float32(c0) * t.cellW
+			w := float32(c1-c0+1) * t.cellW
 			dc.FilledRect(x, float32(vr+1)*t.cellH-rule, w, rule, ds.g.ov.hintRule)
 		}
 	}
@@ -844,9 +865,17 @@ func (t *Term) drawHints(ds *drawState) {
 		// stops reading as a label and starts reading as a corrupted URL. Text
 		// almost always has a space before a link, so the fallback is rare.
 		col := hintLabelCol(ds.g, target.spans[0], len(label))
+		w := float32(len(label)) * t.cellW
+		if v2l := ds.rowV2L(vr); v2l != nil {
+			// hintLabelCol returns logical columns; the pill is visual.
+			// The label covers logical [col, col+len): map to the
+			// covering visual span so the pill sits on the right glyphs.
+			if v0, v1, ok := visualSpan(v2l, col, col+len(label)-1); ok {
+				col, w = v0, float32(v1-v0+1)*t.cellW
+			}
+		}
 		x := float32(col) * t.cellW
 		y := float32(vr) * t.cellH
-		w := float32(len(label)) * t.cellW
 		// Clamp so a label anchored near the right margin stays on canvas
 		// instead of being clipped to a single character.
 		if x+w > dc.Width {

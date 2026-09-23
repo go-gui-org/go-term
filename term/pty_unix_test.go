@@ -32,17 +32,24 @@ func TestPTY_StartWithNonexistentDir(t *testing.T) {
 	}
 }
 
-// envValue returns the last value for key in a cmd.Env slice ("" when absent),
-// matching execve semantics where later entries win.
-func envValue(env []string, key string) string {
-	prefix := key + "="
-	val := ""
-	for _, e := range env {
-		if strings.HasPrefix(e, prefix) {
-			val = e[len(prefix):]
-		}
+func TestPTY_StartWithFileDir(t *testing.T) {
+	// A Dir naming a file (not a directory) falls back to $HOME too.
+	f, err := os.CreateTemp("", "go-term-dir-test")
+	if err != nil {
+		t.Skipf("CreateTemp: %v", err)
 	}
-	return val
+	name := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(name) }()
+	p, err := startPTY(24, 80, Cfg{Dir: name})
+	if err != nil {
+		t.Skipf("startPTY failed: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	home, _ := os.UserHomeDir()
+	if p.cmd.Dir != home {
+		t.Errorf("cmd.Dir = %q, want %q (home fallback)", p.cmd.Dir, home)
+	}
 }
 
 // A child inheriting no locale (the macOS GUI-launch case) must be given a

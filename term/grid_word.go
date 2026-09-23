@@ -1,5 +1,7 @@
 package term
 
+import "unicode"
+
 // Word motion over content coordinates, for copy mode's w / b keys.
 //
 // Pure grid code — no go-gui, no widget state — so it is unit-testable without
@@ -30,11 +32,19 @@ const maxWordScan = 1 << 16
 const maxLineScanRows = 1024
 
 // blankCellAt reports whether the cell at (row, col) counts as whitespace for
-// word motion. Cells never written hold Ch == 0; erased ones hold ' '. Both are
-// blanks. Caller holds Mu.
+// word motion. A wide continuation (Width == 0) is part of its head's word,
+// never a break — otherwise every CJK word splits at each glyph. Other
+// never-written cells (Ch == 0) and Unicode White_Space (space, tab, NBSP,
+// U+3000, …) are blanks. Caller holds Mu.
 func (g *grid) blankCellAt(row, col int) bool {
-	ch := g.ContentCellAt(row, col).Ch
-	return ch == 0 || ch == ' ' || ch == '\t'
+	c := g.ContentCellAt(row, col)
+	if c.Width == 0 && c.Ch == 0 {
+		return false
+	}
+	if c.Ch == 0 {
+		return true
+	}
+	return unicode.IsSpace(c.Ch)
 }
 
 // stepFwd advances one cell, wrapping to the next content row at the right
@@ -76,7 +86,7 @@ func (g *grid) stepBack(p contentPos) (contentPos, bool) {
 // when the next line starts a new word; here it simply means the run of
 // non-blanks cannot continue across the boundary. Caller holds Mu.
 func (g *grid) rowBreakFwd(p contentPos) bool {
-	return p.Col == g.Cols-1 && !g.rowWrapped(p.Row)
+	return p.Col == g.Cols-1 && !g.contentRowWrapped(p.Row)
 }
 
 // wordFwd returns the position of the start of the next word after p, vim `w`.
@@ -142,7 +152,7 @@ func (g *grid) wordBoundsAt(p contentPos) (start, end contentPos) {
 		}
 		// Crossing back into a row that did not soft-wrap ends the unit: the
 		// rows are separate logical lines that happen to be adjacent.
-		if prev.Row != start.Row && !g.rowWrapped(prev.Row) {
+		if prev.Row != start.Row && !g.contentRowWrapped(prev.Row) {
 			break
 		}
 		start = prev
@@ -181,10 +191,10 @@ func (g *grid) lineBoundsAt(row int) (startRow, endRow int) {
 		lo = g.Scrollback.Len()
 	}
 	startRow, endRow = row, row
-	for startRow > lo && startRow > row-maxLineScanRows && g.rowWrapped(startRow-1) {
+	for startRow > lo && startRow > row-maxLineScanRows && g.contentRowWrapped(startRow-1) {
 		startRow--
 	}
-	for endRow < total-1 && endRow < row+maxLineScanRows && g.rowWrapped(endRow) {
+	for endRow < total-1 && endRow < row+maxLineScanRows && g.contentRowWrapped(endRow) {
 		endRow++
 	}
 	return startRow, endRow
@@ -226,7 +236,7 @@ func (g *grid) wordBack(p contentPos) contentPos {
 			return cur
 		}
 		// Crossing back into a row that didn't soft-wrap ends the word.
-		if prev.Row != cur.Row && !g.rowWrapped(prev.Row) {
+		if prev.Row != cur.Row && !g.contentRowWrapped(prev.Row) {
 			return cur
 		}
 		cur = prev

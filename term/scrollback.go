@@ -30,19 +30,50 @@ type scrollbackRing struct {
 	gen uint32
 }
 
+// maxRingCells bounds a single ring slab in cells, not bytes. A cell is
+// roughly two dozen bytes, so this still permits gigabytes in theory; the
+// real defense is the upstream clamp (clampScrollback + clampDim). This is
+// belt-and-braces so a wild capacity can never hand make() a length that
+// panics or exhausts memory.
+const maxRingCells = 1 << 28
+
+// clampRingGeom clamps negative inputs to zero and bounds capacity so
+// capacity*cols never exceeds maxRingCells. The product is computed in
+// int64 so a hostile capacity cannot overflow before the comparison.
+func clampRingGeom(capacity, cols int) (int, int) {
+	if capacity < 0 {
+		capacity = 0
+	}
+	if cols < 0 {
+		cols = 0
+	}
+	if capacity > 0 && cols > 0 && int64(capacity)*int64(cols) > maxRingCells {
+		capacity = maxRingCells / cols
+	}
+	return capacity, cols
+}
+
 func (r *scrollbackRing) Len() int { return r.size }
 
-func (r *scrollbackRing) slot(i int) int { return (r.head + i) % r.cap }
+// slot maps logical index i (0 = oldest) to its storage slot. Callers must
+// hold only valid i (0 <= i < size); the cap guard is belt-and-braces so a
+// zero ring returns slot 0 instead of panicking on % 0.
+func (r *scrollbackRing) slot(i int) int {
+	if r.cap <= 0 {
+		return 0
+	}
+	return (r.head + i) % r.cap
+}
 
 func (r *scrollbackRing) Row(i int) []cell {
-	if i < 0 || i >= r.size || r.cols <= 0 {
+	if i < 0 || i >= r.size || r.cap <= 0 || r.cols <= 0 {
 		return nil
 	}
 	return r.rows[r.slot(i)]
 }
 
 func (r *scrollbackRing) Wrapped(i int) bool {
-	if i < 0 || i >= r.size {
+	if i < 0 || i >= r.size || r.cap <= 0 || r.cols <= 0 {
 		return false
 	}
 	return r.wrapped[r.slot(i)]
@@ -62,10 +93,18 @@ func (r *scrollbackRing) carve() {
 	}
 }
 
-// ensureBacking lazily allocates the slab dropped by DropBacking.
+// ensureBacking lazily allocates the slab dropped by DropBacking. The cap is
+// re-bounded here too: the fields were clamped by SetGeom, but a ring built
+// by direct field assignment must still never hand make() an absurd length.
 func (r *scrollbackRing) ensureBacking() {
 	if r.cells != nil {
 		return
+	}
+	if r.cap <= 0 || r.cols <= 0 {
+		return
+	}
+	if int64(r.cap)*int64(r.cols) > maxRingCells {
+		r.cap = maxRingCells / r.cols
 	}
 	r.cells = make([]cell, r.cap*r.cols)
 	r.wrapped = make([]bool, r.cap)
@@ -109,7 +148,9 @@ func (r *scrollbackRing) Push(src []cell, wrapped bool) bool {
 // caller must stop using it.
 //
 // row must be exactly cols wide. Anything else (or a disabled ring) falls
-// back to a copying Push and returns row itself as spare.
+// back to a copying Push and returns row itself as spare, so spare == row
+// (same backing) signals the fallback and the caller must not treat the
+// screen row as borrowed.
 func (r *scrollbackRing) PushSwap(row []cell, wrapped bool) (spare []cell, evicted bool) {
 	if r.cap == 0 || r.cols == 0 || len(row) != r.cols {
 		return row, r.Push(row, wrapped)
@@ -122,6 +163,10 @@ func (r *scrollbackRing) PushSwap(row []cell, wrapped bool) (spare []cell, evict
 	return spare, evicted
 }
 
+// Reset clears the length without touching the slab. No gen bump is needed:
+// the slab is unchanged, so the ring-owned and screen-owned row sets stay
+// disjoint — unlike SetGeom/EnsureGeom/DropBacking, nothing reuses or drops
+// storage the other side still holds.
 func (r *scrollbackRing) Reset() { r.head, r.size = 0, 0 }
 
 // DropBacking releases the backing arrays (cells and wrapped) so the GC can
@@ -136,20 +181,10 @@ func (r *scrollbackRing) DropBacking() {
 	r.gen++
 }
 
-// SetGeom reallocates at (capacity, cols), dropping stored rows. Negative
-// inputs clamp to zero; an absurd capacity*cols is bounded so make can't
-// panic. Inputs are normally clamped upstream — this is belt-and-braces.
+// SetGeom reallocates at (capacity, cols), dropping stored rows. Inputs are
+// normally clamped upstream — the clamp here is belt-and-braces.
 func (r *scrollbackRing) SetGeom(capacity, cols int) {
-	if capacity < 0 {
-		capacity = 0
-	}
-	if cols < 0 {
-		cols = 0
-	}
-	const maxCells = 1 << 28
-	if capacity > 0 && cols > 0 && capacity > maxCells/cols {
-		capacity = maxCells / cols
-	}
+	capacity, cols = clampRingGeom(capacity, cols)
 	r.cap, r.cols = capacity, cols
 	r.head, r.size = 0, 0
 	// Reusing the slab below can put a slot on top of a row the screen
@@ -180,12 +215,7 @@ func (r *scrollbackRing) SetGeom(capacity, cols int) {
 // the new capacity in a single copy pass; oldest are discarded when
 // shrinking.
 func (r *scrollbackRing) EnsureGeom(capacity, cols int) {
-	if capacity < 0 {
-		capacity = 0
-	}
-	if cols < 0 {
-		cols = 0
-	}
+	capacity, cols = clampRingGeom(capacity, cols)
 	if r.cap == capacity && r.cols == cols {
 		return
 	}

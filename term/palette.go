@@ -6,7 +6,7 @@ import "github.com/go-gui-org/go-gui/gui"
 // color scheme. Indices 0–7 are standard ANSI; 8–15 are bright variants.
 // The 240 extended colors (16–255) are computed and not themeable — a
 // child app can still recolor any of the 256 entries at runtime via
-// OSC 4, which lands in the grid's override layer (see palOverrides),
+// OSC 4, which lands in the grid's override layer (see palOverride),
 // not here.
 type Theme struct {
 	ANSI      [16]gui.Color
@@ -82,6 +82,12 @@ func init() {
 // indices 16–255 use the global xterm table. defaultColor returns def.
 // Unknown high-byte tags fall through to palette[low byte] so a corrupt
 // value renders as some valid color rather than panicking.
+//
+// Test oracle only: production resolves through grid.resolveColor, which
+// reads the effective table (theme + OSC 4 overrides) and honors
+// ReverseScreen via fgOf/bgOf. This method ignores both, so no draw path
+// may call it; TestPalette_NoOverrideMatchesTheme pins the two in
+// agreement for a fresh grid.
 func (th *Theme) resolve(c uint32, def gui.Color) gui.Color {
 	if c == defaultColor {
 		return def
@@ -311,11 +317,16 @@ func (g *grid) highlightSelected(c cell) cell {
 }
 
 // SetPaletteColor overrides palette entry idx with an OSC 4 color. c must
-// be an rgbColor-tagged packed value. The override layer is allocated on
+// be an rgbColor-tagged packed value; anything else is ignored before the
+// override layer is touched, so a mis-tagged value can never allocate the
+// table or poison the effective palette. The override layer is allocated on
 // first use, so sessions that never see OSC 4 pay nothing. Marks all rows
 // dirty so the next render picks up the change. Called from the parser
 // while Mu is held.
 func (g *grid) SetPaletteColor(idx uint8, c uint32) {
+	if c&0xFF000000 != colorRGB {
+		return
+	}
 	if g.palOverride == nil {
 		g.palOverride = new(palTable)
 	}
@@ -360,6 +371,9 @@ func (g *grid) paletteColorRGB(idx uint8) (r, gr, b uint8) {
 }
 
 // fg resolves a cell's foreground to a Color, honoring inverse.
+//
+// Test oracle only — see resolve. Production uses grid.fgOf, which reads
+// the effective palette and folds in ReverseScreen.
 func (th *Theme) fg(c cell) gui.Color {
 	if c.Attrs&attrInverse != 0 {
 		return th.resolve(c.BG, th.DefaultBG)
@@ -368,6 +382,9 @@ func (th *Theme) fg(c cell) gui.Color {
 }
 
 // bg resolves a cell's background to a Color, honoring inverse.
+//
+// Test oracle only — see resolve. Production uses grid.bgOf, which reads
+// the effective palette and folds in ReverseScreen.
 func (th *Theme) bg(c cell) gui.Color {
 	if c.Attrs&attrInverse != 0 {
 		return th.resolve(c.FG, th.DefaultFG)

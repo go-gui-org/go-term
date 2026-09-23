@@ -234,26 +234,43 @@ func TestFinite(t *testing.T) {
 	}
 }
 
-func TestStripPasteEnd_NoMarker(t *testing.T) {
+func TestStripPasteMarkers_NoMarker(t *testing.T) {
 	in := "hello world\nlinetwo"
-	if got := stripPasteEnd(in); got != in {
+	if got := stripPasteMarkers(in); got != in {
 		t.Errorf("got %q, want unchanged", got)
 	}
 }
 
-func TestStripPasteEnd_RemovesEmbeddedMarker(t *testing.T) {
+func TestStripPasteMarkers_RemovesEmbeddedMarker(t *testing.T) {
 	in := "before\x1b[201~middle\x1b[201~after"
 	want := "beforemiddleafter"
-	if got := stripPasteEnd(in); got != want {
+	if got := stripPasteMarkers(in); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
-func TestStripPasteEnd_PartialMarkerLeftAlone(t *testing.T) {
+func TestStripPasteMarkers_PartialMarkerLeftAlone(t *testing.T) {
 	// "\x1b[20" alone is not a marker.
 	in := "x\x1b[20y"
-	if got := stripPasteEnd(in); got != in {
+	if got := stripPasteMarkers(in); got != in {
 		t.Errorf("got %q, want unchanged", got)
+	}
+}
+
+// Removing one marker must not splice its neighbors into a new one: a
+// single ReplaceAll pass turns "ESC[201" + "ESC[201~" + "~" back into a
+// live ESC[201~ that ends bracketed paste early.
+func TestStripPasteMarkers_NoReassembly(t *testing.T) {
+	for _, in := range []string{
+		"\x1b[201" + pasteEnd + "~rm -rf ~\r",
+		"\x1b[20" + pasteStart + "1~x",
+		"\x1b[2" + pasteEnd + "00~x",
+		"\x1b[20\x1b[20" + pasteEnd + "1~1~x",
+	} {
+		got := stripPasteMarkers(in)
+		if strings.Contains(got, pasteEnd) || strings.Contains(got, pasteStart) {
+			t.Errorf("stripPasteMarkers(%q) = %q, still holds a marker", in, got)
+		}
 	}
 }
 
@@ -1951,20 +1968,6 @@ func TestCursorBlink_LockIgnoresDECSCUSR(t *testing.T) {
 
 // --- openURL scheme whitelist ---
 
-func TestOpenURL_PermittedSchemes(t *testing.T) {
-	// Permitted schemes reach exec.Command; blocked at the switch in the
-	// default case and return without spawning a process. We verify the
-	// function does not panic for any input — the exec may fail in CI but
-	// the error is swallowed via cmd.Start().
-	for _, url := range []string{
-		"https://example.com",
-		"http://example.com",
-		"mailto:user@example.com",
-	} {
-		openURL(url) // must not panic
-	}
-}
-
 func TestOpenURL_BlockedSchemes(t *testing.T) {
 	for _, url := range []string{
 		"file:///etc/passwd",
@@ -1977,17 +1980,29 @@ func TestOpenURL_BlockedSchemes(t *testing.T) {
 	}
 }
 
-func TestOpenURL_RejectsShellInjection(t *testing.T) {
-	// Windows cmd /c start would parse these as shell metacharacters; the
-	// charset gate must drop them before any handler is reached.
+func TestOpenURLCommand_RejectsDELAndControls(t *testing.T) {
+	// DEL (0x7F) and C0 controls must not reach a URL handler's argv.
 	for _, url := range []string{
-		"https://example.com\" & calc.exe &",
-		"https://example.com & calc.exe",
-		"https://example.com\ncalc.exe",
-		"http://example.com\t--help",
-		"mailto:a@b.c\" -e evil",
+		"http://example.com\x7f",
+		"https://example.com\x00",
+		"https://example.com\x1b[0m",
+		"mailto:a@b.c\x7f",
 	} {
-		openURL(url) // must not panic; silently dropped
+		if cmd := openURLCommand(url); cmd != nil {
+			t.Errorf("openURLCommand(%q) built %v, want nil", url, cmd.Args)
+		}
+	}
+}
+
+func TestOpenURLCommand_PermitsCleanURLs(t *testing.T) {
+	for _, url := range []string{
+		"https://example.com/path?q=1",
+		"http://example.com",
+		"mailto:user@example.com",
+	} {
+		if cmd := openURLCommand(url); cmd == nil {
+			t.Errorf("openURLCommand(%q) = nil, want a command", url)
+		}
 	}
 }
 
@@ -4039,5 +4054,53 @@ func TestCellRunKey_DefaultULColorFollowsHover(t *testing.T) {
 	if hovered.ulColor != hovered.color {
 		t.Errorf("ulColor = %+v, want hovered text color %+v",
 			hovered.ulColor, hovered.color)
+	}
+}
+
+// cancelSelectDrag clears a stranded selection drag: the flags, the
+// auto-scroll direction, and any trackpad coast in flight.
+func TestCancelSelectDrag_ClearsState(t *testing.T) {
+	tm, _ := newKeyboardTerm(24, 80)
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.cancelSelectDrag()
+	if tm.mouse.dragging || tm.mouse.dragReport {
+		t.Errorf("dragging=%v dragReport=%v, want both false",
+			tm.mouse.dragging, tm.mouse.dragReport)
+	}
+}
+
+// HandleWindowEvent on a bare Term (no grid, no pty, no window) must not
+// panic: queueCommand and kick already tolerate that state.
+func TestHandleWindowEvent_BareTerm(t *testing.T) {
+	tm := &Term{}
+	for _, typ := range []gui.EventType{
+		gui.EventMouseUp, gui.EventResized,
+		gui.EventFocused, gui.EventUnfocused,
+	} {
+		tm.HandleWindowEvent(&gui.Event{Type: typ}) // must not panic
+	}
+	tm.HandleWindowEvent(nil) // must not panic
+}
+
+// A nil window must not panic the pointer-shape path: hover and move run
+// in tests without a window.
+func TestApplyPointerShape_NilWindow(t *testing.T) {
+	applyPointerShape(nil, pointerIBeam) // must not panic
+}
+
+// The non-ASCII string cache is child-driven, so it stays bounded: past
+// capacity it rebuilds instead of growing without limit.
+func TestTermRuneStr_CacheBounded(t *testing.T) {
+	tm, _ := newKeyboardTerm(24, 80)
+	for r := rune(0x1000); r < rune(0x1000+2*maxRuneCacheEntries); r++ {
+		tm.termRuneStr(r)
+	}
+	if n := len(tm.draw.runeCache); n > maxRuneCacheEntries {
+		t.Errorf("rune cache holds %d entries, want at most %d",
+			n, maxRuneCacheEntries)
+	}
+	if got := tm.termRuneStr('é'); got != "é" {
+		t.Errorf("termRuneStr('é') = %q, want %q", got, "é")
 	}
 }

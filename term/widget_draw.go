@@ -129,6 +129,26 @@ type drawState struct {
 	blinkOff bool
 	// IME composition state, populated by drawIME and consumed by drawCursor.
 	imeComposing bool
+	// scrollInset is the window-edge gap for the scrollbar thumb, snapshotted
+	// from the window before grid.Mu is taken (see onDraw). A window call
+	// under the grid lock risks deadlock against the reader goroutine.
+	scrollInset float32
+	// pendingIME carries the IME candidate-window rect out from under
+	// grid.Mu: drawCursor computes it, onDraw reports it after unlocking.
+	// t.win is main-thread only and onDraw runs there, so reading it after
+	// the unlock is still safe.
+	pendingIME bool
+	imeX, imeY float32
+	imeW, imeH float32
+}
+
+// rowV2L returns viewport row vr's visual→logical column map, or nil when
+// the row is not reordered or vr is out of range.
+func (ds *drawState) rowV2L(vr int) []int {
+	if vr < 0 || vr >= len(ds.bidiV2LRows) {
+		return nil
+	}
+	return ds.bidiV2LRows[vr]
 }
 
 // resolveCell returns the cell at viewport (r, c), applying the selection
@@ -218,16 +238,29 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.draw.runBuf.Grow(cols * 4) // one row of text, worst-case UTF-8; no-op when cap sufficient
 
 	now := time.Now()
+	// Window-state reads stay outside grid.Mu: scrollbarEdgeInset reaches
+	// t.win.WindowSize, and the grid lock must never be held across a
+	// go-gui call — the PTY reader goroutine takes the same lock, so a
+	// blocking window call here can stall or deadlock it. t.win and
+	// t.ime.layoutX are main-thread only and onDraw runs there.
+	scrollInset := t.scrollbarEdgeInset(dc.Width)
 	ds := drawState{
-		dc:       dc,
-		style:    style,
-		g:        t.grid,
-		rows:     rows,
-		cols:     cols,
-		now:      now,
-		blinkOff: textBlinkOff(now),
+		dc:          dc,
+		style:       style,
+		g:           t.grid,
+		rows:        rows,
+		cols:        cols,
+		now:         now,
+		blinkOff:    textBlinkOff(now),
+		scrollInset: scrollInset,
 	}
 
+	// The paint passes below (drawBgPass/drawFgPass/dc.Text and friends)
+	// run under grid.Mu deliberately: dc.* are immediate-mode draws that
+	// need a consistent grid snapshot, and copying the grid per frame
+	// would trade the lock for a far larger allocation. True window-state
+	// calls (IMESetRect, WindowSize) stay out — see scrollInset above and
+	// the pendingIME flush after the unlock.
 	t.grid.Mu.Lock()
 
 	// Cancel selection drag when canvas dimensions change between frames.
@@ -239,10 +272,11 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	// motion spuriously extends the selection.
 	if t.mouse.dragging && !t.mouse.dragReport {
 		if rows != t.grid.Rows || cols != t.grid.Cols {
-			t.mouse.dragging = false
-			t.setAutoScrollDir(0)
+			// cancelMomentum inside the helper takes only momentum.mu;
+			// no path holds that lock while acquiring grid.Mu, so this
+			// nesting cannot deadlock (see momentumLoop).
+			t.cancelSelectDrag()
 			t.grid.ClearSelection()
-			t.unlockMouse(t.win)
 		}
 	}
 	// Same rationale for a scrollbar thumb drag: a resize gesture can steal
@@ -253,16 +287,17 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		t.unlockMouse(t.win)
 	}
 
-	// Phase order matters: prepareFastPath sets ds.renderRows / ds.live which
-	// which all subsequent phases read. prepareBiDi sets ds.bidiVisRows consumed
-	// by drawBgPass / drawFgPass / drawCursor. drawIME populates ds.ime* fields
-	// consumed by drawCursor.
+	// Phase order matters: prepareFastPath sets ds.renderRows / ds.live, which
+	// all subsequent phases read. prepareBiDi sets ds.bidiVisRows consumed
+	// by drawBgPass / drawFgPass / drawCursor, and ds.bidiV2LRows consumed
+	// by prepareHoverURL — so BiDi runs before hover. drawIME populates
+	// ds.ime* fields consumed by drawCursor.
 	t.prepareResize(&ds)
 	t.prepareFastPath(&ds)
 	t.prepareSearch(&ds)
 	t.prepareSelection(&ds)
-	t.prepareHoverURL(&ds)
 	t.prepareBiDi(&ds)
+	t.prepareHoverURL(&ds)
 	t.preparePartialRow(&ds)
 	t.drawBgPass(&ds)
 	t.drawFgPass(&ds)
@@ -272,6 +307,12 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.drawCursor(&ds)
 	t.drawOverlays(&ds)
 	t.grid.Mu.Unlock()
+
+	// Deferred IME candidate-window report: computed under the lock by
+	// drawCursor, delivered here where no grid lock is held.
+	if ds.pendingIME && t.win != nil {
+		t.win.IMESetRect(ds.imeX, ds.imeY, ds.imeW, ds.imeH)
+	}
 
 	if ds.doResize {
 		// Defer pty resize to the resizeLoop goroutine so the
@@ -495,8 +536,10 @@ func (t *Term) prepareSelection(ds *drawState) {
 
 // prepareHoverURL translates the Cmd-hovered implicit-URL span (issue 72),
 // stored by updateHover in content coordinates, into a per-viewport-row column
-// range consumed by drawFgPass. No-op unless Cmd is held and a URL is under the
-// pointer, so the render path pays nothing in the common case.
+// range consumed by drawFgPass. Runs after prepareBiDi so logical spans can
+// be mapped to the visual columns the foreground loop actually iterates.
+// No-op unless Cmd is held and a URL is under the pointer, so the render
+// path pays nothing in the common case.
 func (t *Term) prepareHoverURL(ds *drawState) {
 	if !t.mouse.cmdHeld.Load() || len(t.mouse.hoverSpans) == 0 {
 		return
@@ -514,7 +557,16 @@ func (t *Term) prepareHoverURL(ds *drawState) {
 		if !ok {
 			continue
 		}
-		t.draw.urlBuf[vr] = rowBounds{sp.C0, sp.C1, true}
+		c0, c1 := sp.C0, sp.C1
+		if v2l := ds.rowV2L(vr); v2l != nil {
+			// Logical span → covering visual span; same approximation
+			// as selection (see logicalSpan): gap glyphs between runs
+			// highlight along.
+			if v0, v1, ok := visualSpan(v2l, sp.C0, sp.C1); ok {
+				c0, c1 = v0, v1
+			}
+		}
+		t.draw.urlBuf[vr] = rowBounds{c0, c1, true}
 		active = true
 	}
 	if active {
@@ -522,9 +574,9 @@ func (t *Term) prepareHoverURL(ds *drawState) {
 	}
 }
 
-// prepareBiDi detects viewport rows containing RTL characters and computes
-// their visual-reordered cell slices + logical→visual column maps. For live
-// LTR-only terminals rowHasRTL returns false immediately — zero allocations.
+// prepareBiDi detects viewport rows containing reorder triggers and computes
+// their visual-reordered cell slices + visual→logical column maps. For live
+// LTR-only terminals rowNeedsBidi returns false immediately — zero allocations.
 func (t *Term) prepareBiDi(ds *drawState) {
 	renderRows := ds.renderRows
 	if renderRows == 0 {
@@ -544,18 +596,18 @@ func (t *Term) prepareBiDi(ds *drawState) {
 	ds.bidiV2LRows = t.draw.bidiV2LRows
 	cols := ds.cols
 	for r := ds.renderTop; r < renderRows; r++ {
-		var hasRTL bool
+		var needBidi bool
 		if ds.live {
-			hasRTL = rowHasRTL(ds.slots[ds.rowMap[r]], cols)
+			needBidi = rowNeedsBidi(ds.slots[ds.rowMap[r]], cols)
 		} else {
 			for c := range cols {
-				if isRTLRune(ds.g.ViewCellAt(r, c).Ch) {
-					hasRTL = true
+				if ch := ds.g.ViewCellAt(r, c).Ch; ch != 0 && needsReorder(ch) {
+					needBidi = true
 					break
 				}
 			}
 		}
-		if !hasRTL {
+		if !needBidi {
 			continue
 		}
 		if cap(t.draw.bidiScratch) < cols {
@@ -579,7 +631,7 @@ func (t *Term) preparePartialRow(ds *drawState) {
 		return
 	}
 	row := ds.g.partialTopRow()
-	if row != nil && rowHasRTL(row, ds.cols) {
+	if row != nil && rowNeedsBidi(row, ds.cols) {
 		if vis, _ := visualReorder(row, ds.cols); vis != nil {
 			row = vis
 		}

@@ -165,6 +165,19 @@ func (t *Term) cursorBlinkActive() bool {
 	return t.grid.CursorBlink && t.focused.Load() && t.winFocused.Load()
 }
 
+// cancelSelectDrag clears a selection drag stranded by a lost mouse-up:
+// a window-resize gesture consumes the release, so neither the locked
+// onMouseUp nor HandleWindowEvent ever sees it. Also stops a trackpad
+// coast in flight — it would otherwise keep scrolling a viewport that
+// just reflowed out from under it. Main-thread only.
+func (t *Term) cancelSelectDrag() {
+	t.mouse.dragging = false
+	t.mouse.dragReport = false
+	t.setAutoScrollDir(0)
+	t.cancelMomentum()
+	t.unlockMouse(t.win)
+}
+
 // HandleWindowEvent processes window-level events that the Term needs to
 // see: momentum cancellation on mouse-down/trackpad-touch, and focus-
 // reporting sequences (CSI I / CSI O) when the shell has enabled focus
@@ -188,10 +201,7 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 	// selection. Reset drag state on every window-level mouse-up so a
 	// "lost" release doesn't leave the terminal in a permanent drag.
 	if e.Type == gui.EventMouseUp && t.mouse.dragging {
-		t.mouse.dragging = false
-		t.mouse.dragReport = false
-		t.setAutoScrollDir(0)
-		t.unlockMouse(t.win)
+		t.cancelSelectDrag()
 	}
 	// When the window resizes during a drag, the host platform (notably
 	// macOS) takes over mouse tracking and swallows the mouse-up. On the
@@ -199,10 +209,7 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 	// and extend the selection from the now-lost anchor. Cancel any
 	// active drag on every resize so it can't leak across the boundary.
 	if e.Type == gui.EventResized && t.mouse.dragging {
-		t.mouse.dragging = false
-		t.mouse.dragReport = false
-		t.setAutoScrollDir(0)
-		t.unlockMouse(t.win)
+		t.cancelSelectDrag()
 	}
 	// A release the widget never saw also ends the multi-click run, so the
 	// next press starts a fresh gesture rather than reading as a double click
@@ -228,6 +235,9 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 		t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 	}
 	var report []byte
+	if t.grid == nil {
+		return
+	}
 	t.grid.Mu.Lock()
 	focus := t.grid.FocusReporting
 	t.grid.Mu.Unlock()
@@ -240,6 +250,9 @@ func (t *Term) HandleWindowEvent(e *gui.Event) {
 	case gui.EventUnfocused:
 		report = []byte("\x1b[O")
 	default:
+		return
+	}
+	if t.pw == nil {
 		return
 	}
 	if _, err := t.pw.Write(report); err != nil {
@@ -453,7 +466,7 @@ func (t *Term) View(w *gui.Window) gui.View {
 		compText   string
 		compCursor int
 	)
-	if t.focused.Load() {
+	if t.focused.Load() && w != nil {
 		composing = w.IMEComposing()
 		compText = w.IMECompText()
 		compCursor = w.IMECompCursor()

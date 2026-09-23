@@ -80,7 +80,12 @@ type savedCursor struct {
 
 // MoveCursor sets the cursor to (r,c), clamped to grid bounds. Used by
 // CSI cursor-position sequences which are 1-based; callers convert.
+// No-op on a zero-size grid, where Rows-1/Cols-1 would invert the clamp
+// bounds and leave the cursor at -1.
 func (g *grid) MoveCursor(r, c int) {
+	if g.Rows < 1 || g.Cols < 1 {
+		return
+	}
 	if r < 0 {
 		r = 0
 	}
@@ -102,6 +107,9 @@ func (g *grid) MoveCursor(r, c int) {
 // OriginMode is enabled, and the row is clamped to the active scroll
 // region. Column handling remains full-width.
 func (g *grid) MoveCursorOrigin(r, c int) {
+	if g.Rows < 1 || g.Cols < 1 {
+		return
+	}
 	if !g.OriginMode || !g.regionValid() {
 		g.MoveCursor(r, c)
 		return
@@ -124,8 +132,23 @@ func (g *grid) MoveCursorOrigin(r, c int) {
 	g.markDirty(r)
 }
 
+// saturateDelta clamps a cursor-motion count to [0, bound] so
+// CursorR/C+n cannot wrap around int on hostile input (e.g. n near
+// MaxInt derived from a NaN/Inf wheel delta) and clamp to the wrong
+// edge. Negative counts are meaningless and become a no-op.
+func saturateDelta(n, bound int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > bound {
+		return bound
+	}
+	return n
+}
+
 // CursorUp/Down/Forward/Back move the cursor by n cells, clamped.
 func (g *grid) CursorUp(n int) {
+	n = saturateDelta(n, g.Rows)
 	r := g.CursorR - n
 	if g.OriginMode && g.regionValid() && g.CursorR >= g.Top && g.CursorR <= g.Bottom && r < g.Top {
 		r = g.Top
@@ -134,6 +157,7 @@ func (g *grid) CursorUp(n int) {
 }
 
 func (g *grid) CursorDown(n int) {
+	n = saturateDelta(n, g.Rows)
 	r := g.CursorR + n
 	if g.OriginMode && g.regionValid() && g.CursorR >= g.Top && g.CursorR <= g.Bottom && r > g.Bottom {
 		r = g.Bottom
@@ -141,9 +165,15 @@ func (g *grid) CursorDown(n int) {
 	g.MoveCursor(r, g.CursorC)
 }
 
-func (g *grid) CursorForward(n int) { g.MoveCursor(g.CursorR, g.settledCol()+n) }
+func (g *grid) CursorForward(n int) {
+	n = saturateDelta(n, g.Cols)
+	g.MoveCursor(g.CursorR, g.settledCol()+n)
+}
 
-func (g *grid) CursorBack(n int) { g.MoveCursor(g.CursorR, g.settledCol()-n) }
+func (g *grid) CursorBack(n int) {
+	n = saturateDelta(n, g.Cols)
+	g.MoveCursor(g.CursorR, g.settledCol()-n)
+}
 
 // settledCol is the cursor's real column, with the deferred-wrap state
 // collapsed. putCell encodes "wrap pending" by leaving CursorC at Cols: the
@@ -185,8 +215,14 @@ func (g *grid) SaveCursor() {
 }
 
 // RestoreCursor restores the snapshot from SaveCursor. If no save has
-// occurred, homes the cursor and resets SGR per VT100 spec.
+// occurred, homes the cursor and resets SGR per VT100 spec. A pending-wrap
+// column (CursorC == Cols) survives the round trip: SaveCursor keeps it and
+// the restore below allows it, rather than funnelling through MoveCursor
+// which would clamp it onto the last cell.
 func (g *grid) RestoreCursor() {
+	if g.Rows < 1 || g.Cols < 1 {
+		return
+	}
 	if !g.saved.valid {
 		g.MoveCursor(0, 0)
 		g.CurFG, g.CurBG, g.CurAttrs = defaultColor, defaultColor, 0
@@ -194,7 +230,10 @@ func (g *grid) RestoreCursor() {
 		g.CurULColor = defaultColor
 		return
 	}
-	g.MoveCursor(g.saved.r, g.saved.c)
+	g.markDirty(g.CursorR)
+	g.CursorR = clamp(g.saved.r, 0, g.Rows-1)
+	g.CursorC = clamp(g.saved.c, 0, g.Cols)
+	g.markDirty(g.CursorR)
 	g.CurFG = g.saved.fg
 	g.CurBG = g.saved.bg
 	g.CurAttrs = g.saved.attrs

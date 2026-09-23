@@ -143,8 +143,9 @@ func (t *Term) effectiveBellDuration() time.Duration {
 // that tmr fires after d, bumps the draw version, and schedules a window
 // repaint. Used by scheduleBellClear, showScrollbar, and scheduleResizeWake
 // to avoid duplicating the after-func / guard / bump / queue pattern.
-// Safe to call from any goroutine; the callback checks closed before
-// queueing work.
+// Main-thread only: *tmr is mutated with no synchronization. The callback
+// itself checks closed before queueing work, so a late fire after Close is
+// still safe.
 func (t *Term) scheduleDelayedUpdate(d time.Duration, tmr **time.Timer) {
 	if *tmr == nil {
 		*tmr = time.AfterFunc(d, func() {

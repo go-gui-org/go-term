@@ -360,7 +360,8 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 			return
 		}
 		cb := base + mouseModBits(ctx.Event.Modifiers)
-		t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
+		// The child grid is logical; the pointer is visual.
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
 		t.mouse.dragging = true
 		t.mouse.dragButton = ctx.Event.MouseButton
 		t.mouse.dragReport = true
@@ -401,20 +402,26 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
 		contentR := t.grid.viewportToContent(r)
-		head := contentPos{Row: contentR, Col: selCol}
+		cols := t.grid.Cols
+		v2l := t.v2lForViewportRow(r)
+		// Pointer geometry is visual; grid coordinates are logical.
+		head := contentPos{Row: contentR, Col: logicalBoundary(v2l, selCol, cols)}
+		lc := logicalCell(v2l, c, cols)
+		extended := false
 		switch {
 		case shiftExtend && t.grid.hasSelAnchor:
 			// Keep SelAnchor; move only the head to the click point. A one-cell
 			// span (head == anchor) is not a real selection, so leave inactive.
 			t.grid.SelHead = head
 			t.grid.SelActive = head != t.grid.SelAnchor
+			extended = true
 		case count == 2:
 			// Double click: the word under the *cell*, not the boundary.
 			t.grid.SelMode = selWord
-			t.selectUnitAt(contentPos{Row: contentR, Col: c})
+			t.selectUnitAt(contentPos{Row: contentR, Col: lc})
 		case count == 3:
 			t.grid.SelMode = selLine
-			t.selectUnitAt(contentPos{Row: contentR, Col: c})
+			t.selectUnitAt(contentPos{Row: contentR, Col: lc})
 		default:
 			t.grid.SelMode = selChar
 			if block {
@@ -425,6 +432,8 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 			t.grid.SelActive = false
 		}
 		t.grid.hasSelAnchor = true
+		t.mouse.selStartV, t.mouse.selStartRow = selCol, contentR
+		t.mouse.selStartSet = !extended
 	}()
 	t.mouse.dragging = true
 	t.mouse.dragButton = ctx.Event.MouseButton
@@ -455,7 +464,9 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 		if inHit != t.scrollbar.hovered {
 			t.scrollbar.hovered = inHit
 			t.bumpVersion()
-			ctx.Window.InvalidateLayout()
+			if ctx.Window != nil {
+				ctx.Window.InvalidateLayout()
+			}
 		}
 	}
 
@@ -532,13 +543,29 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 			}
 		}
 		contentR := t.grid.viewportToContent(r)
+		cols := t.grid.Cols
+		v2l := t.v2lForViewportRow(r)
 		// A drag begun with a double or triple click keeps that granularity:
 		// the selection snaps to whole words / lines as the pointer moves.
 		if t.grid.SelMode == selWord || t.grid.SelMode == selLine {
-			t.extendUnitSelection(contentPos{Row: contentR, Col: c})
+			t.extendUnitSelection(contentPos{Row: contentR, Col: logicalCell(v2l, c, cols)})
 			return
 		}
-		t.grid.SelHead = contentPos{Row: contentR, Col: selCol}
+		if t.mouse.selStartSet && contentR == t.mouse.selStartRow && t.grid.SelMode == selChar {
+			// Same-row char drag: map the whole visual range to its
+			// covering logical span so the selected glyphs are exactly
+			// the dragged ones (point-mapping each end would drift by
+			// a cell on reversed rows).
+			if l0, l1, ok := logicalSpan(v2l, t.mouse.selStartV, selCol, cols); ok {
+				t.grid.SelAnchor = contentPos{Row: contentR, Col: l0}
+				t.grid.SelHead = contentPos{Row: contentR, Col: l1}
+				t.grid.SelActive = true
+				return
+			}
+		}
+		// Cross-row drags (and the block band): the anchor row runs to its
+		// edge via selRowSpan, so only the head needs mapping here.
+		t.grid.SelHead = contentPos{Row: contentR, Col: logicalBoundary(v2l, selCol, cols)}
 		if t.grid.SelHead != t.grid.SelAnchor {
 			t.grid.SelActive = true
 		}
@@ -572,12 +599,12 @@ func (t *Term) motionReport(e *gui.Event, snap mouseSnap, r, c int) bool {
 			return true
 		}
 		cb := base + mouseModBits(e.Modifiers) + 32
-		t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap.pixels, true)
 		t.mouse.lastR, t.mouse.lastC = r, c
 		return true
 	case !t.mouse.dragging && snap.any:
 		cb := 35 + mouseModBits(e.Modifiers) // 3+32 = motion, no button
-		t.writeMouse(cb, c, r, e.MouseX, e.MouseY, snap.pixels, true)
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap.pixels, true)
 		t.mouse.lastR, t.mouse.lastC = r, c
 		return true
 	}
@@ -595,8 +622,12 @@ func (t *Term) pointerShapeSnap() pointerShape {
 
 // applyPointerShape maps an OSC 22 shape onto go-gui's window cursor calls.
 // The only place in the widget that knows both vocabularies; pointer.go owns
-// the grid-side enum and stays free of go-gui.
+// the grid-side enum and stays free of go-gui. Nil-safe: hover and move paths
+// run in tests without a window.
 func applyPointerShape(w *gui.Window, s pointerShape) {
+	if w == nil {
+		return
+	}
 	switch s {
 	case pointerIBeam:
 		w.SetMouseCursorIBeam()
@@ -663,12 +694,20 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 	func() {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
+		v2l := t.v2lForViewportRow(r)
+		cols := t.grid.Cols
+		// Pointer geometry is visual; grid coordinates are logical.
+		lc := logicalCell(v2l, c, cols)
 		if oldR >= 0 && oldC >= 0 {
-			prevLink = t.grid.ViewCellAt(oldR, oldC).LinkID
+			oldLC := oldC
+			if oldV2L := t.v2lForViewportRow(oldR); oldV2L != nil {
+				oldLC = logicalCell(oldV2L, oldC, cols)
+			}
+			prevLink = t.grid.ViewCellAt(oldR, oldLC).LinkID
 		}
-		curLink = t.grid.ViewCellAt(r, c).LinkID
+		curLink = t.grid.ViewCellAt(r, lc).LinkID
 		if cmd && curLink == 0 {
-			cp := contentPos{Row: t.grid.viewportToContent(r), Col: c}
+			cp := contentPos{Row: t.grid.viewportToContent(r), Col: lc}
 			url, spans, _ = t.grid.detectURLAt(cp)
 		}
 		shape = t.grid.PointerShape
@@ -741,7 +780,7 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 			base, ok := mouseSGRBaseButton(t.mouse.dragButton)
 			if ok {
 				cb := base + mouseModBits(ctx.Event.Modifiers)
-				t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, false)
+				t.writeMouse(cb, t.logicalMouseCol(r, c), r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, false)
 			}
 		}
 		t.mouse.dragging = false
@@ -777,22 +816,25 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 		}()
 	}
 	t.bumpVersion()
-	ctx.Window.InvalidateLayout()
+	if ctx.Window != nil {
+		ctx.Window.InvalidateLayout()
+	}
 	ctx.Event.IsHandled = true
 }
 
-// linkURLAt resolves the link at viewport cell (r,c). An explicit OSC 8
-// destination wins; otherwise implicit URL detection runs at the same cell,
-// matching the precedence the Cmd-hover highlight uses. Returns "" when the
-// cell carries no link.
+// linkURLAt resolves the link at viewport cell (r,c) in visual coordinates.
+// An explicit OSC 8 destination wins; otherwise implicit URL detection runs
+// at the same cell, matching the precedence the Cmd-hover highlight uses.
+// Returns "" when the cell carries no link.
 func (t *Term) linkURLAt(r, c int) string {
 	t.grid.Mu.Lock()
 	defer t.grid.Mu.Unlock()
-	cell := t.grid.ViewCellAt(r, c)
+	lc := logicalCell(t.v2lForViewportRow(r), c, t.grid.Cols)
+	cell := t.grid.ViewCellAt(r, lc)
 	if u := t.grid.LinkURL(cell.LinkID); u != "" {
 		return u
 	}
-	cp := contentPos{Row: t.grid.viewportToContent(r), Col: c}
+	cp := contentPos{Row: t.grid.viewportToContent(r), Col: lc}
 	u, _, _ := t.grid.detectURLAt(cp)
 	return u
 }
@@ -802,39 +844,49 @@ func (t *Term) linkURLAt(r, c int) string {
 // real browser. Production never reassigns it.
 var openURLFn = openURL
 
-// openURL opens url with the OS default browser/handler.
-// Only http, https, and mailto schemes are permitted; other URI schemes
-// (file://, custom handlers, javascript:) are silently dropped to prevent
-// a malicious OSC 8 hyperlink from invoking arbitrary OS handlers.
+// openURLCommand builds the OS command that opens url with the default
+// browser/handler, or nil when the URL is not permitted. Only http, https,
+// and mailto schemes are permitted; other URI schemes (file://, custom
+// handlers, javascript:) are silently dropped to prevent a malicious OSC 8
+// hyperlink from invoking arbitrary OS handlers.
 // The URL is terminal output — untrusted — so it must never reach a shell:
 // every branch below passes it as an argv element of a non-shell program
 // (open, rundll32, xdg-open), and the charset check keeps control characters
-// and quotes out of even that argv.
-func openURL(rawURL string) {
+// (including DEL), 0x7F, and quotes out of even that argv.
+func openURLCommand(rawURL string) *exec.Cmd {
 	switch {
 	case strings.HasPrefix(rawURL, "https://"),
 		strings.HasPrefix(rawURL, "http://"),
 		strings.HasPrefix(rawURL, "mailto:"):
 		// permitted
 	default:
-		return
+		return nil
 	}
 	for i := 0; i < len(rawURL); i++ {
-		if rawURL[i] < 0x20 || rawURL[i] == '"' {
-			return // invalid in a URL; reject before it reaches any handler
+		if rawURL[i] < 0x20 || rawURL[i] == 0x7F || rawURL[i] == '"' {
+			return nil // invalid in a URL; reject before it reaches any handler
 		}
 	}
-	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", rawURL)
+		return exec.Command("open", rawURL)
 	case "windows":
 		// rundll32 takes the URL as argv with no shell parsing — cmd /c start
 		// would let '&' or quotes in the URL escape into cmd.exe. Same choice
 		// falcon's openPath makes.
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
 	default:
-		cmd = exec.Command("xdg-open", rawURL)
+		return exec.Command("xdg-open", rawURL)
+	}
+}
+
+// openURL opens url with the OS default browser/handler. A URL
+// openURLCommand rejects is silently dropped. See openURLCommand for the
+// permit rules.
+func openURL(rawURL string) {
+	cmd := openURLCommand(rawURL)
+	if cmd == nil {
+		return
 	}
 	if err := cmd.Start(); err == nil {
 		go func() { _ = cmd.Wait() }()
@@ -995,8 +1047,9 @@ func (t *Term) onMouseScroll(ctx gui.EventCtx) {
 			base = 65
 		}
 		cb := base + mouseModBits(ctx.Event.Modifiers)
+		lc := t.logicalMouseCol(r, c)
 		for range t.wheelReportTicks(ctx.Event.ScrollY, ctx.Event.ScrollPrecise) {
-			t.writeMouse(cb, c, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
+			t.writeMouse(cb, lc, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
 		}
 		ctx.Event.IsHandled = true
 		return
@@ -1085,7 +1138,7 @@ func (t *Term) cancelMomentum() {
 	t.momentum.coasting = false
 }
 
-// kickMomentum is the AfterFunc callback fired 80 ms after the last scroll
+// kickMomentum is the AfterFunc callback fired 50 ms after the last scroll
 // event. It marks the momentum state as coasting and wakes momentumLoop.
 func (t *Term) kickMomentum() {
 	t.momentum.mu.Lock()

@@ -55,6 +55,36 @@ func TestGrid_ExitAlt_NoOpWhenInactive(t *testing.T) {
 	}
 }
 
+// A short or stale stashed save must rebuild a blank screen rather than
+// panic or misplace in resetRows.
+func TestGrid_ExitAlt_CorruptSaveRebuilds(t *testing.T) {
+	g := newGrid(3, 4)
+	g.Put('m')
+	g.EnterAlt()
+	g.mainSaved.cells = g.mainSaved.cells[:2]
+	g.mainSaved.rowWrapped = g.mainSaved.rowWrapped[:1]
+	g.mainSaved.cursorR, g.mainSaved.cursorC = 99, 99
+	g.mainSaved.top, g.mainSaved.bottom = 5, 1
+	g.ExitAlt()
+	if g.AltActive {
+		t.Fatal("still alt after ExitAlt")
+	}
+	if len(g.Cells) != 12 {
+		t.Fatalf("Cells len = %d, want 12", len(g.Cells))
+	}
+	if g.CursorR != 2 || g.CursorC != 4 {
+		t.Errorf("cursor = %d,%d, want clamped 2,4", g.CursorR, g.CursorC)
+	}
+	if g.Top != 0 || g.Bottom != 2 {
+		t.Errorf("region = %d..%d, want 0..2", g.Top, g.Bottom)
+	}
+	// Must be usable: reads and writes stay in bounds.
+	for r := 0; r < g.Rows; r++ {
+		_ = g.row(r)
+	}
+	g.MoveCursor(2, 3)
+}
+
 func TestGrid_AltSuppressesScrollback(t *testing.T) {
 	g := newGrid(2, 3)
 	g.ScrollbackCap = 100

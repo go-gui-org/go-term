@@ -1,6 +1,9 @@
 package term
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestGrid_MoveCursorClamps(t *testing.T) {
 	g := newGrid(3, 4)
@@ -179,5 +182,50 @@ func TestCursorStyle_String(t *testing.T) {
 		if got := style.String(); got != want {
 			t.Errorf("CursorStyle(%d).String() = %q, want %q", style, got, want)
 		}
+	}
+}
+
+// Extreme deltas (e.g. derived from a non-finite wheel event) must saturate
+// to the grid edge, not wrap around int and land on the wrong one.
+// Negative counts are meaningless and hold still.
+func TestGrid_CursorExtremeDelta_NoWrap(t *testing.T) {
+	g := newGrid(5, 10)
+	g.CursorR, g.CursorC = 2, 3
+	g.CursorUp(math.MaxInt)
+	if g.CursorR != 0 {
+		t.Errorf("CursorUp(MaxInt) row = %d, want 0", g.CursorR)
+	}
+	g.CursorR, g.CursorC = 2, 3
+	g.CursorDown(math.MaxInt)
+	if g.CursorR != 4 {
+		t.Errorf("CursorDown(MaxInt) row = %d, want 4", g.CursorR)
+	}
+	g.CursorR, g.CursorC = 2, 3
+	g.CursorForward(math.MaxInt)
+	if g.CursorC != 9 {
+		t.Errorf("CursorForward(MaxInt) col = %d, want 9", g.CursorC)
+	}
+	g.CursorR, g.CursorC = 2, 3
+	g.CursorBack(math.MaxInt)
+	if g.CursorC != 0 {
+		t.Errorf("CursorBack(MaxInt) col = %d, want 0", g.CursorC)
+	}
+	g.CursorR, g.CursorC = 2, 3
+	g.CursorUp(-1)
+	g.CursorDown(math.MinInt)
+	if g.CursorR != 2 {
+		t.Errorf("negative delta moved row to %d, want 2", g.CursorR)
+	}
+}
+
+// A zero-size grid has no valid cursor: moves and restores are no-ops
+// rather than leaving CursorR/CursorC at -1.
+func TestGrid_CursorZeroGrid_NoOp(t *testing.T) {
+	g := &grid{}
+	g.MoveCursor(0, 0)
+	g.RestoreCursor()
+	g.CursorUp(1)
+	if g.CursorR != 0 || g.CursorC != 0 {
+		t.Errorf("zero-grid cursor = %d,%d, want 0,0", g.CursorR, g.CursorC)
 	}
 }

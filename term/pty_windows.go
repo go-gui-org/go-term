@@ -79,6 +79,9 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 			shell = "cmd.exe"
 		}
 	}
+	if err := checkIdentity(cfg.Identity); err != nil {
+		return nil, err
+	}
 
 	// Two anonymous pipes via the Win32 API directly (not os.Pipe, whose
 	// handles are associated with Go's runtime poller and misbehave when
@@ -140,16 +143,11 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 	// inheriting the parent's real console.
 	si.Flags |= windows.STARTF_USESTDHANDLES
 
-	// COLORTERM advertises the widget's 24-bit rendering; TERM alone only
-	// promises the 256-color palette, so TUI toolkits quantize without it.
-	// The host terminal's identity is replaced by this one's first (see
-	// setTerminalIdentity) so the child probes this terminal instead of
-	// trusting the parent's. cfg.Identity names it; empty falls back to
-	// "go-term".
-	env := setTerminalIdentity(os.Environ(), cfg.Identity)
-	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
-	env = append(env, colorFGBGEnv(cfg))
-	env = append(env, cfg.Env...)
+	// baseChildEnv describes this terminal (TERM, COLORTERM, COLORFGBG, own
+	// identity in place of the host's) so the child probes this terminal
+	// instead of trusting the parent's. cfg.Identity names it; empty falls
+	// back to "go-term". cfg.Env applies last so caller overrides win.
+	env := applyCfgEnv(baseChildEnv(cfg, os.Environ()), cfg.Env)
 	envBlock, err := createEnvBlock(env)
 	if err != nil {
 		windows.ClosePseudoConsole(hpc)
@@ -160,7 +158,7 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 
 	dir := cfg.Dir
 	if dir != "" {
-		if _, err := os.Stat(dir); err != nil {
+		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
 			if home, herr := os.UserHomeDir(); herr == nil {
 				dir = home
 			} else {
@@ -273,7 +271,8 @@ func (p *ptyDev) Resize(rows, cols int) error {
 // pipe. Unlike the child-exit path this does not wait to drain: the caller
 // is discarding the terminal, so pending output has nowhere to go. Safe to
 // call repeatedly; the wait goroutine reaps the process and thread handles
-// once WaitForSingleObject returns.
+// once WaitForSingleObject returns. Always returns nil, per the shared
+// cross-platform Close contract (teardown is best-effort).
 func (p *ptyDev) Close() error {
 	p.shutdownConsole()
 	// Closing the console does not reliably terminate an attached child,
