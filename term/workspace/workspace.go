@@ -66,6 +66,11 @@ type Cfg struct {
 	// closes, splits and new tabs are ignored. If the hook kept the window
 	// open, the dead tab is removed — replaced by a fresh shell when it was
 	// the only tab — so the window never sits on a pane that cannot exit.
+	//
+	// It runs only when no dialog is open. If one is up when the last shell
+	// exits, the call waits until that dialog closes. A hook may open an
+	// in-app dialog (a "quit?" confirmation) and return at once; the workspace
+	// waits for that dialog to close before it reads the close flag.
 	OnLastShellExit func(w *gui.Window)
 
 	// OnColorScheme, when non-nil, runs when the active theme's light/dark
@@ -136,6 +141,9 @@ type Workspace struct {
 type lastShellExit struct {
 	tab    *tab
 	leafID string
+	// hookPending is set when another dialog was open at the exit, so the
+	// hook has not run yet; see exitLastShell.
+	hookPending bool
 }
 
 // notifyColorScheme tells the embedder the active theme's light/dark
@@ -363,12 +371,24 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 //     start a fresh shell behind the dialog, and a Save from its Yes button
 //     would then record that shell instead of the real tab. The decision waits
 //     in pendingExit until View sees the dialog gone.
+//
+// The hook runs only when no dialog is open. go-gui shows one dialog at a
+// time, so with one already up (About, an error) a hook that asks "quit?"
+// either returns early without asking or replaces that dialog, and the
+// workspace could not tell which dialog it then waits on. Instead the whole
+// exit waits in pendingExit, with the hook not yet run, until that dialog
+// closes; see settlePendingExit.
 func (ws *Workspace) exitLastShell(tab *tab, leafID string) {
+	if ws.w.DialogIsVisible() {
+		ws.pendingExit = &lastShellExit{tab: tab, leafID: leafID, hookPending: true}
+		return
+	}
 	if ws.cfg.OnLastShellExit != nil {
 		ws.cfg.OnLastShellExit(ws.w)
 	} else {
 		ws.w.Close()
 	}
+	// No dialog was open before the hook, so a visible one now is the hook's.
 	if !ws.w.CloseRequested() && ws.w.DialogIsVisible() {
 		ws.pendingExit = &lastShellExit{tab: tab, leafID: leafID}
 		return
@@ -390,18 +410,33 @@ func (ws *Workspace) finishLastShellExit(tab *tab, leafID string) {
 	}
 }
 
-// settlePendingExit finishes a last-shell exit that was waiting on the exit
-// hook's dialog, once that dialog has closed. It runs from View, which go-gui
-// rebuilds when a dialog is dismissed; the work itself is queued, because it
-// may spawn a shell and change the tab list, which View must not do while it
-// builds the tree.
+// settlePendingExit resumes a last-shell exit that was waiting on a dialog,
+// once that dialog has closed. When the dialog was the hook's own, the exit is
+// finished from the hook's outcome. When it was some other dialog, the hook has
+// not run yet, and runs now.
+//
+// It runs from View. That is enough because go-gui's DialogDismiss, which
+// every way of closing an in-app dialog goes through, marks the layout for a
+// rebuild and wakes the main loop (go-gui gui/view_dialog.go, DialogDismiss),
+// so View runs on the frame after any dialog closes. The work itself is
+// queued: it may run the hook, spawn a shell and change the tab list, which
+// View must not do while it builds the tree.
 func (ws *Workspace) settlePendingExit(w *gui.Window) {
 	p := ws.pendingExit
 	if p == nil || w.DialogIsVisible() {
 		return
 	}
 	ws.pendingExit = nil
-	w.QueueCommand(func(*gui.Window) { ws.finishLastShellExit(p.tab, p.leafID) })
+	w.QueueCommand(func(*gui.Window) { ws.resumePendingExit(p) })
+}
+
+// resumePendingExit is the queued half of settlePendingExit.
+func (ws *Workspace) resumePendingExit(p *lastShellExit) {
+	if p.hookPending {
+		ws.exitLastShell(p.tab, p.leafID)
+		return
+	}
+	ws.finishLastShellExit(p.tab, p.leafID)
 }
 
 // Close tears down all terminals and restores the original OnEvent.

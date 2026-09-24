@@ -258,6 +258,12 @@ type Cfg struct {
 	// goroutine, so it may block on disk or network. When nil and DownloadDir
 	// is set, the built-in writer saves to that directory instead.
 	//
+	// Close waits a short time (about 2s) for a transfer in progress, then
+	// returns. No OnDownload call, and no OnNotify for a finished download,
+	// starts after Close returns. A call that is still running then is not
+	// interrupted, so a sink that blocks for longer can still be inside
+	// OnDownload after Close; tear the sink down only once that call ends.
+	//
 	// Leaving both unset disables file transfers entirely, which is the
 	// default: untrusted terminal output must not create files on its own
 	// authority.

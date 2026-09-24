@@ -573,9 +573,17 @@ func (ws *Workspace) splitPane(horizontal bool) {
 	if hasOld {
 		inheritSize = old.FontSize()
 	}
+	// Build the new tree before spawning. splitLeaf is pure, so a focused leaf
+	// that is stale or missing from the tree costs nothing here. Spawning
+	// first left a live shell in tab.terms that no layout ever showed, with
+	// the source pane already unfocused.
+	newLeafID := tab.allocLeafID()
+	newRoot := splitLeaf(tab.root, tab.focused, newLeafID, dir)
+	if newRoot == nil {
+		return
+	}
 	// addPane refuses to spawn into a closing window (errWindowClosing), so
 	// that case needs no guard here.
-	newLeafID := tab.allocLeafID()
 	if err := tab.addPane(ws.w, ws.cfg, newLeafID, cwd, inheritSize, ws.hooks()); err != nil {
 		return
 	}
@@ -585,12 +593,9 @@ func (ws *Workspace) splitPane(horizontal bool) {
 	if hasOld {
 		setTermFocused(old, false)
 	}
-	newRoot := splitLeaf(tab.root, tab.focused, newLeafID, dir)
-	if newRoot != nil {
-		tab.root = newRoot
-		tab.focused = newLeafID
-		ws.refresh()
-	}
+	tab.root = newRoot
+	tab.focused = newLeafID
+	ws.refresh()
 }
 
 // closePane closes the focused pane in the active tab. Falls back to the

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/go-gui-org/go-term/internal/atomicfile"
 )
@@ -34,6 +35,21 @@ const downloadDirMode = 0o700
 // holding 100 same-named downloads is a runaway, not a user.
 const maxDownloadCollisions = 100
 
+// downloadCloseWait bounds how long Close waits for a transfer that is being
+// written when the pane closes. Close runs on the main thread, so it must not
+// wait for a slow fsync without limit. But an embedder usually exits the
+// process soon after Close, and that would kill the write halfway and leave
+// the staging file behind. Most transfers finish well inside this time. A
+// var so tests can shorten it.
+var downloadCloseWait = 2 * time.Second
+
+// dlGate states. See Term.dlGate.
+const (
+	dlGateOpen int32 = iota // callbacks allowed
+	dlGateBusy              // the worker is inside a callback
+	dlGateShut              // Close returned or is returning; no new callback
+)
+
 // downloadJob is one queued OSC 1337 File= transfer.
 type downloadJob struct {
 	name string
@@ -53,6 +69,7 @@ func (t *Term) registerDownloadHandler() {
 	}
 	t.dlQueue = make(chan downloadJob, downloadQueueDepth)
 	t.dlDone = make(chan struct{})
+	t.dlExited = make(chan struct{})
 	t.parser.SetDownloadHandler(func(name string, data []byte) {
 		// Reserve the memory before queueing so the accounting can never
 		// go negative or lag behind the channel.
@@ -69,8 +86,37 @@ func (t *Term) registerDownloadHandler() {
 			t.dlPending.Add(-n)
 		}
 	})
-	t.dlWg.Add(1)
 	go t.downloadWorker()
+}
+
+// stopDownloadWorker is the Close half of the worker's shutdown; dlDone is
+// already closed. It waits for the worker up to downloadCloseWait, so a
+// transfer in progress normally gets published before Close returns. When the
+// wait runs out, the worker keeps going in the background and still publishes
+// the file, but the gate is shut first so it calls no embedder callback after
+// Close returns. A callback that is already running when the gate shuts is
+// not interrupted.
+func (t *Term) stopDownloadWorker() {
+	timer := time.NewTimer(downloadCloseWait)
+	defer timer.Stop()
+	select {
+	case <-t.dlExited:
+	case <-timer.C:
+	}
+	t.dlGate.Store(dlGateShut)
+}
+
+// withDownloadGate runs fn only while the gate is open, and holds the gate
+// busy while fn runs. It reports whether fn ran.
+func (t *Term) withDownloadGate(fn func()) bool {
+	if !t.dlGate.CompareAndSwap(dlGateOpen, dlGateBusy) {
+		return false
+	}
+	// If Close shut the gate while fn ran, this CAS fails and the gate stays
+	// shut, which is what Close wants.
+	defer t.dlGate.CompareAndSwap(dlGateBusy, dlGateOpen)
+	fn()
+	return true
 }
 
 // downloadWorker drains dlQueue one job at a time. Serializing the writes keeps
@@ -78,13 +124,12 @@ func (t *Term) registerDownloadHandler() {
 // not what makes publishing race-free against other programs: the hard link in
 // publishDownload is, since it fails instead of replacing a file.
 //
-// The worker can outlive Close: Close signals dlDone but does not wait, so a
-// transfer being written when the pane closes finishes in the background
-// instead of freezing the window during its fsync. That is safe because the
-// worker reads only cfg (never changed after New), the atomic dlPending and
-// the channels, and notify does not touch the window.
+// Close waits for the worker only up to downloadCloseWait, so the worker can
+// outlive Close on a slow disk. That is safe because the worker reads only cfg
+// (never changed after New), the atomics and the channels, and every embedder
+// callback goes through withDownloadGate, which Close shuts.
 func (t *Term) downloadWorker() {
-	defer t.dlWg.Done()
+	defer close(t.dlExited)
 	for {
 		select {
 		case job := <-t.dlQueue:
@@ -98,7 +143,7 @@ func (t *Term) downloadWorker() {
 			default:
 			}
 			if fn := t.cfg.OnDownload; fn != nil {
-				fn(job.name, job.data)
+				t.withDownloadGate(func() { fn(job.name, job.data) })
 				continue
 			}
 			path, err := writeDownload(t.cfg.DownloadDir, job.name, job.data)
@@ -106,7 +151,11 @@ func (t *Term) downloadWorker() {
 				log.Printf("term: download %q: %v", job.name, err)
 				continue
 			}
-			t.notify("Download complete", path)
+			if !t.withDownloadGate(func() { t.notify("Download complete", path) }) {
+				// Close already returned; the file is saved, but the pane
+				// that could announce it is gone.
+				log.Printf("term: download saved after close: %s", path)
+			}
 		case <-t.dlDone:
 			return
 		}
