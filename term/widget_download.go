@@ -69,7 +69,7 @@ func (t *Term) registerDownloadHandler() {
 			t.dlPending.Add(-n)
 		}
 	})
-	t.loopWg.Add(1)
+	t.dlWg.Add(1)
 	go t.downloadWorker()
 }
 
@@ -77,12 +77,26 @@ func (t *Term) registerDownloadHandler() {
 // two of this Term's own downloads from probing the same names at once. It is
 // not what makes publishing race-free against other programs: the hard link in
 // publishDownload is, since it fails instead of replacing a file.
+//
+// The worker can outlive Close: Close signals dlDone but does not wait, so a
+// transfer being written when the pane closes finishes in the background
+// instead of freezing the window during its fsync. That is safe because the
+// worker reads only cfg (never changed after New), the atomic dlPending and
+// the channels, and notify does not touch the window.
 func (t *Term) downloadWorker() {
-	defer t.loopWg.Done()
+	defer t.dlWg.Done()
 	for {
 		select {
 		case job := <-t.dlQueue:
 			t.dlPending.Add(-int64(len(job.data)))
+			// select picks at random among ready cases, so a closed dlDone
+			// does not stop a queued job by itself. Check it first: jobs
+			// still queued at Close are dropped, as Close documents.
+			select {
+			case <-t.dlDone:
+				return
+			default:
+			}
 			if fn := t.cfg.OnDownload; fn != nil {
 				fn(job.name, job.data)
 				continue
@@ -134,8 +148,12 @@ func writeDownload(dir, name string, data []byte) (string, error) {
 	// and full-flushes the whole payload, so a sender that repeats one name
 	// would otherwise pay a large synced write per transfer only to delete it.
 	// This is an early exit, not the guarantee: a name free now can be taken
-	// before the link, and publishDownload handles that.
-	if _, err := firstFree(cleanDir, base, nameIsFree); err != nil {
+	// before the link, and publishDownload handles that. The names before the
+	// first free one were taken a moment ago, so publishing starts there
+	// instead of probing them all again. A name freed in between is skipped,
+	// which costs only a higher suffix.
+	_, start, err := firstFree(cleanDir, base, 0, nameIsFree)
+	if err != nil {
 		return "", err
 	}
 
@@ -146,7 +164,7 @@ func writeDownload(dir, name string, data []byte) (string, error) {
 	// The staging file is always removed: after a successful link the data
 	// lives on under dest, and after a failure nothing should stay behind.
 	defer func() { _ = os.Remove(tmp) }()
-	dest, err = publishDownload(cleanDir, base, tmp)
+	dest, err = publishDownload(cleanDir, base, tmp, start)
 	if err != nil {
 		return "", err
 	}
@@ -166,15 +184,16 @@ var stageDownload = atomicfile.Stage
 var linkFile = os.Link
 
 // publishDownload gives the staged file tmp a free name under dir: base, or
-// base with a " (N)" suffix. It returns the name used.
-func publishDownload(dir, base, tmp string) (string, error) {
-	dest, err := firstFree(dir, base, func(dest string) error {
+// base with a " (N)" suffix, trying candidates from index start on. It returns
+// the name used.
+func publishDownload(dir, base, tmp string, start int) (string, error) {
+	dest, _, err := firstFree(dir, base, start, func(dest string) error {
 		return linkFile(tmp, dest)
 	})
 	if err != nil && linkUnsupported(err) {
 		// This filesystem has no hard links (FAT, exFAT, some network
 		// mounts); it would fail the same way for every name.
-		return publishByRename(dir, base, tmp)
+		return publishByRename(dir, base, tmp, start)
 	}
 	return dest, err
 }
@@ -186,33 +205,43 @@ func publishDownload(dir, base, tmp string) (string, error) {
 // fails the download: falling back there would trade a clear error for the
 // rename path's overwrite window on a filesystem that supports links fine.
 //
-// Linux vfat reports EPERM; ENOSYS, ENOTSUP and EOPNOTSUPP (and their Windows
-// equivalents) all match errors.ErrUnsupported; EXDEV means the staging file
-// and the target sit on different mounts, which a link cannot cross.
+// Linux vfat reports EPERM; ENOSYS, ENOTSUP and EOPNOTSUPP all match
+// errors.ErrUnsupported; EXDEV means the staging file and the target sit on
+// different mounts, which a link cannot cross. Windows reports the same cases
+// with its own codes, listed in platformLinkUnsupported.
 func linkUnsupported(err error) bool {
-	return errors.Is(err, errors.ErrUnsupported) ||
+	if errors.Is(err, errors.ErrUnsupported) ||
 		errors.Is(err, syscall.EPERM) ||
-		errors.Is(err, syscall.EXDEV)
+		errors.Is(err, syscall.EXDEV) {
+		return true
+	}
+	for _, target := range platformLinkUnsupported {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+	return false
 }
 
 // firstFree runs try on each candidate name for base in order — base, then
-// "stem (N).ext" — and returns the first one try succeeds on. try returns an
-// error matching fs.ErrExist to mean "taken, try the next"; any other error
-// stops the probe and is returned as-is. This is the one copy of the probing
-// policy (bound, suffix format, collision error) that the pre-check, the link
-// publish and the rename fallback's claim all share.
-func firstFree(dir, base string, try func(dest string) error) (string, error) {
-	for i := range maxDownloadCollisions {
+// "stem (N).ext" — starting at candidate index start, and returns the first
+// name try succeeds on together with its index. try returns an error matching
+// fs.ErrExist to mean "taken, try the next"; any other error stops the probe
+// and is returned as-is. This is the one copy of the probing policy (bound,
+// suffix format, collision error) that the pre-check, the link publish and the
+// rename fallback's claim all share.
+func firstFree(dir, base string, start int, try func(dest string) error) (string, int, error) {
+	for i := max(start, 0); i < maxDownloadCollisions; i++ {
 		dest := downloadCandidate(dir, base, i)
 		err := try(dest)
 		if err == nil {
-			return dest, nil
+			return dest, i, nil
 		}
 		if !errors.Is(err, fs.ErrExist) {
-			return "", err
+			return "", 0, err
 		}
 	}
-	return "", fmt.Errorf("download %q: too many name collisions", base)
+	return "", 0, fmt.Errorf("download %q: too many name collisions", base)
 }
 
 // nameIsFree is a firstFree probe that only looks: nil when nothing is at dest,
@@ -235,8 +264,8 @@ func nameIsFree(dest string) error {
 // the rename replaces whatever is at dest, so a file another program saves over
 // the placeholder in between is lost; this is the best a link-less filesystem
 // allows.
-func publishByRename(dir, base, tmp string) (string, error) {
-	dest, claim, err := claimDownloadName(dir, base)
+func publishByRename(dir, base, tmp string, start int) (string, error) {
+	dest, claim, err := claimDownloadName(dir, base, start)
 	if err != nil {
 		return "", err
 	}
@@ -270,16 +299,17 @@ func removeClaim(dest string, claim os.FileInfo) {
 	_ = os.Remove(dest)
 }
 
-// claimDownloadName picks a free name under dir and claims it by creating an
+// claimDownloadName picks a free name under dir, from candidate index start on,
+// and claims it by creating an
 // empty placeholder. It returns the destination and the placeholder's FileInfo,
 // which removeClaim uses to recognize the placeholder later.
 //
 // The name is claimed with O_CREATE|O_EXCL so the "is it taken?" test and the
 // claim are one atomic step — a plain os.Stat check would race another writer
 // between the two.
-func claimDownloadName(dir, base string) (string, os.FileInfo, error) {
+func claimDownloadName(dir, base string, start int) (string, os.FileInfo, error) {
 	var claim os.FileInfo
-	dest, err := firstFree(dir, base, func(dest string) error {
+	dest, _, err := firstFree(dir, base, start, func(dest string) error {
 		f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, downloadFileMode)
 		if err != nil {
 			return err

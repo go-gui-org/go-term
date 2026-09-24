@@ -3,6 +3,7 @@ package workspace
 import (
 	"errors"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -123,7 +124,18 @@ type Workspace struct {
 	schemeKnown bool
 	schemeDark  bool
 
+	// pendingExit is a last-shell exit whose OnLastShellExit hook left a dialog
+	// open (a "quit?" confirmation). The hook's answer is not known until the
+	// dialog closes, so View settles it then; see exitLastShell.
+	pendingExit *lastShellExit
+
 	prevOnEvent func(*gui.Event, *gui.Window)
+}
+
+// lastShellExit names the pane whose exit is waiting on the hook's dialog.
+type lastShellExit struct {
+	tab    *tab
+	leafID string
 }
 
 // notifyColorScheme tells the embedder the active theme's light/dark
@@ -207,6 +219,12 @@ func (ws *Workspace) removeTab(idx int) bool {
 	}
 	ws.tabs[idx].closeAll()
 	ws.tabs = append(ws.tabs[:idx], ws.tabs[idx+1:]...)
+	// A tab removed left of the active one shifts the active tab down one
+	// slot; follow it. Without this the tab to its right became active while
+	// the real active tab's pane still held focus.
+	if idx < ws.activeTab {
+		ws.activeTab--
+	}
 	if len(ws.tabs) == 0 {
 		if _, err := ws.addTabIn(""); err != nil {
 			ws.w.Close()
@@ -233,7 +251,7 @@ func (ws *Workspace) closeTabAt(idx int) {
 		// Focus the new active tab's pane.
 		tab := ws.tabs[ws.activeTab]
 		if t, ok := tab.terms[tab.focused]; ok {
-			t.SetFocused(true)
+			setTermFocused(t, true)
 		}
 	}
 	ws.refresh()
@@ -281,7 +299,15 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 	// second exit queued for the same frame still arrives here. Acting on it
 	// would run the exit hook again (a second Save) or respawn a shell into a
 	// window that is going away. The flag never clears, so this is final.
+	//
+	// The pane's Term is still released: its pty, capture tee and recording
+	// must not stay open until Workspace.Close, which an embedder is not
+	// required to call. It stays in the map, because the View and a Save read
+	// it until teardown.
 	if ws.w.CloseRequested() {
+		if tm, ok := tab.terms[leafID]; ok {
+			_ = tm.Close()
+		}
 		return
 	}
 	// Computed once: the same condition decides both "run the exit hook
@@ -295,11 +321,8 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 		// Last pane in this tab, but other tabs remain (or the embedder
 		// wants a replacement): drop the tab. closeTabAt closes the Term,
 		// focuses the survivor and rebuilds the view.
-		for i, t := range ws.tabs {
-			if t == tab {
-				ws.closeTabAt(i)
-				return
-			}
+		if i := slices.Index(ws.tabs, tab); i >= 0 {
+			ws.closeTabAt(i)
 		}
 		return
 	}
@@ -308,7 +331,7 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 		tab.root = newRoot
 		tab.focused = survivor
 		if t, ok := tab.terms[survivor]; ok {
-			t.SetFocused(true)
+			setTermFocused(t, true)
 		}
 	}
 	ws.refresh()
@@ -335,24 +358,50 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 //     of its own): the dead tab is removed like any other closed tab. If it was
 //     the only one, removeTab replaces it with a fresh shell, so the window
 //     never sits on a frozen pane whose shell can no longer exit.
+//   - Dialog still open: go-gui's in-app dialogs are asynchronous, so a hook
+//     that asks "quit?" returns before the user answers. Deciding now would
+//     start a fresh shell behind the dialog, and a Save from its Yes button
+//     would then record that shell instead of the real tab. The decision waits
+//     in pendingExit until View sees the dialog gone.
 func (ws *Workspace) exitLastShell(tab *tab, leafID string) {
 	if ws.cfg.OnLastShellExit != nil {
 		ws.cfg.OnLastShellExit(ws.w)
 	} else {
 		ws.w.Close()
 	}
+	if !ws.w.CloseRequested() && ws.w.DialogIsVisible() {
+		ws.pendingExit = &lastShellExit{tab: tab, leafID: leafID}
+		return
+	}
+	ws.finishLastShellExit(tab, leafID)
+}
+
+// finishLastShellExit acts on the exit hook's outcome, read from the window's
+// close flag. See exitLastShell for both cases.
+func (ws *Workspace) finishLastShellExit(tab *tab, leafID string) {
 	if ws.w.CloseRequested() {
 		if tm, ok := tab.terms[leafID]; ok {
 			_ = tm.Close()
 		}
 		return
 	}
-	for i, t := range ws.tabs {
-		if t == tab {
-			ws.closeTabAt(i)
-			return
-		}
+	if i := slices.Index(ws.tabs, tab); i >= 0 {
+		ws.closeTabAt(i)
 	}
+}
+
+// settlePendingExit finishes a last-shell exit that was waiting on the exit
+// hook's dialog, once that dialog has closed. It runs from View, which go-gui
+// rebuilds when a dialog is dismissed; the work itself is queued, because it
+// may spawn a shell and change the tab list, which View must not do while it
+// builds the tree.
+func (ws *Workspace) settlePendingExit(w *gui.Window) {
+	p := ws.pendingExit
+	if p == nil || w.DialogIsVisible() {
+		return
+	}
+	ws.pendingExit = nil
+	w.QueueCommand(func(*gui.Window) { ws.finishLastShellExit(p.tab, p.leafID) })
 }
 
 // Close tears down all terminals and restores the original OnEvent.
@@ -404,7 +453,7 @@ func (ws *Workspace) ActivePane() *term.Term {
 func (ws *Workspace) blurAllPanes() {
 	for _, tab := range ws.tabs {
 		for _, t := range tab.terms {
-			t.SetFocused(false)
+			setTermFocused(t, false)
 		}
 	}
 }
@@ -482,7 +531,7 @@ func (ws *Workspace) refresh() {
 		// Ensure the active pane owns keyboard focus. No-op when already
 		// correct — cheap atomic compare-and-swap.
 		if t, ok := tab.terms[tab.focused]; ok {
-			t.SetFocused(!ws.overlayOwnsKeys())
+			setTermFocused(t, !ws.overlayOwnsKeys())
 		}
 	}
 	// SetView wipes go-gui's whole state registry, including the per-input
@@ -502,6 +551,7 @@ func (ws *Workspace) refresh() {
 
 // View returns the workspace's go-gui view tree.
 func (ws *Workspace) View(w *gui.Window) gui.View {
+	ws.settlePendingExit(w)
 	ww, wh := w.WindowSize()
 	// Both bounds: activeTab is -1 for a beat while the last tab closes, and
 	// activeTabPtr already guards it on the same reasoning.
@@ -647,11 +697,11 @@ func (ws *Workspace) focusPaneInTab(tab *tab, leafID string) {
 		return
 	}
 	if prev, ok := tab.terms[tab.focused]; ok {
-		prev.SetFocused(false)
+		setTermFocused(prev, false)
 	}
 	tab.focused = leafID
 	if next, ok := tab.terms[leafID]; ok {
-		next.SetFocused(true)
+		setTermFocused(next, true)
 	}
 	ws.refresh()
 }
@@ -800,7 +850,7 @@ func (ws *Workspace) activateTab(idx int) {
 	if old := ws.activeTab; old >= 0 && old < len(ws.tabs) {
 		oldTab := ws.tabs[old]
 		if t, ok := oldTab.terms[oldTab.focused]; ok {
-			t.SetFocused(false)
+			setTermFocused(t, false)
 		}
 	}
 	ws.activeTab = idx
@@ -808,7 +858,7 @@ func (ws *Workspace) activateTab(idx int) {
 	// Whatever this tab was reporting, the user is now looking at it.
 	tab.clearActivity()
 	if t, ok := tab.terms[tab.focused]; ok {
-		t.SetFocused(true)
+		setTermFocused(t, true)
 	}
 	ws.refresh()
 }

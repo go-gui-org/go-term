@@ -8,11 +8,13 @@ package workspace
 // headlessly, so nothing here needs a display.
 
 import (
+	"errors"
 	"path/filepath"
 	"sort"
 	"testing"
 
 	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/term"
 )
 
 // hermeticCfg points ConfigPath at a file that does not exist inside the
@@ -591,5 +593,153 @@ func TestOnPaneExit_LastShellClosesWindowWithoutHook(t *testing.T) {
 
 	if !ws.w.CloseRequested() {
 		t.Error("window not closed after the last shell exited")
+	}
+}
+
+// Closing a tab to the left of the active one shifts the active tab down one
+// slot. removeTab must follow it: keeping the old index made the tab to its
+// right active while the real active tab's pane still believed it had focus.
+func TestCloseTabAt_LeftOfActiveKeepsActiveTab(t *testing.T) {
+	ws := newLiveWorkspace(t)
+	ws.addTab()
+	ws.addTab()
+	ws.goToTab(1)
+	active := activeTabOf(t, ws)
+
+	ws.closeTabAt(0)
+
+	if got := activeTabOf(t, ws); got != active {
+		t.Fatalf("active tab changed after closing a tab to its left (got index %d)", ws.activeTab)
+	}
+	if ws.activeTab != 0 {
+		t.Errorf("activeTab = %d, want 0", ws.activeTab)
+	}
+}
+
+// recordFocus replaces setTermFocused for one test and returns the focus state
+// the workspace last set on each Term.
+func recordFocus(t *testing.T) map[*term.Term]bool {
+	t.Helper()
+	got := make(map[*term.Term]bool)
+	orig := setTermFocused
+	setTermFocused = func(tm *term.Term, v bool) {
+		got[tm] = v
+		orig(tm, v)
+	}
+	t.Cleanup(func() { setTermFocused = orig })
+	return got
+}
+
+// failSpawns makes every later pane spawn fail, the way a missing shell or an
+// exhausted pty pool would.
+func failSpawns(t *testing.T) {
+	t.Helper()
+	orig := newTerm
+	newTerm = func(*gui.Window, term.Cfg) (*term.Term, error) {
+		return nil, errors.New("spawn failed")
+	}
+	t.Cleanup(func() { newTerm = orig })
+}
+
+// A new tab whose shell cannot start must leave the current pane focused.
+// addTab used to unfocus it before the spawn, so a failure left no pane
+// taking keys.
+func TestAddTab_SpawnFailureKeepsFocus(t *testing.T) {
+	ws := newLiveWorkspace(t)
+	tab := activeTabOf(t, ws)
+	pane := tab.terms[tab.focused]
+	focus := recordFocus(t)
+	failSpawns(t)
+
+	ws.addTab()
+
+	if len(ws.tabs) != 1 {
+		t.Fatalf("tabs = %d, want 1 after a failed spawn", len(ws.tabs))
+	}
+	if v, set := focus[pane]; set && !v {
+		t.Error("addTab unfocused the current pane although no tab was added")
+	}
+}
+
+// Same for a split: a failed spawn must not leave the source pane unfocused.
+func TestSplitPane_SpawnFailureKeepsFocus(t *testing.T) {
+	ws := newLiveWorkspace(t)
+	tab := activeTabOf(t, ws)
+	pane := tab.terms[tab.focused]
+	focus := recordFocus(t)
+	failSpawns(t)
+
+	ws.splitPane(false)
+
+	if !tab.root.isLeaf() {
+		t.Fatal("split tree changed after a failed spawn")
+	}
+	if v, set := focus[pane]; set && !v {
+		t.Error("splitPane unfocused the source pane although no pane was added")
+	}
+}
+
+// A pane whose shell exits after the window close was requested keeps its
+// place in the tree (the View and a Save still read it), but its Term must be
+// released right away: its pty, capture tee and recording would otherwise stay
+// open until Workspace.Close, which an embedder is not required to call.
+func TestOnPaneExit_AfterCloseRequestedReleasesTerm(t *testing.T) {
+	ws := newLiveWorkspace(t)
+	ws.splitPane(false)
+	tab := activeTabOf(t, ws)
+	leaf := tab.focused
+	tm := tab.terms[leaf]
+
+	ws.w.Close()
+	ws.onPaneExit(leaf)
+
+	if tm.Alive() {
+		t.Error("exited pane's Term still open after the window close was requested")
+	}
+	if tab.terms[leaf] != tm {
+		t.Error("exited pane removed from its tab during teardown")
+	}
+}
+
+// An exit hook that asks "quit?" with an in-app dialog returns before the user
+// answers. The workspace must not decide in the meantime: replacing the dead
+// tab with a fresh shell behind the dialog made a Save from its Yes button
+// record that shell instead of the real tab.
+func TestOnPaneExit_LastShellWaitsForHookDialog(t *testing.T) {
+	cfg := hermeticCfg(t)
+	cfg.ExitWhenLastShellExits = true
+	cfg.OnLastShellExit = func(w *gui.Window) {
+		w.Dialog(gui.DialogCfg{DialogType: gui.DialogConfirm, Title: "Quit?"})
+	}
+	ws := newLiveWorkspaceCfg(t, cfg)
+	dead := activeTabOf(t, ws)
+	leaf := dead.focused
+	deadTerm := dead.terms[leaf]
+
+	ws.onPaneExit(leaf)
+
+	if len(ws.tabs) != 1 || ws.tabs[0] != dead {
+		t.Fatal("dead tab replaced while the hook's dialog is still open")
+	}
+	ws.View(ws.w)
+	if ws.pendingExit == nil {
+		t.Fatal("exit settled while the hook's dialog is still open")
+	}
+
+	// The user answers Yes: the dialog goes and the window closes.
+	ws.w.DialogDismiss()
+	ws.w.Close()
+	ws.View(ws.w)
+	if ws.pendingExit != nil {
+		t.Fatal("View did not pick up the exit once the dialog closed")
+	}
+	// The queued settle step, as the next frame runs it.
+	ws.finishLastShellExit(dead, leaf)
+
+	if len(ws.tabs) != 1 || ws.tabs[0] != dead {
+		t.Error("dead tab replaced although the window is closing")
+	}
+	if deadTerm.Alive() {
+		t.Error("dead pane's Term not released once the window closed")
 	}
 }

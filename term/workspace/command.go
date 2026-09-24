@@ -554,30 +554,36 @@ func (ws *Workspace) dismissOverlay() {
 // otherwise splits left/right. Creates a new PTY with a fresh shell.
 func (ws *Workspace) splitPane(horizontal bool) {
 	tab := ws.activeTabPtr()
-	// No shell is spawned into a window that is closing (see closePaneInTab).
-	if tab == nil || ws.w.CloseRequested() {
+	if tab == nil {
 		return
 	}
 	dir := splitVertical
 	if horizontal {
 		dir = splitHorizontal
 	}
-	// Unfocus the old pane so it stops asserting focus during layout.
-	// The new pane defaults to focused=true. Capture its effective font size so
-	// the split inherits the source pane's zoom (matching Ghostty). An unzoomed
-	// source reports the workspace default, so the new pane matches it either
-	// way; addPane treats zero as "inherit default" for the no-source case.
-	// The split also inherits the source pane's CWD (empty when the shell
-	// never reported one via OSC 7 — then the child inherits the process CWD).
+	// Capture the source pane's effective font size so the split inherits its
+	// zoom (matching Ghostty). An unzoomed source reports the workspace default,
+	// so the new pane matches it either way; addPane treats zero as "inherit
+	// default" for the no-source case. The split also inherits the source
+	// pane's CWD (empty when the shell never reported one via OSC 7 — then the
+	// child inherits the process CWD).
 	var inheritSize float32
 	cwd := ws.focusedCwd()
-	if old, ok := tab.terms[tab.focused]; ok {
+	old, hasOld := tab.terms[tab.focused]
+	if hasOld {
 		inheritSize = old.FontSize()
-		old.SetFocused(false)
 	}
+	// addPane refuses to spawn into a closing window (errWindowClosing), so
+	// that case needs no guard here.
 	newLeafID := tab.allocLeafID()
 	if err := tab.addPane(ws.w, ws.cfg, newLeafID, cwd, inheritSize, ws.hooks()); err != nil {
 		return
+	}
+	// Unfocus the old pane only now that the split exists, so it stops
+	// asserting focus during layout. Doing it before the spawn left no pane
+	// focused when the spawn failed. The new pane defaults to focused=true.
+	if hasOld {
+		setTermFocused(old, false)
 	}
 	newRoot := splitLeaf(tab.root, tab.focused, newLeafID, dir)
 	if newRoot != nil {
@@ -638,25 +644,25 @@ func (ws *Workspace) focusedCwd() string {
 // addTab creates a new tab with a single terminal and switches to it. The new
 // tab's shell starts in the CWD of the pane the command was issued from.
 func (ws *Workspace) addTab() {
-	if ws.w.CloseRequested() {
-		return // see closePaneInTab: no shell spawned into a closing window
-	}
-	// Capture the source CWD before the active tab index moves.
+	// Capture the source CWD and pane before the active tab index moves.
 	cwd := ws.focusedCwd()
-	// Unfocus old tab's pane.
-	if oldTab := ws.activeTabPtr(); oldTab != nil {
-		if t, ok := oldTab.terms[oldTab.focused]; ok {
-			t.SetFocused(false)
-		}
-	}
-	_, err := ws.addTabIn(cwd)
-	if err != nil {
+	oldTab := ws.activeTabPtr()
+	// addTabIn refuses to spawn into a closing window (errWindowClosing), so
+	// that case needs no guard here.
+	if _, err := ws.addTabIn(cwd); err != nil {
 		return
+	}
+	// Unfocus the old tab's pane only after the new tab exists. Doing it first
+	// left no pane focused when the spawn failed.
+	if oldTab != nil {
+		if t, ok := oldTab.terms[oldTab.focused]; ok {
+			setTermFocused(t, false)
+		}
 	}
 	// Focus the new tab's pane.
 	tab := ws.tabs[ws.activeTab]
 	if t, ok := tab.terms[tab.focused]; ok {
-		t.SetFocused(true)
+		setTermFocused(t, true)
 	}
 	ws.refresh()
 }

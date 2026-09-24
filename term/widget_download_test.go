@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/go-gui-org/go-gui/gui"
 )
 
 func TestWriteDownload_Basic(t *testing.T) {
@@ -178,7 +180,7 @@ func newDownloadTerm(t *testing.T, cfg Cfg) *Term {
 		if tm.dlDone != nil {
 			close(tm.dlDone)
 		}
-		tm.loopWg.Wait()
+		tm.dlWg.Wait()
 	})
 	return tm
 }
@@ -434,7 +436,7 @@ func keys(m map[string]bool) []string {
 // removeClaim, the cleanup that path runs, is tested directly.
 func TestRemoveClaim_RemovesOwnPlaceholder(t *testing.T) {
 	dir := t.TempDir()
-	dest, claim, err := claimDownloadName(dir, "a.bin")
+	dest, claim, err := claimDownloadName(dir, "a.bin", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +450,7 @@ func TestRemoveClaim_RemovesOwnPlaceholder(t *testing.T) {
 // a real file before the failure, removeClaim must leave that file alone.
 func TestRemoveClaim_KeepsReplacedFile(t *testing.T) {
 	dir := t.TempDir()
-	dest, claim, err := claimDownloadName(dir, "report.pdf")
+	dest, claim, err := claimDownloadName(dir, "report.pdf", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,5 +514,73 @@ func TestWriteDownload_AllNamesTakenSkipsStaging(t *testing.T) {
 	}
 	if staged != 0 {
 		t.Errorf("payload staged %d times, want 0", staged)
+	}
+}
+
+// The pre-check already found the first free name; publishing must start there
+// rather than probe every taken name a second time with a link attempt.
+func TestWriteDownload_PublishStartsAtFirstFreeName(t *testing.T) {
+	dir := t.TempDir()
+	for i := range 3 {
+		if err := os.WriteFile(downloadCandidate(dir, "x.bin", i), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	orig := linkFile
+	t.Cleanup(func() { linkFile = orig })
+	var tried []string
+	linkFile = func(oldname, newname string) error {
+		tried = append(tried, filepath.Base(newname))
+		return orig(oldname, newname)
+	}
+	got, err := writeDownload(dir, "x.bin", []byte("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := downloadCandidate(dir, "x.bin", 3); got != want {
+		t.Errorf("dest = %q, want %q", got, want)
+	}
+	if len(tried) != 1 {
+		t.Errorf("link attempts = %v, want one, on the first free name", tried)
+	}
+}
+
+// Close runs on the main thread. A transfer being staged and synced when the
+// pane closes must finish in the background: Close used to wait for it, which
+// froze the window for as long as the fsync took.
+func TestClose_DoesNotWaitForDownloadWrite(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	orig := stageDownload
+	t.Cleanup(func() { stageDownload = orig })
+	stageDownload = func(dir, base string, data []byte, perm os.FileMode) (string, error) {
+		close(entered)
+		<-release
+		return orig(dir, base, data, perm)
+	}
+
+	tm, err := New(gui.NewWindow(gui.WindowCfg{}), Cfg{
+		DownloadDir: t.TempDir(),
+		OnNotify:    func(string, string) {},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Runs after the worker is released, so TempDir cleanup never races it.
+	t.Cleanup(func() { close(release); tm.dlWg.Wait() })
+
+	feedTermDownload(t, tm, "x.bin", []byte("payload"))
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("download never reached the staging write")
+	}
+
+	closed := make(chan struct{})
+	go func() { _ = tm.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close blocked on an in-flight download write")
 	}
 }
