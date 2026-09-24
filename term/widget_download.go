@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/go-gui-org/go-term/internal/atomicfile"
 )
 
 // downloadQueueDepth caps the number of transfers waiting on the worker.
@@ -121,40 +123,40 @@ func writeDownload(dir, name string, data []byte) (string, error) {
 		return "", fmt.Errorf("unsafe download name %q", name)
 	}
 
-	f, dest, err := createDownloadFile(cleanDir, base)
+	dest, claim, err := claimDownloadName(cleanDir, base)
 	if err != nil {
 		return "", err
 	}
-	tmp := f.Name()
-	// Any failure past this point must not leave the scratch file or the
-	// claimed (0-byte) destination placeholder behind.
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		_ = os.Remove(dest)
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		_ = os.Remove(dest)
-		return "", err
-	}
-	if err := os.Rename(tmp, dest); err != nil {
-		_ = os.Remove(tmp)
-		_ = os.Remove(dest)
+	// The payload is staged in a sibling file, synced, and renamed over the
+	// claimed placeholder. On failure the placeholder must not stay behind as
+	// an empty file under the real name.
+	if err := atomicfile.WriteFile(dest, data, downloadFileMode); err != nil {
+		removeClaim(dest, claim)
 		return "", err
 	}
 	return dest, nil
 }
 
-// createDownloadFile picks a free name under dir and opens a temp file to
-// stage the payload in. It returns the open temp file and the destination the
-// caller should rename it to.
+// removeClaim deletes the empty placeholder claimDownloadName created, but only
+// when dest is still that same file. The download dir is shared (~/Downloads),
+// so between the claim and a failed rename another program may have put a real
+// file at dest; deleting by name alone would destroy it.
+func removeClaim(dest string, claim os.FileInfo) {
+	fi, err := os.Lstat(dest)
+	if err != nil || !os.SameFile(fi, claim) || fi.Size() != 0 {
+		return
+	}
+	_ = os.Remove(dest)
+}
+
+// claimDownloadName picks a free name under dir and claims it by creating an
+// empty placeholder. It returns the destination and the placeholder's FileInfo,
+// which removeClaim uses to recognize the placeholder later.
 //
 // The name is claimed with O_CREATE|O_EXCL so the "is it taken?" test and the
 // claim are one atomic step — a plain os.Stat check would race another writer
 // between the two.
-func createDownloadFile(dir, base string) (*os.File, string, error) {
+func claimDownloadName(dir, base string) (string, os.FileInfo, error) {
 	ext := filepath.Ext(base)
 	stem := strings.TrimSuffix(base, ext)
 	for i := 0; i < maxDownloadCollisions; i++ {
@@ -162,28 +164,20 @@ func createDownloadFile(dir, base string) (*os.File, string, error) {
 		if i > 0 {
 			dest = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, i, ext))
 		}
-		claim, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, downloadFileMode)
+		f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, downloadFileMode)
 		if err != nil {
 			if os.IsExist(err) {
 				continue
 			}
-			return nil, "", err
+			return "", nil, err
 		}
-		// The name is ours. Stage the bytes in a sibling temp file and let
-		// the caller rename over the empty placeholder.
-		_ = claim.Close()
-		tmp, err := os.CreateTemp(dir, ".goterm-dl-*")
+		fi, err := f.Stat()
+		_ = f.Close()
 		if err != nil {
 			_ = os.Remove(dest)
-			return nil, "", err
+			return "", nil, err
 		}
-		if err := tmp.Chmod(downloadFileMode); err != nil {
-			_ = tmp.Close()
-			_ = os.Remove(tmp.Name())
-			_ = os.Remove(dest)
-			return nil, "", err
-		}
-		return tmp, dest, nil
+		return dest, fi, nil
 	}
-	return nil, "", fmt.Errorf("download %q: too many name collisions", base)
+	return "", nil, fmt.Errorf("download %q: too many name collisions", base)
 }

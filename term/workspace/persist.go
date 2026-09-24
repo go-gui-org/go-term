@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/internal/atomicfile"
 	"github.com/go-gui-org/go-term/term"
 )
 
@@ -63,17 +64,6 @@ func (ws *Workspace) snapshot() persistedWorkspace {
 			ActiveLeaf: tab.focused,
 			Root:       snapshotNode(tab.root, tab.terms, defaultSize),
 		}
-	}
-	if len(tabs) == 0 && ws.hasLastSession {
-		// Last-shell-exit path: live state is empty, but the exiting
-		// pane's location was remembered so the next launch restores
-		// a fresh shell there instead of the process CWD.
-		leafID := "tab-0-pane-0"
-		node := persistedNode{LeafID: leafID, Cwd: ws.lastSessionCwd}
-		if ws.lastSessionFontSize != 0 && ws.lastSessionFontSize != defaultSize {
-			node.FontSize = ws.lastSessionFontSize
-		}
-		tabs = []persistedTab{{ActiveLeaf: leafID, Root: node}}
 	}
 	themeName := ws.persistableThemeName()
 	return persistedWorkspace{
@@ -157,7 +147,7 @@ func cwdLocalPath(cwd string) string {
 	return p
 }
 
-// Save writes the current workspace layout to path atomically (temp + rename).
+// Save writes the current workspace layout to path atomically (temp, sync, rename).
 // Intermediate directories are created as needed.
 func (ws *Workspace) Save(path string) error {
 	snap := ws.snapshot()
@@ -168,29 +158,8 @@ func (ws *Workspace) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("workspace.Save: mkdir: %w", err)
 	}
-	dir := filepath.Dir(path)
-	// Unique sibling temp file so concurrent saves never share one path.
-	tmp, err := os.CreateTemp(dir, ".workspace-*.tmp")
-	if err != nil {
+	if err := atomicfile.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("workspace.Save: write: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("workspace.Save: write: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("workspace.Save: write: %w", err)
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("workspace.Save: write: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("workspace.Save: rename: %w", err)
 	}
 	return nil
 }
@@ -209,7 +178,8 @@ func Restore(w *gui.Window, cfg Cfg, path string) (*Workspace, error) {
 		return New(w, cfg)
 	}
 	if len(pw.Tabs) == 0 {
-		// A zero-tab workspace (last-shell-exit path) starts fresh but
+		// A zero-tab file (written by releases that tore down before the
+		// exit hook ran, or by hand) starts fresh but
 		// still carries a user's theme choice when one was persisted. The
 		// choice is settled before the first tab is built rather than applied
 		// after: a pane's COLORFGBG is fixed at spawn (see selectThemeByName).

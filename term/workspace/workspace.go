@@ -57,10 +57,9 @@ type Cfg struct {
 	// quit would silently skip that work on this path. The callback owns
 	// closing the window. Ignored when ExitWhenLastShellExits is false.
 	//
-	// Live state is already empty when this runs, but a Save here still
-	// records a single-tab session: the exiting pane's CWD and font
-	// size were remembered before teardown, so the next launch
-	// restores a fresh shell there.
+	// It runs before the workspace tears down, so a Save here records the
+	// exiting pane's tab (CWD, font size) and the next launch restores a
+	// fresh shell there. The workspace drops its tabs after it returns.
 	OnLastShellExit func(w *gui.Window)
 
 	// OnColorScheme, when non-nil, runs when the active theme's light/dark
@@ -118,14 +117,6 @@ type Workspace struct {
 	// which is what makes the first call happen at startup.
 	schemeKnown bool
 	schemeDark  bool
-
-	// lastSessionCwd remembers the exiting pane's directory when the last
-	// shell exits, so a Save from OnLastShellExit restores it on next
-	// launch. hasLastSession marks it valid. Live state still tears down
-	// to zero tabs — only the snapshot synthesizes a single-tab session.
-	lastSessionCwd      string
-	lastSessionFontSize float32
-	hasLastSession      bool
 
 	prevOnEvent func(*gui.Event, *gui.Window)
 }
@@ -277,34 +268,29 @@ func (ws *Workspace) onPaneExit(leafID string) {
 
 // closePaneInTab closes a pane within a specific tab.
 func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
-	isLastShell := tab.root.isLeaf() && ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1
-	if isLastShell {
-		// Remember the exiting pane's location before it is torn down:
-		// the OnLastShellExit hook saves from an empty workspace, and
-		// the snapshot rebuilds a single-tab session from this.
-		if tm, ok := tab.terms[leafID]; ok {
-			ws.lastSessionCwd = cwdLocalPath(tm.Cwd())
-			ws.lastSessionFontSize = tm.FontSize()
-			ws.hasLastSession = true
+	// Computed once: the same condition decides both "run the exit hook
+	// with live state" and "close the window instead of respawning".
+	lastPane := tab.root.isLeaf()
+	if lastPane && ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1 {
+		// Hand the close to the embedder when it asked for it, so quit-time
+		// work (persisting the workspace) still happens — w.Close alone
+		// bypasses OnCloseRequest. The hook runs *before* teardown so a
+		// Save from it snapshots the real tab: the exiting pane's CWD and
+		// font size are still readable from its (dead) Term, and the next
+		// launch restores a fresh shell there, same as after Cmd+Q.
+		if ws.cfg.OnLastShellExit != nil {
+			ws.cfg.OnLastShellExit(ws.w)
+		} else {
+			ws.w.Close()
 		}
+		tab.removePane(leafID)
+		ws.tabs = nil
+		return
 	}
 	tab.removePane(leafID)
-	if tab.root.isLeaf() {
-		// Last pane in this tab — if it's also the only tab and we
-		// should exit when the last shell dies, close the window
-		// instead of spawning a replacement tab.
-		if ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1 {
-			ws.tabs = nil
-			// Hand the close to the embedder when it asked for it, so
-			// quit-time work (persisting the workspace) still happens —
-			// w.Close alone bypasses OnCloseRequest.
-			if ws.cfg.OnLastShellExit != nil {
-				ws.cfg.OnLastShellExit(ws.w)
-				return
-			}
-			ws.w.Close()
-			return
-		}
+	if lastPane {
+		// Last pane in this tab, but other tabs remain (or the embedder
+		// wants a replacement): drop the tab.
 		removed := false
 		for i, t := range ws.tabs {
 			if t == tab {

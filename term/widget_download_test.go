@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 )
@@ -137,7 +136,7 @@ func TestWriteDownload_LeavesNoTempFile(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("entries = %d; want 1", len(entries))
 	}
-	if strings.HasPrefix(entries[0].Name(), ".goterm-dl-") {
+	if entries[0].Name() != "x.bin" {
 		t.Errorf("staging file left behind: %q", entries[0].Name())
 	}
 }
@@ -328,5 +327,43 @@ func TestTermDownload_PendingBytesCapDropsOverflow(t *testing.T) {
 	case name := <-seen:
 		t.Fatalf("over-cap transfer %q was delivered", name)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// A failed write must not leave the claimed 0-byte placeholder under the real
+// name. A write failure after a successful claim cannot be forced portably, so
+// removeClaim, the cleanup that path runs, is tested directly.
+func TestRemoveClaim_RemovesOwnPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	dest, claim, err := claimDownloadName(dir, "a.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeClaim(dest, claim)
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Errorf("placeholder still present after removeClaim: %v", err)
+	}
+}
+
+// The download dir is shared. If another program replaced the placeholder with
+// a real file before the failure, removeClaim must leave that file alone.
+func TestRemoveClaim_KeepsReplacedFile(t *testing.T) {
+	dir := t.TempDir()
+	dest, claim, err := claimDownloadName(dir, "report.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Replace by rename, as an editor or browser saving over the name would.
+	other := filepath.Join(dir, "other")
+	if err := os.WriteFile(other, []byte("user data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(other, dest); err != nil {
+		t.Fatal(err)
+	}
+	removeClaim(dest, claim)
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "user data" {
+		t.Errorf("replaced file = %q, %v; want it kept", got, err)
 	}
 }

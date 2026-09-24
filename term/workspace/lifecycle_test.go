@@ -405,12 +405,16 @@ func TestOnPaneExit_LastShellRunsExitHook(t *testing.T) {
 	cfg := hermeticCfg(t)
 	cfg.ExitWhenLastShellExits = true
 	var hookWindow *gui.Window
+	var hookSnap persistedWorkspace
 	calls := 0
+	var ws *Workspace
 	cfg.OnLastShellExit = func(w *gui.Window) {
 		calls++
 		hookWindow = w
+		// What a Save from the hook would write (falcon's saveAndClose).
+		hookSnap = ws.snapshot()
 	}
-	ws := newLiveWorkspaceCfg(t, cfg)
+	ws = newLiveWorkspaceCfg(t, cfg)
 
 	tab := activeTabOf(t, ws)
 	ws.onPaneExit(tab.focused)
@@ -425,15 +429,14 @@ func TestOnPaneExit_LastShellRunsExitHook(t *testing.T) {
 	if ws.w.CloseRequested() {
 		t.Error("window closed by the workspace despite the hook owning it")
 	}
-	// State is torn down before the hook runs, so live tabs are empty —
-	// but the exiting pane's location was remembered, so a Save from
-	// inside the hook records a single-tab session rather than nothing.
+	// The hook runs before teardown, so a Save from it records the exiting
+	// pane's real tab (typing "exit" must restore like Cmd+Q, not start
+	// fresh). The workspace drops its tabs only after the hook returns.
+	if len(hookSnap.Tabs) != 1 || hookSnap.Tabs[0].Root.LeafID != tab.focused {
+		t.Errorf("snapshot in hook = %+v, want the one live tab (leaf %q)", hookSnap.Tabs, tab.focused)
+	}
 	if len(ws.tabs) != 0 {
 		t.Errorf("tabs = %d after last shell exit, want 0", len(ws.tabs))
-	}
-	snap := ws.snapshot()
-	if len(snap.Tabs) != 1 {
-		t.Fatalf("snapshot tabs = %d, want 1 (remembered last session)", len(snap.Tabs))
 	}
 }
 

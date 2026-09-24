@@ -63,6 +63,8 @@ parser (`term/parser*.go`) → grid (`term/grid*.go`, pure data). Each layer is
 split across multiple files by concern; the layering invariant is what matters,
 not the file count. `internal/recfmt` is a leaf package importing nothing from
 the repo, so both `term` and `term/gotermrec` can sit on it.
+`internal/atomicfile` is the same kind of leaf: the one temp-sync-rename writer
+that `term` (downloads) and `term/workspace` (saved layout) share.
 
 Don't let parser code reach into go-gui — it must stay grid-only.
 

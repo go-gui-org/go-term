@@ -226,46 +226,13 @@ func TestSave_AtomicWrite(t *testing.T) {
 	if pw.Version != 1 {
 		t.Errorf("version = %d, want 1", pw.Version)
 	}
-	// No .tmp file left behind.
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf(".tmp file should not exist after successful save")
-	}
-}
-
-// Last-shell-exit path: live tabs are gone, but the remembered session
-// must save as a single-tab file so the next launch restores a fresh
-// shell in the exiting pane's directory (typing "exit" must behave
-// like Cmd+Q, not start fresh).
-func TestSave_RememberedLastSession(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "workspace.json")
-
-	ws := buildTestWorkspace(nil, 0)
-	ws.lastSessionCwd = "/tmp/projects"
-	ws.lastSessionFontSize = 18
-	ws.hasLastSession = true
-	if err := ws.Save(path); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	pw, err := loadPersistedWorkspace(path)
+	// No staging file left behind: the directory holds only the saved file.
+	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil {
-		t.Fatalf("loadPersistedWorkspace: %v", err)
+		t.Fatal(err)
 	}
-	if len(pw.Tabs) != 1 {
-		t.Fatalf("tabs = %d, want 1", len(pw.Tabs))
-	}
-	root := pw.Tabs[0].Root
-	if root.Cwd != "/tmp/projects" {
-		t.Errorf("cwd = %q, want /tmp/projects", root.Cwd)
-	}
-	if root.FontSize != 18 {
-		t.Errorf("fontSize = %v, want 18", root.FontSize)
-	}
-
-	// Without a remembered session an empty workspace still saves empty.
-	ws2 := buildTestWorkspace(nil, 0)
-	if snap := ws2.snapshot(); len(snap.Tabs) != 0 {
-		t.Errorf("snapshot tabs = %d, want 0", len(snap.Tabs))
+	if len(entries) != 1 || entries[0].Name() != "workspace.json" {
+		t.Errorf("dir entries = %v, want only workspace.json", entries)
 	}
 }
 
