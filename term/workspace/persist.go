@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/internal/atomicfile"
 	"github.com/go-gui-org/go-term/term"
 )
 
@@ -146,7 +147,7 @@ func cwdLocalPath(cwd string) string {
 	return p
 }
 
-// Save writes the current workspace layout to path atomically (temp + rename).
+// Save writes the current workspace layout to path atomically (temp, sync, rename).
 // Intermediate directories are created as needed.
 func (ws *Workspace) Save(path string) error {
 	snap := ws.snapshot()
@@ -157,13 +158,8 @@ func (ws *Workspace) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("workspace.Save: mkdir: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := atomicfile.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("workspace.Save: write: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("workspace.Save: rename: %w", err)
 	}
 	return nil
 }
@@ -182,7 +178,8 @@ func Restore(w *gui.Window, cfg Cfg, path string) (*Workspace, error) {
 		return New(w, cfg)
 	}
 	if len(pw.Tabs) == 0 {
-		// A zero-tab workspace (last-shell-exit path) starts fresh but
+		// A zero-tab file (written by releases that tore down before the
+		// exit hook ran, or by hand) starts fresh but
 		// still carries a user's theme choice when one was persisted. The
 		// choice is settled before the first tab is built rather than applied
 		// after: a pane's COLORFGBG is fixed at spawn (see selectThemeByName).

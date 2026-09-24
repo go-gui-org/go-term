@@ -57,8 +57,9 @@ type Cfg struct {
 	// quit would silently skip that work on this path. The callback owns
 	// closing the window. Ignored when ExitWhenLastShellExits is false.
 	//
-	// The workspace is already empty when this runs, so a Save here writes
-	// a zero-tab file and the next launch starts fresh.
+	// It runs before the workspace tears down, so a Save here records the
+	// exiting pane's tab (CWD, font size) and the next launch restores a
+	// fresh shell there. The workspace drops its tabs after it returns.
 	OnLastShellExit func(w *gui.Window)
 
 	// OnColorScheme, when non-nil, runs when the active theme's light/dark
@@ -267,23 +268,29 @@ func (ws *Workspace) onPaneExit(leafID string) {
 
 // closePaneInTab closes a pane within a specific tab.
 func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
-	tab.removePane(leafID)
-	if tab.root.isLeaf() {
-		// Last pane in this tab — if it's also the only tab and we
-		// should exit when the last shell dies, close the window
-		// instead of spawning a replacement tab.
-		if ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1 {
-			ws.tabs = nil
-			// Hand the close to the embedder when it asked for it, so
-			// quit-time work (persisting the workspace) still happens —
-			// w.Close alone bypasses OnCloseRequest.
-			if ws.cfg.OnLastShellExit != nil {
-				ws.cfg.OnLastShellExit(ws.w)
-				return
-			}
+	// Computed once: the same condition decides both "run the exit hook
+	// with live state" and "close the window instead of respawning".
+	lastPane := tab.root.isLeaf()
+	if lastPane && ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1 {
+		// Hand the close to the embedder when it asked for it, so quit-time
+		// work (persisting the workspace) still happens — w.Close alone
+		// bypasses OnCloseRequest. The hook runs *before* teardown so a
+		// Save from it snapshots the real tab: the exiting pane's CWD and
+		// font size are still readable from its (dead) Term, and the next
+		// launch restores a fresh shell there, same as after Cmd+Q.
+		if ws.cfg.OnLastShellExit != nil {
+			ws.cfg.OnLastShellExit(ws.w)
+		} else {
 			ws.w.Close()
-			return
 		}
+		tab.removePane(leafID)
+		ws.tabs = nil
+		return
+	}
+	tab.removePane(leafID)
+	if lastPane {
+		// Last pane in this tab, but other tabs remain (or the embedder
+		// wants a replacement): drop the tab.
 		removed := false
 		for i, t := range ws.tabs {
 			if t == tab {

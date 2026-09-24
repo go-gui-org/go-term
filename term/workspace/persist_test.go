@@ -226,9 +226,13 @@ func TestSave_AtomicWrite(t *testing.T) {
 	if pw.Version != 1 {
 		t.Errorf("version = %d, want 1", pw.Version)
 	}
-	// No .tmp file left behind.
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf(".tmp file should not exist after successful save")
+	// No staging file left behind: the directory holds only the saved file.
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "workspace.json" {
+		t.Errorf("dir entries = %v, want only workspace.json", entries)
 	}
 }
 
