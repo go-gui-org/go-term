@@ -126,18 +126,22 @@ func writeDownload(dir, name string, data []byte) (string, error) {
 		return "", err
 	}
 	tmp := f.Name()
-	// Any failure past this point must not leave the scratch file behind.
+	// Any failure past this point must not leave the scratch file or the
+	// claimed (0-byte) destination placeholder behind.
 	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
+		_ = os.Remove(dest)
 		return "", err
 	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp)
+		_ = os.Remove(dest)
 		return "", err
 	}
 	if err := os.Rename(tmp, dest); err != nil {
 		_ = os.Remove(tmp)
+		_ = os.Remove(dest)
 		return "", err
 	}
 	return dest, nil

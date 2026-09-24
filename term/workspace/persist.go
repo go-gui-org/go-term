@@ -64,6 +64,17 @@ func (ws *Workspace) snapshot() persistedWorkspace {
 			Root:       snapshotNode(tab.root, tab.terms, defaultSize),
 		}
 	}
+	if len(tabs) == 0 && ws.hasLastSession {
+		// Last-shell-exit path: live state is empty, but the exiting
+		// pane's location was remembered so the next launch restores
+		// a fresh shell there instead of the process CWD.
+		leafID := "tab-0-pane-0"
+		node := persistedNode{LeafID: leafID, Cwd: ws.lastSessionCwd}
+		if ws.lastSessionFontSize != 0 && ws.lastSessionFontSize != defaultSize {
+			node.FontSize = ws.lastSessionFontSize
+		}
+		tabs = []persistedTab{{ActiveLeaf: leafID, Root: node}}
+	}
 	themeName := ws.persistableThemeName()
 	return persistedWorkspace{
 		Version:   1,
@@ -157,12 +168,28 @@ func (ws *Workspace) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("workspace.Save: mkdir: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	dir := filepath.Dir(path)
+	// Unique sibling temp file so concurrent saves never share one path.
+	tmp, err := os.CreateTemp(dir, ".workspace-*.tmp")
+	if err != nil {
 		return fmt.Errorf("workspace.Save: write: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("workspace.Save: write: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("workspace.Save: write: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("workspace.Save: write: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("workspace.Save: rename: %w", err)
 	}
 	return nil

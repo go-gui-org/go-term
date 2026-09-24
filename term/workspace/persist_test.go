@@ -232,6 +232,43 @@ func TestSave_AtomicWrite(t *testing.T) {
 	}
 }
 
+// Last-shell-exit path: live tabs are gone, but the remembered session
+// must save as a single-tab file so the next launch restores a fresh
+// shell in the exiting pane's directory (typing "exit" must behave
+// like Cmd+Q, not start fresh).
+func TestSave_RememberedLastSession(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "workspace.json")
+
+	ws := buildTestWorkspace(nil, 0)
+	ws.lastSessionCwd = "/tmp/projects"
+	ws.lastSessionFontSize = 18
+	ws.hasLastSession = true
+	if err := ws.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	pw, err := loadPersistedWorkspace(path)
+	if err != nil {
+		t.Fatalf("loadPersistedWorkspace: %v", err)
+	}
+	if len(pw.Tabs) != 1 {
+		t.Fatalf("tabs = %d, want 1", len(pw.Tabs))
+	}
+	root := pw.Tabs[0].Root
+	if root.Cwd != "/tmp/projects" {
+		t.Errorf("cwd = %q, want /tmp/projects", root.Cwd)
+	}
+	if root.FontSize != 18 {
+		t.Errorf("fontSize = %v, want 18", root.FontSize)
+	}
+
+	// Without a remembered session an empty workspace still saves empty.
+	ws2 := buildTestWorkspace(nil, 0)
+	if snap := ws2.snapshot(); len(snap.Tabs) != 0 {
+		t.Errorf("snapshot tabs = %d, want 0", len(snap.Tabs))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // buildSplitTree
 // ---------------------------------------------------------------------------

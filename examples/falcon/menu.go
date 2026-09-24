@@ -600,12 +600,19 @@ func writeConfigStub(path string) error {
 
 // openPath hands a file to the platform's default handler.
 func openPath(path string) error {
+	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("open", path).Start()
+		cmd = exec.Command("open", path)
 	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", path).Start()
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", path)
 	default:
-		return exec.Command("xdg-open", path).Start()
+		cmd = exec.Command("xdg-open", path)
 	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// Reap the child so it never lingers as a defunct zombie entry.
+	go func() { _ = cmd.Wait() }()
+	return nil
 }

@@ -57,8 +57,10 @@ type Cfg struct {
 	// quit would silently skip that work on this path. The callback owns
 	// closing the window. Ignored when ExitWhenLastShellExits is false.
 	//
-	// The workspace is already empty when this runs, so a Save here writes
-	// a zero-tab file and the next launch starts fresh.
+	// Live state is already empty when this runs, but a Save here still
+	// records a single-tab session: the exiting pane's CWD and font
+	// size were remembered before teardown, so the next launch
+	// restores a fresh shell there.
 	OnLastShellExit func(w *gui.Window)
 
 	// OnColorScheme, when non-nil, runs when the active theme's light/dark
@@ -116,6 +118,14 @@ type Workspace struct {
 	// which is what makes the first call happen at startup.
 	schemeKnown bool
 	schemeDark  bool
+
+	// lastSessionCwd remembers the exiting pane's directory when the last
+	// shell exits, so a Save from OnLastShellExit restores it on next
+	// launch. hasLastSession marks it valid. Live state still tears down
+	// to zero tabs — only the snapshot synthesizes a single-tab session.
+	lastSessionCwd      string
+	lastSessionFontSize float32
+	hasLastSession      bool
 
 	prevOnEvent func(*gui.Event, *gui.Window)
 }
@@ -267,6 +277,17 @@ func (ws *Workspace) onPaneExit(leafID string) {
 
 // closePaneInTab closes a pane within a specific tab.
 func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
+	isLastShell := tab.root.isLeaf() && ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1
+	if isLastShell {
+		// Remember the exiting pane's location before it is torn down:
+		// the OnLastShellExit hook saves from an empty workspace, and
+		// the snapshot rebuilds a single-tab session from this.
+		if tm, ok := tab.terms[leafID]; ok {
+			ws.lastSessionCwd = cwdLocalPath(tm.Cwd())
+			ws.lastSessionFontSize = tm.FontSize()
+			ws.hasLastSession = true
+		}
+	}
 	tab.removePane(leafID)
 	if tab.root.isLeaf() {
 		// Last pane in this tab — if it's also the only tab and we

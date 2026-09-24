@@ -425,13 +425,15 @@ func TestOnPaneExit_LastShellRunsExitHook(t *testing.T) {
 	if ws.w.CloseRequested() {
 		t.Error("window closed by the workspace despite the hook owning it")
 	}
-	// State is torn down before the hook runs, so a Save from inside it
-	// records an empty session rather than a tab with a dead pane.
+	// State is torn down before the hook runs, so live tabs are empty —
+	// but the exiting pane's location was remembered, so a Save from
+	// inside the hook records a single-tab session rather than nothing.
 	if len(ws.tabs) != 0 {
 		t.Errorf("tabs = %d after last shell exit, want 0", len(ws.tabs))
 	}
-	if snap := ws.snapshot(); len(snap.Tabs) != 0 {
-		t.Errorf("snapshot tabs = %d, want 0", len(snap.Tabs))
+	snap := ws.snapshot()
+	if len(snap.Tabs) != 1 {
+		t.Fatalf("snapshot tabs = %d, want 1 (remembered last session)", len(snap.Tabs))
 	}
 }
 
