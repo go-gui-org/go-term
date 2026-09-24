@@ -61,15 +61,13 @@ func (g *grid) hintTargets(dst []hintTarget) []hintTarget {
 
 // viewportRowRange returns the inclusive content-row range currently on screen.
 // The range is contiguous even when ViewOffset exceeds Rows, because the
-// viewport is always Rows rows starting at the scroll position. Caller holds Mu.
+// viewport is always Rows rows starting at the scroll position. On the alt
+// screen ViewOffset is non-zero only when the user scrolled into main-screen
+// history (Shift+PageUp; EnterAlt resets it), and those history rows are on
+// screen, so they are scanned like any other. Caller holds Mu.
 func (g *grid) viewportRowRange() (first, last int) {
 	sb := g.Scrollback.Len()
 	first = sb - clamp(g.ViewOffset, 0, sb)
-	if g.AltActive && first < sb {
-		// The alt screen owns no scrollback: never scan main-screen
-		// history sitting below it.
-		first = sb
-	}
 	last = min(first+g.Rows-1, g.ContentRows()-1)
 	return first, last
 }

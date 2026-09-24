@@ -1327,3 +1327,47 @@ func TestDrawIME_GlyphsSitOnSnappedCellOrigins(t *testing.T) {
 		}
 	}
 }
+
+// A resize during a selection drag or scrollbar drag makes onDraw drop the drag.
+// The gui mouse unlock that goes with it must run after grid.Mu is released: the
+// grid lock is never held across a go-gui call.
+func TestOnDraw_StuckDragUnlockOutsideGridLock(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(tm *Term)
+	}{
+		{"selection", func(tm *Term) { tm.mouse.dragging = true }},
+		{"scrollbar", func(tm *Term) { tm.scrollbar.dragging = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tm, _ := newDrawTerm(4, 8, 10, 20)
+			tc.setup(tm)
+			tm.mouse.locked = true
+			// The canvas is larger than the grid, so onDraw sees a resize.
+			dc := gui.NewDrawContext(120, 120, testTextMeasurer{cellW: 10, cellH: 20})
+
+			calls := 0
+			unlockMouseHook = func(h *Term) {
+				if h != tm {
+					return
+				}
+				calls++
+				if !tm.grid.Mu.TryLock() {
+					t.Error("unlockMouse ran while grid.Mu was held")
+					return
+				}
+				tm.grid.Mu.Unlock()
+			}
+			defer func() { unlockMouseHook = nil }()
+
+			tm.onDraw(dc)
+			if calls != 1 {
+				t.Errorf("unlockMouse calls = %d, want 1", calls)
+			}
+			if tm.mouse.locked || tm.mouse.dragging || tm.scrollbar.dragging {
+				t.Errorf("locked=%v dragging=%v sbDragging=%v, want all false",
+					tm.mouse.locked, tm.mouse.dragging, tm.scrollbar.dragging)
+			}
+		})
+	}
+}

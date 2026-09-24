@@ -139,6 +139,16 @@ func (g *grid) rotateRowsDown(top, bottom, n int) {
 	copy(g.rowMap[top:top+n], tmp)
 }
 
+// pushSwapBorrowed reports whether PushSwap took row by reference. The copying
+// fallback hands row back as spare, so the same backing array means nothing
+// was lent to the ring.
+func pushSwapBorrowed(row, spare []cell) bool {
+	if len(row) == 0 {
+		return false
+	}
+	return len(spare) == 0 || &spare[0] != &row[0]
+}
+
 // scrollUpRegion shifts rows [Top..Bottom] up by n, clearing the bottom
 // n rows of the region with default cells. When the region starts at row 0
 // and ScrollbackCap > 0, the displaced top rows are pushed to the scrollback
@@ -172,10 +182,12 @@ func (g *grid) scrollUpRegion(n int) {
 			row := g.slots[s]
 			spare, ev := g.Scrollback.PushSwap(row, g.RowWrapped[g.Top+r])
 			g.slots[s] = spare
-			// A short row (possible after the ring re-carved its slab — see
-			// flatScreen) takes the copying Push fallback, which returns the
-			// row itself: nothing was borrowed, so don't mark it as such.
-			if len(row) == g.Scrollback.cols {
+			// A copying Push fallback (a short row after the ring re-carved
+			// its slab — see flatScreen — or a disabled ring) returns the row
+			// itself: nothing was borrowed, so don't mark it as such. Test
+			// the signal PushSwap documents, not one of the conditions that
+			// cause it, so a new fallback reason cannot slip past.
+			if pushSwapBorrowed(row, spare) {
 				swapped = true
 			}
 			if ev {

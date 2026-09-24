@@ -372,9 +372,10 @@ func TestGrid_SelectedText_BlockKeepsRowBreaksAcrossWrap(t *testing.T) {
 	}
 }
 
-// While the alt screen is up the copy must not reach into main-screen
-// scrollback parked below it.
-func TestGrid_SelectedText_AltExcludesScrollback(t *testing.T) {
+// On the alt screen, Shift+PageUp shows main-screen history, and a selection
+// dragged over it must copy what it highlights. The copy used to clamp every
+// row to the alt screen, so the highlighted history text was dropped.
+func TestGrid_SelectedText_AltCopiesVisibleHistory(t *testing.T) {
 	g := newGrid(2, 3)
 	g.ScrollbackCap = 10
 	for c, r := range "OLD" {
@@ -388,13 +389,60 @@ func TestGrid_SelectedText_AltExcludesScrollback(t *testing.T) {
 	for c, r := range "XY" {
 		g.At(0, c).Ch = r
 	}
-	for c, r := range "ZW" {
-		g.At(1, c).Ch = r
+	g.ScrollView(1) // Shift+PageUp: history row 0 is now on screen.
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 3}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "OLD\nXY"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A main-screen selection must not survive into the alt screen: with no
+// alt-screen clamp in SelectedText, EnterAlt clearing it is what keeps stale
+// history out of an alt-screen copy.
+func TestGrid_EnterAltClearsSelection(t *testing.T) {
+	g := newGrid(2, 3)
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 3}
+	g.SelActive = true
+	g.EnterAlt()
+	if g.SelActive {
+		t.Error("selection still active after EnterAlt")
+	}
+}
+
+// A wide glyph that does not fit in the last column wraps early and leaves a
+// blank there. Copying across that soft wrap must not keep the blank, or a
+// CJK word is split by a space that was never typed.
+func TestGrid_SelectedText_WideWrapPadSkipped(t *testing.T) {
+	g := newGrid(2, 5)
+	for _, r := range "你好世界" {
+		g.Put(r)
+	}
+	// 你好 fills cols 0..3, 世 does not fit in col 4 and wraps.
+	if !g.RowWrapped[0] {
+		t.Fatal("setup: row 0 should be soft-wrapped")
 	}
 	g.SelAnchor = contentPos{Row: 0, Col: 0}
-	g.SelHead = contentPos{Row: 2, Col: 3}
+	g.SelHead = contentPos{Row: 1, Col: 4}
 	g.SelActive = true
-	if got, want := g.SelectedText(), "XY\nZW"; got != want {
+	if got, want := g.SelectedText(), "你好世界"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A real space that ends a full row stays in the copy: only the wrap pad is
+// skipped, not every blank before a wrap.
+func TestGrid_SelectedText_RealSpaceBeforeWideWrapKept(t *testing.T) {
+	g := newGrid(2, 5)
+	for _, r := range "abcd 世" {
+		g.Put(r)
+	}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 2}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "abcd 世"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }

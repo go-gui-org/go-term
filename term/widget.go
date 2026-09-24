@@ -171,11 +171,18 @@ func (t *Term) cursorBlinkActive() bool {
 // coast in flight — it would otherwise keep scrolling a viewport that
 // just reflowed out from under it. Main-thread only.
 func (t *Term) cancelSelectDrag() {
+	t.stopSelectDrag()
+	t.unlockMouse(t.win)
+}
+
+// stopSelectDrag is cancelSelectDrag without the mouse unlock. It makes no go-gui
+// call, so onDraw can run it while it holds grid.Mu and release the mouse lock
+// after the grid unlock (see drawState.pendingUnlock).
+func (t *Term) stopSelectDrag() {
 	t.mouse.dragging = false
 	t.mouse.dragReport = false
 	t.setAutoScrollDir(0)
 	t.cancelMomentum()
-	t.unlockMouse(t.win)
 }
 
 // HandleWindowEvent processes window-level events that the Term needs to

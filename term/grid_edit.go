@@ -352,7 +352,7 @@ func (g *grid) putCell(ch rune, clusterID uint16, w int) {
 	// second spurious Newline for a single Put call.
 	if !justWrapped && g.AutoWrap && w == 2 && g.CursorC+1 >= g.Cols {
 		if c := g.At(g.CursorR, g.CursorC); c != nil {
-			*c = blankCell(g.CurFG, g.CurBG, g.CurAttrs)
+			*c = blankCell(g.CurFG, g.CurBG, g.CurAttrs|attrWrapPad)
 		}
 		g.RowWrapped[g.CursorR] = true
 		g.Newline()
