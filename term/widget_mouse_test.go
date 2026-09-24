@@ -1328,13 +1328,14 @@ func rtlRowTerm(t *testing.T) *Term {
 
 func TestOnClick_RTLRowAnchorMapsVisualToLogical(t *testing.T) {
 	tm := rtlRowTerm(t)
-	// x=12 → visual cell 1, boundary 1 → logical v2l[1] = 6.
+	// x=12 → visual boundary 1, between visual cells 0 (logical 7) and 1
+	// (logical 6). In a reversed run that is logical boundary 7.
 	clickAt(tm, 12, 10, 0)
 	func() {
 		tm.grid.Mu.Lock()
 		defer tm.grid.Mu.Unlock()
-		if tm.grid.SelAnchor != (contentPos{Row: 0, Col: 6}) {
-			t.Errorf("SelAnchor = %v, want {Row:0 Col:6}", tm.grid.SelAnchor)
+		if tm.grid.SelAnchor != (contentPos{Row: 0, Col: 7}) {
+			t.Errorf("SelAnchor = %v, want {Row:0 Col:7}", tm.grid.SelAnchor)
 		}
 	}()
 }
@@ -1349,16 +1350,39 @@ func TestOnMouseMove_RTLRowDragSelectsVisualGlyphs(t *testing.T) {
 	move := &gui.Event{MouseX: 78, MouseY: 10}
 	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: move, Window: &gui.Window{}})
 
+	// Press boundary 4 is logical 4 (the end of the Hebrew word), so the
+	// anchor stays there and the head takes the other span end.
 	tm.grid.Mu.Lock()
 	defer tm.grid.Mu.Unlock()
-	if tm.grid.SelAnchor != (contentPos{Row: 0, Col: 0}) {
-		t.Errorf("SelAnchor = %v, want {Row:0 Col:0}", tm.grid.SelAnchor)
+	if tm.grid.SelAnchor != (contentPos{Row: 0, Col: 4}) {
+		t.Errorf("SelAnchor = %v, want {Row:0 Col:4}", tm.grid.SelAnchor)
 	}
-	if tm.grid.SelHead != (contentPos{Row: 0, Col: 4}) {
-		t.Errorf("SelHead = %v, want {Row:0 Col:4}", tm.grid.SelHead)
+	if tm.grid.SelHead != (contentPos{Row: 0, Col: 0}) {
+		t.Errorf("SelHead = %v, want {Row:0 Col:0}", tm.grid.SelHead)
 	}
 	if got := tm.grid.SelectedText(); got != "שלום" {
 		t.Errorf("RTL drag selected %q, want %q", got, "שלום")
+	}
+}
+
+// A press on the visual left edge of a glyph in a right-to-left run is that
+// glyph's logical end. Before the fix it mapped to the glyph's logical start, so
+// a drag onto the next row also selected the glyph left of the pointer.
+func TestOnMouseMove_RTLCrossRowDragAnchor(t *testing.T) {
+	tm := rtlRowTerm(t)
+	// x=60 → visual boundary 6: the left edge of visual cell 6 (logical 1,
+	// 'ל'). Logical boundary 2, so 'ל' and 'ש' are not selected.
+	down := &gui.Event{MouseX: 60, MouseY: 10, MouseButton: gui.MouseLeft}
+	tm.onClick(gui.EventCtx{Event: down, Window: &gui.Window{}})
+	tm.onMouseMove(gui.EventCtx{Event: &gui.Event{MouseX: 0, MouseY: 30}, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if want := (contentPos{Row: 0, Col: 2}); tm.grid.SelAnchor != want {
+		t.Errorf("SelAnchor = %v, want %v", tm.grid.SelAnchor, want)
+	}
+	if got := tm.grid.SelectedText(); strings.Contains(got, "ל") {
+		t.Errorf("cross-row RTL drag copied %q; 'ל' is right of the press point", got)
 	}
 }
 
@@ -1915,5 +1939,46 @@ func TestOnMouseMove_ReportingWithoutCmdStillTracksHoverCell(t *testing.T) {
 	if tm.mouse.hoverURL != "https://b.dev" {
 		t.Errorf("Cmd pressed over the second link: hoverURL = %q, want %q",
 			tm.mouse.hoverURL, "https://b.dev")
+	}
+}
+
+// A same-row drag to the left, then a move to the next row, must keep the anchor
+// at the press point. The same-row path used to write min(press, pointer) into
+// SelAnchor, so the cross-row selection started at the leftmost point the drag
+// had reached and copied cells the user never selected.
+func TestOnMouseMove_AnchorSurvivesLeftwardSameRowDrag(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20) // cellW=10, cellH=20
+	win := &gui.Window{}
+	down := &gui.Event{MouseX: 100, MouseY: 5, MouseButton: gui.MouseLeft} // boundary 10
+	tm.onClick(gui.EventCtx{Event: down, Window: win})
+	tm.onMouseMove(gui.EventCtx{Event: &gui.Event{MouseX: 50, MouseY: 5}, Window: win})
+	tm.onMouseMove(gui.EventCtx{Event: &gui.Event{MouseX: 50, MouseY: 25}, Window: win})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if want := (contentPos{Row: 0, Col: 10}); tm.grid.SelAnchor != want {
+		t.Errorf("SelAnchor = %v, want press point %v", tm.grid.SelAnchor, want)
+	}
+	if want := (contentPos{Row: 1, Col: 5}); tm.grid.SelHead != want {
+		t.Errorf("SelHead = %v, want %v", tm.grid.SelHead, want)
+	}
+}
+
+// Dragging back to exactly the press point collapses the selection. It used to
+// keep the span of the previous move, because logicalSpan reports ok=false for
+// an empty range and the old code then left SelAnchor/SelHead alone.
+func TestOnMouseMove_DragBackToPressCollapses(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	win := &gui.Window{}
+	down := &gui.Event{MouseX: 100, MouseY: 5, MouseButton: gui.MouseLeft}
+	tm.onClick(gui.EventCtx{Event: down, Window: win})
+	tm.onMouseMove(gui.EventCtx{Event: &gui.Event{MouseX: 50, MouseY: 5}, Window: win})
+	tm.onMouseMove(gui.EventCtx{Event: &gui.Event{MouseX: 100, MouseY: 5}, Window: win})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelActive {
+		t.Errorf("selection active after drag back to press point: %v..%v",
+			tm.grid.SelAnchor, tm.grid.SelHead)
 	}
 }

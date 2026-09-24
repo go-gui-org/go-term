@@ -1,6 +1,7 @@
 package term
 
 import (
+	"slices"
 	"strings"
 
 	"golang.org/x/text/unicode/bidi"
@@ -222,17 +223,20 @@ func (t *Term) logicalMouseCol(r, c int) int {
 }
 
 // v2lForViewportRow returns the visual→logical column map for viewport
-// row r, or nil when the row needs no reorder (identity). Recomputed on
-// demand for input events — rare, so no caching; the per-frame draw path
-// uses prepareBiDi instead. Caller holds grid.Mu.
+// row r, or nil when the row needs no reorder (identity). Input events call
+// it: hover and motion reports on every pointer move, often twice per move.
+// The maps of the last two rows seen are cached (see v2lCacheEntry), so a
+// pointer moving over one RTL row reruns the bidi algorithm only when the row
+// changes. The per-frame draw path uses prepareBiDi instead: its maps belong
+// to the last frame and can be stale after output or a scroll. Caller holds
+// grid.Mu; main thread only.
 func (t *Term) v2lForViewportRow(r int) []int {
 	g := t.grid
 	cols := g.Cols
 	if cols <= 0 || r < 0 || r >= g.Rows {
 		return nil
 	}
-	// Gate before allocating: hover and motion reports call this on every
-	// pointer move, and almost every row is LTR-only. Same check as
+	// Gate before allocating: almost every row is LTR-only. Same check as
 	// prepareBiDi's scrolled-view path.
 	needBidi := false
 	for c := range cols {
@@ -244,12 +248,52 @@ func (t *Term) v2lForViewportRow(r int) []int {
 	if !needBidi {
 		return nil
 	}
-	scratch := make([]cell, cols)
-	for c := range scratch {
-		scratch[c] = g.ViewCellAt(r, c)
+	for i := range t.mouse.v2lCache {
+		if e := &t.mouse.v2lCache[i]; e.matches(g, r, cols) {
+			return e.v2l
+		}
 	}
-	_, v2l := visualReorder(scratch, cols)
-	return v2l
+	e := &t.mouse.v2lCache[t.mouse.v2lNext]
+	t.mouse.v2lNext = (t.mouse.v2lNext + 1) % len(t.mouse.v2lCache)
+	// Reuse the entry's buffers: after the first miss per slot, only
+	// visualReorder itself allocates.
+	e.scratch = slices.Grow(e.scratch[:0], cols)[:cols]
+	e.ch = slices.Grow(e.ch[:0], cols)[:cols]
+	e.w = slices.Grow(e.w[:0], cols)[:cols]
+	for c := range cols {
+		vc := g.ViewCellAt(r, c)
+		e.scratch[c] = vc
+		e.ch[c], e.w[c] = vc.Ch, vc.Width
+	}
+	_, e.v2l = visualReorder(e.scratch, cols)
+	e.valid = true
+	return e.v2l
+}
+
+// v2lCacheEntry is one cached visual→logical map. The key is the row content
+// that visualReorder reads, rune and width per cell (see scanBidiCells and
+// appendVisualCell), compared exactly. A row that moved, scrolled, or was
+// rewritten therefore misses; a hash could collide and hand back a wrong map.
+type v2lCacheEntry struct {
+	ch      []rune
+	w       []uint8
+	v2l     []int
+	scratch []cell
+	valid   bool
+}
+
+// matches reports whether e was built from viewport row r's current content.
+func (e *v2lCacheEntry) matches(g *grid, r, cols int) bool {
+	if !e.valid || len(e.ch) != cols {
+		return false
+	}
+	for c := range cols {
+		vc := g.ViewCellAt(r, c)
+		if vc.Ch != e.ch[c] || vc.Width != e.w[c] {
+			return false
+		}
+	}
+	return true
 }
 
 // logicalCell maps a visual cell column to its logical column.
@@ -273,20 +317,45 @@ func logicalCell(v2l []int, v, cols int) int {
 // logicalBoundary maps a visual selection boundary in [0..cols] to its
 // logical boundary. Point approximation for clicks and shift-extends;
 // same-row drags use logicalSpan for exact glyph-set coverage.
+//
+// Visual boundary b is the left edge of visual cell b. In a left-to-right run
+// that edge is the logical start of the cell (v2l[b]). In a right-to-left run
+// the cell's logical start is on its visual right, so its left edge is the
+// logical end, v2l[b]+1. The row edges follow the same rule: on a reversed row
+// visual 0 is the logical end of the row and visual cols is logical 0. When no
+// real cell sits right of b (the right edge, or padding), the right edge of
+// cell b-1 is used, mirrored the same way.
 func logicalBoundary(v2l []int, b, cols int) int {
 	if v2l == nil {
 		return clamp(b, 0, max(cols, 0))
 	}
-	if b <= 0 {
-		return 0
+	b = clamp(b, 0, max(cols, 0))
+	if b < len(v2l) && v2l[b] >= 0 {
+		if cellRTL(v2l, b) {
+			return v2l[b] + 1
+		}
+		return v2l[b]
 	}
-	if b >= cols {
-		return cols
+	if l := b - 1; l >= 0 && l < len(v2l) && v2l[l] >= 0 {
+		if cellRTL(v2l, l) {
+			return v2l[l]
+		}
+		return v2l[l] + 1
 	}
-	if l := v2l[b]; l >= 0 {
-		return l
+	return b
+}
+
+// cellRTL reports whether visual cell v sits in a right-to-left run: a visual
+// neighbor holds the next logical cell on the wrong side (right neighbor one
+// lower, or left neighbor one higher). A one-cell run has no neighbor to show
+// its direction and counts as left-to-right; both answers select that glyph
+// alone, so the choice only moves the boundary by that one cell.
+func cellRTL(v2l []int, v int) bool {
+	l := v2l[v]
+	if v+1 < len(v2l) && v2l[v+1] >= 0 && v2l[v+1] == l-1 {
+		return true
 	}
-	return clamp(b, 0, max(cols, 0))
+	return v > 0 && v2l[v-1] >= 0 && v2l[v-1] == l+1
 }
 
 // logicalSpan maps a visual glyph range [v0,v1) to the covering logical

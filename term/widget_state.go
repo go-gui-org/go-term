@@ -250,6 +250,17 @@ type mouseState struct {
 	selStartV   int
 	selStartRow int // content row
 	selStartSet bool
+	// selStartAnchor is the logical anchor the press set. A same-row drag
+	// rewrites SelAnchor to one end of the covering span, so a drag that leaves
+	// the row, or comes back to the press point, restores the anchor from here.
+	selStartAnchor contentPos
+
+	// v2lCache holds the visual→logical maps of the last rows the pointer
+	// crossed, so v2lForViewportRow does not rerun the bidi algorithm on
+	// every move. Guarded by grid.Mu, like the grid it mirrors.
+	v2lCache [2]v2lCacheEntry
+	// v2lNext is the v2lCache slot the next miss overwrites.
+	v2lNext int
 }
 
 // drawBufs holds per-frame scratch buffers reused across onDraw calls.

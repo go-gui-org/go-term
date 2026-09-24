@@ -74,16 +74,14 @@ func (g *grid) SelectedText() string {
 	if !g.SelActive || g.Rows <= 0 || g.Cols <= 0 {
 		return ""
 	}
+	// No alt-screen clamp: Shift+PageUp shows main-screen history above the
+	// alt screen, and a selection dragged over it must copy what it
+	// highlights. A stale main-screen selection cannot reach here, because
+	// EnterAlt and ExitAlt both clear the selection.
 	total := g.Scrollback.Len() + g.Rows
-	lo, hi := 0, total-1
-	if g.AltActive {
-		// The alt screen owns no scrollback: stale main-screen history
-		// below it must not leak into the copy.
-		lo = g.Scrollback.Len()
-	}
 	s, e := g.selOrder()
-	s.Row, s.Col = clamp(s.Row, lo, hi), clamp(s.Col, 0, g.Cols)
-	e.Row, e.Col = clamp(e.Row, lo, hi), clamp(e.Col, 0, g.Cols)
+	s.Row, s.Col = clamp(s.Row, 0, total-1), clamp(s.Col, 0, g.Cols)
+	e.Row, e.Col = clamp(e.Row, 0, total-1), clamp(e.Col, 0, g.Cols)
 	if s == e {
 		return ""
 	}
@@ -114,8 +112,13 @@ func (g *grid) SelectedText() string {
 		if joined {
 			// Blanks before a soft wrap are real text, not padding: trimming
 			// them would fuse the last word of this row with the first word
-			// of the next ("foo " + "bar" → "foobar").
+			// of the next ("foo " + "bar" → "foobar"). The one exception is
+			// the blank a wide glyph leaves when it wraps early (attrWrapPad):
+			// it is padding, and copying it would split a CJK word.
 			end = c1
+			if c1 == g.Cols-1 && g.ContentCellAt(r, c1).Attrs&attrWrapPad != 0 {
+				end = c1 - 1
+			}
 		}
 		for c := c0; c <= c1 && !joined; c++ {
 			// A Kitty Unicode placeholder is an image, not text. Copying it

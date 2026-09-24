@@ -138,8 +138,12 @@ type drawState struct {
 	// t.win is main-thread only and onDraw runs there, so reading it after
 	// the unlock is still safe.
 	pendingIME bool
-	imeX, imeY float32
-	imeW, imeH float32
+	// pendingUnlock asks onDraw to release the gui mouse lock after grid.Mu is
+	// unlocked. The stuck-drag checks run under the lock, but MouseUnlock is a
+	// go-gui call and must not run while grid.Mu is held.
+	pendingUnlock bool
+	imeX, imeY    float32
+	imeW, imeH    float32
 }
 
 // rowV2L returns viewport row vr's visual→logical column map, or nil when
@@ -274,8 +278,10 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		if rows != t.grid.Rows || cols != t.grid.Cols {
 			// cancelMomentum inside the helper takes only momentum.mu;
 			// no path holds that lock while acquiring grid.Mu, so this
-			// nesting cannot deadlock (see momentumLoop).
-			t.cancelSelectDrag()
+			// nesting cannot deadlock (see momentumLoop). The mouse
+			// unlock is a go-gui call, so it waits until after the unlock.
+			t.stopSelectDrag()
+			ds.pendingUnlock = true
 			t.grid.ClearSelection()
 		}
 	}
@@ -284,7 +290,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	// repositioning the viewport. Drop the drag when the grid reflows.
 	if t.scrollbar.dragging && (rows != t.grid.Rows || cols != t.grid.Cols) {
 		t.scrollbar.dragging = false
-		t.unlockMouse(t.win)
+		ds.pendingUnlock = true
 	}
 
 	// Phase order matters: prepareFastPath sets ds.renderRows / ds.live, which
@@ -307,6 +313,11 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.drawCursor(&ds)
 	t.drawOverlays(&ds)
 	t.grid.Mu.Unlock()
+
+	// Deferred mouse unlock from the stuck-drag checks above.
+	if ds.pendingUnlock {
+		t.unlockMouse(t.win)
+	}
 
 	// Deferred IME candidate-window report: computed under the lock by
 	// drawCursor, delivered here where no grid lock is held.

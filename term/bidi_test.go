@@ -1,6 +1,9 @@
 package term
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // makeTestRow builds a cols-wide row of cells from the given runes.
 // Cells beyond len(runes) are space-filled (Ch=' ', Width=1), matching
@@ -309,11 +312,13 @@ func TestLogicalMappings(t *testing.T) {
 	if got := logicalCell(v2l, 0, cols); got != 7 {
 		t.Errorf("logicalCell(v=0) = %d, want 7", got)
 	}
-	if got := logicalBoundary(v2l, 0, cols); got != 0 {
-		t.Errorf("logicalBoundary(b=0) = %d, want 0", got)
+	// A reversed row's visual left edge is its logical end, and its visual
+	// right edge is logical 0.
+	if got := logicalBoundary(v2l, 0, cols); got != 8 {
+		t.Errorf("logicalBoundary(b=0) = %d, want 8", got)
 	}
-	if got := logicalBoundary(v2l, 8, cols); got != 8 {
-		t.Errorf("logicalBoundary(b=8) = %d, want 8", got)
+	if got := logicalBoundary(v2l, 8, cols); got != 0 {
+		t.Errorf("logicalBoundary(b=8) = %d, want 0", got)
 	}
 	// Visual glyphs [2,5) are logical {5,4,3} → span [3,6).
 	if l0, l1, ok := logicalSpan(v2l, 2, 5, cols); !ok || l0 != 3 || l1 != 6 {
@@ -593,5 +598,55 @@ func TestV2LForViewportRow_LTRNoAlloc(t *testing.T) {
 	}
 	if tm.v2lForViewportRow(1) == nil {
 		t.Error("RTL row: v2l map is nil")
+	}
+}
+
+// Pointer moves over an RTL row must not rerun the bidi algorithm on every
+// event: once the row's map is cached, a repeat call allocates nothing. The
+// cache is exact, so a rewritten row gets a fresh map.
+func TestV2LForViewportRow_RTLCached(t *testing.T) {
+	tm, _ := newTestTermCapture()
+	for c, r := range []rune("שלום") {
+		tm.grid.At(1, c).Ch = r
+		tm.grid.At(1, c).Width = 1
+	}
+	first := tm.v2lForViewportRow(1)
+	if first == nil {
+		t.Fatal("RTL row: v2l map is nil")
+	}
+	if allocs := testing.AllocsPerRun(100, func() {
+		_ = tm.v2lForViewportRow(1)
+	}); allocs != 0 {
+		t.Errorf("cached RTL row: %v allocs per call, want 0", allocs)
+	}
+	// Hover checks the old and the new row on one move; both stay cached.
+	for c, r := range []rune("אבג") {
+		tm.grid.At(2, c).Ch = r
+		tm.grid.At(2, c).Width = 1
+	}
+	_ = tm.v2lForViewportRow(2)
+	if allocs := testing.AllocsPerRun(100, func() {
+		_ = tm.v2lForViewportRow(1)
+		_ = tm.v2lForViewportRow(2)
+	}); allocs != 0 {
+		t.Errorf("two cached RTL rows: %v allocs per pair, want 0", allocs)
+	}
+
+	// Rewrite row 1 with an LTR word in front: the map must change.
+	for c, r := range []rune("ab שלום") {
+		tm.grid.At(1, c).Ch = r
+		tm.grid.At(1, c).Width = 1
+	}
+	got := tm.v2lForViewportRow(1)
+	fresh := func() []int {
+		scratch := make([]cell, tm.grid.Cols)
+		for c := range scratch {
+			scratch[c] = tm.grid.ViewCellAt(1, c)
+		}
+		_, v2l := visualReorder(scratch, tm.grid.Cols)
+		return v2l
+	}()
+	if !slices.Equal(got, fresh) {
+		t.Errorf("rewritten row: cached map %v, want %v", got, fresh)
 	}
 }

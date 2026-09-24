@@ -295,3 +295,34 @@ func TestScrollbackSwap_SlabChangeReleasesBorrowedRows(t *testing.T) {
 		}
 	})
 }
+
+// scrollUpRegion marks screen rows borrowed only when PushSwap really took the
+// row. Every fallback PushSwap has (short row, disabled ring) returns the row
+// itself; the old check looked only at the row length, so a fallback on a ring
+// with cap 0 but a full-width row counted as a swap.
+func TestPushSwapBorrowed(t *testing.T) {
+	row := make([]cell, 4)
+	cases := []struct {
+		name string
+		cap  int
+		row  []cell
+		want bool
+	}{
+		{"swap", 8, row, true},
+		{"disabled ring, full-width row", 0, row, false},
+		{"short row", 8, row[:2], false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var r scrollbackRing
+			r.SetGeom(tc.cap, 4)
+			spare, _ := r.PushSwap(tc.row, false)
+			if got := pushSwapBorrowed(tc.row, spare); got != tc.want {
+				t.Errorf("pushSwapBorrowed = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if pushSwapBorrowed(nil, nil) {
+		t.Error("empty row reported as borrowed")
+	}
+}

@@ -212,10 +212,18 @@ func (t *Term) lockMouse(w *gui.Window) {
 // MouseUnlock must go through here, including the stuck-drag safety nets.
 func (t *Term) unlockMouse(w *gui.Window) {
 	t.mouse.locked = false
+	if unlockMouseHook != nil {
+		unlockMouseHook(t)
+	}
 	if w != nil {
 		w.MouseUnlock()
 	}
 }
+
+// unlockMouseHook, when set by a test, runs in unlockMouse at the point where the
+// go-gui MouseUnlock call happens. Tests use it to check that grid.Mu is not held
+// across that call. It is always nil outside tests.
+var unlockMouseHook func(*Term)
 
 // toCanvasRel converts a mouse event's coordinates from absolute window
 // space to canvas-relative when the event arrived through a mouse-lock
@@ -433,6 +441,7 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 		}
 		t.grid.hasSelAnchor = true
 		t.mouse.selStartV, t.mouse.selStartRow = selCol, contentR
+		t.mouse.selStartAnchor = head
 		t.mouse.selStartSet = !extended
 	}()
 	t.mouse.dragging = true
@@ -556,15 +565,36 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 			// covering logical span so the selected glyphs are exactly
 			// the dragged ones (point-mapping each end would drift by
 			// a cell on reversed rows).
-			if l0, l1, ok := logicalSpan(v2l, t.mouse.selStartV, selCol, cols); ok {
-				t.grid.SelAnchor = contentPos{Row: contentR, Col: l0}
-				t.grid.SelHead = contentPos{Row: contentR, Col: l1}
-				t.grid.SelActive = true
+			l0, l1, ok := logicalSpan(v2l, t.mouse.selStartV, selCol, cols)
+			if !ok {
+				// Back at the press point (or over padding only): nothing is
+				// selected. Collapse onto the press anchor so no stale span of
+				// an earlier move stays behind.
+				t.grid.SelAnchor = t.mouse.selStartAnchor
+				t.grid.SelHead = t.mouse.selStartAnchor
+				t.grid.SelActive = false
 				return
 			}
+			// The span end nearer the press point is the anchor. That keeps the
+			// anchor at the drag origin, so a later cross-row move or a
+			// shift-click extends from where the user pressed, not from
+			// whichever span end is lower.
+			a, h := l0, l1
+			if absInt(l1-t.mouse.selStartAnchor.Col) < absInt(l0-t.mouse.selStartAnchor.Col) {
+				a, h = l1, l0
+			}
+			t.grid.SelAnchor = contentPos{Row: contentR, Col: a}
+			t.grid.SelHead = contentPos{Row: contentR, Col: h}
+			t.grid.SelActive = true
+			return
 		}
 		// Cross-row drags (and the block band): the anchor row runs to its
-		// edge via selRowSpan, so only the head needs mapping here.
+		// edge via selRowSpan, so only the head needs mapping here. A same-row
+		// move above may have moved SelAnchor to a span end; put it back on
+		// the press point.
+		if t.mouse.selStartSet {
+			t.grid.SelAnchor = t.mouse.selStartAnchor
+		}
 		t.grid.SelHead = contentPos{Row: contentR, Col: logicalBoundary(v2l, selCol, cols)}
 		if t.grid.SelHead != t.grid.SelAnchor {
 			t.grid.SelActive = true

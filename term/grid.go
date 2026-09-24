@@ -97,7 +97,7 @@ func isEmojiModifier(r rune) bool {
 }
 
 // cell attribute bits. cell.Attrs is uint16; bits 0..8 are the SGR visual
-// attributes, bit 9 is DECSCA protection. Widening from uint8 was free —
+// attributes, bit 9 is DECSCA protection, bit 10 marks a wide-glyph wrap pad. Widening from uint8 was free —
 // the second byte lands in padding cell already carried.
 const (
 	attrBold uint16 = 1 << iota
@@ -118,6 +118,13 @@ const (
 	// the blank carries CurAttrs (xterm does the same — its ClearCells masks
 	// with ATTRIBUTES, which includes PROTECTED).
 	attrProtected
+
+	// attrWrapPad marks the blank putCell leaves in the last column when a
+	// wide glyph does not fit there and wraps early. The blank is not text:
+	// a copy across the soft wrap skips it, so "你好" + wrap + "世界" copies
+	// as "你好世界" and not "你好 世界". Like attrProtected it is not visual,
+	// and SGR never sets it. Any write to the cell replaces it.
+	attrWrapPad
 
 	// attrVisual is every bit a renderer looks at — i.e. Attrs minus
 	// protection. Blank-cell fast paths compare against this so a protected
@@ -906,6 +913,14 @@ func (g *grid) HasDirtyRows() bool { return g.dirtyCount > 0 }
 func (g *grid) ClearDirty() {
 	clear(g.Dirty)
 	g.dirtyCount = 0
+}
+
+// absInt returns |v|.
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // clamp bounds v to [lo, hi]. lo <= hi assumed.

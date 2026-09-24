@@ -152,3 +152,22 @@ func TestHintTargets_ScrolledViewportOnly(t *testing.T) {
 		t.Fatalf("got %v, want only the on-screen link", got)
 	}
 }
+
+// On the alt screen, Shift+PageUp shows main-screen history, and hint mode must
+// label the links on screen. It used to scan the alt rows instead, which were
+// scrolled off, so the visible history link got no label.
+func TestHintTargets_AltScrolledIntoHistory(t *testing.T) {
+	g := newGrid(2, 40)
+	g.ScrollbackCap = 10
+	putRowAt(g, 0, "https://old.example")
+	g.ScrollUp(1)
+	g.ScrollUp(1)
+	g.EnterAlt()
+	putRowAt(g, 1, "https://alt.example")
+	g.ScrollView(2) // Shift+PageUp: both history rows fill the viewport.
+
+	got := urls(g.hintTargets(nil))
+	if len(got) != 1 || got[0] != "https://old.example" {
+		t.Fatalf("got %v, want only the on-screen history link", got)
+	}
+}
