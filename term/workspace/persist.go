@@ -277,7 +277,7 @@ func restoreWorkspace(w *gui.Window, cfg Cfg, pw persistedWorkspace) (*Workspace
 	ws.blurAllPanes()
 	tab := ws.tabs[ws.activeTab]
 	if t, ok := tab.terms[tab.focused]; ok {
-		t.SetFocused(true)
+		setTermFocused(t, true)
 	}
 	return ws, nil
 }

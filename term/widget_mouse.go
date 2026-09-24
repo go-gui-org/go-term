@@ -3,6 +3,7 @@ package term
 import (
 	"log"
 	"math"
+	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -915,8 +916,23 @@ func openURL(rawURL string) {
 		return
 	}
 	if err := startOpener(cmd); err != nil {
-		log.Printf("term: open %q: %v", rawURL, err)
+		log.Printf("term: open %s: %v", redactURL(rawURL), err)
 	}
+}
+
+// redactURL keeps only the scheme and host of url, for logs. The rest can
+// carry secrets: a password in the userinfo, a token in the query (password
+// reset and magic-login links), or a personal address in a mailto. The host
+// is enough to tell which link failed.
+func redactURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme == "" {
+		return "<unparsable URL>"
+	}
+	if u.Host == "" {
+		return u.Scheme + ":"
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // trackpadSensitivity converts a precise (trackpad / high-res) delta

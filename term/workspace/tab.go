@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"path/filepath"
 	"strconv"
 
@@ -46,6 +47,35 @@ type paneHooks struct {
 	onActivity func(leafID string, kind term.ActivityKind)
 }
 
+// errWindowClosing is returned instead of spawning a pane into a window whose
+// close was requested. gui.Window.Close only raises a flag, so commands and
+// shell exits queued for the same frame still run; a shell started then would
+// outlive the window it belongs to.
+var errWindowClosing = errors.New("workspace: window is closing")
+
+// setTermFocused is Term.SetFocused. Every workspace focus change goes
+// through it so tests can see which pane the workspace believes is focused;
+// Term exposes no getter for its own focus flag.
+var setTermFocused = (*term.Term).SetFocused
+
+// newTerm is term.New, replaceable so tests can make a spawn fail.
+var newTerm = term.New
+
+// spawnPane builds and themes the Term for one pane. It is the single place a
+// workspace starts a shell (new tab, split, restore), and so the single place
+// that refuses to start one into a closing window.
+func (t *tab) spawnPane(w *gui.Window, cfg Cfg, leafID, dir string, hooks paneHooks) (*term.Term, error) {
+	if w.CloseRequested() {
+		return nil, errWindowClosing
+	}
+	tm, err := newTerm(w, t.termCfg(w, cfg, leafID, dir, hooks))
+	if err != nil {
+		return nil, err
+	}
+	applyPaneTheme(tm, cfg)
+	return tm, nil
+}
+
 // newTab creates a tab with a single leaf running a shell. dir sets the
 // shell's working directory (empty = inherit the process CWD).
 func newTab(w *gui.Window, cfg Cfg, tabID, dir string, hooks paneHooks) (*tab, error) {
@@ -57,11 +87,10 @@ func newTab(w *gui.Window, cfg Cfg, tabID, dir string, hooks paneHooks) (*tab, e
 		titles: make(map[string]string),
 		nextID: 1,
 	}
-	tm, err := term.New(w, t.termCfg(w, cfg, leafID, dir, hooks))
+	tm, err := t.spawnPane(w, cfg, leafID, dir, hooks)
 	if err != nil {
 		return nil, err
 	}
-	applyPaneTheme(tm, cfg)
 	t.terms[leafID] = tm
 	t.titles[leafID] = leafID
 	t.focused = leafID
@@ -147,11 +176,10 @@ func (t *tab) addPane(
 	fontSize float32,
 	hooks paneHooks,
 ) error {
-	tm, err := term.New(w, t.termCfg(w, cfg, leafID, dir, hooks))
+	tm, err := t.spawnPane(w, cfg, leafID, dir, hooks)
 	if err != nil {
 		return err
 	}
-	applyPaneTheme(tm, cfg)
 	if fontSize > 0 {
 		tm.SetFontSize(fontSize)
 	}

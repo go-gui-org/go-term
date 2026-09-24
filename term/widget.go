@@ -593,7 +593,9 @@ func (t *Term) Close() error {
 	// Stop the download worker. dlQueue is deliberately left open — the
 	// reader goroutine may still be alive on the stuck-read path above and a
 	// send on a closed channel panics. Anything still queued is dropped; a
-	// transfer already being written finishes before the worker returns.
+	// transfer already being written finishes in the background. Close does
+	// not wait for it (the worker is on dlWg, not loopWg): its staged write
+	// and fsync would otherwise freeze the main thread.
 	if t.dlDone != nil {
 		close(t.dlDone)
 	}
