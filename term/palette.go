@@ -137,6 +137,7 @@ func (g *grid) rebuildPalette() {
 // which are not part of the indexed table, so it needs no rebuild.)
 func (g *grid) setTheme(th Theme) {
 	g.Theme = th
+	g.baseTheme = th
 	g.rebuildPalette()
 }
 

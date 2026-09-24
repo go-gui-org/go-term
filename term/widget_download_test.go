@@ -547,31 +547,46 @@ func TestWriteDownload_PublishStartsAtFirstFreeName(t *testing.T) {
 	}
 }
 
-// blockStaging makes the next staged write wait until the returned release is
-// called. entered is closed once the worker reaches the write.
+// blockStaging makes every staged write wait until the returned release is
+// called. entered gets one value each time a worker reaches the write.
 func blockStaging(t *testing.T) (entered <-chan struct{}, release func()) {
 	t.Helper()
-	in := make(chan struct{})
+	in := make(chan struct{}, 8)
 	gate := make(chan struct{})
 	var once sync.Once
 	orig := stageDownload
 	t.Cleanup(func() { stageDownload = orig })
 	stageDownload = func(dir, base string, data []byte, perm os.FileMode) (string, error) {
-		close(in)
+		in <- struct{}{}
 		<-gate
 		return orig(dir, base, data, perm)
 	}
 	return in, func() { once.Do(func() { close(gate) }) }
 }
 
+// resetCloseChain clears the record of a previous Close giving up, so an
+// earlier test's timeout cannot shorten this test's wait.
+func resetCloseChain(t *testing.T) {
+	t.Helper()
+	lastCloseTimeout.Store(0)
+	t.Cleanup(func() { lastCloseTimeout.Store(0) })
+}
+
 // newClosableDownloadTerm builds a real Term (so Close runs its full path)
-// with the built-in writer saving to dir.
+// with the built-in writer saving to dir. Its cleanup closes the Term and waits
+// for the worker, so a test that fails before its own Close still ends. A test
+// that blocks staging must register its release after this, so the release
+// runs first.
 func newClosableDownloadTerm(t *testing.T, dir string, onNotify func(string, string)) *Term {
 	t.Helper()
 	tm, err := New(gui.NewWindow(gui.WindowCfg{}), Cfg{DownloadDir: dir, OnNotify: onNotify})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = tm.Close()
+		waitClosed(t, tm.dlExited, "download worker never exited")
+	})
 	return tm
 }
 
@@ -588,10 +603,11 @@ func waitClosed(t *testing.T, ch <-chan struct{}, what string) {
 // written at that moment must be published before Close returns; otherwise the
 // exit kills the write and leaves the hidden staging file in the download dir.
 func TestClose_WaitsForDownloadWrite(t *testing.T) {
+	resetCloseChain(t)
 	entered, release := blockStaging(t)
 	dir := t.TempDir()
 	tm := newClosableDownloadTerm(t, dir, func(string, string) {})
-	t.Cleanup(func() { release(); <-tm.dlExited })
+	t.Cleanup(release)
 
 	feedTermDownload(t, tm, "x.bin", []byte("payload"))
 	waitClosed(t, entered, "download never reached the staging write")
@@ -611,17 +627,18 @@ func TestClose_WaitsForDownloadWrite(t *testing.T) {
 
 // Close runs on the main thread, so its wait for a slow write is bounded. When
 // the wait runs out, the write still finishes in the background, but no
-// embedder callback may run after Close has returned.
+// notification starts once Close has started (contract guarantee 4).
 func TestClose_BoundedWaitThenNoCallbacks(t *testing.T) {
-	origWait := downloadCloseWait
-	t.Cleanup(func() { downloadCloseWait = origWait })
-	downloadCloseWait = 50 * time.Millisecond
+	resetCloseChain(t)
+	origWait := closeWait
+	t.Cleanup(func() { closeWait = origWait })
+	closeWait = 50 * time.Millisecond
 
 	entered, release := blockStaging(t)
 	dir := t.TempDir()
 	var notified atomic.Int32
 	tm := newClosableDownloadTerm(t, dir, func(string, string) { notified.Add(1) })
-	t.Cleanup(func() { release(); <-tm.dlExited })
+	t.Cleanup(release)
 
 	feedTermDownload(t, tm, "x.bin", []byte("payload"))
 	waitClosed(t, entered, "download never reached the staging write")
@@ -633,30 +650,58 @@ func TestClose_BoundedWaitThenNoCallbacks(t *testing.T) {
 	release()
 	waitClosed(t, tm.dlExited, "worker never exited")
 	if n := notified.Load(); n != 0 {
-		t.Errorf("OnNotify called %d times after Close returned, want 0", n)
+		t.Errorf("OnNotify called %d times after Close, want 0", n)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "x.bin")); err != nil || string(b) != "payload" {
 		t.Errorf("background write: content = %q, %v; want payload", b, err)
 	}
 }
 
-// The gate is what keeps OnDownload and OnNotify from running after Close
-// returns: once shut, no new callback starts, and a shut during a callback
-// is not undone when the callback ends.
-func TestWithDownloadGate_ShutBlocksCallbacks(t *testing.T) {
-	var tm Term
-	ran := tm.withDownloadGate(func() {})
-	if !ran {
-		t.Fatal("open gate refused the callback")
+// A workspace closes its panes one after another on the main thread. With
+// every pane mid-transfer on a slow disk, the freeze must be about one
+// closeWait, not one per pane. Regression: #239 waited closeWait per pane, so
+// quitting with 4 busy panes froze the UI for about 8s.
+func TestClose_BackToBackClosesShareOneWait(t *testing.T) {
+	resetCloseChain(t)
+	origWait := closeWait
+	t.Cleanup(func() { closeWait = origWait })
+	closeWait = 300 * time.Millisecond
+
+	entered, release := blockStaging(t)
+	panes := make([]*Term, 0, 3)
+	for range 3 {
+		tm := newClosableDownloadTerm(t, t.TempDir(), func(string, string) {})
+		feedTermDownload(t, tm, "x.bin", []byte("payload"))
+		waitClosed(t, entered, "download never reached the staging write")
+		panes = append(panes, tm)
 	}
-	tm.dlGate.Store(dlGateShut)
-	if tm.withDownloadGate(func() { t.Error("callback ran after the gate shut") }) {
-		t.Error("shut gate reported the callback as run")
+	t.Cleanup(release)
+
+	start := time.Now()
+	for _, tm := range panes {
+		_ = tm.Close()
 	}
-	// Shutting the gate while a callback runs must keep it shut afterwards.
-	tm.dlGate.Store(dlGateOpen)
-	tm.withDownloadGate(func() { tm.dlGate.Store(dlGateShut) })
-	if got := tm.dlGate.Load(); got != dlGateShut {
-		t.Errorf("gate = %d after a shut during a callback, want shut", got)
+	// One wait is 300ms; three in a row would be 900ms. The margin absorbs a
+	// slow CI machine without letting a second full wait pass.
+	if el := time.Since(start); el < 250*time.Millisecond || el >= 550*time.Millisecond {
+		t.Errorf("closing 3 busy panes took %v, want about one closeWait (300ms)", el)
+	}
+}
+
+// Only a Close that follows a timeout closely skips its wait. A pane closed on
+// its own later still gets the full wait for its transfer.
+func TestCloseDeadline_ChainExpires(t *testing.T) {
+	resetCloseChain(t)
+	now := time.Now()
+	if got := closeDeadline(now); !got.Equal(now.Add(closeWait)) {
+		t.Errorf("no prior timeout: deadline = %v, want now+closeWait", got.Sub(now))
+	}
+	lastCloseTimeout.Store(now.Add(-closeChainGap / 2).UnixNano())
+	if got := closeDeadline(now); !got.Equal(now) {
+		t.Errorf("timeout just before: deadline = now+%v, want now", got.Sub(now))
+	}
+	lastCloseTimeout.Store(now.Add(-2 * closeChainGap).UnixNano())
+	if got := closeDeadline(now); !got.Equal(now.Add(closeWait)) {
+		t.Errorf("old timeout: deadline = now+%v, want now+closeWait", got.Sub(now))
 	}
 }

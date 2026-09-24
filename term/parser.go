@@ -69,7 +69,7 @@ type parser struct {
 
 	// osc accumulates the payload of the in-progress OSC (Operating
 	// System Command). Reset on entry to stOSC; capped at maxOSCBytes
-	// unless oscIsImage is set (OSC 1337), in which case maxOSC1337Bytes.
+	// unless oscLim names a larger cap (OSC 1337, OSC 52).
 	osc []byte
 	dcs []byte
 
@@ -89,7 +89,7 @@ type parser struct {
 	leader              byte // optional CSI private leader: one of < = > ?
 	intermediate        byte // last intermediate byte (0x20..0x2F) seen, 0 if none
 	escInter            byte // ESC intermediate introducer like '(' in ESC(B
-	oscIsImage          bool // true once "1337;" prefix detected
+	oscLim              int  // payload cap picked from the OSC number; 0 = maxOSCBytes
 	oscTrunc            bool // true once a byte was dropped for exceeding the OSC cap
 	dcsTrunc            bool // true once a byte was dropped for exceeding the DCS cap
 	allowClipboardWrite bool
@@ -115,7 +115,7 @@ func resetPayload(buf []byte, retain int) []byte {
 
 func (p *parser) oscReset() {
 	p.osc = resetPayload(p.osc, maxOSCBytes)
-	p.oscIsImage = false
+	p.oscLim = 0
 	p.oscTrunc = false
 }
 
@@ -214,69 +214,85 @@ func newParser(g *grid) *parser {
 	return &parser{g: g, params: make([]int, 0, 8), paramSub: make([]bool, 0, 8)}
 }
 
+// currentSGRString renders the current SGR state as the parameter string a
+// DECRQSS "m" reply carries ("1;3;38;2;255;0;0m"). It must cover every
+// attribute applySGR can set: a client that saves the reply and replays it to
+// restore its pen otherwise loses what was left out. "0m" is the reply only
+// when nothing is set.
 func (p *parser) currentSGRString() string {
-	if p.g.CurFG == defaultColor && p.g.CurBG == defaultColor &&
-		p.g.CurAttrs&attrVisual == 0 {
-		return "0m"
-	}
+	g := p.g
 	params := make([]byte, 0, 32)
-	appendParam := func(s string) {
-		if len(params) > 0 {
-			params = append(params, ';')
+	// Attribute bits in SGR-number order, so the reply reads like the SGR that
+	// produced it.
+	for _, a := range [...]struct {
+		bit uint16
+		sgr int
+	}{
+		{attrBold, 1}, {attrDim, 2}, {attrItalic, 3},
+	} {
+		if g.CurAttrs&a.bit != 0 {
+			params = appendSGRParam(params, a.sgr)
 		}
-		params = append(params, s...)
 	}
-	if p.g.CurAttrs&attrBold != 0 {
-		appendParam("1")
-	}
-	if p.g.CurAttrs&attrUnderline != 0 {
-		appendParam("4")
-	}
-	if p.g.CurAttrs&attrInverse != 0 {
-		appendParam("7")
-	}
-	switch p.g.CurFG >> 24 {
-	case 0x00:
-		v := int(p.g.CurFG & 0xFF)
-		switch {
-		case v <= 7:
-			appendParam(strconv.Itoa(v + 30))
-		case v <= 15:
-			appendParam(strconv.Itoa(v - 8 + 90))
-		default:
-			appendParam("38")
-			appendParam("5")
-			appendParam(strconv.Itoa(v))
+	if g.CurAttrs&attrUnderline != 0 {
+		params = appendSGRParam(params, 4)
+		// A plain underline is "4"; the other shapes need the colon form
+		// (4:2 double … 4:5 dashed), since "4;3" would read as underline+italic.
+		if g.CurULStyle > ulSingle {
+			params = append(params, ':')
+			params = strconv.AppendInt(params, int64(g.CurULStyle), 10)
 		}
-	case 0x01:
-		appendParam("38")
-		appendParam("2")
-		appendParam(strconv.Itoa(int((p.g.CurFG >> 16) & 0xFF)))
-		appendParam(strconv.Itoa(int((p.g.CurFG >> 8) & 0xFF)))
-		appendParam(strconv.Itoa(int(p.g.CurFG & 0xFF)))
 	}
-	switch p.g.CurBG >> 24 {
-	case 0x00:
-		v := int(p.g.CurBG & 0xFF)
-		switch {
-		case v <= 7:
-			appendParam(strconv.Itoa(v + 40))
-		case v <= 15:
-			appendParam(strconv.Itoa(v - 8 + 100))
-		default:
-			appendParam("48")
-			appendParam("5")
-			appendParam(strconv.Itoa(v))
+	for _, a := range [...]struct {
+		bit uint16
+		sgr int
+	}{
+		{attrBlink, 5}, {attrInverse, 7}, {attrConceal, 8},
+		{attrStrikethrough, 9}, {attrOverline, 53},
+	} {
+		if g.CurAttrs&a.bit != 0 {
+			params = appendSGRParam(params, a.sgr)
 		}
-	case 0x01:
-		appendParam("48")
-		appendParam("2")
-		appendParam(strconv.Itoa(int((p.g.CurBG >> 16) & 0xFF)))
-		appendParam(strconv.Itoa(int((p.g.CurBG >> 8) & 0xFF)))
-		appendParam(strconv.Itoa(int(p.g.CurBG & 0xFF)))
 	}
+	params = appendSGRColor(params, g.CurFG, 30, 90, 38)
+	params = appendSGRColor(params, g.CurBG, 40, 100, 48)
+	// SGR 58 has no short palette form, so base -1 sends every index through
+	// the 58;5;n shape.
+	params = appendSGRColor(params, g.CurULColor, -1, -1, 58)
 	if len(params) == 0 {
 		return "0m"
 	}
 	return string(params) + "m"
+}
+
+// appendSGRColor appends the SGR parameters that select color c, or nothing
+// for defaultColor. Palette 0–7 use base+n and 8–15 bright+n-8 when base >= 0;
+// every other palette index is ext;5;n and a truecolor value ext;2;r;g;b.
+func appendSGRColor(params []byte, c uint32, base, bright, ext int) []byte {
+	switch c >> 24 {
+	case 0x00:
+		v := int(c & 0xFF)
+		switch {
+		case base >= 0 && v <= 7:
+			return appendSGRParam(params, base+v)
+		case base >= 0 && v <= 15:
+			return appendSGRParam(params, bright+v-8)
+		}
+		for _, n := range [...]int{ext, 5, v} {
+			params = appendSGRParam(params, n)
+		}
+	case 0x01:
+		for _, n := range [...]int{ext, 2, int(c>>16) & 0xFF, int(c>>8) & 0xFF, int(c) & 0xFF} {
+			params = appendSGRParam(params, n)
+		}
+	}
+	return params
+}
+
+// appendSGRParam appends n to a ';'-separated SGR parameter list.
+func appendSGRParam(params []byte, n int) []byte {
+	if len(params) > 0 {
+		params = append(params, ';')
+	}
+	return strconv.AppendInt(params, int64(n), 10)
 }

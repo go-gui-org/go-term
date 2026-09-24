@@ -210,7 +210,8 @@ func TestEncodeKeyEvent_AltShiftArrow(t *testing.T) {
 	term, _ := newKeyboardTerm(24, 80)
 	e := &gui.Event{KeyCode: gui.KeyUp, Modifiers: gui.ModAlt | gui.ModShift}
 	got := term.encodeKeyEvent(e, nil, true, false)
-	want := "\x1b\x1b[1;2A"
+	// Alt is part of xterm's modifier parameter (1+1+2), not an ESC prefix.
+	want := "\x1b[1;4A"
 	if string(got) != want {
 		t.Errorf("Alt+Shift+Up: got %q, want %q", got, want)
 	}
@@ -461,7 +462,8 @@ func TestKittyKeyCodepoint_Valid(t *testing.T) {
 		{gui.KeyBackspace, 127},
 		{gui.KeyTab, 9},
 		{gui.KeyEscape, 27},
-		{gui.KeyF1, 57364}, // U+E00C (PUA F1)
+		{gui.KeyLeftShift, 57441},
+		{gui.KeyPeriod, '.'},
 	}
 	for _, tc := range cases {
 		cp, ok := kittyKeyCodepoint(tc.kc)
@@ -515,7 +517,11 @@ func TestOnKeyUp_KittyFlagsDisabled_NoOutput(t *testing.T) {
 
 func TestOnKeyUp_KittyFlagsRelease_EmitsSequence(t *testing.T) {
 	term, buf := newKeyboardTerm(24, 80)
-	term.grid.KittyKeyFlags = 1 | 2 // bits 0+1: disambiguate + release
+	// Enter has release events only under flag 8, and only after its press
+	// went to the child.
+	term.grid.KittyKeyFlags = 1 | 2 | 8
+	term.onKeyDown(gui.EventCtx{Event: &gui.Event{KeyCode: gui.KeyEnter}})
+	*buf = (*buf)[:0]
 	e := &gui.Event{KeyCode: gui.KeyEnter}
 	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: nil})
 	if len(*buf) == 0 {

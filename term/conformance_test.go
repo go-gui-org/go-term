@@ -90,21 +90,22 @@ func TestConformance(t *testing.T) {
 			wantC: 0,
 		},
 		{
-			// DSR always reports absolute cursor position (1-indexed),
-			// even when origin mode is active.
-			name:  "origin_mode_dsr_absolute",
+			// In origin mode DSR reports the row relative to the top
+			// margin, the coordinates CUP takes (xterm charproc.c CASE_CPR
+			// subtracts top_marg under ORIGIN).
+			name:  "origin_mode_dsr_relative",
 			rows:  5,
 			cols:  8,
 			input: "\x1b[2;5r\x1b[?6h\x1b[3;3H\x1b[6n",
 
 			// CUP 3;3 with DECOM → absolute row 2+Top(1)=3, col 2.
-			// DSR reports row=CursorR+1=4, col=CursorC+1=3.
+			// DSR reports row=CursorR-Top+1=3, col=CursorC+1=3.
 			wantLines: []string{
 				"        ", "        ", "        ", "        ", "        ",
 			},
 			wantR:     3,
 			wantC:     2,
-			wantReply: []byte("\x1b[4;3R"),
+			wantReply: []byte("\x1b[3;3R"),
 		},
 
 		// --- Reverse index at region top (vttest RI test) ------------------

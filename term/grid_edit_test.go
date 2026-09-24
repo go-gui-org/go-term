@@ -997,7 +997,8 @@ func TestGrid_EraseChars(t *testing.T) {
 		t.Errorf("ECH 1 = %q, want %q", got, " bcdefgh")
 	}
 
-	// n < 1 is treated as 1, and a cursor past the margin is a no-op.
+	// n < 1 is treated as 1. A cursor at Cols is a pending wrap, which
+	// puts it on the last column (xterm), so ECH erases that cell.
 	g = mk()
 	g.CursorC = 0
 	g.EraseChars(0)
@@ -1007,8 +1008,8 @@ func TestGrid_EraseChars(t *testing.T) {
 	g = mk()
 	g.CursorC = g.Cols
 	g.EraseChars(3)
-	if got := rowText(g, 0); got != "abcdefgh" {
-		t.Errorf("ECH past margin should no-op = %q", got)
+	if got := rowText(g, 0); got != "abcdefg " {
+		t.Errorf("ECH at pending wrap = %q, want %q", got, "abcdefg ")
 	}
 }
 

@@ -321,7 +321,7 @@ func TestOSC1337_StateResetAfterDispatch_NormalOSCCapped(t *testing.T) {
 
 	// "7;" is consumed by the Ps parse, so the payload keeps the rest.
 	if len(g.Cwd) != maxOSCBytes-2 {
-		t.Errorf("cwd len = %d; want %d (oscIsImage state leaked from 1337)", len(g.Cwd), maxOSCBytes-2)
+		t.Errorf("cwd len = %d; want %d (oscLim state leaked from 1337)", len(g.Cwd), maxOSCBytes-2)
 	}
 }
 

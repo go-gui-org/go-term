@@ -40,7 +40,17 @@ Supports a modern xterm/kitty-compatible subset:
 - Deferred wrap is encoded as `CursorC == Cols`; `grid.settledCol` collapses it
   for every cursor-relative operation (BS, CUF/CUB, HT, CPR). Without it a
   backspace out of the pending state lands on the right margin instead of one
-  column left of it, which drifts every subsequent glyph on the row.
+  column left of it, which drifts every subsequent glyph on the row. Erase,
+  insert and delete (EL, ED, ECH, ICH, DCH) go further: `grid.resetPendingWrap`
+  cancels the wrap and puts the cursor on the last column, as xterm's
+  `ResetWrap` does.
+- `RowWrapped` must be cleared on every row an erase blanks whole (ED 0/1, and
+  the cursor row on EL 0 and on ECH up to the right edge). A stale flag makes
+  the next `Resize` join the blank row onto the next one as a single logical
+  line, which moves that line's text. Selective erases keep the flag.
+- Anything that drops scrollback rows shifts the content-row space: call
+  `trimMarks` and `trimGraphics` with the dropped count (scroll eviction, ED 3,
+  a scrollback cap change).
 - `ESC # 8` (DECALN) fills the screen with `E`, homes the cursor and resets the
   region. `ESC # 3`–`6` (double-height/width lines) are consumed but ignored —
   the grid has no double-size line attribute.
@@ -69,13 +79,15 @@ Supports a modern xterm/kitty-compatible subset:
   (DECSTBM), IND/RI/NEL, IL/DL/ICH/DCH/SU/SD, DECSCUSR (cursor shape/blink), DA1
   (advertises Sixel via extension 4: `CSI ?1;2;4c`), DA2, XTVERSION (`CSI > q` →
   `DCS >| go-term(ver) ST`), XTWINOPS reports (`CSI 11 t` state → `1 t`,
-  `CSI 13 t` position → `3;0;0t`, `CSI 14 t`/`CSI 15 t` pixel sizes,
-  `CSI 16 t` cell size, `CSI 18 t`/`CSI 19 t` text-area/screen size in chars,
+  `CSI 13 t` position → `3;0;0t`, `CSI 14 t`/`CSI 15 t` pixel sizes, `CSI 16 t`
+  cell size, `CSI 18 t`/`CSI 19 t` text-area/screen size in chars,
   `CSI 20 t`/`CSI 21 t` icon label/title as `OSC L`/`l`) and title stack
   (`CSI 22 t` push / `CSI 23 t` pop; resize/move/raise manipulation ops stay
-  ignored — an embedded widget must not drive the host window), tab stop clear (TBC), tab navigation
-  (CHT `CSI Ps I` / CBT `CSI Ps Z`), erase characters (ECH `CSI Ps X`), repeat
-  (REP `CSI Ps b` — ncurses emits it wherever terminfo has `rep`).
+  ignored — an embedded widget must not drive the host window), tab stop clear
+  (TBC), tab navigation (CHT `CSI Ps I` / CBT `CSI Ps Z`), erase characters (ECH
+  `CSI Ps X`), repeat (REP `CSI Ps b` — ncurses emits it wherever terminfo has
+  `rep`). A final whose intermediate byte is not one it implements (`CSI 2 SP @`
+  is SL, not ICH) is ignored — `csiIntermediateKnown` lists the pairs.
 - Character protection + rectangular areas (VT420, `grid_rect.go`): DECSCA
   (`CSI Ps " q`) marks characters protected; only the selective erases honor it
   — DECSEL (`CSI ? Ps K`), DECSED (`CSI ? Ps J`), DECSERA (`CSI … $ {`). DECERA
@@ -86,13 +98,14 @@ Supports a modern xterm/kitty-compatible subset:
   DECSC/DECRC and the alt-screen swap carry it; SGR 0 must _not_ clear it,
   DECSTR and RIS must. DA1 still reports VT100 level — apps that gate these on
   `CSI ?64…` will not emit them.
-- Reports: DSR 5 (`CSI 5 n` → `CSI 0 n`), CPR (`CSI 6 n`), DECXCPR
-  (`CSI ? 6 n`), DECRQM in both the private (`CSI ? Ps $ p`) and ANSI
-  (`CSI Ps $ p`) forms, color scheme (`CSI ? 996 n` → `CSI ? 997 ; 1 n` dark /
-  `; 2 n` light), and XTSMGRAPHICS (`CSI ? Pi ; Pa ; Pv S`) for sixel color
-  registers (256) and geometry — current geometry is the text area, maximum is
-  the decoder cap; setting always reports failure because both limits are
-  compile-time constants. `img2sixel` and chafa issue it before emitting.
+- Reports: DSR 5 (`CSI 5 n` → `CSI 0 n`), CPR (`CSI 6 n`), DECXCPR (`CSI ? 6 n`)
+  — both count rows from the top margin in origin mode, as xterm does, DECRQM in
+  both the private (`CSI ? Ps $ p`) and ANSI (`CSI Ps $ p`) forms, color scheme
+  (`CSI ? 996 n` → `CSI ? 997 ; 1 n` dark / `; 2 n` light), and XTSMGRAPHICS
+  (`CSI ? Pi ; Pa ; Pv S`) for sixel color registers (256) and geometry —
+  current geometry is the text area, maximum is the decoder cap; setting always
+  reports failure because both limits are compile-time constants. `img2sixel`
+  and chafa issue it before emitting.
 - Reset: RIS (`ESC c`, terminfo rs1) clears screen + scrollback, leaves alt
   screen, and drops every host-set mode; DECSTR (`CSI ! p`, in rs2 and is2)
   resets modes/SGR without touching the screen. Both live in `grid_reset.go`.
@@ -122,11 +135,13 @@ Supports a modern xterm/kitty-compatible subset:
   (9/777) — `OSC 9 ; 4 ; …` splits off _before_ the notification path as ConEmu
   progress, rendered as a fill in the scrollbar track — mouse cursor shape (22,
   mapped onto go-gui's ten cursors by `pointer.go`; unknown names leave the
-  shape alone), dynamic colors (10/11/12), clipboard (52), semantic shell marks
-  (133), iTerm2 `File=` (1337 — both `inline=1` images and `inline=0` file
-  transfers). The 1337 key list is parsed for real: `name` (base64, sanitized to
-  a bare filename), `size`, `width`/`height` (`N` cells, `Npx`, `N%`, `auto`)
-  and `preserveAspectRatio`. Transfers reach the host only when it opted in via
+  shape alone), dynamic colors (10/11/12, reset by 110/111/112 to the embedder's
+  theme), clipboard (52 — its own 8 MiB cap; an over-cap copy is dropped, never
+  delivered cut short), semantic shell marks (133), iTerm2 `File=` (1337 — both
+  `inline=1` images and `inline=0` file transfers). The 1337 key list is parsed
+  for real: `name` (base64, sanitized to a bare filename), `size`,
+  `width`/`height` (`N` cells, `Npx`, `N%`, `auto`) and `preserveAspectRatio`.
+  Transfers reach the host only when it opted in via
   `Cfg.OnDownload`/`Cfg.DownloadDir`; the parser never touches disk itself.
   Color specs accept `rgb:H/H/H`…`rgb:HHHH/HHHH/HHHH` and `#RGB` through
   `#RRRRGGGGBBBB`; X11 color _names_ are not supported.
@@ -270,16 +285,33 @@ base-rune-only). This is what Mode 2027 advertises.
 
 `onChar` (printable runes via `gui.ContainerCfg.OnChar`) writes UTF-8 to the
 PTY. `onKeyDown` translates non-printable keys (arrows, Enter, Backspace (DEL),
-Delete, Page Up/Down, Home/End, Ctrl+letter, F1–F12, numeric keypad) into
-terminal byte sequences. Alt+key prefixes with ESC. `OnChar` is consume-class:
-go-gui marks it handled before the callback runs, so a path that does not claim
-the key must call `ctx.Bubble()`. `onKeyDown` is notify-class and still calls
-`ctx.Consume()` when it translates a key, so go-gui doesn't propagate it.
+Delete, Page Up/Down, Home/End, F1–F12, numeric keypad) and Ctrl/Alt chords on
+text keys into terminal byte sequences. `OnChar` is consume-class: go-gui marks
+it handled before the callback runs, so a path that does not claim the key must
+call `ctx.Bubble()`. `onKeyDown` is notify-class and still calls `ctx.Consume()`
+when it translates a key, so go-gui doesn't propagate it.
 
-When `KittyKeyFlags != 0` the widget emits KKP sequences
-(`CSI codepoint ; modifiers u`) instead of legacy bytes for Backspace, Enter,
-Tab, Escape, Ctrl+letters, and functional keys. `onKeyUp` emits release events
-when flag bit 2 is set.
+Alt has two encodings, and each key uses one. Cursor, editing and function keys
+carry it in xterm's modifier parameter (Alt+Left is `CSI 1;3D`, Ctrl+Delete
+`CSI 3;5~`). Text keys (letters, digits, punctuation, Space) are Meta: ESC plus
+the US character, shifted when Shift is held (Alt+Shift+. is `ESC >`). Ctrl on a
+text key sends the VT control byte (`ctrlByte`: Ctrl+Space NUL, `Ctrl+\` FS, …).
+`onChar` drops the char event that backends send after these chords.
+
+macOS splits Option (`rightOptionComposes`): left Option is Meta, right Option
+types what the layout prints (@ is Option+L on a German layout). `keyState`
+tracks which Option key is held from the modifier-key events, since go-gui has
+one `ModAlt` bit. For a right-Option chord `onKeyDown` sends nothing and
+`onChar` types the char event.
+
+With `KittyKeyFlags != 0`, Escape and every Ctrl/Alt chord on a text key are
+`CSI codepoint ; modifiers u`, with Alt in the parameter and never also an ESC
+prefix. Enter, Tab and Backspace keep legacy bytes unless modified or flag 8 is
+set, so `reset` still works after an app that pushed KKP crashed. Cursor and
+function keys keep their legacy CSI forms (F3 becomes `CSI 13~`). `onKeyUp`
+emits release events when flag 2 is set, only for keys whose press went to the
+child (`keyState.down`), in the same form as the press (`kittyReleaseSeq`).
+Modifier keys, and Enter/Tab/Backspace releases, are reported only under flag 8.
 
 `writeBytes` is the single choke point for everything `onChar`/`onKeyDown` send
 to the child, which is why `Cfg.OnInput` taps there rather than at each call

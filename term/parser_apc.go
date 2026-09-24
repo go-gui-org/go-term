@@ -512,8 +512,8 @@ func (p *parser) kittyDisplay(
 
 	if params.virtual {
 		// A virtual placement is addressed only by its image id, so one
-		// without an i= key can never be displayed. Refusing tells the client
-		// something is wrong instead of silently swallowing the image.
+		// without an i= key can never be displayed. It is refused; with no id
+		// the refusal sends no reply (kittyReplyMsg), but nothing is stored.
 		if id == 0 {
 			return false
 		}
@@ -630,13 +630,11 @@ func (p *parser) storeUsesSrc(path string) bool {
 // advance so the caller's own positioning survives the placement.
 func (p *parser) kittyPlace(params kgpParams) {
 	id, quiet := params.imageID, params.quiet
-	if p.kittyStore == nil {
-		p.kittyReply(id, quiet, false)
-		return
-	}
-	e, ok := p.kittyStore[id]
+	e, ok := p.kittyStore[id] // a nil map reads as empty
 	if !ok || e.path == "" {
-		p.kittyReply(id, quiet, false)
+		// ENOENT, not EINVAL: the spec's code for "no image with this id", which
+		// tells the client to transmit it again rather than give up.
+		p.kittyReplyMsg(id, quiet, "ENOENT:image not found")
 		return
 	}
 	if !p.kittyDisplay(e.path, e.w, e.h, id, params) {
@@ -701,15 +699,26 @@ func (p *parser) kittyDeleteID(id uint32, op string) {
 
 // kittyReply sends a KGP response. quiet: 0=always, 1=suppress OK, 2=always suppress.
 func (p *parser) kittyReply(id uint32, quiet int, ok bool) {
-	if p.onReply == nil {
-		return
-	}
-	if quiet == 2 || (quiet == 1 && ok) {
-		return
-	}
 	msg := "OK"
 	if !ok {
 		msg = "EINVAL:unsupported"
+	}
+	p.kittyReplyMsg(id, quiet, msg)
+}
+
+// kittyReplyMsg sends a KGP response carrying msg ("OK" or an error such as
+// "ENOENT:..."). quiet: 0=always, 1=suppress OK, 2=always suppress.
+//
+// A command without an id gets no reply at all. The spec says the terminal
+// replies only when the client sent an id, and the client is the only reader
+// for one: an anonymous "ESC _ G i=0;OK ESC \" goes to whatever is reading the
+// pty — usually the shell, which echoes it into the command line.
+func (p *parser) kittyReplyMsg(id uint32, quiet int, msg string) {
+	if p.onReply == nil || id == 0 {
+		return
+	}
+	if quiet == 2 || (quiet == 1 && msg == "OK") {
+		return
 	}
 	buf := make([]byte, 0, 32)
 	buf = append(buf, '\x1b', '_', 'G')

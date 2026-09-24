@@ -184,8 +184,8 @@ func (g *grid) CursorBack(n int) {
 // does not exist. A backspace out of the pending state is the case that shows:
 // it must land one column left of the right margin, not on it.
 //
-// Deliberately not applied to the erase operations, which have their own
-// documented handling of the pending column (see eraseInLine).
+// Erase, insert and delete go further and drop the pending wrap altogether
+// (see resetPendingWrap), as xterm does.
 func (g *grid) settledCol() int {
 	if g.CursorC >= g.Cols {
 		return max(g.Cols-1, 0)

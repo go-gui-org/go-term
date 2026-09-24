@@ -2,6 +2,36 @@ package term
 
 import "strconv"
 
+// cprPos returns the 1-based cursor position a CPR or DECXCPR reports. In
+// origin mode the row counts from the top margin — the same coordinates CUP
+// takes, so a client can feed the report straight back (xterm). There are no
+// left/right margins (DECLRMM), so the column is always absolute.
+func (p *parser) cprPos() (row, col int) {
+	row = p.g.CursorR + 1
+	if p.g.OriginMode && p.g.regionValid() {
+		row -= p.g.Top
+	}
+	return row, p.g.settledCol() + 1
+}
+
+// csiIntermediateKnown reports whether the no-leader switch in dispatchCSI
+// implements final with the intermediate byte inter. It must be an exact pair:
+// 't' and 'r' treat anything but '$' as their plain form, so "CSI Ps SP t"
+// (DECSWBV) would otherwise run XTWINOPS.
+func csiIntermediateKnown(final, inter byte) bool {
+	switch final {
+	case 'p':
+		return inter == '!' || inter == '$' // DECSTR, DECRQM
+	case 'q':
+		return inter == ' ' || inter == '"' // DECSCUSR, DECSCA
+	case 'x':
+		return inter == '$' || inter == '*' // DECFRA, DECSACE
+	case 'r', 't', 'v', 'z', '{':
+		return inter == '$' // DECCARA, DECRARA, DECCRA, DECERA, DECSERA
+	}
+	return false
+}
+
 func (p *parser) dispatchCSI(final byte) {
 	if p.leader != 0 {
 		switch p.leader {
@@ -29,7 +59,7 @@ func (p *parser) dispatchCSI(final byte) {
 					// DECXCPR (CSI ? 6 n) — extended cursor position report.
 					// The reply carries the private marker and, on a real VT, a
 					// page number; xterm omits the page and clients accept that.
-					row, col := p.g.CursorR+1, p.g.settledCol()+1
+					row, col := p.cprPos()
 					p.onReply([]byte("\x1b[?" + strconv.Itoa(row) + ";" +
 						strconv.Itoa(col) + "R"))
 				case 996:
@@ -91,6 +121,13 @@ func (p *parser) dispatchCSI(final byte) {
 				p.g.SetKittyKeyFlags(uint32(p.param(0, 0)))
 			}
 		}
+		return
+	}
+	// An intermediate byte makes a different control function: SL is
+	// "CSI Ps SP @" and SR "CSI Ps SP A", neither of which is ICH or CUU. A
+	// pair this switch does not implement is ignored (xterm), not run as the
+	// plain final.
+	if p.intermediate != 0 && !csiIntermediateKnown(final, p.intermediate) {
 		return
 	}
 	switch final {
@@ -181,7 +218,7 @@ func (p *parser) dispatchCSI(final byte) {
 		case 5:
 			p.onReply([]byte("\x1b[0n"))
 		case 6:
-			row, col := p.g.CursorR+1, p.g.settledCol()+1
+			row, col := p.cprPos()
 			p.onReply([]byte("\x1b[" + strconv.Itoa(row) + ";" + strconv.Itoa(col) + "R"))
 		}
 	case 't':

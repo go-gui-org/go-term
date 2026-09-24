@@ -2,11 +2,79 @@ package term
 
 import (
 	"regexp"
+	"runtime"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/go-gui-org/go-gui/gui"
 )
+
+// rightOptionComposes enables the macOS Option split: left Option is Meta,
+// right Option types what the keyboard layout prints. WezTerm defaults to the
+// same split. Both halves are needed: readline's M-f, M-b and M-. live on
+// Option for US users, and on a German layout @ [ ] { } | exist only as
+// Option chords. Other platforms have no such conflict (AltGr is its own
+// modifier state on X11, so right Alt there is plain Alt). A var so tests run
+// the same on every host.
+var rightOptionComposes = runtime.GOOS == "darwin"
+
+// keyState is keyboard state kept across events. Main thread only, like every
+// key handler.
+type keyState struct {
+	// leftAlt and rightAlt track which Option keys are held, from the
+	// modifier-key events. go-gui reports a single ModAlt bit for both.
+	leftAlt, rightAlt bool
+	// down has one bit per key code whose press went to the child. onKeyUp
+	// sends a KKP release only for those, and clears the bit.
+	down [keyDownWords]uint64
+}
+
+// keyDownWords sizes keyState.down: go-gui key codes stay below 384.
+const keyDownWords = 6
+
+// noteOption updates the held Option keys from a key event. An event with no
+// Alt at all clears both: a release the pane never saw (focus moved while the
+// key was held) must not leave it composing, or Meta, for good.
+func (s *keyState) noteOption(k gui.KeyCode, mods gui.Modifier, down bool) {
+	held := down && mods.Has(gui.ModAlt)
+	if !mods.Has(gui.ModAlt) {
+		s.leftAlt, s.rightAlt = false, false
+	}
+	switch k {
+	case gui.KeyLeftAlt:
+		s.leftAlt = held
+	case gui.KeyRightAlt:
+		s.rightAlt = held
+	}
+}
+
+// optionComposes reports whether an Alt chord with mods is macOS right Option
+// typing a layout character rather than Meta. Left Option held as well means
+// Meta: holding it is deliberate. Ctrl or Cmd held means a shortcut, not text.
+func (s *keyState) optionComposes(mods gui.Modifier) bool {
+	return rightOptionComposes && s.rightAlt && !s.leftAlt &&
+		mods&(gui.ModCtrl|gui.ModSuper) == 0
+}
+
+// markDown records that k's press went to the child.
+func (s *keyState) markDown(k gui.KeyCode) {
+	if i := int(k) / 64; i < keyDownWords {
+		s.down[i] |= 1 << (uint(k) % 64)
+	}
+}
+
+// takeDown reports whether k's press went to the child, and forgets it.
+func (s *keyState) takeDown(k gui.KeyCode) bool {
+	i := int(k) / 64
+	if i >= keyDownWords {
+		return false
+	}
+	bit := uint64(1) << (uint(k) % 64)
+	was := s.down[i]&bit != 0
+	s.down[i] &^= bit
+	return was
+}
 
 // keyModes captures keyboard mode state read under grid.Mu and used
 // in onKeyDown/onKeyUp without holding the lock.
@@ -71,15 +139,24 @@ func (t *Term) onChar(ctx gui.EventCtx) {
 	if ctx.Event.CharCode == 0 {
 		return
 	}
-	// A chord holding Cmd/Ctrl/Alt produces no text: AppKit suppresses
-	// insertText: for those, and onKeyDown owns them (shortcut handlers,
-	// control bytes, KKP sequences). The X11 backend synthesizes a char
-	// event for every printable keypress regardless of modifiers, so
-	// without this gate a Super+Shift+V paste would also type 'V' and
-	// Ctrl+C would send its control byte *and* the letter. Drop the
-	// duplicate char; keep Shift, which is just the same letter's
-	// uppercase form.
-	if ctx.Event.Modifiers&(gui.ModCtrl|gui.ModAlt|gui.ModSuper) != 0 {
+	// A chord holding Cmd/Ctrl/Alt belongs to onKeyDown (shortcut handlers,
+	// control bytes, Meta, KKP sequences). Backends still send a char event
+	// for many of them: X11 for every printable keypress, and macOS for
+	// Option chords (Option+F arrives as ƒ). Without this gate a Super+Shift+V
+	// paste would also type 'V', Ctrl+C would send its control byte *and* the
+	// letter, and Meta+f would be followed by ƒ. Drop the duplicate char; keep
+	// Shift, which is just the same letter's uppercase form.
+	//
+	// The one exception is macOS right Option (see optionComposes): there the
+	// char event is the text the user meant to type, @ or [ on a German
+	// layout, and onKeyDown left the key alone for exactly this path. Alt is
+	// then dropped from the modifiers, because the layout used it up to pick
+	// the character; KKP must not report the key as an Alt chord.
+	mods := ctx.Event.Modifiers
+	if mods.Has(gui.ModAlt) && t.keys.optionComposes(mods) {
+		mods &^= gui.ModAlt
+	}
+	if mods&(gui.ModCtrl|gui.ModAlt|gui.ModSuper) != 0 {
 		ctx.Consume()
 		return
 	}
@@ -139,10 +216,10 @@ func (t *Term) onChar(ctx gui.EventCtx) {
 	kkpFlags := t.keyModes().kittyKeyFlags
 	if singleRune && kkpFlags&8 != 0 {
 		cp := int(r)
-		if r >= 'A' && r <= 'Z' && ctx.Event.Modifiers.Has(gui.ModShift) {
+		if r >= 'A' && r <= 'Z' && mods.Has(gui.ModShift) {
 			cp = int(r-'A') + 'a'
 		}
-		if seq := kittyPrintableSeq(cp, r, ctx.Event.Modifiers, kkpFlags); seq != nil {
+		if seq := kittyPrintableSeq(cp, r, mods, kkpFlags); seq != nil {
 			t.writeBytes(seq)
 			ctx.Consume()
 			return
@@ -258,9 +335,12 @@ func kittyKeySeq(codepoint int, mods gui.Modifier, flags uint32, release bool) [
 	return b
 }
 
-// kittyKeyCodepoint returns the KKP codepoint for k, or (0, false) when k has none.
-// Modifier keys map to private-use-area codepoints; ASCII keys A–Z return 'a'–'z',
-// 0–9 return '0'–'9'. KKP spec §7 table.
+// kittyKeyCodepoint returns the KKP codepoint for a key whose KKP form is
+// CSI codepoint u, or (0, false) when it has none. Modifier keys map to the
+// spec's private-use codepoints; keys that type text map to their unshifted US
+// character (see textKeyBase). Cursor, editing and function keys are not here:
+// KKP keeps their legacy CSI forms, so their releases are built by
+// legacyFuncForm instead.
 func kittyKeyCodepoint(k gui.KeyCode) (int, bool) {
 	switch k {
 	case gui.KeyLeftShift:
@@ -287,59 +367,169 @@ func kittyKeyCodepoint(k gui.KeyCode) (int, bool) {
 		return 9, true
 	case gui.KeyEscape:
 		return 27, true
-	case gui.KeyInsert:
-		return 57348, true
-	case gui.KeyDelete:
-		return 57349, true
-	case gui.KeyLeft:
-		return 57350, true
-	case gui.KeyRight:
-		return 57351, true
-	case gui.KeyUp:
-		return 57352, true
-	case gui.KeyDown:
-		return 57353, true
-	case gui.KeyPageUp:
-		return 57354, true
-	case gui.KeyPageDown:
-		return 57355, true
-	case gui.KeyHome:
-		return 57356, true
-	case gui.KeyEnd:
-		return 57357, true
-	case gui.KeyF1:
-		return 57364, true
-	case gui.KeyF2:
-		return 57365, true
-	case gui.KeyF3:
-		return 57366, true
-	case gui.KeyF4:
-		return 57367, true
-	case gui.KeyF5:
-		return 57368, true
-	case gui.KeyF6:
-		return 57369, true
-	case gui.KeyF7:
-		return 57370, true
-	case gui.KeyF8:
-		return 57371, true
-	case gui.KeyF9:
-		return 57372, true
-	case gui.KeyF10:
-		return 57373, true
-	case gui.KeyF11:
-		return 57374, true
-	case gui.KeyF12:
-		return 57375, true
-	default:
-		if k >= gui.KeyA && k <= gui.KeyZ {
-			return int('a') + int(k-gui.KeyA), true
-		}
-		if k >= gui.Key0 && k <= gui.Key9 {
-			return int('0') + int(k-gui.Key0), true
-		}
-		return 0, false
 	}
+	if b, ok := textKeyBase(k); ok {
+		return int(b), true
+	}
+	return 0, false
+}
+
+// isModifierKey reports whether k is a Shift, Ctrl, Alt or Super key itself.
+// KKP reports these only under flag 8 (report all keys as escape codes).
+func isModifierKey(k gui.KeyCode) bool {
+	switch k {
+	case gui.KeyLeftShift, gui.KeyRightShift,
+		gui.KeyLeftControl, gui.KeyRightControl,
+		gui.KeyLeftAlt, gui.KeyRightAlt,
+		gui.KeyLeftSuper, gui.KeyRightSuper:
+		return true
+	}
+	return false
+}
+
+// legacyFuncForm returns the CSI form KKP keeps for a cursor, editing or
+// function key: CSI 1;mod final (ps "1") or CSI ps;mod ~ (final '~'). F3 is
+// CSI 13~ rather than CSI 1;mod R, because CSI R is also the cursor position
+// report and an app could not tell the two apart.
+func legacyFuncForm(k gui.KeyCode) (ps string, final byte, ok bool) {
+	switch k {
+	case gui.KeyUp:
+		return "1", 'A', true
+	case gui.KeyDown:
+		return "1", 'B', true
+	case gui.KeyRight:
+		return "1", 'C', true
+	case gui.KeyLeft:
+		return "1", 'D', true
+	case gui.KeyHome:
+		return "1", 'H', true
+	case gui.KeyEnd:
+		return "1", 'F', true
+	case gui.KeyF1:
+		return "1", 'P', true
+	case gui.KeyF2:
+		return "1", 'Q', true
+	case gui.KeyF4:
+		return "1", 'S', true
+	case gui.KeyInsert:
+		return "2", '~', true
+	case gui.KeyDelete:
+		return "3", '~', true
+	case gui.KeyPageUp:
+		return "5", '~', true
+	case gui.KeyPageDown:
+		return "6", '~', true
+	case gui.KeyF3:
+		return "13", '~', true
+	case gui.KeyF5:
+		return "15", '~', true
+	case gui.KeyF6:
+		return "17", '~', true
+	case gui.KeyF7:
+		return "18", '~', true
+	case gui.KeyF8:
+		return "19", '~', true
+	case gui.KeyF9:
+		return "20", '~', true
+	case gui.KeyF10:
+		return "21", '~', true
+	case gui.KeyF11:
+		return "23", '~', true
+	case gui.KeyF12:
+		return "24", '~', true
+	}
+	return "", 0, false
+}
+
+// kittyReleaseSeq encodes the KKP release (event type 3) of k, in the same
+// form its press used so the app can pair the two. Returns nil for a key that
+// has no release under flags:
+//   - Enter, Tab and Backspace send legacy bytes on press unless flag 8 is
+//     set, so they have no release without it either (KKP spec, "report event
+//     types"): an app that crashed with flag 2 on must not break `reset`.
+//   - Modifier keys are reported at all only under flag 8.
+func kittyReleaseSeq(k gui.KeyCode, mods gui.Modifier, flags uint32) []byte {
+	switch {
+	case k == gui.KeyEnter || k == gui.KeyKPEnter || k == gui.KeyTab || k == gui.KeyBackspace,
+		isModifierKey(k):
+		if flags&8 == 0 {
+			return nil
+		}
+	}
+	if ps, final, ok := legacyFuncForm(k); ok {
+		b := append([]byte("\x1b["), ps...)
+		b = append(b, ';')
+		b = strconv.AppendInt(b, int64(kittyModParam(mods)), 10)
+		return append(b, ':', '3', final)
+	}
+	if cp, ok := kittyKeyCodepoint(k); ok {
+		return kittyKeySeq(cp, mods, flags, true)
+	}
+	return nil
+}
+
+// textKeyBase returns the character a text-typing key prints with no
+// modifiers on a US layout: 'a' for KeyA, '.' for KeyPeriod, ' ' for KeySpace.
+// go-gui key codes name physical keys and equal that character, so this is a
+// range check. Meta and control chords are built from it: once Ctrl or a
+// Meta Option is held, the OS reports no layout character to use instead.
+func textKeyBase(k gui.KeyCode) (byte, bool) {
+	switch {
+	case k >= gui.KeyA && k <= gui.KeyZ:
+		return byte('a' + (k - gui.KeyA)), true
+	case k >= gui.Key0 && k <= gui.Key9:
+		return byte(k), true
+	}
+	switch k {
+	case gui.KeySpace, gui.KeyApostrophe, gui.KeyComma, gui.KeyMinus,
+		gui.KeyPeriod, gui.KeySlash, gui.KeySemicolon, gui.KeyEqual,
+		gui.KeyLeftBracket, gui.KeyBackslash, gui.KeyRightBracket,
+		gui.KeyGraveAccent:
+		return byte(k), true
+	}
+	return 0, false
+}
+
+// usShifted returns what Shift turns a US-layout base character into. Meta
+// needs it because Alt+Shift+. is M-> (end of history in readline), not M-.
+func usShifted(b byte) byte {
+	if b >= 'a' && b <= 'z' {
+		return b - 'a' + 'A'
+	}
+	const plain, shifted = "1234567890-=[]\\;',./`", "!@#$%^&*()_+{}|:\"<>?~"
+	if i := strings.IndexByte(plain, b); i >= 0 {
+		return shifted[i]
+	}
+	return b
+}
+
+// ctrlByte returns the C0 control byte a Ctrl chord on base sends, following
+// xterm and the VT convention: letters are 1..26, Ctrl+Space and Ctrl+2 (@)
+// are NUL, Ctrl+[ \ ] are ESC FS GS, Ctrl+6 (^) is RS, Ctrl+- and Ctrl+/ (_)
+// are US, and Ctrl+3..8 repeat that row. Shift does not change the byte, so
+// Ctrl+Shift+2 is also NUL. Returns false for keys with no control byte
+// (Ctrl+1, Ctrl+.), which then send nothing.
+func ctrlByte(base byte) (byte, bool) {
+	if base >= 'a' && base <= 'z' {
+		return base - 'a' + 1, true
+	}
+	switch base {
+	case ' ', '2', '`':
+		return 0x00, true
+	case '[', '3':
+		return 0x1b, true
+	case '\\', '4':
+		return 0x1c, true
+	case ']', '5':
+		return 0x1d, true
+	case '6':
+		return 0x1e, true
+	case '-', '/', '7':
+		return 0x1f, true
+	case '8':
+		return 0x7f, true
+	}
+	return 0, false
 }
 
 func keypadSeq(k gui.KeyCode) []byte {
@@ -423,10 +613,10 @@ func modSS3(letter byte, mod int) []byte {
 	return b
 }
 
-// funcKeySeq returns the xterm sequence for Insert and F1–F12, with optional
-// modifier encoding. Alt is excluded: callers prepend ESC separately.
-func funcKeySeq(k gui.KeyCode, shift, ctrl bool) []byte {
-	mod := modParam(shift, false, ctrl)
+// funcKeySeq returns the xterm sequence for Insert and F1–F12 with modifier
+// parameter mod (0 for none; see modParam). Under KKP (kkp true) F3 takes its
+// CSI 13~ form; see legacyFuncForm.
+func funcKeySeq(k gui.KeyCode, mod int, kkp bool) []byte {
 	switch k {
 	case gui.KeyInsert:
 		return modTilde("2", mod)
@@ -435,6 +625,9 @@ func funcKeySeq(k gui.KeyCode, shift, ctrl bool) []byte {
 	case gui.KeyF2:
 		return modSS3('Q', mod)
 	case gui.KeyF3:
+		if kkp {
+			return modTilde("13", mod)
+		}
 		return modSS3('R', mod)
 	case gui.KeyF4:
 		return modSS3('S', mod)
@@ -465,6 +658,7 @@ func funcKeySeq(k gui.KeyCode, shift, ctrl bool) []byte {
 // the viewport back to live.
 func (t *Term) onKeyDown(ctx gui.EventCtx) {
 	t.syncHoverForModifiers(ctx.Event.Modifiers, ctx.Window)
+	t.keys.noteOption(ctx.Event.KeyCode, ctx.Event.Modifiers, true)
 	// Hints first, ahead of copy mode: the entry chords must work from inside
 	// copy mode (a link you scrolled back to find is exactly the one you want
 	// to open), and while hints is up it owns the keyboard outright.
@@ -528,6 +722,11 @@ func (t *Term) onKeyDown(ctx gui.EventCtx) {
 	if t.handleDisplayKey(ctx.Event, ctx.Window) {
 		return
 	}
+	// Every handler that keeps a key for itself has returned by now, so this
+	// press belongs to the child: either encoded below, or typed by the char
+	// event that follows. Recorded so onKeyUp sends only releases the child
+	// can pair with a press.
+	t.keys.markDown(ctx.Event.KeyCode)
 	out := t.encodeKeyEvent(ctx.Event, ctx.Window, shift, ctrl)
 	if len(out) == 0 {
 		return
@@ -773,136 +972,167 @@ func (t *Term) scrollbackIntercept(e *gui.Event, w *gui.Window, shift bool) bool
 }
 
 // encodeKeyEvent translates a key event into the corresponding terminal
-// byte sequence. Returns nil when the key has no terminal encoding.
+// byte sequence. Returns nil when the key has no terminal encoding, or when
+// onChar will type it (plain and Shift text keys, macOS right Option).
 // shift and ctrl are pre-computed by the caller (onKeyDown).
+//
+// Alt has two encodings and each key uses exactly one of them. Cursor, editing
+// and function keys carry it in the xterm modifier parameter (Alt+Left is
+// CSI 1;3D). Everything else is Meta: an ESC prefix on the legacy bytes. Under
+// KKP it is always the modifier parameter, and never also a prefix.
 func (t *Term) encodeKeyEvent(e *gui.Event, w *gui.Window, shift, ctrl bool) []byte {
-	alt := e.Modifiers.Has(gui.ModAlt)
+	mods := e.Modifiers
+	alt := mods.Has(gui.ModAlt)
 	modes := t.keyModes()
+	flags := modes.kittyKeyFlags
+	mod := modParam(shift, alt, ctrl)
 
-	var out []byte
 	switch e.KeyCode {
 	case gui.KeyPageUp:
-		out = []byte("\x1b[5~")
+		return modTilde("5", mod)
 	case gui.KeyPageDown:
-		out = []byte("\x1b[6~")
+		return modTilde("6", mod)
+	case gui.KeyDelete:
+		return modTilde("3", mod)
 	case gui.KeyEnter, gui.KeyKPEnter:
 		// Application keypad Enter takes priority; KKP applies to regular Enter.
 		if modes.appKeypad && e.KeyCode == gui.KeyKPEnter {
-			out = []byte("\x1bOM")
-		} else if kkp := kittyKeySeq(13, e.Modifiers, modes.kittyKeyFlags, false); kkp != nil {
-			out = kkp
-		} else {
-			out = []byte{'\r'}
+			return []byte("\x1bOM")
 		}
+		if kkpNamedKey(mods, flags) {
+			return kittyKeySeq(13, mods, flags, false)
+		}
+		return meta(alt, '\r')
 	case gui.KeyBackspace:
-		if kkp := kittyKeySeq(127, e.Modifiers, modes.kittyKeyFlags, false); kkp != nil {
-			out = kkp
-		} else {
-			out = []byte{0x7F}
+		if kkpNamedKey(mods, flags) {
+			return kittyKeySeq(127, mods, flags, false)
 		}
+		return meta(alt, 0x7F)
 	case gui.KeyTab:
-		if kkp := kittyKeySeq(9, e.Modifiers, modes.kittyKeyFlags, false); kkp != nil {
-			out = kkp
-		} else if shift && !ctrl {
-			out = []byte("\x1b[Z")
-		} else {
-			out = []byte{'\t'}
+		if kkpNamedKey(mods, flags) {
+			return kittyKeySeq(9, mods, flags, false)
 		}
+		if shift && !ctrl {
+			return []byte("\x1b[Z")
+		}
+		return meta(alt, '\t')
 	case gui.KeyEscape:
-		if kkp := kittyKeySeq(27, e.Modifiers, modes.kittyKeyFlags, false); kkp != nil {
-			out = kkp
-		} else {
-			out = []byte{0x1B}
+		if flags != 0 {
+			return kittyKeySeq(27, mods, flags, false)
 		}
-	case gui.KeyUp:
-		if mod := modParam(shift, false, ctrl); mod != 0 {
-			out = modSS3('A', mod)
-		} else {
-			out = arrowSeq('A', modes.appCursor)
+		return meta(alt, 0x1B)
+	case gui.KeyUp, gui.KeyDown, gui.KeyRight, gui.KeyLeft:
+		_, final, _ := legacyFuncForm(e.KeyCode)
+		if mod != 0 {
+			return modSS3(final, mod)
 		}
-	case gui.KeyDown:
-		if mod := modParam(shift, false, ctrl); mod != 0 {
-			out = modSS3('B', mod)
-		} else {
-			out = arrowSeq('B', modes.appCursor)
+		return arrowSeq(final, modes.appCursor)
+	case gui.KeyHome, gui.KeyEnd:
+		_, final, _ := legacyFuncForm(e.KeyCode)
+		// Shift excluded from the modifier: Shift+Home/End scroll the
+		// viewport, and Ctrl+Shift+Home emits Ctrl+Home.
+		if m := modParam(false, alt, ctrl); m != 0 {
+			return modSS3(final, m)
 		}
-	case gui.KeyRight:
-		if mod := modParam(shift, false, ctrl); mod != 0 {
-			out = modSS3('C', mod)
-		} else {
-			out = arrowSeq('C', modes.appCursor)
-		}
-	case gui.KeyLeft:
-		if mod := modParam(shift, false, ctrl); mod != 0 {
-			out = modSS3('D', mod)
-		} else {
-			out = arrowSeq('D', modes.appCursor)
-		}
-	case gui.KeyHome:
-		if mod := modParam(false, false, ctrl); mod != 0 {
-			// Shift excluded from modifier: Shift+Home scrolls, Ctrl+Shift+Home emits Ctrl+Home.
-			out = modSS3('H', mod)
-		} else {
-			out = arrowSeq('H', modes.appCursor)
-		}
-	case gui.KeyEnd:
-		if mod := modParam(false, false, ctrl); mod != 0 {
-			// Shift excluded from modifier: Shift+End scrolls, Ctrl+Shift+End emits Ctrl+End.
-			out = modSS3('F', mod)
-		} else {
-			out = arrowSeq('F', modes.appCursor)
-		}
-	case gui.KeyDelete:
-		out = []byte("\x1b[3~")
+		return arrowSeq(final, modes.appCursor)
 	case gui.KeyInsert,
 		gui.KeyF1, gui.KeyF2, gui.KeyF3, gui.KeyF4,
 		gui.KeyF5, gui.KeyF6, gui.KeyF7, gui.KeyF8,
 		gui.KeyF9, gui.KeyF10, gui.KeyF11, gui.KeyF12:
-		out = funcKeySeq(e.KeyCode, shift, ctrl)
-	default:
-		if modes.appKeypad {
-			out = keypadSeq(e.KeyCode)
-			if len(out) > 0 {
-				break
-			}
+		return funcKeySeq(e.KeyCode, mod, flags != 0)
+	}
+	if isModifierKey(e.KeyCode) {
+		// Modifier keys alone are reported only under KKP flag 8.
+		if flags&8 == 0 {
+			return nil
 		}
-		// Alt+letter → lowercase letter; ESC prefix applied below.
-		// Handled here so onChar sees IsHandled=true and does not also
-		// send the OS-translated glyph (e.g. macOS Alt+F → ƒ).
-		if alt && !ctrl && e.KeyCode >= gui.KeyA && e.KeyCode <= gui.KeyZ {
-			out = []byte{byte('a' + (e.KeyCode - gui.KeyA))}
-			break
-		}
-		// Ctrl+letter → control byte, or KKP CSI u when active.
-		if e.Modifiers.Has(gui.ModCtrl) &&
-			e.KeyCode >= gui.KeyA && e.KeyCode <= gui.KeyZ {
-			if kkp := kittyKeySeq(int('a')+int(e.KeyCode-gui.KeyA),
-				e.Modifiers, modes.kittyKeyFlags, false); kkp != nil {
-				out = kkp
-			} else {
-				out = []byte{byte(e.KeyCode-gui.KeyA) + 1}
+		cp, _ := kittyKeyCodepoint(e.KeyCode)
+		return kittyKeySeq(cp, mods, flags, false)
+	}
+	if modes.appKeypad {
+		if seq := keypadSeq(e.KeyCode); len(seq) > 0 {
+			if alt {
+				return append([]byte{0x1b}, seq...)
 			}
+			return seq
 		}
 	}
-	// Alt/Meta key: prefix any outbound sequence with ESC.
-	if alt && len(out) > 0 {
-		out = append([]byte{0x1b}, out...)
-	}
-	return out
+	return t.encodeTextChord(e.KeyCode, mods, flags)
 }
 
-// onKeyUp generates KKP key-release sequences (event-type 3) when flag bit 2 is set.
+// encodeTextChord encodes a Ctrl and/or Alt chord on a key that types text
+// (letters, digits, punctuation, Space). Plain and Shift presses return nil:
+// the char event that follows types them, with the layout's own character.
+// So does macOS right Option, which composes layout characters (@ on German
+// Option+L) instead of acting as Meta; see optionComposes.
+//
+// Under KKP the chord is CSI base;mod u with the unshifted base. In legacy
+// mode Ctrl picks a control byte (ctrlByte) and Alt adds the Meta ESC prefix
+// to it, or to the character itself, shifted when Shift is held so that
+// Alt+Shift+f (M-F) differs from Alt+f (M-f).
+func (t *Term) encodeTextChord(k gui.KeyCode, mods gui.Modifier, flags uint32) []byte {
+	base, ok := textKeyBase(k)
+	if !ok {
+		return nil
+	}
+	ctrl, alt := mods.Has(gui.ModCtrl), mods.Has(gui.ModAlt)
+	if !ctrl && !alt {
+		return nil
+	}
+	if alt && t.keys.optionComposes(mods) {
+		return nil
+	}
+	if flags != 0 {
+		return kittyKeySeq(int(base), mods, flags, false)
+	}
+	if ctrl {
+		b, ok := ctrlByte(base)
+		if !ok {
+			return nil
+		}
+		return meta(alt, b)
+	}
+	if mods.Has(gui.ModShift) {
+		base = usShifted(base)
+	}
+	return meta(true, base)
+}
+
+// kkpNamedKey reports whether Enter, Tab or Backspace take their KKP CSI u
+// form. Unmodified, they keep their legacy bytes unless flag 8 (report all
+// keys as escape codes) is set, so the user can still type `reset` at a shell
+// after an app that pushed KKP flags crashed without popping them (KKP spec,
+// "disambiguate escape codes").
+func kkpNamedKey(mods gui.Modifier, flags uint32) bool {
+	if flags == 0 {
+		return false
+	}
+	return flags&8 != 0 || kittyModParam(mods) != 1
+}
+
+// meta returns b, with the Meta ESC prefix when alt is held.
+func meta(alt bool, b byte) []byte {
+	if alt {
+		return []byte{0x1b, b}
+	}
+	return []byte{b}
+}
+
+// onKeyUp generates KKP key-release sequences (event type 3) when flag 2 is
+// set, but only for a key whose press went to the child (see keyState.down):
+// the search bar, copy mode, hints and shortcuts keep their presses, and a
+// release the child never saw pressed is noise it cannot pair.
 func (t *Term) onKeyUp(ctx gui.EventCtx) {
 	t.syncHoverForModifiers(ctx.Event.Modifiers, ctx.Window)
+	t.keys.noteOption(ctx.Event.KeyCode, ctx.Event.Modifiers, false)
+	if !t.keys.takeDown(ctx.Event.KeyCode) {
+		return
+	}
 	modes := t.keyModes()
 	if modes.kittyKeyFlags&2 == 0 {
 		return
 	}
-	cp, ok := kittyKeyCodepoint(ctx.Event.KeyCode)
-	if !ok {
-		return
-	}
-	if seq := kittyKeySeq(cp, ctx.Event.Modifiers, modes.kittyKeyFlags, true); seq != nil {
+	if seq := kittyReleaseSeq(ctx.Event.KeyCode, ctx.Event.Modifiers, modes.kittyKeyFlags); seq != nil {
 		t.writeBytes(seq)
 		ctx.Consume()
 	}

@@ -9,10 +9,42 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/go-gui-org/go-term/internal/atomicfile"
 )
+
+// Download contract. These are the decisions for OSC 1337 File= transfers. A
+// review finding that argues against one of them is a request to change the
+// decision here first, not a bug in the code.
+//
+// Guarantees:
+//
+//  1. No truncated file ever shows under the final name. The payload is staged
+//     in a hidden file, synced, then published in one step.
+//  2. On a filesystem with hard links, an existing file is never replaced. The
+//     publish is a hard link, which fails instead of overwriting.
+//  3. Close waits for a transfer in progress at most closeWait, counted from
+//     the start of Close, so it overlaps the reader wait. A Close that starts
+//     right after another Close gave up does not wait at all (closeChainGap):
+//     a workspace that closes N busy panes on quit freezes about closeWait,
+//     not N times that.
+//  4. Once Close starts, no new OnDownload call and no new "Download complete"
+//     notification starts.
+//
+// Accepted failures (not bugs):
+//
+//  1. On a filesystem without hard links (FAT32, exFAT, some network shares),
+//     the publish is a rename. A file another program saves under the chosen
+//     name between the claim and the rename is lost. No safer publish exists
+//     there. Windows decides "no hard links" from the link error, and for the
+//     generic codes, from the volume flags (download_link_windows.go).
+//  2. An OnDownload call or a disk write already running when Close's wait
+//     runs out keeps running after Close returns. The file is still published;
+//     its notification is dropped. OnDownload must not wait on the main thread
+//     (Close holds it), and must tolerate running after Close.
+//  3. Jobs still queued when Close starts are dropped.
+//  4. If the process exits while a write is still running, a hidden staging
+//     file can stay in the download directory.
 
 // downloadQueueDepth caps the number of transfers waiting on the worker.
 // Small on purpose: the reader goroutine drops rather than blocks, and a
@@ -34,21 +66,6 @@ const downloadDirMode = 0o700
 // maxDownloadCollisions bounds the " (N)" suffix probe. A directory already
 // holding 100 same-named downloads is a runaway, not a user.
 const maxDownloadCollisions = 100
-
-// downloadCloseWait bounds how long Close waits for a transfer that is being
-// written when the pane closes. Close runs on the main thread, so it must not
-// wait for a slow fsync without limit. But an embedder usually exits the
-// process soon after Close, and that would kill the write halfway and leave
-// the staging file behind. Most transfers finish well inside this time. A
-// var so tests can shorten it.
-var downloadCloseWait = 2 * time.Second
-
-// dlGate states. See Term.dlGate.
-const (
-	dlGateOpen int32 = iota // callbacks allowed
-	dlGateBusy              // the worker is inside a callback
-	dlGateShut              // Close returned or is returning; no new callback
-)
 
 // downloadJob is one queued OSC 1337 File= transfer.
 type downloadJob struct {
@@ -89,45 +106,16 @@ func (t *Term) registerDownloadHandler() {
 	go t.downloadWorker()
 }
 
-// stopDownloadWorker is the Close half of the worker's shutdown; dlDone is
-// already closed. It waits for the worker up to downloadCloseWait, so a
-// transfer in progress normally gets published before Close returns. When the
-// wait runs out, the worker keeps going in the background and still publishes
-// the file, but the gate is shut first so it calls no embedder callback after
-// Close returns. A callback that is already running when the gate shuts is
-// not interrupted.
-func (t *Term) stopDownloadWorker() {
-	timer := time.NewTimer(downloadCloseWait)
-	defer timer.Stop()
-	select {
-	case <-t.dlExited:
-	case <-timer.C:
-	}
-	t.dlGate.Store(dlGateShut)
-}
-
-// withDownloadGate runs fn only while the gate is open, and holds the gate
-// busy while fn runs. It reports whether fn ran.
-func (t *Term) withDownloadGate(fn func()) bool {
-	if !t.dlGate.CompareAndSwap(dlGateOpen, dlGateBusy) {
-		return false
-	}
-	// If Close shut the gate while fn ran, this CAS fails and the gate stays
-	// shut, which is what Close wants.
-	defer t.dlGate.CompareAndSwap(dlGateBusy, dlGateOpen)
-	fn()
-	return true
-}
-
 // downloadWorker drains dlQueue one job at a time. Serializing the writes keeps
 // two of this Term's own downloads from probing the same names at once. It is
 // not what makes publishing race-free against other programs: the hard link in
 // publishDownload is, since it fails instead of replacing a file.
 //
-// Close waits for the worker only up to downloadCloseWait, so the worker can
-// outlive Close on a slow disk. That is safe because the worker reads only cfg
-// (never changed after New), the atomics and the channels, and every embedder
-// callback goes through withDownloadGate, which Close shuts.
+// Close waits for the worker only until its deadline, so the worker can outlive
+// Close on a slow disk. That is safe because the worker reads only cfg (never
+// changed after New), the atomics and the channels. It checks t.closed before
+// each embedder callback, so no callback starts once Close has started
+// (contract guarantee 4).
 func (t *Term) downloadWorker() {
 	defer close(t.dlExited)
 	for {
@@ -135,15 +123,15 @@ func (t *Term) downloadWorker() {
 		case job := <-t.dlQueue:
 			t.dlPending.Add(-int64(len(job.data)))
 			// select picks at random among ready cases, so a closed dlDone
-			// does not stop a queued job by itself. Check it first: jobs
-			// still queued at Close are dropped, as Close documents.
-			select {
-			case <-t.dlDone:
+			// does not stop a queued job by itself. Check closed first: Close
+			// sets it before it closes dlDone, so jobs still queued once
+			// Close starts are dropped (contract accepted failure 3) and no
+			// OnDownload starts after that (guarantee 4).
+			if t.closed.Load() {
 				return
-			default:
 			}
 			if fn := t.cfg.OnDownload; fn != nil {
-				t.withDownloadGate(func() { fn(job.name, job.data) })
+				fn(job.name, job.data)
 				continue
 			}
 			path, err := writeDownload(t.cfg.DownloadDir, job.name, job.data)
@@ -151,11 +139,13 @@ func (t *Term) downloadWorker() {
 				log.Printf("term: download %q: %v", job.name, err)
 				continue
 			}
-			if !t.withDownloadGate(func() { t.notify("Download complete", path) }) {
-				// Close already returned; the file is saved, but the pane
-				// that could announce it is gone.
+			if t.closed.Load() {
+				// The file is saved, but the pane that could announce it is
+				// closing (contract accepted failure 2).
 				log.Printf("term: download saved after close: %s", path)
+				continue
 			}
+			t.notify("Download complete", path)
 		case <-t.dlDone:
 			return
 		}
@@ -239,7 +229,7 @@ func publishDownload(dir, base, tmp string, start int) (string, error) {
 	dest, _, err := firstFree(dir, base, start, func(dest string) error {
 		return linkFile(tmp, dest)
 	})
-	if err != nil && linkUnsupported(err) {
+	if err != nil && linkUnsupported(dir, err) {
 		// This filesystem has no hard links (FAT, exFAT, some network
 		// mounts); it would fail the same way for every name.
 		return publishByRename(dir, base, tmp, start)
@@ -257,19 +247,15 @@ func publishDownload(dir, base, tmp string, start int) (string, error) {
 // Linux vfat reports EPERM; ENOSYS, ENOTSUP and EOPNOTSUPP all match
 // errors.ErrUnsupported; EXDEV means the staging file and the target sit on
 // different mounts, which a link cannot cross. Windows reports the same cases
-// with its own codes, listed in platformLinkUnsupported.
-func linkUnsupported(err error) bool {
+// with its own codes; platformLinkUnsupported decides those, and may ask the
+// volume that holds dir.
+func linkUnsupported(dir string, err error) bool {
 	if errors.Is(err, errors.ErrUnsupported) ||
 		errors.Is(err, syscall.EPERM) ||
 		errors.Is(err, syscall.EXDEV) {
 		return true
 	}
-	for _, target := range platformLinkUnsupported {
-		if errors.Is(err, target) {
-			return true
-		}
-	}
-	return false
+	return platformLinkUnsupported(dir, err)
 }
 
 // firstFree runs try on each candidate name for base in order — base, then

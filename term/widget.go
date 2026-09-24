@@ -67,6 +67,7 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 	t.win = w
 	t.mouse.lastR = -1
 	t.mouse.lastC = -1
+	t.mouse.lastPX, t.mouse.lastPY = -1, -1
 	t.momentum.kick = make(chan struct{}, 1)
 	t.mouse.hoverR.Store(-1)
 	t.mouse.hoverC.Store(-1)
@@ -171,6 +172,7 @@ func (t *Term) cursorBlinkActive() bool {
 // coast in flight — it would otherwise keep scrolling a viewport that
 // just reflowed out from under it. Main-thread only.
 func (t *Term) cancelSelectDrag() {
+	t.reportLostRelease()
 	t.stopSelectDrag()
 	t.unlockMouse(t.win)
 }
@@ -558,7 +560,17 @@ func (t *Term) Close() error {
 		return nil
 	}
 	close(t.blinkDone)
+	// The download deadline starts now, so the wait for a transfer in progress
+	// overlaps the reader wait below instead of following it.
+	dlDeadline := closeDeadline(time.Now())
 	err := t.pty.Close() // signals readLoop to exit via read error
+	// Stop the download worker now, for the same overlap. dlQueue is
+	// deliberately left open — the reader goroutine may still be alive on the
+	// stuck-read path below, and a send on a closed channel panics. Anything
+	// still queued is dropped.
+	if t.dlDone != nil {
+		close(t.dlDone)
+	}
 	// Wait for readLoop to drain, but don't hang forever if the pty fd
 	// is in a degraded state where close doesn't unblock an in-progress
 	// read. When this timeout fires, readLoop may still be alive and
@@ -590,12 +602,11 @@ func (t *Term) Close() error {
 	if t.replyCond != nil {
 		t.replyCond.Signal()
 	}
-	// Stop the download worker. dlQueue is deliberately left open — the
-	// reader goroutine may still be alive on the stuck-read path above and a
-	// send on a closed channel panics. Anything still queued is dropped.
-	if t.dlDone != nil {
-		close(t.dlDone)
-		t.stopDownloadWorker()
+	// Give a transfer being written a chance to publish before an embedder
+	// exits the process. If the wait runs out, the worker finishes in the
+	// background; see the download contract in widget_download.go.
+	if t.dlExited != nil {
+		waitDownloadWorker(t.dlExited, dlDeadline)
 	}
 	// Wait for auxiliary goroutines to exit cleanly so they cannot
 	// reference t.cmd or other state after we return.
@@ -634,6 +645,55 @@ func (t *Term) Close() error {
 		t.win.OnEvent = t.prevOnEvent
 	}
 	return err
+}
+
+// closeWait bounds how long Close waits for a download being written, counted
+// from the start of Close. A var so tests can shorten it.
+var closeWait = 2 * time.Second
+
+// closeChainGap is how soon after one Close gave up on its download another
+// Close must start to skip its own download wait. A workspace closes its panes
+// one after another on the main thread, microseconds apart; without this, N
+// panes mid-transfer on a slow disk would freeze the UI for N times closeWait.
+// A pane closed later on its own still gets the full wait.
+const closeChainGap = 250 * time.Millisecond
+
+// lastCloseTimeout is when a Close last gave up on its download wait, in
+// UnixNano. 0 means never. Package-wide on purpose: the panes of a workspace
+// are separate Terms, and the public API has no call to close them as a group.
+var lastCloseTimeout atomic.Int64
+
+// closeDeadline returns when a Close starting at now stops waiting for its
+// download: now+closeWait, or now when another Close gave up less than
+// closeChainGap ago.
+func closeDeadline(now time.Time) time.Time {
+	if last := lastCloseTimeout.Load(); last != 0 && now.Sub(time.Unix(0, last)) < closeChainGap {
+		return now
+	}
+	return now.Add(closeWait)
+}
+
+// waitDownloadWorker waits for exited to close or for deadline to pass. When
+// the deadline wins, it records the time so the Closes that follow right after
+// skip their wait (see closeChainGap).
+func waitDownloadWorker(exited <-chan struct{}, deadline time.Time) {
+	// A worker that is already idle must count as done even with a deadline
+	// in the past.
+	select {
+	case <-exited:
+		return
+	default:
+	}
+	if d := time.Until(deadline); d > 0 {
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case <-exited:
+			return
+		case <-timer.C:
+		}
+	}
+	lastCloseTimeout.Store(time.Now().UnixNano())
 }
 
 // effectiveScrollbarWidth returns the configured scrollbar pixel width,

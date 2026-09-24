@@ -169,23 +169,48 @@ func (t *Term) posToSelCol(x float32) int {
 	return b
 }
 
+// devicePx converts a pointer position in logical points (what go-gui
+// reports) to the device pixels ?1016 reports use. CSI 14t and CSI 16t report
+// sizes in device pixels (grid.CellPxW is cellW*pxScale), so an app dividing
+// a pixel position by the cell size from CSI 16t needs both in the same unit.
+// Without the scale, every click on a 2x display mapped to half its real
+// position. NaN/Inf become 0: posToCell sanitizes cell-mode coordinates, but
+// pixel mode takes MouseX/MouseY from the GUI framework as they are.
+//
+// Negative positions become 0. A reported drag holds the mouse lock, so its
+// motion and release arrive from outside the pane too, and a negative number
+// is not a valid SGR parameter. Positions past the right or bottom edge stay
+// as they are: they are still well-formed, and clamping them would need
+// grid.Cols under Mu.
+func (t *Term) devicePx(x, y float32) (int, int) {
+	s := t.draw.pxScale
+	if !(s > 0) || !realNumber(s) {
+		s = 1
+	}
+	if !realNumber(x) || x < 0 {
+		x = 0
+	}
+	if !realNumber(y) || y < 0 {
+		y = 0
+	}
+	// A float past int range converts to an arbitrary int, so a bogus huge
+	// position from the backend is capped well past any real display first.
+	return int(min(x*s, maxDevicePx)), int(min(y*s, maxDevicePx))
+}
+
+// maxDevicePx caps a ?1016 coordinate; see devicePx.
+const maxDevicePx = 1 << 20
+
 // writeMouse emits an SGR mouse report. When pixels is true (?1016 active),
-// pixX/pixY (0-based widget pixels) are used; otherwise col/row (0-based
-// cell indices) are used. Both forms report 1-based coordinates per spec.
+// pixX/pixY (0-based widget position in logical points; see devicePx) are
+// used; otherwise col/row (0-based cell indices) are used. Both forms report
+// 1-based coordinates per spec.
 func (t *Term) writeMouse(cb, col, row int, pixX, pixY float32, pixels, press bool) {
 	var buf [32]byte
 	var out []byte
 	if pixels {
-		// Guard against NaN/Inf pixel coords before int() conversion.
-		// posToCell sanitizes x/y for cell-mode paths; pixel-mode paths
-		// receive raw MouseX/MouseY from the GUI framework directly.
-		if !realNumber(pixX) {
-			pixX = 0
-		}
-		if !realNumber(pixY) {
-			pixY = 0
-		}
-		out = encodeMouseSGR(buf[:0], cb, int(pixX), int(pixY), press)
+		px, py := t.devicePx(pixX, pixY)
+		out = encodeMouseSGR(buf[:0], cb, px, py, press)
 	} else {
 		out = encodeMouseSGR(buf[:0], cb, col, row, press)
 	}
@@ -375,6 +400,12 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 		t.mouse.dragButton = ctx.Event.MouseButton
 		t.mouse.dragReport = true
 		t.mouse.lastR, t.mouse.lastC = r, c
+		t.mouse.lastPX, t.mouse.lastPY = t.devicePx(ctx.Event.MouseX, ctx.Event.MouseY)
+		// Lock like a selection drag does. Without the lock, a release outside
+		// the pane (on the tab bar, or off the window) never reached onMouseUp:
+		// the child got a press with no release and stayed in its drag or
+		// visual mode, and drag motion outside the pane was never reported.
+		t.lockMouse(ctx.Window)
 		ctx.Consume()
 		return
 	}
@@ -615,8 +646,15 @@ func (t *Term) motionReport(e *gui.Event, snap mouseSnap, r, c int) bool {
 	if !snap.sgr || !snap.live {
 		return false
 	}
-	// Dedupe: only emit when crossing a cell boundary.
-	if r == t.mouse.lastR && c == t.mouse.lastC {
+	// Dedupe: only emit when the position the child sees changed. That is the
+	// cell, or under ?1016 the device pixel: deduping pixel reports by cell
+	// threw away the sub-cell motion that is the point of asking for pixels.
+	px, py := t.devicePx(e.MouseX, e.MouseY)
+	same := r == t.mouse.lastR && c == t.mouse.lastC
+	if snap.pixels {
+		same = px == t.mouse.lastPX && py == t.mouse.lastPY
+	}
+	if same {
 		if t.mouse.dragReport {
 			return true
 		}
@@ -632,11 +670,13 @@ func (t *Term) motionReport(e *gui.Event, snap mouseSnap, r, c int) bool {
 		cb := base + mouseModBits(e.Modifiers) + 32
 		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap.pixels, true)
 		t.mouse.lastR, t.mouse.lastC = r, c
+		t.mouse.lastPX, t.mouse.lastPY = px, py
 		return true
 	case !t.mouse.dragging && snap.any:
 		cb := 35 + mouseModBits(e.Modifiers) // 3+32 = motion, no button
 		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap.pixels, true)
 		t.mouse.lastR, t.mouse.lastC = r, c
+		t.mouse.lastPX, t.mouse.lastPY = px, py
 		return true
 	}
 	return false
@@ -785,6 +825,31 @@ func (t *Term) updateHover(r, c int, w *gui.Window) {
 	}
 }
 
+// reportLostRelease sends the release of a reported drag whose real release
+// never arrived (a window resize took the mouse-up, see cancelSelectDrag). The
+// child pairs every press with a release; without one it stays in its drag or
+// visual mode. Reported at the last position the child saw, with no
+// modifiers, since the real ones are unknown. Takes grid.Mu, so the caller
+// must not hold it.
+func (t *Term) reportLostRelease() {
+	if !t.mouse.dragReport {
+		return
+	}
+	snap := t.mouseSnap()
+	base, ok := mouseSGRBaseButton(t.mouse.dragButton)
+	if !snap.sgr || !ok {
+		return
+	}
+	x, y := t.logicalMouseCol(t.mouse.lastR, t.mouse.lastC), t.mouse.lastR
+	if snap.pixels {
+		x, y = t.mouse.lastPX, t.mouse.lastPY
+	}
+	var buf [32]byte
+	if _, err := t.pw.Write(encodeMouseSGR(buf[:0], base, x, y, false)); err != nil {
+		log.Printf("term: pty mouse: %v", err)
+	}
+}
+
 // onMouseUp handles button-release. A drag started under reporting
 // emits a release report regardless of whether the mode is still on
 // (the host expects every press to be paired with a release).
@@ -823,7 +888,14 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 	// Single click (no drag) with Cmd/Ctrl on a hyperlink → open URL. An
 	// explicit OSC 8 link wins; otherwise fall back to implicit URL detection
 	// at the click cell, matching the Cmd-hover highlight.
-	if !t.grid.SelActive {
+	//
+	// SelActive is read under grid.Mu: the reader goroutine clears the
+	// selection (ClearSelection) when output overwrites it or the alt screen
+	// is entered.
+	t.grid.Mu.Lock()
+	selActive := t.grid.SelActive
+	t.grid.Mu.Unlock()
+	if !selActive {
 		if ctx.Event.Modifiers&gui.ModSuper != 0 || ctx.Event.Modifiers&gui.ModCtrl != 0 {
 			url := t.linkURLAt(r, c)
 			if url != "" {
@@ -1160,6 +1232,9 @@ func (t *Term) onMouseScroll(ctx gui.EventCtx) {
 		t.momentum.vel = math.Max(-momentumCap, math.Min(momentumCap, float64(ctx.Event.ScrollY)*momentumScale))
 		t.momentum.cellH = t.cellH
 		t.momentum.coasting = false
+		// Set before the timer is re-armed below, so the timer never fires
+		// ahead of the deadline it is checked against.
+		t.momentum.kickAt = time.Now().Add(coastDelay)
 	}()
 	if t.momentum.timer == nil {
 		t.momentum.timer = time.AfterFunc(coastDelay, t.kickMomentum)
@@ -1178,13 +1253,25 @@ func (t *Term) cancelMomentum() {
 	defer t.momentum.mu.Unlock()
 	t.momentum.vel = 0
 	t.momentum.coasting = false
+	t.momentum.kickAt = time.Time{}
 }
 
 // kickMomentum is the AfterFunc callback fired 50 ms after the last scroll
 // event. It marks the momentum state as coasting and wakes momentumLoop.
+//
+// Timer.Stop and Timer.Reset cannot recall a callback that has already
+// started, so this one may run late: after a cancel (the user touched the
+// trackpad again), or after a newer scroll re-armed the timer. kickAt tells
+// those apart. A cancel zeroed it, and a newer scroll moved it past now, so
+// either way this stale kick starts nothing; the re-armed timer brings its
+// own.
 func (t *Term) kickMomentum() {
 	t.momentum.mu.Lock()
 	defer t.momentum.mu.Unlock()
+	if t.momentum.kickAt.IsZero() || time.Now().Before(t.momentum.kickAt) {
+		return
+	}
+	t.momentum.kickAt = time.Time{}
 	t.momentum.coasting = true
 	kick(t.momentum.kick)
 }

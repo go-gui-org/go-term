@@ -493,6 +493,7 @@ func newMouseTerm(rows, cols int) (*Term, *[]byte) {
 	}
 	t.mouse.lastR = -1
 	t.mouse.lastC = -1
+	t.mouse.lastPX, t.mouse.lastPY = -1, -1
 	t.mouse.hoverR.Store(-1)
 	t.mouse.hoverC.Store(-1)
 	return t, &buf
@@ -964,10 +965,10 @@ func TestTerm_OnKeyDown_AltArrow(t *testing.T) {
 		key  gui.KeyCode
 		want string
 	}{
-		{gui.KeyUp, "\x1b\x1b[A"},
-		{gui.KeyDown, "\x1b\x1b[B"},
-		{gui.KeyRight, "\x1b\x1b[C"},
-		{gui.KeyLeft, "\x1b\x1b[D"},
+		{gui.KeyUp, "\x1b[1;3A"},
+		{gui.KeyDown, "\x1b[1;3B"},
+		{gui.KeyRight, "\x1b[1;3C"},
+		{gui.KeyLeft, "\x1b[1;3D"},
 	}
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
@@ -1031,7 +1032,7 @@ func TestFuncKeySeq_NoModifier(t *testing.T) {
 		{gui.KeyF12, "\x1b[24~"},
 	}
 	for _, c := range cases {
-		got := string(funcKeySeq(c.key, false, false))
+		got := string(funcKeySeq(c.key, 0, false))
 		if got != c.want {
 			t.Errorf("funcKeySeq(%v)=%q want %q", c.key, got, c.want)
 		}
@@ -1040,20 +1041,20 @@ func TestFuncKeySeq_NoModifier(t *testing.T) {
 
 func TestFuncKeySeq_ShiftModifier(t *testing.T) {
 	// Shift+F1 → \x1b[1;2P, Shift+F5 → \x1b[15;2~
-	if got := string(funcKeySeq(gui.KeyF1, true, false)); got != "\x1b[1;2P" {
+	if got := string(funcKeySeq(gui.KeyF1, 2, false)); got != "\x1b[1;2P" {
 		t.Errorf("Shift+F1=%q want %q", got, "\x1b[1;2P")
 	}
-	if got := string(funcKeySeq(gui.KeyF5, true, false)); got != "\x1b[15;2~" {
+	if got := string(funcKeySeq(gui.KeyF5, 2, false)); got != "\x1b[15;2~" {
 		t.Errorf("Shift+F5=%q want %q", got, "\x1b[15;2~")
 	}
 }
 
 func TestFuncKeySeq_CtrlModifier(t *testing.T) {
 	// Ctrl+F1 → \x1b[1;5P, Ctrl+F10 → \x1b[21;5~
-	if got := string(funcKeySeq(gui.KeyF1, false, true)); got != "\x1b[1;5P" {
+	if got := string(funcKeySeq(gui.KeyF1, 5, false)); got != "\x1b[1;5P" {
 		t.Errorf("Ctrl+F1=%q want %q", got, "\x1b[1;5P")
 	}
-	if got := string(funcKeySeq(gui.KeyF10, false, true)); got != "\x1b[21;5~" {
+	if got := string(funcKeySeq(gui.KeyF10, 5, false)); got != "\x1b[21;5~" {
 		t.Errorf("Ctrl+F10=%q want %q", got, "\x1b[21;5~")
 	}
 }
@@ -1071,7 +1072,7 @@ func TestTerm_OnKeyDown_FuncKeys(t *testing.T) {
 		{gui.KeyInsert, 0, "\x1b[2~"},
 		{gui.KeyF1, gui.ModShift, "\x1b[1;2P"},
 		{gui.KeyF5, gui.ModCtrl, "\x1b[15;5~"},
-		{gui.KeyF1, gui.ModAlt, "\x1b\x1bOP"}, // alt as ESC prefix
+		{gui.KeyF1, gui.ModAlt, "\x1b[1;3P"}, // alt in the modifier parameter
 	}
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
@@ -1329,7 +1330,9 @@ func TestKittyKeySeq_WithMods(t *testing.T) {
 
 func TestTerm_KittyKey_Backspace(t *testing.T) {
 	term, buf := newTestTermCapture()
-	term.grid.KittyKeyFlags = 1
+	// Unmodified, this key is CSI u only under flag 8; flag 1 keeps its
+	// legacy byte (see kkpNamedKey).
+	term.grid.KittyKeyFlags = 1 | 8
 	e := &gui.Event{KeyCode: gui.KeyBackspace}
 	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[127u" {
@@ -1339,7 +1342,9 @@ func TestTerm_KittyKey_Backspace(t *testing.T) {
 
 func TestTerm_KittyKey_Enter(t *testing.T) {
 	term, buf := newTestTermCapture()
-	term.grid.KittyKeyFlags = 1
+	// Unmodified, this key is CSI u only under flag 8; flag 1 keeps its
+	// legacy byte (see kkpNamedKey).
+	term.grid.KittyKeyFlags = 1 | 8
 	e := &gui.Event{KeyCode: gui.KeyEnter}
 	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[13u" {
@@ -1349,7 +1354,9 @@ func TestTerm_KittyKey_Enter(t *testing.T) {
 
 func TestTerm_KittyKey_Tab(t *testing.T) {
 	term, buf := newTestTermCapture()
-	term.grid.KittyKeyFlags = 1
+	// Unmodified, this key is CSI u only under flag 8; flag 1 keeps its
+	// legacy byte (see kkpNamedKey).
+	term.grid.KittyKeyFlags = 1 | 8
 	e := &gui.Event{KeyCode: gui.KeyTab}
 	term.onKeyDown(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[9u" {
@@ -1401,9 +1408,11 @@ func TestKittyKeySeq_Release(t *testing.T) {
 
 func TestTerm_KittyKey_Release(t *testing.T) {
 	term, buf := newTestTermCapture()
-	term.grid.KittyKeyFlags = 2 // Enable event type reporting (flag bit 2)
+	// Event types (flag 2); Enter and Tab have releases only under flag 8.
+	term.grid.KittyKeyFlags = 2 | 8
 
 	// Test Enter key release
+	pressKey(term, buf, gui.KeyEnter, 0)
 	e := &gui.Event{KeyCode: gui.KeyEnter}
 	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[13;1:3u" {
@@ -1414,6 +1423,7 @@ func TestTerm_KittyKey_Release(t *testing.T) {
 	*buf = (*buf)[:0]
 
 	// Test Shift+Tab release
+	pressKey(term, buf, gui.KeyTab, gui.ModShift)
 	e = &gui.Event{KeyCode: gui.KeyTab, Modifiers: gui.ModShift}
 	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[9;2:3u" {
@@ -1423,9 +1433,11 @@ func TestTerm_KittyKey_Release(t *testing.T) {
 
 func TestTerm_KittyKey_ModifierOnly(t *testing.T) {
 	term, buf := newTestTermCapture()
-	term.grid.KittyKeyFlags = 2 // Enable event type reporting (flag bit 2)
+	// Modifier keys are reported only under flag 8 (report all keys).
+	term.grid.KittyKeyFlags = 2 | 8
 
 	// Test Shift key release
+	pressKey(term, buf, gui.KeyLeftShift, 0)
 	e := &gui.Event{KeyCode: gui.KeyLeftShift}
 	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[57441;1:3u" {
@@ -1436,6 +1448,7 @@ func TestTerm_KittyKey_ModifierOnly(t *testing.T) {
 	*buf = (*buf)[:0]
 
 	// Test Ctrl key release
+	pressKey(term, buf, gui.KeyLeftControl, 0)
 	e = &gui.Event{KeyCode: gui.KeyLeftControl}
 	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[57442;1:3u" {
@@ -1446,6 +1459,7 @@ func TestTerm_KittyKey_ModifierOnly(t *testing.T) {
 	*buf = (*buf)[:0]
 
 	// Test Alt key release
+	pressKey(term, buf, gui.KeyLeftAlt, 0)
 	e = &gui.Event{KeyCode: gui.KeyLeftAlt}
 	term.onKeyUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[57443;1:3u" {
@@ -1480,6 +1494,14 @@ func TestKittyKeySeq_NegativeCodepointReturnsNil(t *testing.T) {
 	}
 }
 
+// pressKey sends k's press through onKeyDown, as a real key does before its
+// release, and discards what it wrote. onKeyUp sends a release only for a
+// press the child saw.
+func pressKey(term *Term, buf *[]byte, k gui.KeyCode, mods gui.Modifier) {
+	term.onKeyDown(gui.EventCtx{Event: &gui.Event{KeyCode: k, Modifiers: mods}, Window: &gui.Window{}})
+	*buf = (*buf)[:0]
+}
+
 func TestTerm_KittyKey_RightModifiers(t *testing.T) {
 	cases := []struct {
 		key  gui.KeyCode
@@ -1493,7 +1515,8 @@ func TestTerm_KittyKey_RightModifiers(t *testing.T) {
 	}
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
-		term.grid.KittyKeyFlags = 2
+		term.grid.KittyKeyFlags = 2 | 8 // modifier keys need flag 8
+		pressKey(term, buf, c.key, 0)
 		term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: c.key}, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("key=%v: got %q, want %q", c.key, got, c.want)
@@ -1506,20 +1529,23 @@ func TestTerm_KittyKey_NavRelease(t *testing.T) {
 		key  gui.KeyCode
 		want string
 	}{
-		{gui.KeyInsert, "\x1b[57348;1:3u"},
-		{gui.KeyDelete, "\x1b[57349;1:3u"},
-		{gui.KeyLeft, "\x1b[57350;1:3u"},
-		{gui.KeyRight, "\x1b[57351;1:3u"},
-		{gui.KeyUp, "\x1b[57352;1:3u"},
-		{gui.KeyDown, "\x1b[57353;1:3u"},
-		{gui.KeyPageUp, "\x1b[57354;1:3u"},
-		{gui.KeyPageDown, "\x1b[57355;1:3u"},
-		{gui.KeyHome, "\x1b[57356;1:3u"},
-		{gui.KeyEnd, "\x1b[57357;1:3u"},
+		{gui.KeyInsert, "\x1b[2;1:3~"},
+		{gui.KeyDelete, "\x1b[3;1:3~"},
+		{gui.KeyLeft, "\x1b[1;1:3D"},
+		{gui.KeyRight, "\x1b[1;1:3C"},
+		{gui.KeyUp, "\x1b[1;1:3A"},
+		{gui.KeyDown, "\x1b[1;1:3B"},
+		{gui.KeyPageUp, "\x1b[5;1:3~"},
+		{gui.KeyPageDown, "\x1b[6;1:3~"},
+		{gui.KeyHome, "\x1b[1;1:3H"},
+		{gui.KeyEnd, "\x1b[1;1:3F"},
 	}
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		term.grid.KittyKeyFlags = 2
+		// Alt screen, so plain PageUp/PageDown reach the child, not scrollback.
+		term.grid.AltActive = true
+		pressKey(term, buf, c.key, 0)
 		term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: c.key}, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("key=%v: got %q, want %q", c.key, got, c.want)
@@ -1532,22 +1558,23 @@ func TestTerm_KittyKey_FKeyRelease(t *testing.T) {
 		key  gui.KeyCode
 		want string
 	}{
-		{gui.KeyF1, "\x1b[57364;1:3u"},
-		{gui.KeyF2, "\x1b[57365;1:3u"},
-		{gui.KeyF3, "\x1b[57366;1:3u"},
-		{gui.KeyF4, "\x1b[57367;1:3u"},
-		{gui.KeyF5, "\x1b[57368;1:3u"},
-		{gui.KeyF6, "\x1b[57369;1:3u"},
-		{gui.KeyF7, "\x1b[57370;1:3u"},
-		{gui.KeyF8, "\x1b[57371;1:3u"},
-		{gui.KeyF9, "\x1b[57372;1:3u"},
-		{gui.KeyF10, "\x1b[57373;1:3u"},
-		{gui.KeyF11, "\x1b[57374;1:3u"},
-		{gui.KeyF12, "\x1b[57375;1:3u"},
+		{gui.KeyF1, "\x1b[1;1:3P"},
+		{gui.KeyF2, "\x1b[1;1:3Q"},
+		{gui.KeyF3, "\x1b[13;1:3~"},
+		{gui.KeyF4, "\x1b[1;1:3S"},
+		{gui.KeyF5, "\x1b[15;1:3~"},
+		{gui.KeyF6, "\x1b[17;1:3~"},
+		{gui.KeyF7, "\x1b[18;1:3~"},
+		{gui.KeyF8, "\x1b[19;1:3~"},
+		{gui.KeyF9, "\x1b[20;1:3~"},
+		{gui.KeyF10, "\x1b[21;1:3~"},
+		{gui.KeyF11, "\x1b[23;1:3~"},
+		{gui.KeyF12, "\x1b[24;1:3~"},
 	}
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		term.grid.KittyKeyFlags = 2
+		pressKey(term, buf, c.key, 0)
 		term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: c.key}, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("key=%v: got %q, want %q", c.key, got, c.want)
@@ -1568,6 +1595,7 @@ func TestTerm_KittyKey_PrintableRelease(t *testing.T) {
 	for _, c := range cases {
 		term, buf := newTestTermCapture()
 		term.grid.KittyKeyFlags = 2
+		pressKey(term, buf, c.key, 0)
 		term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: c.key}, Window: &gui.Window{}})
 		if got := string(*buf); got != c.want {
 			t.Errorf("key=%v: got %q, want %q", c.key, got, c.want)
@@ -1577,7 +1605,8 @@ func TestTerm_KittyKey_PrintableRelease(t *testing.T) {
 
 func TestTerm_KittyKey_KPEnterRelease(t *testing.T) {
 	term, buf := newTestTermCapture()
-	term.grid.KittyKeyFlags = 2
+	term.grid.KittyKeyFlags = 2 | 8 // Enter has releases only under flag 8
+	pressKey(term, buf, gui.KeyKPEnter, 0)
 	term.onKeyUp(gui.EventCtx{Layout: nil, Event: &gui.Event{KeyCode: gui.KeyKPEnter}, Window: &gui.Window{}})
 	if got := string(*buf); got != "\x1b[13;1:3u" {
 		t.Fatalf("KPEnter release: got %q, want %q", got, "\x1b[13;1:3u")
@@ -1815,18 +1844,6 @@ func TestKKPCodepoint_AllKeys(t *testing.T) {
 		{gui.KeyBackspace, 127, true},
 		{gui.KeyTab, 9, true},
 		{gui.KeyEscape, 27, true},
-		{gui.KeyInsert, 57348, true},
-		{gui.KeyDelete, 57349, true},
-		{gui.KeyLeft, 57350, true},
-		{gui.KeyRight, 57351, true},
-		{gui.KeyUp, 57352, true},
-		{gui.KeyDown, 57353, true},
-		{gui.KeyPageUp, 57354, true},
-		{gui.KeyPageDown, 57355, true},
-		{gui.KeyHome, 57356, true},
-		{gui.KeyEnd, 57357, true},
-		{gui.KeyF1, 57364, true},
-		{gui.KeyF12, 57375, true},
 		{gui.KeyA, int('a'), true},
 		{gui.KeyZ, int('z'), true},
 		{gui.Key0, int('0'), true},

@@ -378,16 +378,20 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 // workspace could not tell which dialog it then waits on. Instead the whole
 // exit waits in pendingExit, with the hook not yet run, until that dialog
 // closes; see settlePendingExit.
+//
+// With no hook there is nothing to wait for: the direct close opens no dialog,
+// so an unrelated open one does not delay it.
 func (ws *Workspace) exitLastShell(tab *tab, leafID string) {
+	if ws.cfg.OnLastShellExit == nil {
+		ws.w.Close()
+		ws.finishLastShellExit(tab, leafID)
+		return
+	}
 	if ws.w.DialogIsVisible() {
 		ws.pendingExit = &lastShellExit{tab: tab, leafID: leafID, hookPending: true}
 		return
 	}
-	if ws.cfg.OnLastShellExit != nil {
-		ws.cfg.OnLastShellExit(ws.w)
-	} else {
-		ws.w.Close()
-	}
+	ws.cfg.OnLastShellExit(ws.w)
 	// No dialog was open before the hook, so a visible one now is the hook's.
 	if !ws.w.CloseRequested() && ws.w.DialogIsVisible() {
 		ws.pendingExit = &lastShellExit{tab: tab, leafID: leafID}
@@ -431,9 +435,22 @@ func (ws *Workspace) settlePendingExit(w *gui.Window) {
 }
 
 // resumePendingExit is the queued half of settlePendingExit.
+//
+// When the hook has not run yet, the exit waited on a dialog it did not open,
+// for as long as the user left that dialog up. The workspace may have changed
+// meanwhile: Workspace.Close ran (Cmd+Q), the window close was requested, or a
+// new tab or split means this shell is no longer the last one. So the exit
+// goes through closePaneInTab again, which checks all of that, instead of
+// straight to the hook.
 func (ws *Workspace) resumePendingExit(p *lastShellExit) {
 	if p.hookPending {
-		ws.exitLastShell(p.tab, p.leafID)
+		if !slices.Contains(ws.tabs, p.tab) {
+			return // workspace closed, or the tab is gone
+		}
+		if _, ok := p.tab.terms[p.leafID]; !ok {
+			return // the dead pane was already closed
+		}
+		ws.closePaneInTab(p.tab, p.leafID)
 		return
 	}
 	ws.finishLastShellExit(p.tab, p.leafID)
