@@ -6,10 +6,67 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- macOS: right Option types what the keyboard layout prints (@, [, ], { and } on
+  a German layout). Left Option stays Meta for readline's Alt+f, Alt+b and Alt+.
+  keys.
+- Alt on cursor, editing and function keys is sent in xterm's modifier form
+  (Alt+Left is `CSI 1;3D`) instead of an ESC prefix.
+
+### Fixed
+
+- Alt+digit and Alt+punctuation sent nothing, and Alt+Shift+letter sent the
+  lowercase letter.
+- `Ctrl+Space`, `Ctrl+\`, `Ctrl+]`, `Ctrl+/` and `Ctrl+^` sent nothing.
+  Ctrl+Delete and Ctrl+PageUp/PageDown sent the plain key.
+- Kitty keyboard protocol: Alt chords were ESC-prefixed on top of their CSI u
+  form. Plain Enter, Tab and Backspace were CSI u under flag 1. Release events
+  were sent for keys the terminal kept (search bar, copy mode, shortcuts) and
+  for unsent modifier presses. Cursor and function key releases used a different
+  form than their presses.
+- A mouse drag reported to an app (vim, tmux) and released outside the pane
+  never sent its release.
+- `?1016` pixel mouse reports were in points, not device pixels, so they were
+  off by the display scale. Motion within a cell was not reported.
+- A trackpad touch at the moment a coast was about to start could still start
+  it.
+- OSC 52 copies over about 3 KB were cut short on the clipboard, with no error.
+  Copies up to 6 MB now arrive whole, and a larger one leaves the clipboard
+  unchanged.
+- After 4096 different OSC 8 hyperlinks, new links stopped working until
+  `reset`. A full link table now drops the links no cell shows any more.
+- OSC 110, 111 and 112 did nothing, so a program that changed the text,
+  background or cursor color with OSC 10, 11 or 12 left them changed after it
+  exited.
+- Kitty graphics commands sent without an image id got a reply, which landed on
+  the shell's command line as text. Placing an unknown image id now answers
+  `ENOENT` instead of `EINVAL`.
+- A CSI sequence with an intermediate byte the terminal does not know ran the
+  plain command: `CSI 2 SP @` inserted blanks and `CSI 2 SP A` moved the cursor
+  up. These are now ignored.
+- The cursor position report ignored origin mode. It now counts rows from the
+  top margin, as xterm does.
+- The DECRQSS reply for `m` left out italic, dim, blink, conceal, strikethrough,
+  overline, underline style and underline color.
+- XTGETTCAP now reports `ech`, `ccc`, `initc`, `oc`, `flash`, and the Alt arrow
+  keys (`kUP3` and the rest).
+- Lowering the scrollback limit left prompt marks and images on the wrong rows,
+  so jump-to-prompt landed below the prompt.
+- After an erase (ED 0, ED 1, EL 0, or ECH up to the right edge), a window
+  resize joined the erased rows onto the next line and moved its text down or
+  right.
+- With the cursor waiting to wrap after the last column, EL 0, ECH, ICH and DCH
+  skipped the last cell and the next character still wrapped. They now act on
+  the last column and cancel the wrap, as xterm does. `CSI g` in that state
+  cleared no tab stop.
+- DECCRA (copy rectangle) over a sixel or iTerm2 image left the image drawn over
+  the copied text.
+
 ## [0.14.0] - 2026-09-21
 
-- Migrate mono rungs to go-gui semantic text roles and bump go-gui
-  v0.77.0 → v0.78.0.
+- Migrate mono rungs to go-gui semantic text roles and bump go-gui v0.77.0 →
+  v0.78.0.
 
 ## [0.13.0] - 2026-09-14
 

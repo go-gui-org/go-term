@@ -603,10 +603,13 @@ type grid struct {
 
 	// Hyperlink registry (OSC 8). CurLinkID is the active link applied
 	// by Put; 0 means no link. links/linkIDs are a sidecar map so cell
-	// stays compact — URLs live here, not in each cell. The maps grow
-	// only, never shrink; sessions are short and links are rare.
+	// stays compact — URLs live here, not in each cell. A full registry
+	// drops the ids no cell refers to (sweepLinks); RIS clears it.
 	CurLinkID uint16
 	nextLink  uint16
+	// linkSweepWait counts down refused internLink calls before the next
+	// sweep of a full registry; see linkSweepBackoff.
+	linkSweepWait int
 
 	// TabStops[c] is true when column c has a tab stop set. Initialized to
 	// every 8 columns (xterm default). ESC H sets; CSI g clears. Tab()
@@ -616,6 +619,12 @@ type grid struct {
 	// Theme controls the 16 ANSI base colors and the default fg/bg used
 	// when rendering cells. Set via Term.SetTheme; defaults to DefaultTheme.
 	Theme Theme
+
+	// baseTheme is the theme the embedder set, before any OSC 10/11 override.
+	// OSC 110/111 restore Theme's DefaultFG/DefaultBG from it. Kept as a whole
+	// Theme so grid.go needs no go-gui import. Written only by setTheme (and
+	// newGrid).
+	baseTheme Theme
 
 	// pal is the effective 256-color table the render path reads: the
 	// static xterm table with Theme.ANSI merged over 0–15 and any OSC 4
@@ -884,6 +893,27 @@ func (g *grid) SetDynColor(ps int, c uint32) {
 	g.markAllDirty()
 }
 
+// ResetDynColor undoes SetDynColor for ps (110=foreground, 111=background,
+// 112=cursor): the foreground and background go back to the embedder's theme,
+// the cursor back to "invert the cell under it". A program that recolors the
+// pane with OSC 10/11/12 sends these on exit; without them the pane kept the
+// program's colors. Called from the parser while Mu is held.
+func (g *grid) ResetDynColor(ps int) {
+	switch ps {
+	case 110:
+		g.Theme.DefaultFG = g.baseTheme.DefaultFG
+		g.rebuildOverlay()
+	case 111:
+		g.Theme.DefaultBG = g.baseTheme.DefaultBG
+		g.rebuildOverlay()
+	case 112:
+		g.CursorColor = defaultColor
+	default:
+		return
+	}
+	g.markAllDirty()
+}
+
 // dynColorRGB returns the r,g,b components of the dynamic color for ps.
 // 10=foreground, 11=background, 12=cursor (falls back to DefaultFG when
 // CursorColor is unset). Called from the parser while Mu is held.
@@ -959,6 +989,7 @@ func newGrid(rows, cols int) *grid {
 		Top:           0,
 		Bottom:        rows - 1,
 		Theme:         DefaultTheme,
+		baseTheme:     DefaultTheme,
 		links:         make(map[uint16]string),
 		linkIDs:       make(map[string]uint16),
 		nextLink:      1,
@@ -978,25 +1009,88 @@ func newGrid(rows, cols int) *grid {
 // unique URLs can't grow the maps without bound.
 const maxLinkEntries = 4096
 
+// linkSweepBackoff is how many refused internLink calls must pass before a
+// sweep that reclaimed little is tried again. A sweep scans every cell of the
+// screen and the scrollback; when nearly every id is still on screen or in
+// history, retrying it for each new URL would repeat that scan per link.
+const linkSweepBackoff = maxLinkEntries / 8
+
 // internLink returns the ID for url, creating one if needed. Called under Mu.
-// Returns 0 when the registry is full; those cells carry no link ID and become
-// non-clickable for the life of the session. This is intentional: the cap
-// prevents unbounded map growth during very long sessions.
+//
+// When the registry is full, ids that no cell refers to any more are dropped
+// (sweepLinks) and the new URL takes one of the freed slots. Only when every
+// id is still live — 4096 distinct links on screen or in the scrollback — does
+// it return 0, and those cells carry no link. Before the sweep a full registry
+// stayed full until RIS, so a few `ls --hyperlink` runs ended clickable links
+// for the rest of the session.
 func (g *grid) internLink(url string) uint16 {
 	if id, ok := g.linkIDs[url]; ok {
 		return id
 	}
 	if len(g.linkIDs) >= maxLinkEntries {
-		return 0
+		if g.linkSweepWait > 0 {
+			g.linkSweepWait--
+			return 0
+		}
+		if g.sweepLinks() < linkSweepBackoff {
+			g.linkSweepWait = linkSweepBackoff
+		}
+		if len(g.linkIDs) >= maxLinkEntries {
+			return 0
+		}
 	}
+	// A swept registry has holes, so after nextLink wraps the next id may
+	// still be taken. The registry is never full here, so the loop ends.
 	id := g.nextLink
-	g.nextLink++
-	if g.nextLink == 0 {
-		g.nextLink = 1
+	for id == 0 || g.links[id] != "" {
+		id++
 	}
+	g.nextLink = id + 1
 	g.links[id] = url
 	g.linkIDs[url] = id
 	return id
+}
+
+// sweepLinks drops every registry entry no cell refers to and returns how
+// many it dropped. A live id is one held by a cell on the screen, in the
+// scrollback, or on the main screen parked behind the alt screen, or the id
+// the next Put will write (CurLinkID, and the parked main screen's copy).
+// Called under Mu, only when the registry is full.
+func (g *grid) sweepLinks() int {
+	// One bit per possible id: 8 KB on the stack, no allocation.
+	var live [1 << 16 / 64]uint64
+	mark := func(id uint16) { live[id/64] |= 1 << (id % 64) }
+	markRow := func(row []cell) {
+		for i := range row {
+			if id := row[i].LinkID; id != 0 {
+				mark(id)
+			}
+		}
+	}
+	for r := range g.Rows {
+		markRow(g.row(r))
+	}
+	for i := range g.Scrollback.Len() {
+		markRow(g.Scrollback.Row(i))
+	}
+	if g.AltActive {
+		for _, slot := range g.mainSaved.rowMap {
+			markRow(g.mainSaved.slots[slot])
+		}
+		markRow(g.mainSaved.cells)
+		mark(g.mainSaved.curLinkID)
+	}
+	mark(g.CurLinkID)
+
+	dropped := 0
+	for id, url := range g.links {
+		if live[id/64]&(1<<(id%64)) == 0 {
+			delete(g.links, id)
+			delete(g.linkIDs, url)
+			dropped++
+		}
+	}
+	return dropped
 }
 
 // LinkURL returns the URL for the given link ID, or "" for ID 0 / unknown.

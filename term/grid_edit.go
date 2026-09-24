@@ -555,8 +555,20 @@ func (g *grid) ClearTabStop(all bool) {
 		g.TabStops = [MaxGridDim]bool{}
 		return
 	}
-	if g.CursorC >= 0 && g.CursorC < MaxGridDim {
-		g.TabStops[g.CursorC] = false
+	// Same column SetTabStop uses: with a wrap pending the cursor is on the
+	// last cell, not at Cols.
+	if c := g.settledCol(); c >= 0 && c < MaxGridDim {
+		g.TabStops[c] = false
+	}
+}
+
+// resetPendingWrap drops a pending wrap: the cursor goes back onto the last
+// column, where DEC terminals keep it while the wrap flag is set. Erase, insert
+// and delete all do this (xterm ResetWrap), so they act on the last column and
+// the next glyph overwrites it instead of wrapping to the next row.
+func (g *grid) resetPendingWrap() {
+	if g.Cols > 0 && g.CursorC >= g.Cols {
+		g.CursorC = g.Cols - 1
 	}
 }
 
@@ -574,6 +586,12 @@ func (g *grid) eraseInLine(mode int, selective bool) {
 	if row < 0 || row >= g.Rows {
 		return
 	}
+	if mode < 0 || mode > 2 {
+		return
+	}
+	// A pending wrap puts the cursor on the last column for this erase, so
+	// EL 0 clears that cell, and the next glyph lands there instead of wrapping.
+	g.resetPendingWrap()
 	// A wide pair straddling the cursor is split so no orphaned half survives —
 	// unless this is a selective erase and the pair is protected, which must
 	// come through untouched.
@@ -586,15 +604,18 @@ func (g *grid) eraseInLine(mode int, selective bool) {
 	case 0:
 		g.splitWideAt(row, g.CursorC, edge)
 		cFrom = clamp(g.CursorC, 0, g.Cols)
+		// With its tail gone the row no longer runs on into the next one
+		// (xterm ClearRight). Left set, the next Resize would join the two.
+		// A selective erase may leave protected text in the tail, so it keeps
+		// the flag.
+		if !selective {
+			g.RowWrapped[row] = false
+		}
 	case 1:
 		g.splitWideAt(row, g.CursorC, edge)
 		// The cursor can sit at Cols with a wrap pending; without the clamp
 		// this span would run one cell past the row into the next one.
 		cTo = clamp(g.CursorC+1, 0, g.Cols)
-	case 2:
-
-	default:
-		return
 	}
 	g.eraseSpan(row, cFrom, cTo, selective)
 }
@@ -644,6 +665,8 @@ func (g *grid) EraseChars(n int) {
 	if n < 1 {
 		n = 1
 	}
+	// ECH at a pending wrap erases the last column (see resetPendingWrap).
+	g.resetPendingWrap()
 	from := g.CursorC
 	if from < 0 {
 		from = 0
@@ -659,6 +682,13 @@ func (g *grid) EraseChars(n int) {
 	// eraseSpan owns the blanking, so ECH picks up image occlusion on the
 	// same terms as EL/ED — an erase over an image's cells removes it.
 	g.eraseSpan(row, from, to, false)
+	// An erase that reaches the right margin empties the row's tail, so the row
+	// no longer wraps into the next one. xterm clears the flag for every ECH;
+	// clearing it only here keeps a mid-row ECH from splitting a logical line
+	// whose tail is still there.
+	if to == g.Cols {
+		g.RowWrapped[row] = false
+	}
 }
 
 // EraseInDisplay implements CSI J. mode: 0 = cursor to end of screen,
@@ -679,15 +709,19 @@ func (g *grid) eraseInDisplay(mode int, selective bool) {
 		g.eraseInLine(0, selective)
 		for r := g.CursorR + 1; r < g.Rows; r++ {
 			g.eraseSpan(r, 0, g.Cols, selective)
+			g.clearEraseWrap(r, selective)
 		}
 		g.markAllDirty()
 	case 1:
 		g.eraseInLine(1, selective)
 		for r := range g.CursorR {
 			g.eraseSpan(r, 0, g.Cols, selective)
+			g.clearEraseWrap(r, selective)
 		}
 		g.markAllDirty()
 	case 2, 3:
+		// A screen clear drops a pending wrap too (xterm ClearScreen).
+		g.resetPendingWrap()
 		if selective {
 			for r := range g.Rows {
 				g.eraseSpan(r, 0, g.Cols, true)
@@ -729,6 +763,17 @@ func (g *grid) eraseInDisplay(mode int, selective bool) {
 			g.ResetView()
 		}
 		g.markAllDirty()
+	}
+}
+
+// clearEraseWrap drops the wrap flag of row r after an erase blanked all of it:
+// an empty row joins nothing, and a stale flag makes the next Resize splice it
+// onto the row below as one logical line, moving that row's text (xterm
+// ClearBufRows does the same). A selective erase may leave protected text on
+// the row, so it keeps the flag.
+func (g *grid) clearEraseWrap(r int, selective bool) {
+	if !selective && r >= 0 && r < len(g.RowWrapped) {
+		g.RowWrapped[r] = false
 	}
 }
 
@@ -814,6 +859,8 @@ func (g *grid) InsertChars(n int) {
 	if n <= 0 || g.CursorR < 0 || g.CursorR >= g.Rows {
 		return
 	}
+	// At a pending wrap this acts on the last column (see resetPendingWrap).
+	g.resetPendingWrap()
 	if g.CursorC < 0 || g.CursorC >= g.Cols {
 		return
 	}
@@ -850,6 +897,8 @@ func (g *grid) DeleteChars(n int) {
 	if n <= 0 || g.CursorR < 0 || g.CursorR >= g.Rows {
 		return
 	}
+	// At a pending wrap this acts on the last column (see resetPendingWrap).
+	g.resetPendingWrap()
 	if g.CursorC < 0 || g.CursorC >= g.Cols {
 		return
 	}

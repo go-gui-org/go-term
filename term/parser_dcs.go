@@ -69,9 +69,8 @@ func xtgettcapValue(name string) (string, bool) {
 		return "xterm-256color", true
 
 	// ── Boolean caps (empty value = present) ──
-	// ccc is deliberately absent: palette redefinition (OSC 4/104) is not
-	// implemented, so "can change colors" must not be advertised.
-	case "AX", "am", "bce", "fullkbd", "hs", "km", "mir", "mc5i",
+	// ccc ("can change colors") is backed by OSC 4 / OSC 104; see initc/oc.
+	case "AX", "am", "bce", "ccc", "fullkbd", "hs", "km", "mir", "mc5i",
 		"msgr", "npc", "xenl", "XT":
 		return "", true
 
@@ -182,9 +181,9 @@ func xtgettcapValue(name string) (string, bool) {
 		return "\x1b[%p1%dL", true
 	case "il1":
 		return "\x1b[L", true
-	// ech (CSI Ps X) is deliberately absent: dispatchCSI has no 'X' case,
-	// and ncurses uses ech for clear optimizations when advertised —
-	// a silently dropped ECH would leave stale cells on screen.
+	case "ech":
+		// ECH — dispatchCSI 'X' (grid.EraseChars).
+		return "\x1b[%p1%dX", true
 	case "indn":
 		return "\x1b[%p1%dS", true
 	case "rin":
@@ -197,8 +196,14 @@ func xtgettcapValue(name string) (string, bool) {
 		return "\x1bM", true
 
 	// ── Color ──
-	// initc / oc / ccc are deliberately absent: OSC 4 (set palette entry)
-	// and OSC 104 (reset palette) are not implemented by parser_osc.go.
+	// initc and oc are OSC 4 and OSC 104 (handleOSC4, handleOSC104). initc
+	// takes terminfo's 0–1000 channel scale and writes the rgb:RR/GG/BB form
+	// parseXColor reads; the string is the one xterm-direct and kitty ship.
+	case "initc":
+		return "\x1b]4;%p1%d;rgb:%p2%{255}%*%{1000}%/%2.2X/" +
+			"%p3%{255}%*%{1000}%/%2.2X/%p4%{255}%*%{1000}%/%2.2X\x1b\\", true
+	case "oc":
+		return "\x1b]104\x07", true
 	case "RGB":
 		return "8/8/8", true
 	case "Co", "colors":
@@ -249,9 +254,10 @@ func xtgettcapValue(name string) (string, bool) {
 		return "8", true
 
 	// ── Misc control ──
-	// flash is deliberately absent: it needs DECSCNM (mode 5), which
-	// applyDECMode ignores; BEL already triggers the widget's visual
-	// flash overlay, so apps falling back to bel get a flash anyway.
+	case "flash":
+		// DECSCNM (?5, grid.ReverseScreen) on, 100 ms padding, off — xterm's
+		// string. The $<100/> delay is ncurses' to honor; it never reaches us.
+		return "\x1b[?5h$<100/>\x1b[?5l", true
 	case "bel":
 		return "\x07", true
 	case "cr":
@@ -383,8 +389,33 @@ func xtgettcapValue(name string) (string, bool) {
 	case "kf12":
 		return "\x1b[24~", true
 
-	// ── Keyboard: modified arrow keys (Shift/Ctrl/Shift+Ctrl only;
-	//   Alt is ESC-prefixed in legacy mode so 3/4/7 variants are omitted) ──
+	// ── Keyboard: modified arrow keys. The suffix is the xterm modifier
+	//   parameter (modParam): 2 Shift, 3 Alt, 4 Shift+Alt, 5 Ctrl, 6 Shift+Ctrl,
+	//   7 Ctrl+Alt. Alt+arrow is CSI 1;3X, not ESC-prefixed ──
+	case "kUP3":
+		return "\x1b[1;3A", true
+	case "kUP4":
+		return "\x1b[1;4A", true
+	case "kUP7":
+		return "\x1b[1;7A", true
+	case "kDN3":
+		return "\x1b[1;3B", true
+	case "kDN4":
+		return "\x1b[1;4B", true
+	case "kDN7":
+		return "\x1b[1;7B", true
+	case "kLFT3":
+		return "\x1b[1;3D", true
+	case "kLFT4":
+		return "\x1b[1;4D", true
+	case "kLFT7":
+		return "\x1b[1;7D", true
+	case "kRIT3":
+		return "\x1b[1;3C", true
+	case "kRIT4":
+		return "\x1b[1;4C", true
+	case "kRIT7":
+		return "\x1b[1;7C", true
 	case "kUP":
 		return "\x1b[1;2A", true
 	case "kUP5":

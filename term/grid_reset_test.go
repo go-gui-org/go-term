@@ -339,9 +339,8 @@ func TestHardReset_RestoresConfiguredCursor(t *testing.T) {
 }
 
 // RIS wipes every cell that could carry a LinkID, so the OSC 8 registry goes
-// with them. Keeping it would pin the old session's URLs and — once the cap
-// was reached — leave internLink refusing new links for the life of the pane,
-// with no way for the user to recover the pane.
+// with them. Keeping it would pin the old session's URLs until a full
+// registry happened to trigger a sweep.
 func TestGrid_HardReset_ClearsLinkRegistry(t *testing.T) {
 	g := newGrid(5, 20)
 	for i := range maxLinkEntries {
@@ -349,8 +348,9 @@ func TestGrid_HardReset_ClearsLinkRegistry(t *testing.T) {
 			t.Fatalf("internLink returned 0 at entry %d, before the cap", i)
 		}
 	}
-	if g.internLink("https://full.example.com") != 0 {
-		t.Fatal("registry did not reach its cap; the test would prove nothing")
+	if len(g.links) != maxLinkEntries {
+		t.Fatalf("registry holds %d entries, want the cap %d; the test would prove nothing",
+			len(g.links), maxLinkEntries)
 	}
 
 	g.HardReset()

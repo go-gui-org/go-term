@@ -285,8 +285,9 @@ func TestOnKeyDown_UnboundActionReachesPTY(t *testing.T) {
 	}
 	out := tm.encodeKeyEvent(e, &gui.Window{}, true, false)
 	*buf = append(*buf, out...)
-	if string(*buf) != "\x1b[5~" {
-		t.Errorf("PageUp bytes = %q, want %q", *buf, "\x1b[5~")
+	// Shift is held, so it rides along as xterm's modifier parameter.
+	if string(*buf) != "\x1b[5;2~" {
+		t.Errorf("PageUp bytes = %q, want %q", *buf, "\x1b[5;2~")
 	}
 }
 

@@ -362,6 +362,11 @@ func (g *grid) CopyRect(pts, pls, pbs, prs, ptd, pld int) {
 		g.sanitizeWideEdges(dr, dstLeft, dstLeft+cols)
 		g.markDirty(dr)
 	}
+	// The copy paints every destination cell, so it removes a sixel/iTerm2
+	// image there, as DECERA and DECFRA do. Caller holds Mu.
+	if len(g.Graphics) != 0 {
+		g.occludeGraphics(dstTop, rows, dstLeft, dstLeft+cols)
+	}
 }
 
 // sanitizeWideEdges repairs half a wide character left at either edge of the

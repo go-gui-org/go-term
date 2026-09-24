@@ -726,8 +726,8 @@ func TestParser_APC_KittyPlace_UnknownID_ErrorReply(t *testing.T) {
 	if len(h.replies) != 1 {
 		t.Fatalf("got %d replies; want 1 error reply for unknown id", len(h.replies))
 	}
-	if !strings.Contains(string(h.replies[0]), "EINVAL") {
-		t.Errorf("reply %q missing EINVAL", string(h.replies[0]))
+	if !strings.Contains(string(h.replies[0]), "ENOENT") {
+		t.Errorf("reply %q missing ENOENT", string(h.replies[0]))
 	}
 }
 
@@ -1051,7 +1051,8 @@ func TestParser_APC_KittyVirtualPlace(t *testing.T) {
 }
 
 // A virtual placement with no i= key can never be addressed by a placeholder
-// cell, so it is refused rather than silently swallowed.
+// cell, so it is refused. The refusal is silent: with no id there is no one to
+// reply to (see kittyReplyMsg), so the only effect is that nothing is stored.
 func TestParser_APC_KittyVirtualWithoutID(t *testing.T) {
 	h := newAPCHelper(t)
 	_, b64 := makePNG(t)
@@ -1060,8 +1061,8 @@ func TestParser_APC_KittyVirtualWithoutID(t *testing.T) {
 	if len(h.g.virtualImages) != 0 {
 		t.Fatalf("recorded %d virtual placements; want 0", len(h.g.virtualImages))
 	}
-	if len(h.replies) != 1 || !bytes.Contains(h.replies[0], []byte("EINVAL")) {
-		t.Fatalf("replies = %q; want one EINVAL", h.replies)
+	if len(h.replies) != 0 {
+		t.Fatalf("replies = %q; want none for a command without an id", h.replies)
 	}
 }
 

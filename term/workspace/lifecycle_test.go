@@ -10,6 +10,7 @@ package workspace
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"sort"
 	"testing"
 
@@ -851,5 +852,98 @@ func TestOnPaneExit_LastShellWaitsForUnrelatedDialogBeforeHook(t *testing.T) {
 	}
 	if ws.pendingExit == nil || ws.pendingExit.hookPending {
 		t.Error("exit not waiting on the hook's own dialog")
+	}
+}
+
+// quitHookCfg is a config whose exit hook counts its runs and asks "quit?"
+// with an in-app dialog, never stacking a second one.
+func quitHookCfg(t *testing.T, runs *int) Cfg {
+	t.Helper()
+	cfg := hermeticCfg(t)
+	cfg.ExitWhenLastShellExits = true
+	cfg.OnLastShellExit = func(w *gui.Window) {
+		*runs++
+		if w.DialogIsVisible() {
+			return
+		}
+		w.Dialog(gui.DialogCfg{DialogType: gui.DialogConfirm, Title: "Quit?"})
+	}
+	return cfg
+}
+
+// The last shell exits while About is open, so the hook waits. The user then
+// quits (Cmd+Q: the embedder saves and calls Workspace.Close). When About
+// closes, the hook must not run: a second Save would record the torn-down
+// workspace over the good session. Regression: the resume ran the hook with no
+// teardown check.
+func TestResumePendingExit_HookSkippedAfterWorkspaceClose(t *testing.T) {
+	runs := 0
+	ws := newLiveWorkspaceCfg(t, quitHookCfg(t, &runs))
+	leaf := activeTabOf(t, ws).focused
+	ws.w.Dialog(gui.DialogCfg{DialogType: gui.DialogMessage, Title: "About"})
+
+	ws.onPaneExit(leaf)
+	p := ws.pendingExit
+	if p == nil || !p.hookPending {
+		t.Fatal("exit not waiting for the About dialog")
+	}
+	ws.w.Close()
+	_ = ws.Close()
+	ws.w.DialogDismiss()
+	ws.resumePendingExit(p)
+
+	if runs != 0 {
+		t.Errorf("hook ran %d times after the workspace closed, want 0", runs)
+	}
+}
+
+// The last shell exits while About is open. Before About closes, the user opens
+// a new tab. The exited shell is then no longer the last one, so the resume
+// must drop the dead tab and keep the window open, not run the quit hook.
+// Regression: the resume did not check the tab count again.
+func TestResumePendingExit_NewTabMeansNotLastShell(t *testing.T) {
+	runs := 0
+	ws := newLiveWorkspaceCfg(t, quitHookCfg(t, &runs))
+	dead := activeTabOf(t, ws)
+	leaf := dead.focused
+	ws.w.Dialog(gui.DialogCfg{DialogType: gui.DialogMessage, Title: "About"})
+
+	ws.onPaneExit(leaf)
+	p := ws.pendingExit
+	ws.addTab()
+	ws.w.DialogDismiss()
+	ws.resumePendingExit(p)
+
+	if runs != 0 {
+		t.Errorf("hook ran %d times although another tab has a live shell", runs)
+	}
+	if ws.w.CloseRequested() {
+		t.Error("window closing although another tab has a live shell")
+	}
+	if slices.Contains(ws.tabs, dead) {
+		t.Error("dead tab kept after the resume")
+	}
+	if len(ws.tabs) != 1 {
+		t.Errorf("tabs = %d, want 1 (the new tab)", len(ws.tabs))
+	}
+}
+
+// With no exit hook the workspace closes the window itself, which opens no
+// dialog. An unrelated open dialog is then no reason to wait: the window
+// closes at once. Regression: #239 waited for any dialog, hook or not.
+func TestOnPaneExit_NoHookClosesDespiteDialog(t *testing.T) {
+	cfg := hermeticCfg(t)
+	cfg.ExitWhenLastShellExits = true
+	ws := newLiveWorkspaceCfg(t, cfg)
+	leaf := activeTabOf(t, ws).focused
+	ws.w.Dialog(gui.DialogCfg{DialogType: gui.DialogMessage, Title: "About"})
+
+	ws.onPaneExit(leaf)
+
+	if !ws.w.CloseRequested() {
+		t.Error("window not closed: exit waited for an unrelated dialog with no hook")
+	}
+	if ws.pendingExit != nil {
+		t.Error("exit left pending with no hook")
 	}
 }

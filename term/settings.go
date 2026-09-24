@@ -82,7 +82,15 @@ func (t *Term) resizeScrollback(capRows int) bool {
 	// change and drops the backing entirely at cap 0. Pass the ring's own
 	// column count: a differing value would reset the content, and the ring
 	// is repopulated at the live column count by scrollUpRegion anyway.
+	oldLen := t.grid.Scrollback.Len()
 	t.grid.Scrollback.EnsureGeom(capRows, t.grid.Scrollback.cols)
+	// Dropping the oldest rows shifts every content row up by the same count.
+	// Marks and image anchors live in content rows, so they move with it, the
+	// same as when scrolling evicts rows (scrollUpRegion) or ED 3 clears them.
+	if dropped := oldLen - t.grid.Scrollback.Len(); dropped > 0 {
+		t.grid.trimMarks(dropped)
+		t.grid.trimGraphics(dropped)
+	}
 	// A new or dropped ring slab must not stay pinned by screen rows swapped in
 	// from the old one — at cap 0 no scroll would ever reclaim them.
 	t.grid.syncScrollbackGen()

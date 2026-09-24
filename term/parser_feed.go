@@ -336,20 +336,26 @@ func (p *parser) feedChunk(b []byte) {
 			case 0x1B:
 				p.state = stOSCEsc
 			default:
+				// The first ';' picks the cap: OSC 1337 (images, file
+				// transfers) and OSC 52 (clipboard) carry base64 payloads far
+				// past the generic cap. oscLim stays 0 for everything else.
+				if p.oscLim == 0 && c == ';' && len(p.osc) <= 4 {
+					switch string(p.osc) {
+					case "1337":
+						p.oscLim = maxOSC1337Bytes
+					case "52":
+						p.oscLim = maxOSC52Bytes
+					}
+				}
 				lim := maxOSCBytes
-				if p.oscIsImage {
-					lim = maxOSC1337Bytes
-				} else if len(p.osc) == 4 &&
-					p.osc[0] == '1' && p.osc[1] == '3' &&
-					p.osc[2] == '3' && p.osc[3] == '7' && c == ';' {
-					p.oscIsImage = true
-					lim = maxOSC1337Bytes
+				if p.oscLim != 0 {
+					lim = p.oscLim
 				}
 				if len(p.osc) < lim {
 					p.osc = append(p.osc, c)
 				} else {
 					// Record the truncation so handlers that care (OSC
-					// 1337) can drop the sequence instead of decoding a
+					// 1337, OSC 52) can drop the sequence instead of decoding a
 					// payload with its tail cut off.
 					p.oscTrunc = true
 				}

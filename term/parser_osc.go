@@ -95,10 +95,18 @@ func (p *parser) dispatchOSC() {
 		}
 	}
 	if sep <= 0 {
-		// Bare "OSC 104 ST" resets the whole palette — the one command
-		// with no argument. Everything else requires a ";Pt" payload.
-		if string(p.osc) == "104" {
+		// The reset commands take no argument, so they may arrive bare:
+		// "OSC 104 ST" resets the whole palette, OSC 110/111/112 the dynamic
+		// colors. Everything else requires a ";Pt" payload.
+		switch string(p.osc) {
+		case "104":
 			p.g.ResetPalette()
+		case "110":
+			p.g.ResetDynColor(110)
+		case "111":
+			p.g.ResetDynColor(111)
+		case "112":
+			p.g.ResetDynColor(112)
 		}
 		return
 	}
@@ -151,8 +159,10 @@ func (p *parser) dispatchOSC() {
 		p.handleOSC4(pt)
 	case 104:
 		p.handleOSC104(pt)
+	case 110, 111, 112:
+		// The ";"-terminated form some programs send; the payload is ignored.
+		p.g.ResetDynColor(ps)
 	case 10, 11, 12:
-
 		if pt == "?" {
 			r, g, b := p.g.dynColorRGB(ps)
 			reply := "\x1b]" + strconv.Itoa(ps) + ";rgb:" +
@@ -227,7 +237,11 @@ func (p *parser) dispatchOSC() {
 			p.onNotify("", truncatePaste(sanitizeNotifyBody(pt), notifyMax))
 		}
 	case 52:
-
+		// A payload that hit maxOSC52Bytes lost its tail. Dropping it keeps the
+		// old clipboard; delivering it would put half a copy there.
+		if p.oscTrunc {
+			return
+		}
 		semiIdx := strings.IndexByte(pt, ';')
 		if semiIdx < 0 {
 			return

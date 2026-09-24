@@ -377,14 +377,15 @@ func TestXTGETTCAPValue_AllCaps(t *testing.T) {
 		// Custom query caps
 		{"query-os-name", "\x1b]0;?\x07", true},
 
-		// Deliberately unadvertised: features the emulator does not
-		// implement. Re-adding any of these requires implementing the
-		// underlying sequence first (see comments in xtgettcapValue).
-		{"ech", "", false},   // CSI X not in dispatchCSI
-		{"ccc", "", false},   // OSC 4/104 palette ops unimplemented
-		{"initc", "", false}, // OSC 4 unimplemented
-		{"oc", "", false},    // OSC 104 unimplemented
-		{"flash", "", false}, // DECSCNM (mode 5) unimplemented
+		// Backed by ECH, OSC 4/104 and DECSCNM.
+		{"ech", "\x1b[%p1%dX", true},
+		{"ccc", "", true},
+		{"oc", "\x1b]104\x07", true},
+		{"flash", "\x1b[?5h$<100/>\x1b[?5l", true},
+
+		// Alt arrows: CSI 1;3X (widget_keyboard.go modParam).
+		{"kUP3", "\x1b[1;3A", true},
+		{"kLFT7", "\x1b[1;7D", true},
 
 		// Unknown caps
 		{"nonexistent", "", false},

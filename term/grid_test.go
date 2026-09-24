@@ -471,8 +471,12 @@ func TestGrid_DefaultCell_ULColor(t *testing.T) {
 	}
 }
 
+// When every id is still live (here: all written into scrollback cells), a
+// full registry cannot reclaim anything and refuses new URLs.
 func TestGrid_InternLink_CapReturnsZero(t *testing.T) {
 	g := newGrid(5, 20)
+	g.Scrollback.SetGeom(maxLinkEntries, 20)
+	row := make([]cell, 20)
 
 	for i := range maxLinkEntries {
 		url := "https://example.com/" + strconv.Itoa(i)
@@ -480,6 +484,9 @@ func TestGrid_InternLink_CapReturnsZero(t *testing.T) {
 		if id == 0 {
 			t.Fatalf("internLink returned 0 at entry %d (before cap %d)", i, maxLinkEntries)
 		}
+		row[0] = defaultCell()
+		row[0].LinkID = id
+		g.Scrollback.Push(row, false)
 	}
 
 	id := g.internLink("https://overflow.example.com")

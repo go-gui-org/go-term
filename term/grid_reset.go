@@ -123,11 +123,11 @@ func (g *grid) SetColumnMode(cols int) {
 // `reset` relies on to recover a terminal left in raw/mouse-reporting mode by
 // a crashed application.
 //
-// Not reset: the embedder's Theme (including OSC 10/11 overrides, which the
-// grid cannot distinguish from an embedder-supplied theme) and the window
-// title. Both belong to the widget, not the cell buffer. OSC 4 palette
-// overrides *are* reset — they live in their own layer, so dropping them
-// cannot take an embedder-supplied color with them.
+// Not reset: the embedder's Theme (including OSC 10/11 overrides — the child
+// undoes those with OSC 110/111, see ResetDynColor) and the window title.
+// Both belong to the widget, not the cell buffer. OSC 4 palette overrides
+// *are* reset — they live in their own layer, so dropping them cannot take an
+// embedder-supplied color with them.
 func (g *grid) HardReset() {
 	g.ExitAlt() // no-op when the main screen is already active
 	g.SoftReset()
@@ -209,6 +209,7 @@ func (g *grid) HardReset() {
 	clear(g.links)
 	clear(g.linkIDs)
 	g.nextLink = 1
+	g.linkSweepWait = 0
 	clear(g.Graphics)
 	g.Graphics = g.Graphics[:0]
 	g.occludeMaxR = 0

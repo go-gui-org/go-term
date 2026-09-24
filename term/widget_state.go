@@ -106,6 +106,12 @@ type momentumState struct {
 	mu       sync.Mutex
 	cellH    float32 // cellH snapshot at last scroll event
 	coasting bool    // true while goroutine is decelerating
+	// kickAt is when the armed coast may start: the last scroll event plus
+	// the coast delay. Zero when nothing is armed (cancelled, or already
+	// kicked). kickMomentum checks it, because a timer that already fired
+	// cannot be stopped: its callback may be waiting on mu while a cancel or
+	// a newer scroll runs, and must not then start a coast nobody armed.
+	kickAt time.Time
 }
 
 // searchState holds the interactive search bar state. All fields accessed
@@ -199,15 +205,20 @@ type mouseState struct {
 	// locked is true while a gui MouseLock is engaged. Lock callbacks
 	// deliver absolute window coordinates; the same handlers registered on
 	// the canvas deliver canvas-relative ones. This flag is what tells the
-	// two apart — see toCanvasRel. Not every drag locks: a drag that is
-	// being reported to the pty (?1000/?1002/?1003) leaves the pointer
-	// unlocked, so keying off dragging would mis-translate those events.
-	locked  bool
-	lastR   int // dedupe motion reports under ?1003
-	lastC   int
-	hoverR  atomic.Int32 // sentinel -1 = not yet set
-	hoverC  atomic.Int32
-	cmdHeld atomic.Bool // true when Super (Cmd) is held
+	// two apart — see toCanvasRel. Every drag locks, the reported kind too,
+	// so its release reaches onMouseUp even when it lands outside the pane.
+	// The scrollbar thumb drag locks without setting dragging, so dragging is
+	// not a stand-in for this flag.
+	locked bool
+	// lastR/lastC are the cell of the last report, and lastPX/lastPY its
+	// ?1016 position in device pixels. Motion reports are deduped against
+	// the unit the child sees (cells, or pixels under ?1016), and a drag
+	// release that never arrives is reported at this position.
+	lastR, lastC   int
+	lastPX, lastPY int
+	hoverR         atomic.Int32 // sentinel -1 = not yet set
+	hoverC         atomic.Int32
+	cmdHeld        atomic.Bool // true when Super (Cmd) is held
 
 	// Implicit URL detected under the pointer while Cmd is held (issue 72).
 	// Main-thread only: written by updateHover, read by prepareHoverURL and
@@ -405,6 +416,9 @@ type Term struct {
 
 	mouse mouseState
 
+	// keys holds keyboard state kept across events. See keyState.
+	keys keyState
+
 	// loopWg tracks the auxiliary goroutines (blink, autoScroll, momentum,
 	// reply writer, pty resizer) so Close can wait for them to exit before
 	// tearing down state they may still reference.
@@ -485,15 +499,9 @@ type Term struct {
 	dlDone    chan struct{}
 	dlPending atomic.Int64
 	// dlExited is closed when the download worker returns. Close waits on it,
-	// but only up to downloadCloseWait (see stopDownloadWorker).
-	//
-	// dlGate decides whether the worker may still call the embedder's
-	// callbacks (OnDownload, OnNotify). Close shuts it before it returns, so
-	// no callback starts after that. One atomic instead of a mutex: the worker
-	// claims the gate with a compare-and-swap, and Close's store makes every
-	// later claim fail.
+	// but only until its deadline (see closeDeadline). The worker checks
+	// closed, not a channel, before each embedder callback.
 	dlExited chan struct{}
-	dlGate   atomic.Int32
 
 	// autoScrollDir drives the selection auto-scroll goroutine during a
 	// drag that extends outside the widget (-1 = toward live,

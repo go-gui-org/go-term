@@ -14,6 +14,15 @@ const maxOSCBytes = 4096
 // truncated payload to the decoder.
 const maxOSC1337Bytes = 32 << 20
 
+// maxOSC52Bytes is the enlarged cap for OSC 52 clipboard writes. The payload is
+// base64, so the generic 4 KB OSC cap stopped a copy at about 3 KB of text —
+// one screen of code yanked in nvim or tmux over ssh. 8 MiB of base64 is 6 MiB
+// of text, beyond any selection a person copies, while still bounding a runaway
+// stream. Like OSC 1337, a payload over the cap sets p.oscTrunc and is dropped:
+// half a copy on the clipboard is worse than none, because it gets pasted
+// without anyone noticing.
+const maxOSC52Bytes = 8 << 20
+
 // maxDCSBytes caps DCS payloads, which in practice means Sixel frames.
 // Sixel costs roughly 1.7 bytes per pixel at photographic densities
 // (measured: chafa 1.18 emits 1.6 MB for a 1200×800 image), so the old
