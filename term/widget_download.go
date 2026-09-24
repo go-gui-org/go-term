@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/go-gui-org/go-term/internal/atomicfile"
 )
@@ -72,9 +73,10 @@ func (t *Term) registerDownloadHandler() {
 	go t.downloadWorker()
 }
 
-// downloadWorker drains dlQueue one job at a time. Serializing the writes is
-// what makes the collision suffixing in writeDownload race-free: no two jobs
-// probe the same directory at once.
+// downloadWorker drains dlQueue one job at a time. Serializing the writes keeps
+// two of this Term's own downloads from probing the same names at once. It is
+// not what makes publishing race-free against other programs: the hard link in
+// publishDownload is, since it fails instead of replacing a file.
 func (t *Term) downloadWorker() {
 	defer t.loopWg.Done()
 	for {
@@ -128,7 +130,16 @@ func writeDownload(dir, name string, data []byte) (string, error) {
 		return "", fmt.Errorf("unsafe download name %q", name)
 	}
 
-	tmp, err := atomicfile.Stage(cleanDir, base, data, downloadFileMode)
+	// Fail cheaply when every candidate name is already taken. Staging writes
+	// and full-flushes the whole payload, so a sender that repeats one name
+	// would otherwise pay a large synced write per transfer only to delete it.
+	// This is an early exit, not the guarantee: a name free now can be taken
+	// before the link, and publishDownload handles that.
+	if _, err := firstFree(cleanDir, base, nameIsFree); err != nil {
+		return "", err
+	}
+
+	tmp, err := stageDownload(cleanDir, base, data, downloadFileMode)
 	if err != nil {
 		return "", err
 	}
@@ -146,6 +157,10 @@ func writeDownload(dir, name string, data []byte) (string, error) {
 	return dest, nil
 }
 
+// stageDownload is atomicfile.Stage, replaceable so tests can see whether a
+// payload was written at all.
+var stageDownload = atomicfile.Stage
+
 // linkFile is os.Link, replaceable so tests can simulate a filesystem without
 // hard links.
 var linkFile = os.Link
@@ -153,20 +168,66 @@ var linkFile = os.Link
 // publishDownload gives the staged file tmp a free name under dir: base, or
 // base with a " (N)" suffix. It returns the name used.
 func publishDownload(dir, base, tmp string) (string, error) {
+	dest, err := firstFree(dir, base, func(dest string) error {
+		return linkFile(tmp, dest)
+	})
+	if err != nil && linkUnsupported(err) {
+		// This filesystem has no hard links (FAT, exFAT, some network
+		// mounts); it would fail the same way for every name.
+		return publishByRename(dir, base, tmp)
+	}
+	return dest, err
+}
+
+// linkUnsupported reports whether a link error means the filesystem cannot
+// make hard links at all, as opposed to failing this one link. Only these
+// errors justify the weaker rename fallback. Anything else (ENOSPC, EDQUOT,
+// ENAMETOOLONG on a suffixed name, ENOENT on a staging file a cleaner removed)
+// fails the download: falling back there would trade a clear error for the
+// rename path's overwrite window on a filesystem that supports links fine.
+//
+// Linux vfat reports EPERM; ENOSYS, ENOTSUP and EOPNOTSUPP (and their Windows
+// equivalents) all match errors.ErrUnsupported; EXDEV means the staging file
+// and the target sit on different mounts, which a link cannot cross.
+func linkUnsupported(err error) bool {
+	return errors.Is(err, errors.ErrUnsupported) ||
+		errors.Is(err, syscall.EPERM) ||
+		errors.Is(err, syscall.EXDEV)
+}
+
+// firstFree runs try on each candidate name for base in order — base, then
+// "stem (N).ext" — and returns the first one try succeeds on. try returns an
+// error matching fs.ErrExist to mean "taken, try the next"; any other error
+// stops the probe and is returned as-is. This is the one copy of the probing
+// policy (bound, suffix format, collision error) that the pre-check, the link
+// publish and the rename fallback's claim all share.
+func firstFree(dir, base string, try func(dest string) error) (string, error) {
 	for i := range maxDownloadCollisions {
 		dest := downloadCandidate(dir, base, i)
-		err := linkFile(tmp, dest)
+		err := try(dest)
 		if err == nil {
 			return dest, nil
 		}
-		if errors.Is(err, fs.ErrExist) {
-			continue
+		if !errors.Is(err, fs.ErrExist) {
+			return "", err
 		}
-		// Any other error means this filesystem has no hard links (FAT, exFAT,
-		// some network mounts); it would fail the same way for every name.
-		return publishByRename(dir, base, tmp)
 	}
 	return "", fmt.Errorf("download %q: too many name collisions", base)
+}
+
+// nameIsFree is a firstFree probe that only looks: nil when nothing is at dest,
+// fs.ErrExist when something is. Lstat, so a dangling symlink counts as taken —
+// a link or O_EXCL create onto it would fail too.
+func nameIsFree(dest string) error {
+	_, err := os.Lstat(dest)
+	switch {
+	case err == nil:
+		return fs.ErrExist
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	default:
+		return err
+	}
 }
 
 // publishByRename is the fallback for filesystems without hard links. It claims
@@ -217,22 +278,23 @@ func removeClaim(dest string, claim os.FileInfo) {
 // claim are one atomic step — a plain os.Stat check would race another writer
 // between the two.
 func claimDownloadName(dir, base string) (string, os.FileInfo, error) {
-	for i := range maxDownloadCollisions {
-		dest := downloadCandidate(dir, base, i)
+	var claim os.FileInfo
+	dest, err := firstFree(dir, base, func(dest string) error {
 		f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, downloadFileMode)
 		if err != nil {
-			if os.IsExist(err) {
-				continue
-			}
-			return "", nil, err
+			return err
 		}
 		fi, err := f.Stat()
 		_ = f.Close()
 		if err != nil {
 			_ = os.Remove(dest)
-			return "", nil, err
+			return err
 		}
-		return dest, fi, nil
+		claim = fi
+		return nil
+	})
+	if err != nil {
+		return "", nil, err
 	}
-	return "", nil, fmt.Errorf("download %q: too many name collisions", base)
+	return dest, claim, nil
 }

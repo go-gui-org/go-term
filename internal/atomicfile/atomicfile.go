@@ -3,6 +3,8 @@
 //
 // It is a leaf package: it imports nothing from the repo, so both term (downloads)
 // and term/workspace (the saved layout) can share one copy of the sequence.
+// Downloads use only Stage and SyncDir: they publish by hard link, not rename,
+// so a file already at the target name is never replaced.
 package atomicfile
 
 import (

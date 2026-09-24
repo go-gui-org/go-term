@@ -411,13 +411,15 @@ func TestOnPaneExit_LastShellRunsExitHook(t *testing.T) {
 	cfg.OnLastShellExit = func(w *gui.Window) {
 		calls++
 		hookWindow = w
-		// What a Save from the hook would write (falcon's saveAndClose).
+		// What falcon's saveAndClose does: Save, then close.
 		hookSnap = ws.snapshot()
+		w.Close()
 	}
 	ws = newLiveWorkspaceCfg(t, cfg)
 
 	tab := activeTabOf(t, ws)
-	ws.onPaneExit(tab.focused)
+	leaf := tab.focused
+	ws.onPaneExit(leaf)
 
 	if calls != 1 {
 		t.Fatalf("OnLastShellExit calls = %d, want 1", calls)
@@ -425,24 +427,47 @@ func TestOnPaneExit_LastShellRunsExitHook(t *testing.T) {
 	if hookWindow != ws.w {
 		t.Error("hook got a different window than the workspace's")
 	}
-	// The hook owns the close, so the workspace must not have requested it.
-	if ws.w.CloseRequested() {
-		t.Error("window closed by the workspace despite the hook owning it")
-	}
 	// A Save from the hook records the exiting pane's real tab (typing
 	// "exit" must restore like Cmd+Q, not start fresh).
-	if len(hookSnap.Tabs) != 1 || hookSnap.Tabs[0].Root.LeafID != tab.focused {
-		t.Errorf("snapshot in hook = %+v, want the one live tab (leaf %q)", hookSnap.Tabs, tab.focused)
+	if len(hookSnap.Tabs) != 1 || hookSnap.Tabs[0].Root.LeafID != leaf {
+		t.Errorf("snapshot in hook = %+v, want the one live tab (leaf %q)", hookSnap.Tabs, leaf)
 	}
-	// The tab stays until Workspace.Close: the window closes a frame later.
+	// The tab stays until Workspace.Close: the window closes a frame later
+	// and commands queued for this frame still index the active tab.
 	if len(ws.tabs) != 1 || ws.tabs[0] != tab {
 		t.Errorf("tabs = %d after last shell exit, want the exiting tab kept", len(ws.tabs))
 	}
 }
 
+// The exiting pane's Term is released as soon as the hook has run, not at
+// Workspace.Close: its pty, capture tee and session recording must not stay
+// open for the rest of the frame (or forever, for an embedder that never
+// calls Workspace.Close). The shell here is still running — onPaneExit is
+// called directly, as Cmd+W on a live last pane would — so Alive turning
+// false proves Close ran and sent the hangup.
+func TestOnPaneExit_LastShellReleasesDeadTerm(t *testing.T) {
+	cfg := hermeticCfg(t)
+	cfg.ExitWhenLastShellExits = true
+	cfg.OnLastShellExit = func(w *gui.Window) { w.Close() }
+	ws := newLiveWorkspaceCfg(t, cfg)
+
+	tab := activeTabOf(t, ws)
+	tm := tab.terms[tab.focused]
+	ws.onPaneExit(tab.focused)
+
+	if tm.Alive() {
+		t.Error("exiting pane's Term still open after the window close was requested")
+	}
+	// Still in the map: the View and a Save read it until teardown.
+	if tab.terms[tab.focused] != tm {
+		t.Error("exiting pane's Term removed from its tab")
+	}
+}
+
 // A tab the exit hook opens (a "keep the window open?" flow) must stay in the
-// workspace, alive. Clearing ws.tabs after the hook used to drop it without
-// closing it, which leaked its shell and reader goroutine.
+// workspace, alive and active, and the dead tab must go. Keeping the dead tab
+// left the window stuck on a frozen pane once the new tab's shell exited: the
+// dead pane never exits again, so the last-shell path never fired.
 func TestOnPaneExit_LastShellKeepsTabAddedByHook(t *testing.T) {
 	cfg := hermeticCfg(t)
 	cfg.ExitWhenLastShellExits = true
@@ -456,29 +481,61 @@ func TestOnPaneExit_LastShellKeepsTabAddedByHook(t *testing.T) {
 	}
 	ws = newLiveWorkspaceCfg(t, cfg)
 
-	ws.onPaneExit(activeTabOf(t, ws).focused)
+	dead := activeTabOf(t, ws)
+	deadTerm := dead.terms[dead.focused]
+	ws.onPaneExit(dead.focused)
 
-	found := false
-	for _, tb := range ws.tabs {
-		found = found || tb == added
+	if len(ws.tabs) != 1 || ws.tabs[0] != added {
+		t.Fatalf("tabs = %d after hook added one, want only the added tab", len(ws.tabs))
 	}
-	if !found {
-		t.Fatalf("tab added by the exit hook was dropped (%d tabs left)", len(ws.tabs))
+	if activeTabOf(t, ws) != added {
+		t.Error("tab added by the exit hook is not active")
 	}
 	if tm := added.terms[added.focused]; tm == nil || !tm.Alive() {
 		t.Error("tab added by the exit hook lost its live pane")
 	}
+	if deadTerm.Alive() {
+		t.Error("dead tab's Term not closed")
+	}
+}
+
+// A hook that keeps the window open without adding a tab (a cancelled "quit?"
+// dialog) must not leave the window on a dead pane: the workspace falls back
+// to the no-hook-close behavior and replaces the tab with a fresh shell.
+func TestOnPaneExit_LastShellHookDeclinesClose(t *testing.T) {
+	cfg := hermeticCfg(t)
+	cfg.ExitWhenLastShellExits = true
+	cfg.OnLastShellExit = func(*gui.Window) {}
+	ws := newLiveWorkspaceCfg(t, cfg)
+
+	dead := activeTabOf(t, ws)
+	ws.onPaneExit(dead.focused)
+
+	if len(ws.tabs) != 1 || ws.tabs[0] == dead {
+		t.Fatalf("tabs = %d, want one fresh tab in place of the dead one", len(ws.tabs))
+	}
+	tab := activeTabOf(t, ws)
+	if tm := tab.terms[tab.focused]; tm == nil || !tm.Alive() {
+		t.Error("replacement tab has no live pane")
+	}
 }
 
 // gui.Window.Close only raises a flag, so commands queued in the same frame as
-// the exit still run. They index the active tab and must not panic on an empty
-// tab list.
+// the exit still run. They must not panic, must not run the exit hook a second
+// time (falcon would Save twice), and must not spawn shells into a window that
+// is closing.
 func TestOnPaneExit_LastShellCommandsInSameFrame(t *testing.T) {
 	cfg := hermeticCfg(t)
 	cfg.ExitWhenLastShellExits = true
+	calls := 0
+	cfg.OnLastShellExit = func(w *gui.Window) {
+		calls++
+		w.Close()
+	}
 	ws := newLiveWorkspaceCfg(t, cfg)
 
-	ws.onPaneExit(activeTabOf(t, ws).focused)
+	tab := activeTabOf(t, ws)
+	ws.onPaneExit(tab.focused)
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -487,6 +544,40 @@ func TestOnPaneExit_LastShellCommandsInSameFrame(t *testing.T) {
 	}()
 	ws.nextPane()
 	ws.splitPane(false)
+	ws.addTab()
+	ws.closePane()
+	ws.closeTab()
+
+	if calls != 1 {
+		t.Errorf("OnLastShellExit calls = %d, want 1", calls)
+	}
+	if len(ws.tabs) != 1 || len(tab.terms) != 1 {
+		t.Errorf("tabs = %d, panes = %d after same-frame commands, want 1 and 1",
+			len(ws.tabs), len(tab.terms))
+	}
+}
+
+// removeTab's failure path (the replacement tab cannot spawn) closes the
+// window with an empty tab list. Commands queued for the same frame must
+// not index it.
+func TestCommands_EmptyWorkspaceNoPanic(t *testing.T) {
+	ws := &Workspace{w: &gui.Window{}, activeTab: -1}
+	ws.w.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("command on empty workspace panicked: %v", r)
+		}
+	}()
+	ws.nextPane()
+	ws.prevPane()
+	ws.splitPane(true)
+	ws.closePane()
+	ws.closeTab()
+	ws.addTab()
+	ws.resizeActivePane(resizeLeft)
+	if len(ws.tabs) != 0 {
+		t.Errorf("tabs = %d, want none spawned into a closing window", len(ws.tabs))
+	}
 }
 
 // With no hook installed the workspace still closes the window itself.

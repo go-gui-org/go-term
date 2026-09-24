@@ -63,8 +63,11 @@ parser (`term/parser*.go`) → grid (`term/grid*.go`, pure data). Each layer is
 split across multiple files by concern; the layering invariant is what matters,
 not the file count. `internal/recfmt` is a leaf package importing nothing from
 the repo, so both `term` and `term/gotermrec` can sit on it.
-`internal/atomicfile` is the same kind of leaf: the one temp-sync-rename writer
-that `term` (downloads) and `term/workspace` (saved layout) share.
+`internal/atomicfile` is the same kind of leaf: the one stage-and-sync writer
+that `term` (downloads) and `term/workspace` (saved layout) share. The saved
+layout renames the staged file over its target. Downloads must not: they
+hard-link the staged file to a free name so they never replace a file another
+program saved, and use rename only on filesystems with no hard links.
 `internal/opener` is a third: the platform default-handler command and child
 reaping that `term` (OSC 8 links) and falcon (config file) share.
 

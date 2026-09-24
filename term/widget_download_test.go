@@ -466,3 +466,51 @@ func TestRemoveClaim_KeepsReplacedFile(t *testing.T) {
 		t.Errorf("replaced file = %q, %v; want it kept", got, err)
 	}
 }
+
+// Only "this filesystem has no hard links" errors may switch to the rename
+// fallback. Any other link failure (a full disk, a name too long for its " (N)"
+// suffix, a staging file a cleaner deleted) must fail the download: the rename
+// path can overwrite a file another program saves between claim and rename,
+// which is exactly what linking exists to prevent.
+func TestWriteDownload_OtherLinkErrorsDoNotFallBack(t *testing.T) {
+	for _, errno := range []syscall.Errno{syscall.ENOSPC, syscall.ENAMETOOLONG, syscall.ENOENT} {
+		t.Run(errno.Error(), func(t *testing.T) {
+			dir := t.TempDir()
+			orig := linkFile
+			t.Cleanup(func() { linkFile = orig })
+			linkFile = func(oldname, newname string) error {
+				return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: errno}
+			}
+			if got, err := writeDownload(dir, "x.bin", []byte("payload")); err == nil {
+				t.Fatalf("writeDownload = %q, want the link error", got)
+			}
+			assertDirEntries(t, dir)
+		})
+	}
+}
+
+// When every candidate name is taken the download fails before the payload is
+// staged. Staging writes and full-flushes up to the pending-bytes cap, so a
+// sender repeating one name would otherwise cost a large synced write per
+// transfer only to delete it.
+func TestWriteDownload_AllNamesTakenSkipsStaging(t *testing.T) {
+	dir := t.TempDir()
+	for i := range maxDownloadCollisions {
+		if err := os.WriteFile(downloadCandidate(dir, "x.bin", i), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	orig := stageDownload
+	t.Cleanup(func() { stageDownload = orig })
+	staged := 0
+	stageDownload = func(dir, base string, data []byte, perm os.FileMode) (string, error) {
+		staged++
+		return orig(dir, base, data, perm)
+	}
+	if _, err := writeDownload(dir, "x.bin", []byte("payload")); err == nil {
+		t.Fatal("writeDownload with every name taken: want error")
+	}
+	if staged != 0 {
+		t.Errorf("payload staged %d times, want 0", staged)
+	}
+}

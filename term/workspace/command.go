@@ -553,7 +553,11 @@ func (ws *Workspace) dismissOverlay() {
 // splitPane splits the focused pane. If horizontal is true, splits top/bottom;
 // otherwise splits left/right. Creates a new PTY with a fresh shell.
 func (ws *Workspace) splitPane(horizontal bool) {
-	tab := ws.tabs[ws.activeTab]
+	tab := ws.activeTabPtr()
+	// No shell is spawned into a window that is closing (see closePaneInTab).
+	if tab == nil || ws.w.CloseRequested() {
+		return
+	}
 	dir := splitVertical
 	if horizontal {
 		dir = splitHorizontal
@@ -586,13 +590,19 @@ func (ws *Workspace) splitPane(horizontal bool) {
 // closePane closes the focused pane in the active tab. Falls back to the
 // nearest surviving pane. If the last pane, closes the tab.
 func (ws *Workspace) closePane() {
-	tab := ws.tabs[ws.activeTab]
+	tab := ws.activeTabPtr()
+	if tab == nil {
+		return
+	}
 	ws.closePaneInTab(tab, tab.focused)
 }
 
 // nextPane cycles focus to the next pane, wrapping to first after last.
 func (ws *Workspace) nextPane() {
-	tab := ws.tabs[ws.activeTab]
+	tab := ws.activeTabPtr()
+	if tab == nil {
+		return
+	}
 	if next := nextLeaf(tab.root, tab.focused); next != "" {
 		ws.focusPaneInTab(tab, next)
 	}
@@ -600,7 +610,10 @@ func (ws *Workspace) nextPane() {
 
 // prevPane cycles focus to the previous pane, wrapping to last after first.
 func (ws *Workspace) prevPane() {
-	tab := ws.tabs[ws.activeTab]
+	tab := ws.activeTabPtr()
+	if tab == nil {
+		return
+	}
 	if prev := prevLeaf(tab.root, tab.focused); prev != "" {
 		ws.focusPaneInTab(tab, prev)
 	}
@@ -611,10 +624,10 @@ func (ws *Workspace) prevPane() {
 // or the shell never emitted OSC 7 — callers pass that straight through, which
 // leaves the child inheriting the process CWD.
 func (ws *Workspace) focusedCwd() string {
-	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs) {
+	tab := ws.activeTabPtr()
+	if tab == nil {
 		return ""
 	}
-	tab := ws.tabs[ws.activeTab]
 	tm, ok := tab.terms[tab.focused]
 	if !ok {
 		return ""
@@ -625,12 +638,13 @@ func (ws *Workspace) focusedCwd() string {
 // addTab creates a new tab with a single terminal and switches to it. The new
 // tab's shell starts in the CWD of the pane the command was issued from.
 func (ws *Workspace) addTab() {
+	if ws.w.CloseRequested() {
+		return // see closePaneInTab: no shell spawned into a closing window
+	}
 	// Capture the source CWD before the active tab index moves.
 	cwd := ws.focusedCwd()
 	// Unfocus old tab's pane.
-	oldIdx := ws.activeTab
-	if oldIdx >= 0 && oldIdx < len(ws.tabs) {
-		oldTab := ws.tabs[oldIdx]
+	if oldTab := ws.activeTabPtr(); oldTab != nil {
 		if t, ok := oldTab.terms[oldTab.focused]; ok {
 			t.SetFocused(false)
 		}

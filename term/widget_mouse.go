@@ -900,15 +900,23 @@ func openURLCommand(rawURL string) *exec.Cmd {
 	return opener.Command(rawURL)
 }
 
+// startOpener is opener.Start, replaceable so tests can simulate a missing
+// handler.
+var startOpener = opener.Start
+
 // openURL opens url with the OS default browser/handler. A URL
 // openURLCommand rejects is silently dropped. See openURLCommand for the
-// permit rules.
+// permit rules. A handler that fails to start (no xdg-open on a minimal Linux)
+// is logged: the click has no other visible result, so without the log line
+// the failure leaves no trace at all.
 func openURL(rawURL string) {
 	cmd := openURLCommand(rawURL)
 	if cmd == nil {
 		return
 	}
-	_ = opener.Start(cmd)
+	if err := startOpener(cmd); err != nil {
+		log.Printf("term: open %q: %v", rawURL, err)
+	}
 }
 
 // trackpadSensitivity converts a precise (trackpad / high-res) delta
