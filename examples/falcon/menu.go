@@ -3,12 +3,11 @@ package main
 import (
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sync"
 
 	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/internal/opener"
 )
 
 // appName titles the macOS app menu ("Quit <appName>") and the About dialog.
@@ -600,19 +599,5 @@ func writeConfigStub(path string) error {
 
 // openPath hands a file to the platform's default handler.
 func openPath(path string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", path)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", path)
-	default:
-		cmd = exec.Command("xdg-open", path)
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	// Reap the child so it never lingers as a defunct zombie entry.
-	go func() { _ = cmd.Wait() }()
-	return nil
+	return opener.Start(opener.Command(path))
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -330,8 +331,106 @@ func TestTermDownload_PendingBytesCapDropsOverflow(t *testing.T) {
 	}
 }
 
-// A failed write must not leave the claimed 0-byte placeholder under the real
-// name. A write failure after a successful claim cannot be forced portably, so
+// A file another program saves under the download's name while the payload is
+// being written must survive: the download takes the next free name instead.
+// Before the stage-then-link order, the name was claimed first and the finished
+// payload renamed over it, which silently destroyed such a file.
+func TestWriteDownload_KeepsFileSavedMidWrite(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "report.pdf")
+	orig := linkFile
+	t.Cleanup(func() { linkFile = orig })
+	first := true
+	linkFile = func(oldname, newname string) error {
+		if first {
+			// The staged payload is on disk; another program saves now.
+			first = false
+			if err := os.WriteFile(dest, []byte("user data"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return orig(oldname, newname)
+	}
+	got, err := writeDownload(dir, "report.pdf", []byte("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "report (1).pdf"); got != want {
+		t.Errorf("path = %q, want %q", got, want)
+	}
+	if b, err := os.ReadFile(dest); err != nil || string(b) != "user data" {
+		t.Errorf("other program's file = %q, %v; want it kept", b, err)
+	}
+	assertDirEntries(t, dir, "report (1).pdf", "report.pdf")
+}
+
+// A filesystem without hard links (FAT, exFAT) still saves, through the
+// placeholder-and-rename fallback, and leaves no staging file.
+func TestWriteDownload_FallbackWithoutHardLinks(t *testing.T) {
+	dir := t.TempDir()
+	orig := linkFile
+	t.Cleanup(func() { linkFile = orig })
+	linkFile = func(oldname, newname string) error {
+		return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: syscall.EPERM}
+	}
+	got, err := writeDownload(dir, "x.bin", []byte("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(got); err != nil || string(b) != "payload" {
+		t.Errorf("content = %q, %v; want \"payload\"", b, err)
+	}
+	assertDirEntries(t, dir, "x.bin")
+}
+
+// A download that fails after the payload is staged (every name taken) must
+// leave neither the staging file nor a new placeholder behind.
+func TestWriteDownload_FailureLeavesNothing(t *testing.T) {
+	dir := t.TempDir()
+	want := make([]string, 0, maxDownloadCollisions)
+	for i := range maxDownloadCollisions {
+		p := downloadCandidate(dir, "x.bin", i)
+		if err := os.WriteFile(p, []byte("taken"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, filepath.Base(p))
+	}
+	if _, err := writeDownload(dir, "x.bin", []byte("payload")); err == nil {
+		t.Fatal("writeDownload with every name taken: want error")
+	}
+	assertDirEntries(t, dir, want...)
+}
+
+// assertDirEntries fails unless dir holds exactly the named entries.
+func assertDirEntries(t *testing.T, dir string, names ...string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	have := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		have[e.Name()] = true
+	}
+	ok := len(entries) == len(names)
+	for _, n := range names {
+		ok = ok && have[n]
+	}
+	if !ok {
+		t.Errorf("dir entries = %v, want %v", keys(have), names)
+	}
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// The link-less fallback must not leave its claimed 0-byte placeholder under the
+// real name when the rename fails. That failure cannot be forced portably, so
 // removeClaim, the cleanup that path runs, is tested directly.
 func TestRemoveClaim_RemovesOwnPlaceholder(t *testing.T) {
 	dir := t.TempDir()

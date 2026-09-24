@@ -65,6 +65,8 @@ not the file count. `internal/recfmt` is a leaf package importing nothing from
 the repo, so both `term` and `term/gotermrec` can sit on it.
 `internal/atomicfile` is the same kind of leaf: the one temp-sync-rename writer
 that `term` (downloads) and `term/workspace` (saved layout) share.
+`internal/opener` is a third: the platform default-handler command and child
+reaping that `term` (OSC 8 links) and falcon (config file) share.
 
 Don't let parser code reach into go-gui — it must stay grid-only.
 
