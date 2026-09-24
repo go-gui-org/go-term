@@ -57,9 +57,10 @@ type Cfg struct {
 	// quit would silently skip that work on this path. The callback owns
 	// closing the window. Ignored when ExitWhenLastShellExits is false.
 	//
-	// It runs before the workspace tears down, so a Save here records the
-	// exiting pane's tab (CWD, font size) and the next launch restores a
-	// fresh shell there. The workspace drops its tabs after it returns.
+	// The exiting pane's tab is still in the workspace when it runs, so a
+	// Save here records that tab (CWD, font size) and the next launch
+	// restores a fresh shell there. The workspace keeps the tab, dead pane
+	// included, after it returns; Workspace.Close releases it.
 	OnLastShellExit func(w *gui.Window)
 
 	// OnColorScheme, when non-nil, runs when the active theme's light/dark
@@ -274,17 +275,22 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 	if lastPane && ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1 {
 		// Hand the close to the embedder when it asked for it, so quit-time
 		// work (persisting the workspace) still happens — w.Close alone
-		// bypasses OnCloseRequest. The hook runs *before* teardown so a
-		// Save from it snapshots the real tab: the exiting pane's CWD and
-		// font size are still readable from its (dead) Term, and the next
-		// launch restores a fresh shell there, same as after Cmd+Q.
+		// bypasses OnCloseRequest. A Save from the hook snapshots the real
+		// tab: the exiting pane's CWD and font size are still readable from
+		// its (dead) Term, and the next launch restores a fresh shell there,
+		// same as after Cmd+Q.
+		//
+		// The tab is deliberately left in place. gui.Window.Close only
+		// raises a flag, so events and commands already queued for this
+		// frame still run and index ws.tabs[ws.activeTab]; an empty slice
+		// would panic there. The hook may also add a tab of its own (a
+		// "keep the window open?" flow), which a teardown here would drop
+		// without closing. Workspace.Close reaps the dead Term with the rest.
 		if ws.cfg.OnLastShellExit != nil {
 			ws.cfg.OnLastShellExit(ws.w)
 		} else {
 			ws.w.Close()
 		}
-		tab.removePane(leafID)
-		ws.tabs = nil
 		return
 	}
 	tab.removePane(leafID)

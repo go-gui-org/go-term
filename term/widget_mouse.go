@@ -4,12 +4,12 @@ import (
 	"log"
 	"math"
 	"os/exec"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/internal/opener"
 )
 
 // mouseSGRBaseButton maps a go-gui MouseButton to its SGR (?1006) base
@@ -880,9 +880,9 @@ var openURLFn = openURL
 // handlers, javascript:) are silently dropped to prevent a malicious OSC 8
 // hyperlink from invoking arbitrary OS handlers.
 // The URL is terminal output — untrusted — so it must never reach a shell:
-// every branch below passes it as an argv element of a non-shell program
-// (open, rundll32, xdg-open), and the charset check keeps control characters
-// (including DEL), 0x7F, and quotes out of even that argv.
+// opener.Command passes it as one argv element of a non-shell program (open,
+// rundll32, xdg-open), and the charset check keeps control characters
+// (including DEL, 0x7F) and quotes out of even that argv.
 func openURLCommand(rawURL string) *exec.Cmd {
 	switch {
 	case strings.HasPrefix(rawURL, "https://"),
@@ -897,17 +897,7 @@ func openURLCommand(rawURL string) *exec.Cmd {
 			return nil // invalid in a URL; reject before it reaches any handler
 		}
 	}
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", rawURL)
-	case "windows":
-		// rundll32 takes the URL as argv with no shell parsing — cmd /c start
-		// would let '&' or quotes in the URL escape into cmd.exe. Same choice
-		// falcon's openPath makes.
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
-	default:
-		return exec.Command("xdg-open", rawURL)
-	}
+	return opener.Command(rawURL)
 }
 
 // openURL opens url with the OS default browser/handler. A URL
@@ -918,9 +908,7 @@ func openURL(rawURL string) {
 	if cmd == nil {
 		return
 	}
-	if err := cmd.Start(); err == nil {
-		go func() { _ = cmd.Wait() }()
-	}
+	_ = opener.Start(cmd)
 }
 
 // trackpadSensitivity converts a precise (trackpad / high-res) delta

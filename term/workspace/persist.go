@@ -77,8 +77,8 @@ func (ws *Workspace) snapshot() persistedWorkspace {
 // persistableThemeName returns the non-default theme name for snapshot,
 // or "" when no theme is active or the default is selected. Uses
 // cfg.opts.themeName (which termOpts.setTheme is the sole writer of)
-// rather than probing the active pane, so it works even when tabs have
-// been cleared (last-shell-exit path).
+// rather than probing the active pane, so it does not depend on any tab
+// being present.
 func (ws *Workspace) persistableThemeName() string {
 	if ws.cfg.opts.themeName == "" || len(ws.cfg.Themes) == 0 {
 		return ""

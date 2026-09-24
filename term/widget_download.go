@@ -1,7 +1,9 @@
 package term
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -101,9 +103,12 @@ func (t *Term) downloadWorker() {
 // a path escape is not the kind of bug to leave to a single layer.
 //
 // Existing files are never overwritten — collisions get a " (N)" suffix before
-// the extension. The payload is written to a sibling temp file and renamed
-// into place, so an interrupted transfer cannot leave a truncated file under
-// the real name.
+// the extension. The payload is staged in a hidden sibling file and synced
+// first, then hard-linked to a free name. A link fails with EEXIST instead of
+// replacing a file, so choosing the name and publishing the finished data are
+// one atomic step: a truncated file never shows under the real name, and a file
+// another program saves under that name meanwhile (~/Downloads is shared) is
+// never destroyed.
 func writeDownload(dir, name string, data []byte) (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("no download directory")
@@ -123,18 +128,73 @@ func writeDownload(dir, name string, data []byte) (string, error) {
 		return "", fmt.Errorf("unsafe download name %q", name)
 	}
 
-	dest, claim, err := claimDownloadName(cleanDir, base)
+	tmp, err := atomicfile.Stage(cleanDir, base, data, downloadFileMode)
 	if err != nil {
 		return "", err
 	}
-	// The payload is staged in a sibling file, synced, and renamed over the
-	// claimed placeholder. On failure the placeholder must not stay behind as
-	// an empty file under the real name.
-	if err := atomicfile.WriteFile(dest, data, downloadFileMode); err != nil {
+	// The staging file is always removed: after a successful link the data
+	// lives on under dest, and after a failure nothing should stay behind.
+	defer func() { _ = os.Remove(tmp) }()
+	dest, err = publishDownload(cleanDir, base, tmp)
+	if err != nil {
+		return "", err
+	}
+	// Without this a power cut can undo the link, and the notification below
+	// would announce a file that is gone after reboot. This runs on the
+	// download worker, so the flush costs the GUI nothing.
+	atomicfile.SyncDir(cleanDir)
+	return dest, nil
+}
+
+// linkFile is os.Link, replaceable so tests can simulate a filesystem without
+// hard links.
+var linkFile = os.Link
+
+// publishDownload gives the staged file tmp a free name under dir: base, or
+// base with a " (N)" suffix. It returns the name used.
+func publishDownload(dir, base, tmp string) (string, error) {
+	for i := range maxDownloadCollisions {
+		dest := downloadCandidate(dir, base, i)
+		err := linkFile(tmp, dest)
+		if err == nil {
+			return dest, nil
+		}
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		// Any other error means this filesystem has no hard links (FAT, exFAT,
+		// some network mounts); it would fail the same way for every name.
+		return publishByRename(dir, base, tmp)
+	}
+	return "", fmt.Errorf("download %q: too many name collisions", base)
+}
+
+// publishByRename is the fallback for filesystems without hard links. It claims
+// a free name with an empty placeholder and renames tmp over it. Unlike a link,
+// the rename replaces whatever is at dest, so a file another program saves over
+// the placeholder in between is lost; this is the best a link-less filesystem
+// allows.
+func publishByRename(dir, base, tmp string) (string, error) {
+	dest, claim, err := claimDownloadName(dir, base)
+	if err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, dest); err != nil {
 		removeClaim(dest, claim)
 		return "", err
 	}
 	return dest, nil
+}
+
+// downloadCandidate is the i-th name tried for base: base itself, then
+// "stem (i).ext".
+func downloadCandidate(dir, base string, i int) string {
+	if i == 0 {
+		return filepath.Join(dir, base)
+	}
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	return filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, i, ext))
 }
 
 // removeClaim deletes the empty placeholder claimDownloadName created, but only
@@ -157,13 +217,8 @@ func removeClaim(dest string, claim os.FileInfo) {
 // claim are one atomic step — a plain os.Stat check would race another writer
 // between the two.
 func claimDownloadName(dir, base string) (string, os.FileInfo, error) {
-	ext := filepath.Ext(base)
-	stem := strings.TrimSuffix(base, ext)
-	for i := 0; i < maxDownloadCollisions; i++ {
-		dest := filepath.Join(dir, base)
-		if i > 0 {
-			dest = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, i, ext))
-		}
+	for i := range maxDownloadCollisions {
+		dest := downloadCandidate(dir, base, i)
 		f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, downloadFileMode)
 		if err != nil {
 			if os.IsExist(err) {
