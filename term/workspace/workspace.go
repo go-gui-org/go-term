@@ -59,8 +59,12 @@ type Cfg struct {
 	//
 	// The exiting pane's tab is still in the workspace when it runs, so a
 	// Save here records that tab (CWD, font size) and the next launch
-	// restores a fresh shell there. The workspace keeps the tab, dead pane
-	// included, after it returns; Workspace.Close releases it.
+	// restores a fresh shell there. After it returns the workspace reads the
+	// window's close flag: if the hook closed the window, the tab stays for
+	// the rest of the frame (its pane's Term already closed) and later
+	// closes, splits and new tabs are ignored. If the hook kept the window
+	// open, the dead tab is removed — replaced by a fresh shell when it was
+	// the only tab — so the window never sits on a pane that cannot exit.
 	OnLastShellExit func(w *gui.Window)
 
 	// OnColorScheme, when non-nil, runs when the active theme's light/dark
@@ -218,6 +222,9 @@ func (ws *Workspace) removeTab(idx int) bool {
 // closeTabAt closes the tab at idx, focuses a survivor, and refreshes
 // the view. Used by the tab bar close button.
 func (ws *Workspace) closeTabAt(idx int) {
+	if ws.w.CloseRequested() {
+		return // see closePaneInTab: no respawn into a closing window
+	}
 	wasActive := idx == ws.activeTab
 	if !ws.removeTab(idx) {
 		return // window is closing
@@ -269,65 +276,83 @@ func (ws *Workspace) onPaneExit(leafID string) {
 
 // closePaneInTab closes a pane within a specific tab.
 func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
+	// Once the window close is requested the workspace is being torn down.
+	// gui.Window.Close only raises a flag, so a Cmd+W, a tab-bar click or a
+	// second exit queued for the same frame still arrives here. Acting on it
+	// would run the exit hook again (a second Save) or respawn a shell into a
+	// window that is going away. The flag never clears, so this is final.
+	if ws.w.CloseRequested() {
+		return
+	}
 	// Computed once: the same condition decides both "run the exit hook
 	// with live state" and "close the window instead of respawning".
 	lastPane := tab.root.isLeaf()
 	if lastPane && ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1 {
-		// Hand the close to the embedder when it asked for it, so quit-time
-		// work (persisting the workspace) still happens — w.Close alone
-		// bypasses OnCloseRequest. A Save from the hook snapshots the real
-		// tab: the exiting pane's CWD and font size are still readable from
-		// its (dead) Term, and the next launch restores a fresh shell there,
-		// same as after Cmd+Q.
-		//
-		// The tab is deliberately left in place. gui.Window.Close only
-		// raises a flag, so events and commands already queued for this
-		// frame still run and index ws.tabs[ws.activeTab]; an empty slice
-		// would panic there. The hook may also add a tab of its own (a
-		// "keep the window open?" flow), which a teardown here would drop
-		// without closing. Workspace.Close reaps the dead Term with the rest.
-		if ws.cfg.OnLastShellExit != nil {
-			ws.cfg.OnLastShellExit(ws.w)
-		} else {
-			ws.w.Close()
+		ws.exitLastShell(tab, leafID)
+		return
+	}
+	if lastPane {
+		// Last pane in this tab, but other tabs remain (or the embedder
+		// wants a replacement): drop the tab. closeTabAt closes the Term,
+		// focuses the survivor and rebuilds the view.
+		for i, t := range ws.tabs {
+			if t == tab {
+				ws.closeTabAt(i)
+				return
+			}
 		}
 		return
 	}
 	tab.removePane(leafID)
-	if lastPane {
-		// Last pane in this tab, but other tabs remain (or the embedder
-		// wants a replacement): drop the tab.
-		removed := false
-		for i, t := range ws.tabs {
-			if t == tab {
-				if !ws.removeTab(i) {
-					return // window is closing
-				}
-				removed = true
-				break
-			}
-		}
-		if removed {
-			// tab was removed — focus the surviving tab's pane
-			// and rebuild the view.
-			tab := ws.tabs[ws.activeTab]
-			if t, ok := tab.terms[tab.focused]; ok {
-				t.SetFocused(true)
-			}
-			ws.refresh()
-			return
-		}
-	} else {
-		newRoot, survivor := removeLeaf(tab.root, leafID)
-		if newRoot != nil {
-			tab.root = newRoot
-			tab.focused = survivor
-			if t, ok := tab.terms[survivor]; ok {
-				t.SetFocused(true)
-			}
+	if newRoot, survivor := removeLeaf(tab.root, leafID); newRoot != nil {
+		tab.root = newRoot
+		tab.focused = survivor
+		if t, ok := tab.terms[survivor]; ok {
+			t.SetFocused(true)
 		}
 	}
 	ws.refresh()
+}
+
+// exitLastShell handles the last pane of the last tab going away when the
+// embedder asked for the window to close on that.
+//
+// The hook (or the direct close) runs with the tab still in place, so a Save
+// from the hook records the real tab: the exiting pane's CWD and font size are
+// still readable from its Term, and the next launch restores a fresh shell
+// there, same as after Cmd+Q. The hook is how quit-time work happens on this
+// path at all — w.Close alone bypasses OnCloseRequest.
+//
+// What happens next depends on what the hook did, read back from the window's
+// close flag rather than guessed:
+//
+//   - Close requested: the tab stays in ws.tabs. The close takes effect a frame
+//     later, and events and commands already queued for this frame index
+//     ws.tabs[ws.activeTab]. The dead pane's Term is closed now, though, so its
+//     pty, capture tee and recording are released without waiting for
+//     Workspace.Close (which an embedder is not required to call).
+//   - Window kept open (a cancelled "quit?" dialog, or a hook that opened a tab
+//     of its own): the dead tab is removed like any other closed tab. If it was
+//     the only one, removeTab replaces it with a fresh shell, so the window
+//     never sits on a frozen pane whose shell can no longer exit.
+func (ws *Workspace) exitLastShell(tab *tab, leafID string) {
+	if ws.cfg.OnLastShellExit != nil {
+		ws.cfg.OnLastShellExit(ws.w)
+	} else {
+		ws.w.Close()
+	}
+	if ws.w.CloseRequested() {
+		if tm, ok := tab.terms[leafID]; ok {
+			_ = tm.Close()
+		}
+		return
+	}
+	for i, t := range ws.tabs {
+		if t == tab {
+			ws.closeTabAt(i)
+			return
+		}
+	}
 }
 
 // Close tears down all terminals and restores the original OnEvent.
@@ -356,10 +381,10 @@ func (ws *Workspace) LiveTermCount() int {
 
 // ActivePane returns the focused *term.Term, or nil.
 func (ws *Workspace) ActivePane() *term.Term {
-	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs) {
+	tab := ws.activeTabPtr()
+	if tab == nil {
 		return nil
 	}
-	tab := ws.tabs[ws.activeTab]
 	return tab.terms[tab.focused]
 }
 
@@ -452,11 +477,10 @@ func (ws *Workspace) overlayOwnsKeys() bool {
 // keyboard, where the invariant is suspended for exactly as long as the
 // overlay is up.
 func (ws *Workspace) refresh() {
-	if ws.activeTab >= 0 && ws.activeTab < len(ws.tabs) {
-		ws.w.SetTitle(ws.tabs[ws.activeTab].focusedTitle())
+	if tab := ws.activeTabPtr(); tab != nil {
+		ws.w.SetTitle(tab.focusedTitle())
 		// Ensure the active pane owns keyboard focus. No-op when already
 		// correct — cheap atomic compare-and-swap.
-		tab := ws.tabs[ws.activeTab]
 		if t, ok := tab.terms[tab.focused]; ok {
 			t.SetFocused(!ws.overlayOwnsKeys())
 		}
