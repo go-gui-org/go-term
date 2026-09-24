@@ -8,12 +8,10 @@ import (
 	"testing"
 )
 
-// FAT32, exFAT and some SMB shares answer CreateHardLink with these codes.
-// Each must take the rename fallback; before, every download there failed.
+// A link across volumes and ERROR_NOT_SUPPORTED (through Go's mapping to
+// errors.ErrUnsupported) mean no hard links here; both take the rename fallback.
 func TestWriteDownload_FallbackOnWindowsLinkErrors(t *testing.T) {
-	for _, errno := range []syscall.Errno{
-		errorInvalidFunction, errorNotSameDevice, errorNotSupported, errorInvalidParameter,
-	} {
+	for _, errno := range []syscall.Errno{errorNotSameDevice, syscall.Errno(50)} {
 		t.Run(errno.Error(), func(t *testing.T) {
 			dir := t.TempDir()
 			orig := linkFile
@@ -29,5 +27,17 @@ func TestWriteDownload_FallbackOnWindowsLinkErrors(t *testing.T) {
 				t.Errorf("content = %q, %v; want \"payload\"", b, err)
 			}
 		})
+	}
+}
+
+// ERROR_INVALID_FUNCTION and ERROR_INVALID_PARAMETER are too generic to mean
+// "no hard links". Falling back on them would risk the rename path's overwrite
+// window on a volume where links work, so the download fails instead.
+func TestLinkUnsupported_GenericWindowsErrorsDoNotFallBack(t *testing.T) {
+	for _, errno := range []syscall.Errno{1, 87} {
+		err := &os.LinkError{Op: "link", Old: "a", New: "b", Err: errno}
+		if linkUnsupported(err) {
+			t.Errorf("linkUnsupported(errno %d) = true, want false", errno)
+		}
 	}
 }

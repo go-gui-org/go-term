@@ -679,6 +679,35 @@ func TestSplitPane_SpawnFailureKeepsFocus(t *testing.T) {
 	}
 }
 
+// When the focused leaf is not in the tree, splitLeaf cannot place a new pane.
+// splitPane must then spawn nothing: it used to start a shell into tab.terms
+// that no layout showed, and unfocus the source pane, so keys went nowhere.
+func TestSplitPane_StaleFocusSpawnsNothing(t *testing.T) {
+	ws := newLiveWorkspace(t)
+	tab := activeTabOf(t, ws)
+	realLeaf := tab.focused
+	pane := tab.terms[realLeaf]
+	// Keep the Term reachable under the stale ID so the source-pane lookup
+	// still finds it, as it would for a stale focus left behind by a bug.
+	tab.focused = "stale"
+	tab.terms["stale"] = pane
+	t.Cleanup(func() { delete(tab.terms, "stale"); tab.focused = realLeaf })
+	focus := recordFocus(t)
+	before := len(tab.terms)
+
+	ws.splitPane(false)
+
+	if len(tab.terms) != before {
+		t.Errorf("terms = %d, want %d: a pane was spawned outside the tree", len(tab.terms), before)
+	}
+	if v, set := focus[pane]; set && !v {
+		t.Error("splitPane unfocused the source pane although no pane was added")
+	}
+	if !tab.root.isLeaf() {
+		t.Error("split tree changed although the focused leaf was not in it")
+	}
+}
+
 // A pane whose shell exits after the window close was requested keeps its
 // place in the tree (the View and a Save still read it), but its Term must be
 // released right away: its pty, capture tee and recording would otherwise stay
@@ -741,5 +770,86 @@ func TestOnPaneExit_LastShellWaitsForHookDialog(t *testing.T) {
 	}
 	if deadTerm.Alive() {
 		t.Error("dead pane's Term not released once the window closed")
+	}
+}
+
+// The user answers No: the dialog closes and the window stays open. The dead
+// tab must then be replaced by a fresh shell, so the window does not sit on a
+// pane whose shell has exited.
+func TestOnPaneExit_LastShellHookDialogNoRespawns(t *testing.T) {
+	cfg := hermeticCfg(t)
+	cfg.ExitWhenLastShellExits = true
+	cfg.OnLastShellExit = func(w *gui.Window) {
+		w.Dialog(gui.DialogCfg{DialogType: gui.DialogConfirm, Title: "Quit?"})
+	}
+	ws := newLiveWorkspaceCfg(t, cfg)
+	dead := activeTabOf(t, ws)
+	leaf := dead.focused
+
+	ws.onPaneExit(leaf)
+	p := ws.pendingExit
+	if p == nil {
+		t.Fatal("exit not deferred while the hook's dialog is open")
+	}
+
+	ws.w.DialogDismiss()
+	ws.View(ws.w)
+	if ws.pendingExit != nil {
+		t.Fatal("View did not pick up the exit once the dialog closed")
+	}
+	// The queued settle step, as the next frame runs it.
+	ws.resumePendingExit(p)
+
+	if ws.w.CloseRequested() {
+		t.Fatal("window closing although the user answered No")
+	}
+	if len(ws.tabs) != 1 || ws.tabs[0] == dead {
+		t.Fatalf("tabs = %d (dead tab kept: %v), want one fresh tab", len(ws.tabs), ws.tabs[0] == dead)
+	}
+	if pane := ws.ActivePane(); pane == nil || !pane.Alive() {
+		t.Error("replacement tab has no live shell")
+	}
+}
+
+// A dialog that is already open when the last shell exits (About, an error)
+// is not the hook's. The hook must still get to ask: it used to run at once,
+// return early because a dialog was up, and the exit then settled when the
+// unrelated dialog closed, respawning a shell without ever asking.
+func TestOnPaneExit_LastShellWaitsForUnrelatedDialogBeforeHook(t *testing.T) {
+	cfg := hermeticCfg(t)
+	cfg.ExitWhenLastShellExits = true
+	hookRuns := 0
+	cfg.OnLastShellExit = func(w *gui.Window) {
+		hookRuns++
+		// The onCloseRequest pattern: never stack a second dialog.
+		if w.DialogIsVisible() {
+			return
+		}
+		w.Dialog(gui.DialogCfg{DialogType: gui.DialogConfirm, Title: "Quit?"})
+	}
+	ws := newLiveWorkspaceCfg(t, cfg)
+	dead := activeTabOf(t, ws)
+	leaf := dead.focused
+	ws.w.Dialog(gui.DialogCfg{DialogType: gui.DialogMessage, Title: "About"})
+
+	ws.onPaneExit(leaf)
+	if hookRuns != 0 {
+		t.Fatalf("hook ran %d times while another dialog was open, want 0", hookRuns)
+	}
+
+	// The About panel closes: the hook now runs and opens its own dialog.
+	p := ws.pendingExit
+	ws.w.DialogDismiss()
+	ws.View(ws.w)
+	ws.resumePendingExit(p)
+	if hookRuns != 1 || !ws.w.DialogIsVisible() {
+		t.Fatalf("hook runs = %d, dialog visible = %v; want the hook to ask once",
+			hookRuns, ws.w.DialogIsVisible())
+	}
+	if len(ws.tabs) != 1 || ws.tabs[0] != dead {
+		t.Error("dead tab replaced before the user answered the hook's dialog")
+	}
+	if ws.pendingExit == nil || ws.pendingExit.hookPending {
+		t.Error("exit not waiting on the hook's own dialog")
 	}
 }

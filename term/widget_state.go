@@ -484,11 +484,16 @@ type Term struct {
 	dlQueue   chan downloadJob
 	dlDone    chan struct{}
 	dlPending atomic.Int64
-	// dlWg tracks the download worker. It is not part of loopWg on purpose:
-	// Close must not wait for a transfer's synced write, which runs on the
-	// main thread's time. The worker touches no Term state that Close tears
-	// down (see downloadWorker), so it may finish after Close returns.
-	dlWg sync.WaitGroup
+	// dlExited is closed when the download worker returns. Close waits on it,
+	// but only up to downloadCloseWait (see stopDownloadWorker).
+	//
+	// dlGate decides whether the worker may still call the embedder's
+	// callbacks (OnDownload, OnNotify). Close shuts it before it returns, so
+	// no callback starts after that. One atomic instead of a mutex: the worker
+	// claims the gate with a compare-and-swap, and Close's store makes every
+	// later claim fail.
+	dlExited chan struct{}
+	dlGate   atomic.Int32
 
 	// autoScrollDir drives the selection auto-scroll goroutine during a
 	// drag that extends outside the widget (-1 = toward live,

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -179,8 +181,8 @@ func newDownloadTerm(t *testing.T, cfg Cfg) *Term {
 	t.Cleanup(func() {
 		if tm.dlDone != nil {
 			close(tm.dlDone)
+			<-tm.dlExited
 		}
-		tm.dlWg.Wait()
 	})
 	return tm
 }
@@ -545,42 +547,116 @@ func TestWriteDownload_PublishStartsAtFirstFreeName(t *testing.T) {
 	}
 }
 
-// Close runs on the main thread. A transfer being staged and synced when the
-// pane closes must finish in the background: Close used to wait for it, which
-// froze the window for as long as the fsync took.
-func TestClose_DoesNotWaitForDownloadWrite(t *testing.T) {
-	entered := make(chan struct{})
-	release := make(chan struct{})
+// blockStaging makes the next staged write wait until the returned release is
+// called. entered is closed once the worker reaches the write.
+func blockStaging(t *testing.T) (entered <-chan struct{}, release func()) {
+	t.Helper()
+	in := make(chan struct{})
+	gate := make(chan struct{})
+	var once sync.Once
 	orig := stageDownload
 	t.Cleanup(func() { stageDownload = orig })
 	stageDownload = func(dir, base string, data []byte, perm os.FileMode) (string, error) {
-		close(entered)
-		<-release
+		close(in)
+		<-gate
 		return orig(dir, base, data, perm)
 	}
+	return in, func() { once.Do(func() { close(gate) }) }
+}
 
-	tm, err := New(gui.NewWindow(gui.WindowCfg{}), Cfg{
-		DownloadDir: t.TempDir(),
-		OnNotify:    func(string, string) {},
-	})
+// newClosableDownloadTerm builds a real Term (so Close runs its full path)
+// with the built-in writer saving to dir.
+func newClosableDownloadTerm(t *testing.T, dir string, onNotify func(string, string)) *Term {
+	t.Helper()
+	tm, err := New(gui.NewWindow(gui.WindowCfg{}), Cfg{DownloadDir: dir, OnNotify: onNotify})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	// Runs after the worker is released, so TempDir cleanup never races it.
-	t.Cleanup(func() { close(release); tm.dlWg.Wait() })
+	return tm
+}
+
+func waitClosed(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal(what)
+	}
+}
+
+// An embedder usually exits the process right after Close. A transfer being
+// written at that moment must be published before Close returns; otherwise the
+// exit kills the write and leaves the hidden staging file in the download dir.
+func TestClose_WaitsForDownloadWrite(t *testing.T) {
+	entered, release := blockStaging(t)
+	dir := t.TempDir()
+	tm := newClosableDownloadTerm(t, dir, func(string, string) {})
+	t.Cleanup(func() { release(); <-tm.dlExited })
 
 	feedTermDownload(t, tm, "x.bin", []byte("payload"))
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("download never reached the staging write")
+	waitClosed(t, entered, "download never reached the staging write")
+	// Release the write a moment after Close starts, well inside the wait.
+	time.AfterFunc(50*time.Millisecond, release)
+	_ = tm.Close()
+
+	b, err := os.ReadFile(filepath.Join(dir, "x.bin"))
+	if err != nil || string(b) != "payload" {
+		t.Fatalf("after Close: content = %q, %v; want the published payload", b, err)
 	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("download dir = %v, want only x.bin (no staging file left)", entries)
+	}
+}
+
+// Close runs on the main thread, so its wait for a slow write is bounded. When
+// the wait runs out, the write still finishes in the background, but no
+// embedder callback may run after Close has returned.
+func TestClose_BoundedWaitThenNoCallbacks(t *testing.T) {
+	origWait := downloadCloseWait
+	t.Cleanup(func() { downloadCloseWait = origWait })
+	downloadCloseWait = 50 * time.Millisecond
+
+	entered, release := blockStaging(t)
+	dir := t.TempDir()
+	var notified atomic.Int32
+	tm := newClosableDownloadTerm(t, dir, func(string, string) { notified.Add(1) })
+	t.Cleanup(func() { release(); <-tm.dlExited })
+
+	feedTermDownload(t, tm, "x.bin", []byte("payload"))
+	waitClosed(t, entered, "download never reached the staging write")
 
 	closed := make(chan struct{})
 	go func() { _ = tm.Close(); close(closed) }()
-	select {
-	case <-closed:
-	case <-time.After(3 * time.Second):
-		t.Fatal("Close blocked on an in-flight download write")
+	waitClosed(t, closed, "Close blocked past its bounded wait")
+
+	release()
+	waitClosed(t, tm.dlExited, "worker never exited")
+	if n := notified.Load(); n != 0 {
+		t.Errorf("OnNotify called %d times after Close returned, want 0", n)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "x.bin")); err != nil || string(b) != "payload" {
+		t.Errorf("background write: content = %q, %v; want payload", b, err)
+	}
+}
+
+// The gate is what keeps OnDownload and OnNotify from running after Close
+// returns: once shut, no new callback starts, and a shut during a callback
+// is not undone when the callback ends.
+func TestWithDownloadGate_ShutBlocksCallbacks(t *testing.T) {
+	var tm Term
+	ran := tm.withDownloadGate(func() {})
+	if !ran {
+		t.Fatal("open gate refused the callback")
+	}
+	tm.dlGate.Store(dlGateShut)
+	if tm.withDownloadGate(func() { t.Error("callback ran after the gate shut") }) {
+		t.Error("shut gate reported the callback as run")
+	}
+	// Shutting the gate while a callback runs must keep it shut afterwards.
+	tm.dlGate.Store(dlGateOpen)
+	tm.withDownloadGate(func() { tm.dlGate.Store(dlGateShut) })
+	if got := tm.dlGate.Load(); got != dlGateShut {
+		t.Errorf("gate = %d after a shut during a callback, want shut", got)
 	}
 }
