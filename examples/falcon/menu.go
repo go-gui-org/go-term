@@ -197,7 +197,7 @@ var aboutIconFile = sync.OnceValue(func() string {
 //
 // Laid out like the Ghostty about panel — icon, tagline, a right-aligned
 // label column of build metadata, then links out to the docs and the repo.
-// That needs DialogCustom, the only dialog type that renders CustomContent.
+// That needs DialogCustom, the only dialog type that renders CustomView.
 //
 // There is no OK button and no default button: the panel reports, it does
 // not ask, so nothing here is worth a highlighted target. Escape dismisses
@@ -335,8 +335,10 @@ func aboutDialogCfg(theme gui.Theme) gui.DialogCfg {
 		// Dialog() focuses FocusID on open. It points at the invisible key
 		// holder rather than at Docs or GitHub: focusing a link would make
 		// Enter open a browser, which is the opposite of dismissing.
-		FocusID:       aboutKeysID,
-		CustomContent: []gui.View{aboutKeys(content)},
+		FocusID: aboutKeysID,
+		CustomView: func(*gui.Window) gui.View {
+			return aboutKeys(content)
+		},
 		// go-gui's dialog root calls OnCancelNo when Escape dismisses.
 		// Not a button callback here — the panel has no buttons — just
 		// the notification that tells the outside-click hook to retire.
