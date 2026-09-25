@@ -118,9 +118,20 @@ func TestAboutDialogKeyboardContract(t *testing.T) {
 	if cfg.OnCancelNo == nil {
 		t.Error("OnCancelNo is nil: Escape would leave the hook installed")
 	}
-	if len(cfg.CustomContent) != 1 {
-		t.Errorf("CustomContent has %d views, want 1 (the key holder)",
-			len(cfg.CustomContent))
+	if cfg.CustomView == nil {
+		t.Fatal("CustomView is nil: the About panel has no body")
+	}
+	// The view builds fresh on every dialog frame, so it must hand back
+	// the key holder each time — not a cached or empty subtree.
+	w := gui.NewTestWindow(gui.WindowCfg{})
+	view := cfg.CustomView(w)
+	if view == nil {
+		t.Fatal("CustomView returned nil")
+	}
+	layout := gui.GenerateViewLayout(view, w)
+	if _, ok := layout.FindByID(aboutKeysID); !ok {
+		t.Errorf("CustomView result has no %q holder: Enter would hit "+
+			"a link, not dismiss", aboutKeysID)
 	}
 }
 
