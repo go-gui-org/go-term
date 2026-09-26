@@ -233,8 +233,12 @@ func (p *parser) dispatchOSC() {
 			return
 		}
 		// iTerm2-style notification: OSC 9 ; message BEL — body only, no title.
-		if p.onNotify != nil {
-			p.onNotify("", truncatePaste(sanitizeNotifyBody(pt), notifyMax))
+		// An empty body notifies nothing; dropping it keeps a stray
+		// sequence from popping a blank desktop prompt.
+		if body := truncatePaste(sanitizeNotifyBody(pt), notifyMax); body != "" {
+			if p.onNotify != nil {
+				p.onNotify("", body)
+			}
 		}
 	case 52:
 		// A payload that hit maxOSC52Bytes lost its tail. Dropping it keeps the
@@ -267,9 +271,13 @@ func (p *parser) dispatchOSC() {
 		if len(parts) == 3 {
 			title, body = parts[1], parts[2]
 		}
+		title = truncatePaste(sanitizeOSCString(title), notifyMax)
+		body = truncatePaste(sanitizeNotifyBody(body), notifyMax)
+		if title == "" && body == "" {
+			return // notifies nothing; see the OSC 9 empty-body drop above
+		}
 		if p.onNotify != nil {
-			p.onNotify(truncatePaste(sanitizeOSCString(title), notifyMax),
-				truncatePaste(sanitizeNotifyBody(body), notifyMax))
+			p.onNotify(title, body)
 		}
 	case 1337:
 		p.handleOSC1337(pt)

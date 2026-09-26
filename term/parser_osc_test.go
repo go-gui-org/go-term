@@ -672,6 +672,31 @@ func TestParser_OSC777_UnknownSubcommandDropped(t *testing.T) {
 	}
 }
 
+func TestParser_OSC9_EmptyBodyDropped(t *testing.T) {
+	// A bare "OSC 9;" notifies nothing — it must not pop a blank prompt.
+	g, p := newParserGrid(4, 8)
+	called := false
+	g.Mu.Lock()
+	p.SetNotifyHandler(func(title, body string) { called = true })
+	g.Mu.Unlock()
+	feed(t, g, p, []byte("\x1b]9;\x07"))
+	if called {
+		t.Fatal("OSC 9 with empty body should be dropped")
+	}
+}
+
+func TestParser_OSC777_EmptyDropped(t *testing.T) {
+	g, p := newParserGrid(4, 8)
+	called := false
+	g.Mu.Lock()
+	p.SetNotifyHandler(func(title, body string) { called = true })
+	g.Mu.Unlock()
+	feed(t, g, p, []byte("\x1b]777;notify;;\x07"))
+	if called {
+		t.Fatal("OSC 777 with empty title and body should be dropped")
+	}
+}
+
 func TestParser_OSC9_NoHandlerNoPanic(t *testing.T) {
 	g, p := newParserGrid(4, 8)
 	// handler not registered — must not panic

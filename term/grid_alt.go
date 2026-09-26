@@ -90,13 +90,12 @@ func (g *grid) EnterAlt() {
 	g.Graphics = nil
 	g.occludeMaxR = 0
 	cells := make([]cell, g.Rows*g.Cols)
-	blank := defaultCell()
-	for i := range cells {
-		cells[i] = blank
-	}
 	g.Cells = cells
 	g.slots, g.rowMap = nil, nil // mainSaved owns the main layout arrays now
 	g.resetRows()
+	// Fill through the row accessor, never flat over Cells: the screen slab
+	// can hold rows owned by scrollback, and only g.row knows the layout.
+	g.fillScreen(defaultCell())
 	g.RowWrapped = make([]bool, g.Rows)
 	g.CursorR, g.CursorC = 0, 0
 	g.CurFG, g.CurBG, g.CurAttrs = defaultColor, defaultColor, 0
@@ -136,13 +135,11 @@ func (g *grid) ExitAlt() {
 		}
 	} else {
 		g.Cells = make([]cell, g.Rows*g.Cols)
-		blank := defaultCell()
-		for i := range g.Cells {
-			g.Cells[i] = blank
-		}
 		g.slots, g.rowMap = nil, nil
 		g.rowsBorrowed = false
 		g.resetRows()
+		// Same row-accessor rule as EnterAlt above: no flat fill over Cells.
+		g.fillScreen(defaultCell())
 	}
 	if len(g.mainSaved.rowWrapped) == g.Rows {
 		g.RowWrapped = g.mainSaved.rowWrapped

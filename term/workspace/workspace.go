@@ -779,10 +779,14 @@ func (ws *Workspace) tabBarView() gui.View {
 	buttons := make([]gui.View, 0, len(ws.tabs)*2)
 	for i, tab := range ws.tabs {
 		if i > 0 {
-			sep := tight(gui.FixedFill)
-			sep.Width = 1
-			sep.Color = theme.ColorBorder
-			buttons = append(buttons, gui.Column(sep))
+			// Rectangle, not a thin Column: containers pick up the
+			// theme's padding and would inset the rule from the bar
+			// edges (see themeDivider).
+			buttons = append(buttons, gui.Rectangle(gui.RectangleCfg{
+				Sizing: gui.FixedFill,
+				Width:  1,
+				Color:  theme.ColorBorder,
+			}))
 		}
 		isActive := i == ws.activeTab
 		buttons = append(buttons, ws.tabButton(theme, tab, isActive, i))

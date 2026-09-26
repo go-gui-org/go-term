@@ -79,6 +79,11 @@ type Cfg struct {
 	// the widget fires a native OS notification via osascript (macOS),
 	// notify-send (Linux), or a WinRT toast (Windows). Called on a
 	// background goroutine — safe to block.
+	//
+	// Both strings are terminal output — untrusted. The widget strips
+	// control bytes and drops empty notifications, but the text itself
+	// is child-chosen: a hostile payload can spoof prompts ("Update
+	// required"), so display it verbatim and never act on it.
 	OnNotify func(title, body string)
 
 	// OnActivity, if non-nil, is called on the main thread when the child

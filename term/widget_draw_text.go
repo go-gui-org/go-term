@@ -1,8 +1,8 @@
 package term
 
 import (
-	"strings"
 	"time"
+	"unicode/utf8"
 
 	glyph "github.com/go-gui-org/go-glyph"
 	"github.com/go-gui-org/go-gui/gui"
@@ -305,7 +305,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 	var fr flushState
 	for r := ds.renderTop; r < ds.renderRows; r++ {
 		fr.open = false
-		t.draw.runBuf.Reset()
+		t.draw.runBuf = t.draw.runBuf[:0]
 		fr.cols = 0
 		// rowY is constant across the row: hoist it out of the per-cell
 		// emit path (each call pays a float64 Round plus a snap).
@@ -348,7 +348,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 			}
 			if isPlainSpace {
 				if fr.open && k == fr.key {
-					t.draw.runBuf.WriteRune(' ')
+					t.draw.runBuf = append(t.draw.runBuf, ' ')
 					fr.cols++
 				} else {
 					t.flushRun(dc, r, style, yOff, &fr)
@@ -356,7 +356,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 				continue
 			}
 			if fr.open && k == fr.key {
-				t.draw.runBuf.WriteRune(cell.Ch)
+				t.draw.runBuf = utf8.AppendRune(t.draw.runBuf, cell.Ch)
 				fr.cols++
 			} else {
 				t.flushRun(dc, r, style, yOff, &fr)
@@ -364,7 +364,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 				fr.start = c
 				fr.cols = 1
 				fr.key = k
-				t.draw.runBuf.WriteRune(cell.Ch)
+				t.draw.runBuf = utf8.AppendRune(t.draw.runBuf, cell.Ch)
 			}
 		}
 		t.flushRun(dc, r, style, yOff, &fr)
@@ -373,25 +373,29 @@ func (t *Term) drawFgPass(ds *drawState) {
 }
 
 // flushRun draws the accumulated text run as a single dc.Text call with
-// optional underline decoration, then resets the run state.
+// optional underline decoration, then resets the run state. Trailing spaces
+// are trimmed by reslicing the byte buffer before the single string
+// conversion, so an undecorated run costs exactly one allocation: "abc   "
+// and "abc" still share a layout-cache entry, keeping cache hits stable as
+// tail padding wobbles frame to frame.
 func (t *Term) flushRun(dc *gui.DrawContext, r int, style gui.TextStyle, yOff float32, fr *flushState) {
-	if !fr.open || t.draw.runBuf.Len() == 0 {
+	buf := t.draw.runBuf
+	if !fr.open || len(buf) == 0 {
 		fr.open = false
 		return
 	}
-	text := t.draw.runBuf.String()
-	// Trim trailing spaces when no decoration spans them: "abc   " and
-	// "abc" share a layout-cache entry, so trimming keeps cache hits
-	// stable as tail padding wobbles frame to frame.
 	if fr.key.ulStyle == ulNone && !fr.key.strikethrough && !fr.key.overline {
-		text = strings.TrimRight(text, " ")
-		if text == "" {
+		for len(buf) > 0 && buf[len(buf)-1] == ' ' {
+			buf = buf[:len(buf)-1]
+		}
+		if len(buf) == 0 {
 			fr.open = false
-			t.draw.runBuf.Reset()
+			t.draw.runBuf = t.draw.runBuf[:0]
 			fr.cols = 0
 			return
 		}
 	}
+	text := string(buf)
 	cs := style
 	cs.Color = fr.key.color
 	cs.Typeface = fr.key.typeface
@@ -412,7 +416,7 @@ func (t *Term) flushRun(dc *gui.DrawContext, r int, style gui.TextStyle, yOff fl
 		}
 	}
 	fr.open = false
-	t.draw.runBuf.Reset()
+	t.draw.runBuf = t.draw.runBuf[:0]
 	fr.cols = 0
 }
 

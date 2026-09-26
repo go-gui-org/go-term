@@ -128,13 +128,12 @@ func (t *Term) SetMinimumContrast(ratio float64) {
 		return
 	}
 	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
 	if t.grid.MinContrast == ratio {
-		t.grid.Mu.Unlock()
 		return
 	}
 	t.grid.MinContrast = ratio
 	t.grid.contrast.reset()
-	t.grid.Mu.Unlock()
 	t.bumpVersion()
 	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 }
@@ -162,14 +161,13 @@ func (t *Term) SetScrollbarWidth(px float32) {
 func (t *Term) SetCursorStyle(s CursorStyle) {
 	s = validCursorStyle(s)
 	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
 	if t.grid.defaultShape == s && t.grid.cursorShape == s {
-		t.grid.Mu.Unlock()
 		return
 	}
 	t.grid.defaultShape = s
 	t.grid.cursorShape = s
 	t.grid.markDirty(t.grid.CursorR)
-	t.grid.Mu.Unlock()
 	t.bumpVersion()
 	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 }
@@ -182,14 +180,13 @@ func (t *Term) SetCursorStyle(s CursorStyle) {
 // blinkLoop, which sleeps indefinitely while nothing is animating.
 func (t *Term) SetCursorBlink(on bool) {
 	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
 	if t.grid.defaultBlink == on && t.grid.CursorBlink == on {
-		t.grid.Mu.Unlock()
 		return
 	}
 	t.grid.defaultBlink = on
 	t.grid.CursorBlink = on
 	t.grid.markDirty(t.grid.CursorR)
-	t.grid.Mu.Unlock()
 	// Main-thread only, like the rest of this file: cursorEpoch is read by
 	// the draw pass, which also runs there.
 	t.cursorEpoch = time.Now()
@@ -204,10 +201,9 @@ func (t *Term) SetCursorBlink(on bool) {
 // "revert now". A caller that wants both calls SetCursorStyle as well.
 func (t *Term) SetCursorLocked(locked bool) {
 	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
 	if t.grid.cursorLocked == locked {
-		t.grid.Mu.Unlock()
 		return
 	}
 	t.grid.cursorLocked = locked
-	t.grid.Mu.Unlock()
 }

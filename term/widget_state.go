@@ -3,7 +3,6 @@ package term
 import (
 	"io"
 	"regexp"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,7 +77,9 @@ type resizeState struct {
 // grid.Mu-guarded state plus the thread-safe queueCommand path. armedAt
 // tracks which BeginSync the timer was armed for so re-arming happens once
 // per block, not once per chunk. Both fields are written only by the
-// reader goroutine (Close stops the timer after readLoop has exited).
+// reader goroutine; Close stops the timer after the readLoop wait and the
+// reader stops re-arming once Close has started, so a stuck readLoop can
+// neither revive the timer past teardown nor Reset a stopped one.
 type syncState struct {
 	timer   *time.Timer
 	armedAt time.Time
@@ -280,8 +281,11 @@ type drawBufs struct {
 	// pxScale is the device-pixel ratio captured at the top of the current
 	// onDraw (dc.Scale, sanitized). Cell origins are snapped to that grid —
 	// see Term.snapPx — so it must be set before any pass runs.
-	pxScale     float32
-	runBuf      strings.Builder
+	pxScale float32
+	// runBuf accumulates the current foreground text run as UTF-8 bytes.
+	// A []byte (not strings.Builder) so flushRun can trim trailing
+	// spaces by reslicing and convert to string exactly once per run.
+	runBuf      []byte
 	runeCache   map[rune]string // caches string(r) for non-ASCII runes
 	vMatchBuf   [][]vMatch      // pre-allocated search-highlight rows
 	selBuf      []rowBounds     // pre-allocated selection-bound rows

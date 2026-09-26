@@ -166,9 +166,15 @@ func (ds *drawState) resolveCell(r, c int) cell {
 	// Search matches invert; selection tints. Search runs first so a cell that
 	// is both keeps the inverted match colors, with the selection tint blended
 	// on top of them rather than the two effects cancelling out.
+	// Matches arrive in viewport order with columns ascending per row (both
+	// ViewportMatches and ViewportMatchesRegex scan rows top-down, matches
+	// left-to-right), so the scan stops at the first span past the cell.
 	if ds.vMatchesByRow != nil {
 		for _, m := range ds.vMatchesByRow[r] {
-			if c >= m.col && c < m.col+m.len {
+			if m.col > c {
+				break
+			}
+			if c < m.col+m.len {
 				cell.Attrs ^= attrInverse
 				break
 			}
@@ -239,7 +245,10 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	}
 	cols := clampDim(int(dc.Width / t.cellW))
 	rows := clampDim(int(dc.Height / t.cellH))
-	t.draw.runBuf.Grow(cols * 4) // one row of text, worst-case UTF-8; no-op when cap sufficient
+	// One row of text, worst-case UTF-8; no-op when cap sufficient.
+	if cap(t.draw.runBuf) < cols*4 {
+		t.draw.runBuf = make([]byte, 0, cols*4)
+	}
 
 	now := time.Now()
 	// Window-state reads stay outside grid.Mu: scrollbarEdgeInset reaches

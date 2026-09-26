@@ -174,7 +174,11 @@ func (t *Term) commitHint(idx int, w *gui.Window) {
 	t.exitHints(w)
 	switch verb {
 	case hintCopy:
-		if w != nil {
+		// The URL is terminal output — untrusted. A hostile OSC 8
+		// destination can carry a newline plus shell commands, which
+		// execute on the next paste when bracketed paste is off. Copy
+		// nothing rather than half a payload: fail closed like openURL.
+		if w != nil && safeClipboardText(url) {
 			w.SetClipboard(url)
 			// Mirror copySelection: PRIMARY is independent of CLIPBOARD, so
 			// writing both costs the user nothing and makes middle-click paste
@@ -186,6 +190,23 @@ func (t *Term) commitHint(idx int, w *gui.Window) {
 		// destination is no more dangerous here than under Cmd+click.
 		openURLFn(url)
 	}
+}
+
+// safeClipboardText reports whether s may be placed on the clipboard as-is.
+// Legitimate URLs never contain C0 controls, DEL, or a double quote; a paste
+// of such bytes is a paste-hijack vector (embedded newline + commands), so
+// the copy is refused instead of sanitized — same fail-closed rule as
+// openURLCommand.
+func safeClipboardText(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7F || s[i] == '"' {
+			return false
+		}
+	}
+	return true
 }
 
 // toLowerASCII lowercases A–Z and leaves everything else alone. The label
