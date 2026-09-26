@@ -264,6 +264,44 @@ func TestHintLabelCol_PrefersBlankCellsLeft(t *testing.T) {
 	}
 }
 
+func TestHints_CopyVerbRejectsControlBytes(t *testing.T) {
+	// A hostile OSC 8 destination carrying a newline plus commands must
+	// not reach the clipboard: it would execute on the next paste when
+	// bracketed paste is off. Fail closed — copy nothing.
+	tm, w, clip, _ := hintTerm(40, "see https://visible.example now")
+	linkCells(tm.grid, 0, 4, 26, "https://evil.example\ntouch /tmp/pwned")
+
+	key(tm, w, gui.KeyY, hintsMods)
+	press(tm, w, 'a')
+
+	if *clip != "" {
+		t.Errorf("clipboard = %q, want empty (hostile URL refused)", *clip)
+	}
+	if tm.hints.active {
+		t.Error("hints mode still active after commit")
+	}
+}
+
+func TestSafeClipboardText(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+	}{
+		{"https://go.dev", true},
+		{"mailto:a@b.example", true},
+		{"", false},
+		{"https://x.example\necho pwned", false},
+		{"https://x.example\recho", false},
+		{"https://x.example\x7f", false},
+		{`https://x.example"`, false},
+		{"https://x.example/a\tb", false},
+	} {
+		if got := safeClipboardText(tc.in); got != tc.want {
+			t.Errorf("safeClipboardText(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestHintLabelCol_FallsBackAtLineStart(t *testing.T) {
 	// A link in column 0 has nowhere to the left to go.
 	g := newGrid(3, 40)

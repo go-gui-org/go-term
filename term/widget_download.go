@@ -350,9 +350,14 @@ func claimDownloadName(dir, base string, start int) (string, os.FileInfo, error)
 			return err
 		}
 		fi, err := f.Stat()
-		_ = f.Close()
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
 		if err != nil {
 			_ = os.Remove(dest)
+			return err
+		}
+		if err := checkClaimFile(fi, dest); err != nil {
 			return err
 		}
 		claim = fi
@@ -362,4 +367,26 @@ func claimDownloadName(dir, base string, start int) (string, os.FileInfo, error)
 		return "", nil, err
 	}
 	return dest, claim, nil
+}
+
+// checkClaimFile verifies the placeholder just created at dest is really the
+// file opened above. O_EXCL follows a pre-existing symlink to a missing
+// target on some platforms, so the create can plant the placeholder outside
+// dir when another writer raced a link into place after the Lstat probe.
+// Lstat the name back: anything but the file just created means the claim
+// missed, and the name counts as taken (fs.ErrExist). Only a link itself is
+// removed — never its target, and never another program's file that replaced
+// the placeholder in between (that case just tries the next name).
+func checkClaimFile(fi os.FileInfo, dest string) error {
+	li, err := os.Lstat(dest)
+	switch {
+	case err != nil:
+		return fs.ErrExist
+	case li.Mode()&os.ModeSymlink != 0:
+		_ = os.Remove(dest)
+		return fs.ErrExist
+	case !os.SameFile(fi, li):
+		return fs.ErrExist
+	}
+	return nil
 }

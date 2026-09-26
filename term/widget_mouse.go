@@ -929,6 +929,12 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 // An explicit OSC 8 destination wins; otherwise implicit URL detection runs
 // at the same cell, matching the precedence the Cmd-hover highlight uses.
 // Returns "" when the cell carries no link.
+//
+// Destination-wins is the standard OSC 8 semantic (every hyperlink-capable
+// terminal resolves the same way), so a dest that disagrees with the visible
+// text is inherent to the protocol, not a bug here. The open path stays safe
+// because openURLCommand allowlists the scheme and rejects control bytes;
+// the copy path is gated separately by safeClipboardText.
 func (t *Term) linkURLAt(r, c int) string {
 	t.grid.Mu.Lock()
 	defer t.grid.Mu.Unlock()

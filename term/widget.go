@@ -585,10 +585,12 @@ func (t *Term) Close() error {
 	}
 	// readLoop has exited (or is deemed stuck); the capture tee and the
 	// session recording have no writer left, so both files can be closed.
-	// Skipped on the stuck path only if readLoop later revives — its writes
-	// then land on a closed recorder, which is a no-op.
+	// The capture field is deliberately left non-nil: on the stuck path
+	// readLoop may still be alive and call capture.Output concurrently,
+	// and a plain-field store here would race that load. A closed
+	// Recorder is already a no-op (see recfmt.writeFrame), so nil-ing
+	// buys nothing and costs a data race.
 	_ = t.capture.Close()
-	t.capture = nil
 	if r := t.rec.Swap(nil); r != nil {
 		if err := r.Close(); err != nil {
 			log.Printf("term: recording close: %v", err)

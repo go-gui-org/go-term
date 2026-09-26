@@ -2,6 +2,8 @@ package term
 
 import (
 	"encoding/base64"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -469,6 +471,93 @@ func TestRemoveClaim_KeepsReplacedFile(t *testing.T) {
 	if err != nil || string(got) != "user data" {
 		t.Errorf("replaced file = %q, %v; want it kept", got, err)
 	}
+}
+
+// A planted symlink at a candidate name must not redirect the rename
+// fallback's placeholder outside the download dir. On Linux O_EXCL follows a
+// dangling link to its (missing) target and creates it; on BSD the create
+// itself fails with EEXIST. Either way the name counts as taken, the next
+// suffix is used, and nothing lands outside dir.
+func TestClaimDownloadName_SymlinkSkipped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privilege")
+	}
+	dir := t.TempDir()
+	// Nonexistent target: an existing one already fails the create with
+	// EEXIST, so only a dangling link exercises the redirect.
+	target := filepath.Join(t.TempDir(), "redirected")
+	if err := os.Symlink(target, filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	dest, _, err := claimDownloadName(dir, "a.txt", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(dest) != "a (1).txt" {
+		t.Errorf("dest = %q; want the next free name", dest)
+	}
+	// Its target is never created, whatever the platform's link semantics.
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Errorf("redirect target created: %v", err)
+	}
+	removeClaim(dest, mustClaim(t, dest))
+}
+
+// checkClaimFile is what keeps a raced-in link from passing as a claim.
+// Tested directly because the create-follows-link behavior it guards is
+// platform-specific (Linux follows, BSD refuses) and unreachable from
+// claimDownloadName on some platforms.
+func TestCheckClaimFile_RejectsLink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privilege")
+	}
+	dir := t.TempDir()
+	// A real placeholder somewhere else stands in for the opened file.
+	other, err := os.Create(filepath.Join(dir, "real"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, err := other.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = other.Close()
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(filepath.Join(dir, "real"), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkClaimFile(fi, link); !errors.Is(err, fs.ErrExist) {
+		t.Errorf("checkClaimFile(link) = %v; want ErrExist", err)
+	}
+	// The link itself is removed; its target survives.
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Errorf("raced link still present: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "real")); err != nil {
+		t.Errorf("link target removed: %v", err)
+	}
+}
+
+func TestCheckClaimFile_AcceptsOwnFile(t *testing.T) {
+	dir := t.TempDir()
+	dest, claim, err := claimDownloadName(dir, "a.bin", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer removeClaim(dest, claim)
+	if err := checkClaimFile(claim, dest); err != nil {
+		t.Errorf("checkClaimFile(own) = %v; want nil", err)
+	}
+}
+
+// mustClaim stats dest for removeClaim's identity check.
+func mustClaim(t *testing.T, dest string) os.FileInfo {
+	t.Helper()
+	fi, err := os.Stat(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fi
 }
 
 // Only "this filesystem has no hard links" errors may switch to the rename

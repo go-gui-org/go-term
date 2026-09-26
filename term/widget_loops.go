@@ -393,9 +393,12 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 	}
 	// This chunk left a sync block open: arm the watchdog so a stalled or
 	// dead application cannot suppress repaints past syncUpdateTimeout.
-	// armedAt keys on SyncBegan so each block arms exactly once.
+	// armedAt keys on SyncBegan so each block arms exactly once. Skipped
+	// once Close has started: the timer is stopped there, and re-arming
+	// from a still-draining readLoop would revive it past teardown (its
+	// fire is a no-op via the closed guard, but never arming is cleaner).
 	var syncDeadline time.Time
-	if t.grid.SyncActive && t.grid.SyncBegan != t.sync.armedAt {
+	if !t.closed.Load() && t.grid.SyncActive && t.grid.SyncBegan != t.sync.armedAt {
 		t.sync.armedAt = t.grid.SyncBegan
 		syncDeadline = t.grid.SyncBegan.Add(syncUpdateTimeout)
 	}
