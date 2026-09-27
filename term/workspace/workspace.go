@@ -810,6 +810,10 @@ func (ws *Workspace) tabButton(theme gui.Theme, tab *tab, isActive bool, idx int
 	title = truncateTitle(title, 30)
 	inner := tight(gui.FillFit)
 	inner.Padding = gui.NewPadding(1, 6, 1, 6)
+	// The title, the activity marker and the close glyph have different line
+	// heights, so the row is as tall as the tallest of them. Without this the
+	// shorter ones sit on the row's top edge.
+	inner.VAlign = gui.VAlignMiddle
 
 	content := make([]gui.View, 0, 4)
 	// The activity marker leads the title. Only background tabs carry one —
@@ -864,6 +868,7 @@ func (ws *Workspace) tabButton(theme gui.Theme, tab *tab, isActive bool, idx int
 
 	outer := tight(gui.FillFit)
 	outer.Color = bg
+	outer.VAlign = gui.VAlignMiddle
 	outer.OnClick = func(ctx gui.EventCtx) {
 		ws.activateTab(idx)
 	}
