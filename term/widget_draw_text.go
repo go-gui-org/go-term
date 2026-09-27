@@ -313,7 +313,14 @@ func (t *Term) drawFgPass(ds *drawState) {
 		for c := range cols {
 			cell := ds.resolveVisual(r, c)
 			if cell.Width == 0 && cell.Ch == 0 {
-				continue // continuation cell; skip without breaking run
+				// Continuation cell of a wide character — the Width==2 branch
+				// below already closed the run before emitting the head, so
+				// this flush is a no-op there. It matters for a *gap*: a
+				// zero-valued cell no wide char owns. Skipping that silently
+				// would keep the run open across a column it contributes no
+				// glyph to, drawing every glyph after it one column left.
+				t.flushRun(dc, r, style, yOff, &fr)
+				continue
 			}
 			sawBlink = sawBlink || cell.Attrs&attrBlink != 0
 			cell = maskGlyph(cell, ds.blinkOff)

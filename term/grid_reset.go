@@ -134,7 +134,7 @@ func (g *grid) HardReset() {
 
 	// Reporting modes an application may have left enabled.
 	g.MouseTrack, g.MouseTrackBtn, g.MouseTrackAny = false, false, false
-	g.MouseSGR, g.MouseSGRPixels = false, false
+	g.MouseSGR, g.MouseSGRPixels, g.MouseURXVT = false, false, false
 	g.BracketedPaste = false
 	g.FocusReporting = false
 	g.ColorSchemeUpdates = false

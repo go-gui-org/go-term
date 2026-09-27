@@ -14,8 +14,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Alt on cursor, editing and function keys is sent in xterm's modifier form
   (Alt+Left is `CSI 1;3D`) instead of an ESC prefix.
 
+### Added
+
+- Mouse reports are sent in the legacy X10 byte encoding and the urxvt encoding
+  (`?1015`), not only SGR (`?1006`). An application that enabled `?1000`,
+  `?1002` or `?1003` without also enabling `?1006` previously got no reports at
+  all. Not available on Windows builds whose ConPTY consumes the mouse mode
+  sets — see `docs/terminal-verification.md`.
+
 ### Fixed
 
+- Windows: a character typed at a shell prompt could render one column to the
+  left of where it belongs (`> i` drawn as `>i`), recovering on the next full
+  repaint. The foreground pass coalesced a run of glyphs across a zero-valued
+  cell that no wide character owns, so every glyph after it drew one column
+  early.
 - Alt+digit and Alt+punctuation sent nothing, and Alt+Shift+letter sent the
   lowercase letter.
 - `Ctrl+Space`, `Ctrl+\`, `Ctrl+]`, `Ctrl+/` and `Ctrl+^` sent nothing.

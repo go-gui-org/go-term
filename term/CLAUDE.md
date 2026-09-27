@@ -110,7 +110,8 @@ Supports a modern xterm/kitty-compatible subset:
   screen, and drops every host-set mode; DECSTR (`CSI ! p`, in rs2 and is2)
   resets modes/SGR without touching the screen. Both live in `grid_reset.go`.
   DECSTR restores autowrap ON, diverging from VT510 — see the comment there.
-- Modes: alt screen (1049/1047/47), mouse (1000/1002/1003/1006/1016), bracketed
+- Modes: alt screen (1049/1047/47), mouse (1000/1002/1003/1006/1015/1016),
+  bracketed
   paste (2004), focus reporting (1004), synchronized updates (2026 — DECSET
   begins a block, DECRST ends + flushes; a 500 ms watchdog in the widget
   force-ends a block whose end never arrives), grapheme clustering (2027 —
@@ -280,6 +281,31 @@ allocation-free case). The pool grows only, deduped via `clusterIDs`, capped at
 Renderers (`drawFgPass`/`emitCell`/cursor) and selection copy use `cellText` /
 the pool; cluster cells always emit individually (run coalescing is
 base-rune-only). This is what Mode 2027 advertises.
+
+## Mouse reporting
+
+Three wire encodings, ranked in `mouseSnap.encoding()`: SGR (`?1006`) outranks
+urxvt (`?1015`), and a child that enabled neither gets the legacy X10 byte form
+(`\x1b[M` + three `32+n` bytes). Both legacy forms spell release as button 3 —
+they have no `m` final — so `mouseReleaseButton` rewrites the low two bits and
+keeps the modifier/motion bits above them. X10 cannot express a coordinate past
+223; `encodeMouseX10` drops those reports rather than wrap them. `?1016` pixel
+coordinates are an SGR-only refinement: under either legacy encoding reports
+stay cell-based. `encodeMouseReport` is the single selector — `writeMouse` and
+`reportLostRelease` both route through it so no path can drift to one encoding.
+
+**Windows: mouse reporting does not work on older builds, and this is not
+fixable from here.** ConPTY parses the child's output and consumes the mouse
+DECSETs instead of forwarding them, so the grid never learns the child wants
+mouse, `shouldReport()` stays false, and the wheel drives local scrollback.
+Measured on 10.0.19045.6466: `?1000h`, `?1003h` and `?1006h` are all swallowed
+by the system `conpty.dll`. wezterm's bundled `conpty.dll` (Windows Terminal's
+build, shipped alongside `OpenConsole.exe`) forwards the first three — which is
+why mouse works there and not here. `?1015` is dropped even by that build, so a
+Windows child can never select urxvt encoding. Bundling a newer ConPTY was
+considered and rejected: two redistributed binaries in every release is not
+worth it. Don't re-diagnose this as a bug in the encoders; verify mouse on
+Linux/macOS, or on a Windows build whose own ConPTY passes the modes through.
 
 ## Keyboard input
 

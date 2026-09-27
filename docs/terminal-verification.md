@@ -41,6 +41,7 @@ go test ./term -run TestConformance
 | OSC title and OSC 7 working-directory updates                         | `parser_test.go`, `emulator_replay_test.go`                       |
 | Device replies (`DA1`, `DA2`, `DECRQSS`, `DECRQM`, `XTGETTCAP`)       | `parser_test.go`, `parser_csi_test.go`, `emulator_replay_test.go` |
 | Bracketed paste, focus reporting, mouse modes, sync output            | `parser_test.go`, `widget_test.go`, `emulator_replay_test.go`     |
+| Mouse encodings: X10, urxvt (`?1015`), SGR (`?1006`/`?1016`)          | `widget_mouse_legacy_test.go`, `widget_mouse_test.go`             |
 | Grapheme clusters, wide chars, emoji, VS15/16, ZWJ, flags (Mode 2027) | `grapheme_test.go`, `grid_test.go`                                |
 | Bidirectional text (UAX#9)                                            | `bidi_test.go`                                                    |
 | DECSCA protection, selective erase, rectangular area ops              | `grid_rect_test.go`, `parser_csi_test.go`, `conformance_test.go`  |
@@ -82,7 +83,7 @@ Validate:
 | Selection/copy | drag-select copies trimmed text                                            |
 | Paste          | multi-line paste does not auto-execute in bracketed paste mode             |
 | Alt screen     | `vim` and `less` restore the main buffer on exit                           |
-| Mouse/focus    | mouse-aware apps and focus events do not leak garbage text                 |
+| Mouse/focus    | mouse-aware apps and focus events do not leak garbage text (not Windows)   |
 | Splits/tabs    | Cmd+D / Cmd+Shift+D split, Cmd+T new tab, Cmd+/ overlay                    |
 | Persistence    | quit with `--save-workspace`, relaunch with `--workspace`, layout restores |
 | Graphics       | `img2sixel` / `kitten icat` / `imgcat` render inline images                |
@@ -159,6 +160,40 @@ the grid's narrow interpretation.
 the same probe under Windows Terminal on the same machine. An identical result
 there is conhost, not this code. To confirm the mechanism directly, check that
 no `CSI 6 n` ever appears in a `GOTERM_CAPTURE` tee of the child's output.
+
+### Mouse reporting on Windows (ConPTY)
+
+The same mechanism, in the other direction, and with a harder consequence:
+**mouse reporting does not work on older Windows builds.**
+
+Conhost consumes the child's mouse DECSETs instead of forwarding them — it
+tracks the modes for its own input translation and passes nothing upstream. The
+grid therefore never learns that the child wants mouse, `mouseSnap.shouldReport`
+stays false, and the wheel drives local scrollback while clicks drive local
+selection. Nothing in the encoders is involved, and no change to them can help.
+
+Measured on 10.0.19045.6466, with a child that sets each mode and a terminal
+that logs what arrives:
+
+| mode the child sets | system `conpty.dll` | Windows Terminal's `conpty.dll` |
+| ------------------- | ------------------- | ------------------------------- |
+| `?1000h`            | swallowed           | forwarded                       |
+| `?1003h`            | swallowed           | forwarded                       |
+| `?1006h`            | swallowed           | forwarded                       |
+| `?1015h`            | swallowed           | swallowed                       |
+
+wezterm ships that second `conpty.dll` (with `OpenConsole.exe`) in its install
+directory and loads it in preference to the system one, which is the whole
+reason mouse works there on a build where it does not work here. Bundling a
+newer ConPTY was considered and rejected: two redistributed Microsoft binaries
+in every release, plus a load-order fallback, is not worth the one feature.
+`?1015` is dropped even by the newer build, so a Windows child can never select
+urxvt encoding regardless.
+
+**Verify mouse on Linux or macOS**, where the child speaks VT directly, or on a
+Windows build whose own ConPTY forwards the modes. Before filing a mouse bug on
+Windows, confirm the modes actually arrive: a `GOTERM_CAPTURE` tee of the
+child's output containing no `CSI ? 1000 h` means the platform ate it.
 
 ## External Conformance Tools
 
