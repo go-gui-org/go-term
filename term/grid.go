@@ -736,13 +736,14 @@ type grid struct {
 	cursorLocked bool
 
 	// Mouse reporting modes. Multiple may be active at once; the
-	// widget emits the broadest report any of them enables. SGR
-	// (?1006) is an encoding flag layered on top — without it, the
-	// widget drops reports rather than fall back to legacy X10
-	// byte-encoding.
+	// widget emits the broadest report any of them enables. The
+	// encoding flags layer on top and are ranked SGR > urxvt > legacy
+	// X10 byte-encoding, which is what a child gets when it asks for
+	// none of them (see mouseSnap.encoding).
 	MouseTrack     bool // ?1000 — button press/release
 	MouseTrackBtn  bool // ?1002 — press/release + drag (button held)
 	MouseTrackAny  bool // ?1003 — any motion, even with no button
+	MouseURXVT     bool // ?1015 — urxvt-style decimal "b;c;rM" encoding
 	MouseSGR       bool // ?1006 — SGR-style "<b;c;rM/m" encoding
 	MouseSGRPixels bool // ?1016 — pixel-precise coordinates in SGR reports
 

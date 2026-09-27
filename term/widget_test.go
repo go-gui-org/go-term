@@ -1681,7 +1681,8 @@ func TestWriteMouse_CellVsPixelCoords(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tm, buf := newTestTermCapture()
-			tm.writeMouse(0, c.col, c.row, c.pixX, c.pixY, c.pixels, c.press)
+			tm.writeMouse(0, c.col, c.row, c.pixX, c.pixY,
+				mouseSnap{sgr: true, pixels: c.pixels}, c.press)
 			if got := string(*buf); got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
@@ -2431,7 +2432,8 @@ func TestWriteMouse_PixelCoordsNaN(t *testing.T) {
 	term, buf := newTestTermCapture()
 	// NaN pixX should collapse to 0 via the realNumber guard; pixY=9
 	// unchanged. Expect 1-based coords: col=int(0)+1=1, row=int(9)+1=10.
-	term.writeMouse(0, 0, 0, float32(math.NaN()), 9.0, true, true)
+	term.writeMouse(0, 0, 0, float32(math.NaN()), 9.0,
+		mouseSnap{sgr: true, pixels: true}, true)
 	want := "\x1b[<0;1;10M"
 	if got := string(*buf); got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -2440,7 +2442,8 @@ func TestWriteMouse_PixelCoordsNaN(t *testing.T) {
 
 func TestWriteMouse_PixelCoordsInf(t *testing.T) {
 	term, buf := newTestTermCapture()
-	term.writeMouse(0, 0, 0, 5.0, float32(math.Inf(1)), true, true)
+	term.writeMouse(0, 0, 0, 5.0, float32(math.Inf(1)),
+		mouseSnap{sgr: true, pixels: true}, true)
 	want := "\x1b[<0;6;1M"
 	if got := string(*buf); got != want {
 		t.Errorf("got %q, want %q", got, want)

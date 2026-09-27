@@ -439,6 +439,8 @@ func (p *parser) applyDECMode(set bool) {
 			p.g.MouseTrackBtn = set
 		case 1003:
 			p.g.MouseTrackAny = set
+		case 1015:
+			p.g.MouseURXVT = set
 		case 1006:
 			p.g.MouseSGR = set
 		case 1016:
@@ -599,6 +601,8 @@ func (p *parser) decModeState(n int) int {
 		return boolState(p.g.MouseTrackAny)
 	case 1004:
 		return boolState(p.g.FocusReporting)
+	case 1015:
+		return boolState(p.g.MouseURXVT)
 	case 1006:
 		return boolState(p.g.MouseSGR)
 	case 1016:

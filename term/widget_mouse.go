@@ -71,15 +71,82 @@ func encodeMouseSGR(buf []byte, cb, col, row int, press bool) []byte {
 	return buf
 }
 
+// mouseReleaseButton rewrites a button byte for the two encodings with no
+// release final: both spell release as button 3, keeping the modifier and
+// motion bits that sit above the low two.
+func mouseReleaseButton(cb int) int { return cb&^3 | 3 }
+
+// maxX10Coord is the first coordinate the legacy byte encoding cannot carry:
+// the byte is 32+coord (1-based), and 255 is the last single byte xterm
+// writes. Reports past it are dropped rather than wrapped — a wrapped
+// coordinate is indistinguishable from a real one near the origin.
+const maxX10Coord = 223
+
+// encodeMouseX10 appends a legacy (pre-?1006) mouse report to buf:
+// "\x1b[M" then three bytes, 32 + button, 32 + 1-based column, 32 + 1-based
+// row. Reports false when either coordinate is out of range; the caller then
+// sends nothing.
+func encodeMouseX10(buf []byte, cb, col, row int, press bool) ([]byte, bool) {
+	if !press {
+		cb = mouseReleaseButton(cb)
+	}
+	if col+1 > maxX10Coord || row+1 > maxX10Coord {
+		return buf, false
+	}
+	return append(buf, '\x1b', '[', 'M',
+		byte(32+cb), byte(32+col+1), byte(32+row+1)), true
+}
+
+// encodeMouseURXVT appends a urxvt-style (?1015) mouse report to buf:
+// "\x1b[{32+cb};{col};{row}M". Coordinates are decimal and 1-based, so the
+// X10 range limit does not apply, but the final is always 'M' — release still
+// goes out as button 3.
+func encodeMouseURXVT(buf []byte, cb, col, row int, press bool) []byte {
+	if !press {
+		cb = mouseReleaseButton(cb)
+	}
+	buf = append(buf, '\x1b', '[')
+	buf = strconv.AppendInt(buf, int64(32+cb), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendInt(buf, int64(col+1), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendInt(buf, int64(row+1), 10)
+	return append(buf, 'M')
+}
+
+// encodeMouseReport appends one report in snap's wire form, reporting false
+// when the encoding cannot represent it (legacy coordinates only). col/row are
+// the coordinates the child should see: cells, or device pixels under SGR with
+// ?1016.
+func encodeMouseReport(buf []byte, snap mouseSnap, cb, col, row int, press bool) ([]byte, bool) {
+	switch snap.encoding() {
+	case mouseEncSGR:
+		return encodeMouseSGR(buf, cb, col, row, press), true
+	case mouseEncURXVT:
+		return encodeMouseURXVT(buf, cb, col, row, press), true
+	}
+	return encodeMouseX10(buf, cb, col, row, press)
+}
+
+// mouseEncoding is the wire form the child asked for.
+type mouseEncoding int
+
+const (
+	mouseEncX10   mouseEncoding = iota // no encoding mode set
+	mouseEncURXVT                      // ?1015
+	mouseEncSGR                        // ?1006
+)
+
 // mouseSnap reports the current mouse-mode state under the grid lock.
-// Reporting requires SGR encoding (?1006) and a live viewport — when
-// scrolled back into history we suppress reports so the user can
-// select / scroll without the host consuming the events.
+// Reporting requires a live viewport — when scrolled back into history we
+// suppress reports so the user can select / scroll without the host
+// consuming the events.
 type mouseSnap struct {
 	report bool // any of ?1000/?1002/?1003 active
 	drag   bool // ?1002
 	any    bool // ?1003
 	sgr    bool // ?1006
+	urxvt  bool // ?1015
 	pixels bool // ?1016 — pixel-precise SGR coordinates
 	live   bool // ViewOffset == 0 && ViewSubPx == 0
 	alt    bool // alt screen active — the wheel drives arrow keys instead
@@ -93,16 +160,31 @@ func (t *Term) mouseSnap() mouseSnap {
 		drag:   t.grid.MouseTrackBtn,
 		any:    t.grid.MouseTrackAny,
 		sgr:    t.grid.MouseSGR,
+		urxvt:  t.grid.MouseURXVT,
 		pixels: t.grid.MouseSGRPixels,
 		live:   t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0,
 		alt:    t.grid.AltActive,
 	}
 }
 
+// encoding picks the wire form for a report. ?1006 outranks ?1015 (xterm
+// resolves the pair the same way), and a child that enabled neither gets the
+// legacy byte encoding — dropping its reports instead is why mouse input
+// looked dead under any app using the default xterm encoding.
+func (m mouseSnap) encoding() mouseEncoding {
+	switch {
+	case m.sgr:
+		return mouseEncSGR
+	case m.urxvt:
+		return mouseEncURXVT
+	}
+	return mouseEncX10
+}
+
 // shouldReport reports whether mouse events should encode to the pty
-// rather than drive local selection. Requires reporting on, SGR
-// encoding on, and a live viewport.
-func (m mouseSnap) shouldReport() bool { return m.report && m.sgr && m.live }
+// rather than drive local selection. Requires reporting on and a live
+// viewport; every encoding is supported, so no encoding mode is needed.
+func (m mouseSnap) shouldReport() bool { return m.report && m.live }
 
 // posToCell maps shape-local (x, y) pixels to viewport (row, col).
 // Returns clamped coordinates so out-of-bounds drag positions still
@@ -201,18 +283,19 @@ func (t *Term) devicePx(x, y float32) (int, int) {
 // maxDevicePx caps a ?1016 coordinate; see devicePx.
 const maxDevicePx = 1 << 20
 
-// writeMouse emits an SGR mouse report. When pixels is true (?1016 active),
-// pixX/pixY (0-based widget position in logical points; see devicePx) are
-// used; otherwise col/row (0-based cell indices) are used. Both forms report
-// 1-based coordinates per spec.
-func (t *Term) writeMouse(cb, col, row int, pixX, pixY float32, pixels, press bool) {
+// writeMouse emits a mouse report in the encoding snap selects. Under SGR
+// with ?1016 active, pixX/pixY (0-based widget position in logical points;
+// see devicePx) are used; otherwise col/row (0-based cell indices) are. Both
+// forms report 1-based coordinates per spec. ?1016 is an SGR refinement only:
+// neither legacy encoding can carry pixels, so they keep reporting cells.
+func (t *Term) writeMouse(cb, col, row int, pixX, pixY float32, snap mouseSnap, press bool) {
+	if snap.pixels && snap.encoding() == mouseEncSGR {
+		col, row = t.devicePx(pixX, pixY)
+	}
 	var buf [32]byte
-	var out []byte
-	if pixels {
-		px, py := t.devicePx(pixX, pixY)
-		out = encodeMouseSGR(buf[:0], cb, px, py, press)
-	} else {
-		out = encodeMouseSGR(buf[:0], cb, col, row, press)
+	out, ok := encodeMouseReport(buf[:0], snap, cb, col, row, press)
+	if !ok {
+		return
 	}
 	if _, err := t.pw.Write(out); err != nil {
 		log.Printf("term: pty mouse: %v", err)
@@ -395,7 +478,7 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 		}
 		cb := base + mouseModBits(ctx.Event.Modifiers)
 		// The child grid is logical; the pointer is visual.
-		t.writeMouse(cb, t.logicalMouseCol(r, c), r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, ctx.Event.MouseX, ctx.Event.MouseY, snap, true)
 		t.mouse.dragging = true
 		t.mouse.dragButton = ctx.Event.MouseButton
 		t.mouse.dragReport = true
@@ -643,7 +726,7 @@ func (t *Term) onMouseMove(ctx gui.EventCtx) {
 // belongs to the child, i.e. the local selection and hover paths in
 // onMouseMove must not also act on it.
 func (t *Term) motionReport(e *gui.Event, snap mouseSnap, r, c int) bool {
-	if !snap.sgr || !snap.live {
+	if !snap.report || !snap.live {
 		return false
 	}
 	// Dedupe: only emit when the position the child sees changed. That is the
@@ -668,13 +751,13 @@ func (t *Term) motionReport(e *gui.Event, snap mouseSnap, r, c int) bool {
 			return true
 		}
 		cb := base + mouseModBits(e.Modifiers) + 32
-		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap.pixels, true)
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap, true)
 		t.mouse.lastR, t.mouse.lastC = r, c
 		t.mouse.lastPX, t.mouse.lastPY = px, py
 		return true
 	case !t.mouse.dragging && snap.any:
 		cb := 35 + mouseModBits(e.Modifiers) // 3+32 = motion, no button
-		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap.pixels, true)
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap, true)
 		t.mouse.lastR, t.mouse.lastC = r, c
 		t.mouse.lastPX, t.mouse.lastPY = px, py
 		return true
@@ -837,15 +920,22 @@ func (t *Term) reportLostRelease() {
 	}
 	snap := t.mouseSnap()
 	base, ok := mouseSGRBaseButton(t.mouse.dragButton)
-	if !snap.sgr || !ok {
+	if !ok {
 		return
 	}
 	x, y := t.logicalMouseCol(t.mouse.lastR, t.mouse.lastC), t.mouse.lastR
-	if snap.pixels {
+	// Device pixels are already recorded for the last reported position, so
+	// encode here rather than through writeMouse, which would re-derive them
+	// from logical points we no longer have.
+	if snap.pixels && snap.encoding() == mouseEncSGR {
 		x, y = t.mouse.lastPX, t.mouse.lastPY
 	}
 	var buf [32]byte
-	if _, err := t.pw.Write(encodeMouseSGR(buf[:0], base, x, y, false)); err != nil {
+	out, ok := encodeMouseReport(buf[:0], snap, base, x, y, false)
+	if !ok {
+		return
+	}
+	if _, err := t.pw.Write(out); err != nil {
 		log.Printf("term: pty mouse: %v", err)
 	}
 }
@@ -872,12 +962,12 @@ func (t *Term) onMouseUp(ctx gui.EventCtx) {
 	r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
 	if t.mouse.dragReport {
 		snap := t.mouseSnap()
-		if snap.sgr {
-			base, ok := mouseSGRBaseButton(t.mouse.dragButton)
-			if ok {
-				cb := base + mouseModBits(ctx.Event.Modifiers)
-				t.writeMouse(cb, t.logicalMouseCol(r, c), r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, false)
-			}
+		// No mode check: a press was reported, so the child is owed its
+		// release even if it has since turned reporting off.
+		if base, ok := mouseSGRBaseButton(t.mouse.dragButton); ok {
+			cb := base + mouseModBits(ctx.Event.Modifiers)
+			t.writeMouse(cb, t.logicalMouseCol(r, c), r,
+				ctx.Event.MouseX, ctx.Event.MouseY, snap, false)
 		}
 		t.mouse.dragging = false
 		t.mouse.dragReport = false
@@ -1169,7 +1259,7 @@ func (t *Term) onMouseScroll(ctx gui.EventCtx) {
 		cb := base + mouseModBits(ctx.Event.Modifiers)
 		lc := t.logicalMouseCol(r, c)
 		for range t.wheelReportTicks(ctx.Event.ScrollY, ctx.Event.ScrollPrecise) {
-			t.writeMouse(cb, lc, r, ctx.Event.MouseX, ctx.Event.MouseY, snap.pixels, true)
+			t.writeMouse(cb, lc, r, ctx.Event.MouseX, ctx.Event.MouseY, snap, true)
 		}
 		ctx.Event.IsHandled = true
 		return
