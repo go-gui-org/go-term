@@ -343,7 +343,14 @@ func (p *parser) applyDECMode(set bool) {
 	for _, n := range p.params {
 		switch n {
 		case 25:
-			p.g.CursorVisible = set
+			// Dirty the cursor row on a real change: a read carrying only
+			// DECTCEM marks nothing else, and applyChunk skips the frame for
+			// a clean grid — the cursor would keep its old visibility until
+			// unrelated output forced a repaint.
+			if p.g.CursorVisible != set {
+				p.g.CursorVisible = set
+				p.g.markDirty(p.g.CursorR)
+			}
 		case 47, 1047:
 			if set {
 				p.g.EnterAlt()

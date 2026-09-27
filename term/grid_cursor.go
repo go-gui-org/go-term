@@ -30,6 +30,7 @@ func (g *grid) ApplyDECSCUSR(ps int) {
 	if g.cursorLocked {
 		return
 	}
+	shape, blink := g.cursorShape, g.CursorBlink
 	switch ps {
 	case 0, 1:
 		g.cursorShape, g.CursorBlink = CursorStyleBlock, true
@@ -45,6 +46,12 @@ func (g *grid) ApplyDECSCUSR(ps int) {
 		g.cursorShape, g.CursorBlink = CursorStyleBar, false
 	default:
 		g.cursorShape, g.CursorBlink = CursorStyleBlock, true
+	}
+	// Same reason as DECTCEM: a shape or blink change touches no cell, so
+	// without this the repaint is never scheduled and the cursor keeps its
+	// old appearance until something else dirties a row.
+	if g.cursorShape != shape || g.CursorBlink != blink {
+		g.markDirty(g.CursorR)
 	}
 }
 
