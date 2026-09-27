@@ -1331,3 +1331,49 @@ func TestHasVS16(t *testing.T) {
 		t.Error("hasVS16(VS15)=true, want false")
 	}
 }
+
+// ECH/EL bounded at the middle of a wide pair must not strand half of it.
+// A surviving continuation cell is a gap the renderer's run coalescing skips
+// without accounting for its column, drawing the rest of the row one column
+// left; a surviving head draws two columns wide over a cell it no longer owns.
+// ConPTY emits exactly these bounded erases when it diffs the console buffer.
+func TestEraseSpan_StrandedWideHalves(t *testing.T) {
+	t.Run("continuation right of the span", func(t *testing.T) {
+		g := newGrid(1, 6)
+		g.MoveCursor(0, 0)
+		g.Put('世') // cols 0-1
+		g.MoveCursor(0, 0)
+		g.EraseChars(1) // blanks the head only
+		if c := g.At(0, 1); c.Ch != ' ' || c.Width != 1 {
+			t.Errorf("col 1 = {Ch:%q Width:%d}, want a blank cell", c.Ch, c.Width)
+		}
+	})
+	t.Run("head left of the span", func(t *testing.T) {
+		g := newGrid(1, 6)
+		g.MoveCursor(0, 1)
+		g.Put('世') // cols 1-2
+		g.MoveCursor(0, 2)
+		g.EraseChars(1) // blanks the continuation only
+		if c := g.At(0, 1); c.Ch != ' ' || c.Width != 1 {
+			t.Errorf("col 1 = {Ch:%q Width:%d}, want a blank cell", c.Ch, c.Width)
+		}
+	})
+	t.Run("EL to the middle of a pair", func(t *testing.T) {
+		g := newGrid(1, 6)
+		g.MoveCursor(0, 3)
+		g.Put('世') // cols 3-4
+		g.MoveCursor(0, 3)
+		g.EraseInLine(0) // cursor to end of line: clears both halves
+		if c := g.At(0, 4); c.Ch != ' ' || c.Width != 1 {
+			t.Errorf("col 4 = {Ch:%q Width:%d}, want a blank cell", c.Ch, c.Width)
+		}
+		g2 := newGrid(1, 6)
+		g2.MoveCursor(0, 3)
+		g2.Put('世')
+		g2.MoveCursor(0, 4)
+		g2.EraseInLine(1) // start of line to cursor: strands the head at 3
+		if c := g2.At(0, 3); c.Ch != ' ' || c.Width != 1 {
+			t.Errorf("col 3 = {Ch:%q Width:%d}, want a blank cell", c.Ch, c.Width)
+		}
+	})
+}

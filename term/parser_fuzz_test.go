@@ -104,6 +104,23 @@ func assertParserInvariants(t *testing.T, g *grid, p *parser) {
 	if p.state > stAPCEsc {
 		t.Fatalf("parser state out of range: %d", p.state)
 	}
+	// A zero-valued cell is the continuation half of a wide character and
+	// nothing else: every path that creates or clears a row writes blanks
+	// (Ch == ' ', Width == 1). One with no wide head to its left is a gap the
+	// renderer's run coalescing cannot see, and it draws the rest of the row
+	// one column to the left.
+	for r := range g.Rows {
+		row := g.row(r)
+		for c := range g.Cols {
+			if row[c].Ch != 0 || row[c].Width != 0 {
+				continue
+			}
+			if c == 0 || row[c-1].Width != 2 {
+				t.Fatalf("gap cell at (%d,%d): zero cell with no wide head "+
+					"to its left", r, c)
+			}
+		}
+	}
 }
 
 // seeder is the slice of *testing.T used by loadFixtures — enough for seed

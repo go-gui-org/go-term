@@ -16,6 +16,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Windows: a character typed at a shell prompt could render one column to the
+  left of where it belongs (`> i` drawn as `>i`), recovering on the next full
+  repaint. The foreground pass coalesced a run of glyphs across a zero-valued
+  cell that no wide character owns, so every glyph after it drew one column
+  early.
 - Alt+digit and Alt+punctuation sent nothing, and Alt+Shift+letter sent the
   lowercase letter.
 - `Ctrl+Space`, `Ctrl+\`, `Ctrl+]`, `Ctrl+/` and `Ctrl+^` sent nothing.

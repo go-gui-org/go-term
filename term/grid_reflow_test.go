@@ -1,6 +1,7 @@
 package term
 
 import (
+	"fmt"
 	"math"
 	"testing"
 )
@@ -697,5 +698,47 @@ func TestLogicalReflow_NegativeOldRowsClamped(t *testing.T) {
 	// oldRows clamped to 0, newRows=2, newCols=4 → 8 cells total.
 	if len(res.cells) != 8 {
 		t.Errorf("negative oldRows: got %d cells, want 8", len(res.cells))
+	}
+}
+
+// gapCells reports every zero-valued cell on the live screen that no wide
+// character owns. Such a cell is invisible to the renderer's run coalescing,
+// which skips it without accounting for its column and so draws the rest of
+// the row one column to the left.
+func gapCells(g *grid) []string {
+	var out []string
+	for r := range g.Rows {
+		row := g.row(r)
+		for c := range g.Cols {
+			if row[c].Ch != 0 || row[c].Width != 0 {
+				continue
+			}
+			if c == 0 || row[c-1].Width != 2 {
+				out = append(out, fmt.Sprintf("(%d,%d)", r, c))
+			}
+		}
+	}
+	return out
+}
+
+// Resize reflows through freshly allocated buffers and, when rows are borrowed
+// from the scrollback ring, through zero-filled storage. Every such cell must
+// come out a blank, never a zero cell.
+func TestResize_NoGapCells(t *testing.T) {
+	g := newGrid(6, 20)
+	p := newParser(g)
+	// Mixed narrow/wide content, wrapped lines, a scroll region and enough
+	// output to push rows into scrollback.
+	p.Feed([]byte("\x1b[2;5r"))
+	for i := range 40 {
+		p.Feed([]byte(fmt.Sprintf("line %d 世界 ab\r\n", i)))
+	}
+	p.Feed([]byte("\x1b[3;7H\x1b[1K\x1b[4;9H\x1b[0K\x1b[5;4H\x1b[3X"))
+	dims := [][2]int{{20, 7}, {19, 6}, {40, 10}, {3, 2}, {80, 24}, {21, 6}, {20, 20}}
+	for _, d := range dims {
+		g.Resize(d[1], d[0])
+		if gaps := gapCells(g); len(gaps) != 0 {
+			t.Fatalf("resize to %dx%d left gap cells at %v", d[1], d[0], gaps)
+		}
 	}
 }

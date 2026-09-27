@@ -1371,3 +1371,33 @@ func TestOnDraw_StuckDragUnlockOutsideGridLock(t *testing.T) {
 		})
 	}
 }
+
+// A zero-valued cell (Ch==0, Width==0) whose left neighbour is not a wide
+// character is a gap, not a wide-char continuation. The fg pass must close the
+// open run at it: coalescing across the gap draws every following glyph one
+// column to the left, which is what "> i" rendering as ">i" looks like.
+func TestOnDraw_GapCellBreaksRun(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.CursorVisible = false
+	g.Cells[0].Ch = '>'
+	g.Cells[0].Width = 1
+	g.Cells[1] = cell{} // gap: not the continuation of a wide char
+	g.Cells[2].Ch = 'i'
+	g.Cells[2].Width = 1
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	for _, te := range dc.Texts() {
+		switch te.Text {
+		case ">i":
+			t.Fatalf("run coalesced across the gap cell: %q at x=%v", te.Text, te.X)
+		case "i":
+			if want := tm.colX(2); te.X != want {
+				t.Errorf("'i' drawn at x=%v, want %v (column 2)", te.X, want)
+			}
+			return
+		}
+	}
+	t.Errorf("no 'i' text entry; got %v", dc.Texts())
+}
