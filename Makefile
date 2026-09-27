@@ -3,6 +3,16 @@
 	build-linux build-windows build-macos \
 	package-linux package-windows package-macos release
 
+# GNU Make on Windows uses sh.exe when it finds one on PATH and silently falls
+# back to cmd.exe when it does not. Every recipe here is POSIX (env-var
+# prefixes, mkdir -p, &&), so the cmd fallback fails with errors that point
+# nowhere near the cause. Fail fast with the fix instead.
+ifeq ($(OS),Windows_NT)
+ifeq (,$(findstring sh,$(SHELL)))
+$(error make fell back to cmd.exe ($(SHELL)); run make from Git Bash, or add Git's usr/bin directory to PATH so sh.exe is found)
+endif
+endif
+
 # Repo-local bin for the pinned linter. The pinned VERSION itself lives in
 # tools/lint/go.mod -- see the $(LINT_BIN) rule below.
 LINT_DIR = $(CURDIR)/.bin
@@ -35,6 +45,14 @@ VERSION      := $(shell git describe --tags --always --dirty 2>/dev/null)
 # MEMLIMIT=268435456 make app.
 MEMLIMIT     := 536870912
 LDFLAGS      := -X main.version=$(VERSION) -w -X main.memLimit=$(MEMLIMIT)
+# Windows hosts get the same GUI-subsystem link as the shipping build (see
+# build-windows), so a locally built falcon.exe does not trail an empty console
+# window. Windows sets OS itself, so this holds under cmd and Git Bash alike and
+# stays empty when cross-building from macOS or Linux. Drop it to get stdout,
+# stderr and panic traces back for debugging.
+ifeq ($(OS),Windows_NT)
+HOST_GUIFLAG := -H windowsgui
+endif
 # CFBundleShortVersionString wants a bare number, so drop the tag's leading v.
 BUNDLE_VER   := $(patsubst v%,%,$(VERSION))
 # Pre-built .icns (see examples/falcon/icon/README.md); buildapp copies it
@@ -155,9 +173,10 @@ cross-windows:
 	CGO_ENABLED=0 GOOS=windows $(GO) build ./term/... ./internal/...
 
 # Build the falcon binary (ensures it compiles). Shipping path: excludes the
-# go-gui inspector via the prod tag.
+# go-gui inspector via the prod tag, and on Windows links GUI-subsystem via
+# HOST_GUIFLAG so the result matches what a release ships.
 build-falcon:
-	$(GO) build $(PROD_TAGS) -ldflags '$(LDFLAGS)' ./examples/falcon
+	$(GO) build $(PROD_TAGS) -ldflags '$(LDFLAGS) $(HOST_GUIFLAG)' ./examples/falcon
 
 # Recommended full local validation before pushing (issue go-gui#314).
 # Approximates the CI matrix from one host: race tests, vet, lint, the prod
