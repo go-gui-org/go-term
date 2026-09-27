@@ -305,8 +305,15 @@ type Term struct {
 	scrollbar scrollbarState
 
 	// cursorEpoch is the reference time for blink-phase calculation.
-	// Set in New so the cursor starts in the "on" half-cycle.
+	// Set in New so the cursor starts in the "on" half-cycle, and restarted
+	// by rephaseCursorBlink every time the cursor moves.
 	cursorEpoch time.Time
+
+	// cursorPhaseR/C is the cursor position the blink cycle was last phased
+	// against — the previous frame's position. Main-thread only, like
+	// cursorEpoch: both are written from onDraw, which is where a move
+	// becomes observable.
+	cursorPhaseR, cursorPhaseC int
 
 	// pw writes bytes to the pty master. In production this is the ptyDev
 	// itself (*ptyDev satisfies io.Writer). Tests replace it with a buffer

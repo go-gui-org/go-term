@@ -374,8 +374,8 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 	// OverlayVersion covers state that repaints an overlay but marks no row
 	// dirty (OSC 9;4 progress) — without it the frame is never scheduled and
 	// the change sits in the grid unseen.
-	dirty := t.grid.HasDirtyRows() || bellCount != t.bell.readCount ||
-		overlayVer != t.overlayVersion
+	dirty := t.grid.HasDirtyRows() || t.cursorMoved() ||
+		bellCount != t.bell.readCount || overlayVer != t.overlayVersion
 	needUpdate := false
 	if redraw {
 		t.grid.SyncFrameReady = false
@@ -486,7 +486,7 @@ func (t *Term) onSyncTimeout() {
 		// don't leave a frame marked pending for the next chunk to re-flush.
 		t.grid.SyncFrameReady = false
 	}
-	dirty := expired && t.grid.HasDirtyRows()
+	dirty := expired && (t.grid.HasDirtyRows() || t.cursorMoved())
 	t.grid.Mu.Unlock()
 	if !dirty {
 		return

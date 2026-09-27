@@ -242,6 +242,10 @@ func (t *Term) drawIME(ds *drawState) {
 // visual column.
 func (t *Term) drawCursor(ds *drawState) {
 	g := ds.g
+	// Before every early return: a cursor that moved while off-screen, in
+	// copy mode or in scrollback must not carry a stale phase back with it
+	// when it returns to view.
+	t.rephaseCursorBlink(g.CursorR, g.CursorC, ds.now)
 	// Copy mode draws its own cursor. Two cursors on screen at once is worse
 	// than none — on entry they overlap exactly, so the user cannot tell which
 	// one their motion keys are moving.
@@ -462,6 +466,37 @@ func (t *Term) scrollbarEdgeInset(canvasW float32) float32 {
 		return scrollbarInset
 	}
 	return 0
+}
+
+// cursorMoved reports whether the cursor sits somewhere other than where the
+// last painted frame put it. The repaint decision needs this on top of the
+// dirty-row test because a cursor move touches no cell: BS, CR, HT and the
+// clamping done by resize, alt-screen swaps and DECRC all write CursorR/CursorC
+// directly. Backspacing over blank cells is the case users hit — the child
+// rewrites nothing, so without this the cursor stays painted at its old column
+// until an unrelated write dirties a row.
+//
+// Testing the position rather than marking each mutation site keeps the
+// invariant in one place; there are around thirty such sites, and a new one
+// fails silently.
+//
+// Caller holds grid.Mu.
+func (t *Term) cursorMoved() bool {
+	return t.grid.CursorR != t.cursorPhaseR || t.grid.CursorC != t.cursorPhaseC
+}
+
+// rephaseCursorBlink restarts the blink cycle when the cursor has moved since
+// the last frame, so a moving cursor is always solid. Every other terminal
+// (xterm, VTE, Windows Terminal, iTerm2) does this; without it the 500 ms
+// cycle free-runs and hides the cursor for half of it while the user types,
+// which reads as the cursor failing to advance. Runs on the main thread from
+// drawCursor, under grid.Mu like the rest of onDraw.
+func (t *Term) rephaseCursorBlink(row, col int, now time.Time) {
+	if row == t.cursorPhaseR && col == t.cursorPhaseC {
+		return
+	}
+	t.cursorPhaseR, t.cursorPhaseC = row, col
+	t.cursorEpoch = now
 }
 
 // cursorBlinkOff reports whether the cursor is currently in the
