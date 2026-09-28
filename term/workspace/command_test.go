@@ -220,3 +220,98 @@ func TestFocusedCwd_NoPane(t *testing.T) {
 		t.Errorf("dead pane: focusedCwd() = %q, want empty", got)
 	}
 }
+
+// extraTestCommands returns the fixture for the ExtraCommands tests: one
+// palette-only entry and one chord-bound entry. The chord avoids every
+// built-in shortcut so the fixture never collides with the default table.
+func extraTestCommands() []gui.Command {
+	return []gui.Command{
+		{
+			ID:      "embed.about",
+			Label:   "About Embed",
+			Global:  true,
+			Execute: func(_ *gui.Event, _ *gui.Window) {},
+		},
+		{
+			ID:       "embed.settings",
+			Label:    "Embed Settings",
+			Shortcut: gui.Shortcut{Key: gui.KeyF12, Modifiers: gui.ModSuper | gui.ModAlt | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, _ *gui.Window) {},
+		},
+	}
+}
+
+// TestExtraCommands_RegisteredListedAndSurviveReload pins the
+// Cfg.ExtraCommands contract: embedder commands join the workspace table,
+// reach the window registry, appear in the palette, and are not duplicated
+// by a config reload (which rebuilds the table from baseCfg).
+func TestExtraCommands_RegisteredListedAndSurviveReload(t *testing.T) {
+	cfg := Cfg{ConfigPath: filepath.Join(t.TempDir(), "no-such-config")}
+	cfg.ExtraCommands = extraTestCommands()
+	ws := &Workspace{w: &gui.Window{}, cfg: cfg, baseCfg: cfg}
+	ws.loadAndApplyConfig()
+
+	// Registered on the window: the registry, not ws.commands, is what
+	// dispatches keystrokes.
+	for _, id := range []string{"embed.about", "embed.settings"} {
+		if _, ok := ws.w.CommandByID(id); !ok {
+			t.Errorf("extra command %q not registered", id)
+		}
+	}
+	// Listed in the palette, including the shortcut-less About entry.
+	labels := make(map[string]string)
+	for _, it := range ws.paletteItems() {
+		labels[it.label] = it.keys
+	}
+	if _, ok := labels["About Embed"]; !ok {
+		t.Error("palette is missing the extra About command")
+	}
+	keys, ok := labels["Embed Settings"]
+	if !ok {
+		t.Fatal("palette is missing the extra Settings command")
+	}
+	if keys == "" {
+		t.Error("palette hides the extra Settings shortcut")
+	}
+
+	// A reload (config re-read + table rebuild) must not stack a second
+	// copy of the extras.
+	ws.loadAndApplyConfig()
+	seen := make(map[string]int)
+	for _, cmd := range ws.commands {
+		seen[cmd.ID]++
+	}
+	for _, id := range []string{"embed.about", "embed.settings"} {
+		if seen[id] != 1 {
+			t.Errorf("command %q appears %d times after reload, want 1", id, seen[id])
+		}
+	}
+}
+
+// TestExtraCommands_RebindByFullID pins that a config-file [keybindings]
+// entry naming an embedder command's full ID rewrites its shortcut, the
+// same as for the built-in workspace.* commands.
+func TestExtraCommands_RebindByFullID(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config")
+	if err := os.WriteFile(cfgPath, []byte("[keybindings]\nembed.settings = Cmd+E\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Cfg{ConfigPath: cfgPath}
+	cfg.ExtraCommands = extraTestCommands()
+	ws := &Workspace{w: &gui.Window{}, cfg: cfg, baseCfg: cfg}
+	ws.loadAndApplyConfig()
+
+	want := gui.Shortcut{Key: gui.KeyE, Modifiers: remapMod(gui.ModSuper)}
+	for _, cmd := range ws.commands {
+		if cmd.ID != "embed.settings" {
+			continue
+		}
+		if cmd.Shortcut != want {
+			t.Errorf("shortcut = %v, want %v", cmd.Shortcut, want)
+		}
+		return
+	}
+	t.Error("extra command embed.settings missing after reload with keybindings")
+}

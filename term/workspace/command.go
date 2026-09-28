@@ -300,6 +300,11 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.goToTab(idx) },
 		})
 	}
+	// Embedder commands (About, Settings, …) ride the same table so the
+	// palette, the help overlay, and config reloads all see them. Sourced
+	// from baseCfg — the pristine copy — so a reload recomputes from the
+	// same starting point instead of stacking a copy per reload.
+	cmds = append(cmds, ws.baseCfg.ExtraCommands...)
 	// Remap the Super-based defaults to platform-appropriate modifiers
 	// (identity except on Windows, where Super is OS-reserved — see remapMod).
 	// Applied before config overrides so explicit user bindings are honored

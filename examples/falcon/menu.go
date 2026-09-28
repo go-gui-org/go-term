@@ -17,9 +17,14 @@ const appName = "Falcon"
 
 const repoURL = "https://github.com/go-gui-org/go-term"
 
-// actionAbout routes the Help menu's About item to showAbout through OnAction.
-// No command backs it: About has no shortcut, and nothing else invokes it.
+// actionAbout routes the Help menu's About item to the About dialog. It backs
+// a real window command (see appCommands) so the dialog is reachable from the
+// command palette too; About has no shortcut, so the entry is palette-only.
 const actionAbout = "help.about"
+
+// aboutLabel is the About entry's text, shared by the Help menu item and the
+// command-palette row so the two cannot drift.
+const aboutLabel = "About " + appName
 
 // cmdToggleHelp names the workspace command that shows or hides the
 // keyboard-shortcut overlay. Must match the ID in
@@ -32,31 +37,50 @@ const cmdToggleHelp = "workspace.toggleHelp"
 // term/workspace/command.go).
 const helpShortcutsLabel = "Show / Hide Shortcuts"
 
-// cmdOpenConfig is falcon's own window command (Cmd+,). It carries no menu
-// item — the chord is the whole interface.
+// cmdOpenConfig is falcon's Settings command (Cmd+,). It opens the config
+// file in the OS-default editor, creating a commented stub first when the
+// file doesn't exist yet.
 const cmdOpenConfig = "falcon.openConfig"
 
-// registerCommands adds falcon's own window commands. Everything else in the
-// registry comes from workspace.New; this runs after it so the workspace's
-// installCommands (which unregisters only its own table) can't drop these on a
-// config reload.
+// settingsLabel is the Settings entry's text, shared by the command-palette
+// row (and the help overlay, which lists it under its Cmd+, chord).
+const settingsLabel = "Settings"
+
+// appCommands returns falcon's own window commands: About (palette-only, no
+// shortcut) and Settings (Cmd+,). They ride on workspace.Cfg.ExtraCommands —
+// see run() in main.go — so the workspace registers them, lists them in the
+// command palette, and re-registers them on every config reload. Registering
+// them separately here as well would collide on ID with that table.
 //
 // Cmd+, is the macOS Settings convention. It has to be a gui.Command rather
 // than a native menu key equivalent: the native encoder only handles A-Z/0-9,
 // so a comma there would be silently dropped — no hint, no dispatch.
-func registerCommands(w *gui.Window) {
-	cmd := gui.Command{
-		ID:       cmdOpenConfig,
-		Label:    "Open Config File",
-		Shortcut: gui.Shortcut{Key: gui.KeyComma, Modifiers: gui.ModSuper},
-		// Global so it fires before focus dispatch — the focused pane would
-		// otherwise get first refusal on the chord, same as every workspace
-		// command.
-		Global:  true,
-		Execute: func(_ *gui.Event, _ *gui.Window) { openConfigFile() },
-	}
-	if err := w.RegisterCommand(cmd); err != nil {
-		log.Printf("menu: register %s: %v", cmd.ID, err)
+func appCommands() []gui.Command {
+	return []gui.Command{
+		{
+			ID:    actionAbout,
+			Label: aboutLabel,
+			// Global so it fires before focus dispatch — the focused pane
+			// would otherwise get first refusal on the chord, same as
+			// every workspace command. No Shortcut: this one is
+			// palette-only.
+			Global: true,
+			Execute: func(_ *gui.Event, w *gui.Window) {
+				if w != nil {
+					showAbout(w)
+				}
+			},
+		},
+		{
+			ID:       cmdOpenConfig,
+			Label:    settingsLabel,
+			Shortcut: gui.Shortcut{Key: gui.KeyComma, Modifiers: gui.ModSuper},
+			// Global so it fires before focus dispatch — the focused pane
+			// would otherwise get first refusal on the chord, same as
+			// every workspace command.
+			Global:  true,
+			Execute: func(_ *gui.Event, _ *gui.Window) { openConfigFile() },
+		},
 	}
 }
 
@@ -65,10 +89,10 @@ func registerCommands(w *gui.Window) {
 // fires through the workspace command registry) and the About dialog, which
 // OmitAboutItem moves out of the app menu.
 //
-// AboutActionID is deliberately unset: About is an explicit Help item routed
-// through OnAction to falcon's own dialog. The system NSAboutPanel is not
-// usable here: it renders from Info.plist, so an unbundled `go build` would
-// show the lowercase process name with no version and no icon.
+// AboutActionID is deliberately unset: About is an explicit Help item backed
+// by falcon's own window command (see appCommands). The system NSAboutPanel
+// is not usable here: it renders from Info.plist, so an unbundled `go build`
+// would show the lowercase process name with no version and no icon.
 //
 // No Edit menu: Cmd+C/Cmd+V are terminal shortcuts handled by term's binding
 // table, and an auto-wired Edit menu would swallow them before they get there.
@@ -113,11 +137,14 @@ func (a *app) menubarCfg(w *gui.Window) gui.NativeMenubarCfg {
 					},
 					{Separator: true},
 					{
-						// No command backs About, so this ID
-						// falls through to OnAction and
-						// onMenuAction shows the dialog.
-						ID:   actionAbout,
-						Text: "About " + appName,
+						// Backed by falcon's own window command (see
+						// appCommands): App.SetNativeMenubar resolves the ID
+						// via the command registry first, which shows the
+						// dialog. OnAction below stays as the fallback for
+						// backends that route on neither field.
+						ID:        actionAbout,
+						CommandID: actionAbout,
+						Text:      aboutLabel,
 					},
 				},
 			},
@@ -127,6 +154,8 @@ func (a *app) menubarCfg(w *gui.Window) gui.NativeMenubarCfg {
 
 // onMenuAction dispatches a menu click that no command handles. go-gui already
 // queued this onto the main thread, so it can touch window state directly.
+// The About item normally resolves through the command registry before it
+// gets here; this arm covers backends that route on neither ID field.
 func (a *app) onMenuAction(id string, w *gui.Window) {
 	switch id {
 	case actionAbout:
