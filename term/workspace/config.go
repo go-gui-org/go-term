@@ -728,7 +728,9 @@ func sortedBindingKeys(kb map[string]string, wantTerm bool) []string {
 }
 
 // applyWorkspaceBindings rewrites the shortcuts of the workspace.* commands
-// named in kb. Bare (unprefixed) keys are workspace commands too.
+// named in kb. Bare (unprefixed) keys are workspace commands too. Embedder
+// commands registered via Cfg.ExtraCommands are matched by their full ID,
+// so a falcon entry rebinds as e.g. falcon.openConfig = Cmd+E.
 func applyWorkspaceBindings(cmds []gui.Command, kb map[string]string) {
 	byID := make(map[string]int, len(cmds))
 	for i, cmd := range cmds {
@@ -736,10 +738,17 @@ func applyWorkspaceBindings(cmds []gui.Command, kb map[string]string) {
 	}
 	for _, key := range sortedBindingKeys(kb, false) {
 		chord := kb[key]
-		// Bare keys are workspace commands, so normalize both spellings to
-		// the namespaced command ID.
-		fullID := workspacePrefix + strings.TrimPrefix(key, workspacePrefix)
-		idx, ok := byID[fullID]
+		idx, ok := byID[key]
+		var fullID string
+		if ok {
+			// An embedder command named by its full ID.
+			fullID = key
+		} else {
+			// Bare keys are workspace commands, so normalize both spellings to
+			// the namespaced command ID.
+			fullID = workspacePrefix + strings.TrimPrefix(key, workspacePrefix)
+			idx, ok = byID[fullID]
+		}
 		if !ok {
 			log.Printf("workspace: unknown command %q in config", fullID)
 			continue

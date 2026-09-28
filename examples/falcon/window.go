@@ -103,9 +103,10 @@ func (a *app) onInit(w *gui.Window) {
 		}
 	}
 	w.SetView(s.View)
-	registerCommands(w)
 	// After the workspace exists: the Help menu's shortcut item resolves
-	// against the workspace commands registered by workspace.New.
+	// against the workspace commands registered by workspace.New — which
+	// already include falcon's own About and Settings entries via
+	// Cfg.ExtraCommands.
 	if a.gapp != nil {
 		a.installMenubar(a.gapp, w)
 	}

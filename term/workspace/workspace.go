@@ -86,6 +86,16 @@ type Cfg struct {
 	// gui.SetTheme here lands in the same frame as the pane repaint.
 	OnColorScheme func(dark bool)
 
+	// ExtraCommands are embedder-provided window commands (falcon's About
+	// and Settings, for example). They are appended to the built-in table
+	// in buildCommands, so they are registered on the window, listed in
+	// the command palette, and re-registered on every config reload —
+	// which is why they live here rather than in a separate
+	// RegisterCommand call the reload would not know about. Entries with
+	// no Shortcut are palette-only; entries with one also appear in the
+	// help overlay and can be rebound from the config file by full ID.
+	ExtraCommands []gui.Command
+
 	// opts carries the per-Term settings resolved from the config file. The
 	// workspace fills it in; embedders configure these through the config
 	// file, not here.
