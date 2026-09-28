@@ -652,11 +652,20 @@ func (ws *Workspace) focusedCwd() string {
 }
 
 // addTab creates a new tab with a single terminal and switches to it. The new
-// tab's shell starts in the CWD of the pane the command was issued from.
+// tab's shell starts in the CWD of the pane the command was issued from, and
+// the pane inherits that source pane's effective font size (matching splitPane:
+// an unzoomed source reports the workspace default, so the new pane matches it
+// either way).
 func (ws *Workspace) addTab() {
-	// Capture the source CWD and pane before the active tab index moves.
+	// Capture the source CWD, pane, and zoom before the active tab index moves.
 	cwd := ws.focusedCwd()
 	oldTab := ws.activeTabPtr()
+	var inheritSize float32
+	if oldTab != nil {
+		if old, ok := oldTab.terms[oldTab.focused]; ok {
+			inheritSize = old.FontSize()
+		}
+	}
 	// addTabIn refuses to spawn into a closing window (errWindowClosing), so
 	// that case needs no guard here.
 	if _, err := ws.addTabIn(cwd); err != nil {
@@ -672,6 +681,9 @@ func (ws *Workspace) addTab() {
 	// Focus the new tab's pane.
 	tab := ws.tabs[ws.activeTab]
 	if t, ok := tab.terms[tab.focused]; ok {
+		if inheritSize > 0 {
+			t.SetFontSize(inheritSize)
+		}
 		setTermFocused(t, true)
 	}
 	ws.refresh()

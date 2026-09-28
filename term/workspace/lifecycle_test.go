@@ -258,6 +258,33 @@ func TestAddTab_AppendsAndActivates(t *testing.T) {
 	}
 }
 
+// addTab inherits the source pane's zoom, like splitPane does: a Cmd+= zoom
+// must carry over to the new tab instead of resetting to the saved default.
+func TestAddTab_InheritsFontSize(t *testing.T) {
+	ws := newLiveWorkspace(t)
+	srcTab := activeTabOf(t, ws)
+	src, ok := srcTab.terms[srcTab.focused]
+	if !ok {
+		t.Fatalf("source pane %q has no Term", srcTab.focused)
+	}
+	src.AdjustFontSize(2)
+	want := src.FontSize()
+	if want <= 0 {
+		t.Fatalf("source FontSize = %v after zoom, want > 0", want)
+	}
+
+	ws.addTab()
+
+	newTab := activeTabOf(t, ws)
+	dst, ok := newTab.terms[newTab.focused]
+	if !ok {
+		t.Fatalf("new tab's focused leaf %q has no Term", newTab.focused)
+	}
+	if got := dst.FontSize(); got != want {
+		t.Errorf("new tab FontSize = %v, want %v (source zoom)", got, want)
+	}
+}
+
 // Closing a tab when others remain drops it and keeps a valid active index.
 func TestCloseTab_WithOthersRemaining(t *testing.T) {
 	ws := newLiveWorkspace(t)
