@@ -100,7 +100,7 @@ func TestAppCommands_Register(t *testing.T) {
 // exist. The shape test catches a label or shortcut regression; only this
 // one proves the entry does something.
 func TestAppCommands_AboutOpensDialog(t *testing.T) {
-	w := gui.NewTestWindow(gui.WindowCfg{})
+	w := gui.NewTestWindow(t, gui.WindowCfg{})
 	w.TestRender(func(*gui.Window) gui.View {
 		return gui.Column(gui.ContainerCfg{ID: "root"})
 	})
@@ -220,7 +220,7 @@ func TestAboutDialogKeyboardContract(t *testing.T) {
 	}
 	// The view builds fresh on every dialog frame, so it must hand back
 	// the key holder each time — not a cached or empty subtree.
-	w := gui.NewTestWindow(gui.WindowCfg{})
+	w := gui.NewTestWindow(t, gui.WindowCfg{})
 	view := cfg.CustomView(w)
 	if view == nil {
 		t.Fatal("CustomView returned nil")
@@ -245,7 +245,7 @@ func TestAboutDialogDismissal(t *testing.T) {
 		{"keypad enter", gui.KeyKPEnter},
 	} {
 		t.Run(key.name, func(t *testing.T) {
-			w := gui.NewTestWindow(gui.WindowCfg{})
+			w := gui.NewTestWindow(t, gui.WindowCfg{})
 			w.TestRender(func(*gui.Window) gui.View {
 				return gui.Column(gui.ContainerCfg{ID: "root"})
 			})
@@ -272,7 +272,7 @@ func TestAboutDialogDismissal(t *testing.T) {
 // terminal behind the panel closes it. The panel has no OK button, so a user
 // who reaches for the mouse has nothing else to aim at.
 func TestAboutDialogClickOutside(t *testing.T) {
-	w := gui.NewTestWindow(gui.WindowCfg{})
+	w := gui.NewTestWindow(t, gui.WindowCfg{})
 	w.TestRender(func(*gui.Window) gui.View {
 		return gui.Column(gui.ContainerCfg{ID: "root"})
 	})
@@ -300,7 +300,7 @@ func TestAboutDialogClickOutside(t *testing.T) {
 // must unwrap it there and then. A hook that never retired would wrap itself
 // on the next open and stay in the terminal's event path for good.
 func TestAboutDialogHookRetires(t *testing.T) {
-	w := gui.NewTestWindow(gui.WindowCfg{})
+	w := gui.NewTestWindow(t, gui.WindowCfg{})
 	w.TestRender(func(*gui.Window) gui.View {
 		return gui.Column(gui.ContainerCfg{ID: "root"})
 	})
