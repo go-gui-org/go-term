@@ -169,3 +169,40 @@ func TestPaneThemes(t *testing.T) {
 		_ = got
 	})
 }
+
+// TestTabBarView_HorizontalInset verifies the tab bar insets its tabs from the
+// window's left and right edges. With a hidden macOS titlebar the content view
+// runs under the window outline and rounded corners, so a first tab flush at
+// x=0 has its colored background clipped by the frame. The inset is
+// horizontal only: vertical padding would make the bar taller than
+// tabBarHeight reports, and the pane area below would overflow.
+func TestTabBarView_HorizontalInset(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.tabs = []*tab{{id: "tab-0"}, {id: "tab-1"}}
+
+	layout := ws.tabBarView().GenerateLayout(ws.w)
+	if layout.Shape == nil {
+		t.Fatal("tab bar layout has no shape")
+	}
+	want := gui.NewPadding(0, tabBarPad, 0, tabBarPad)
+	if got := layout.Shape.Padding; got != want {
+		t.Errorf("tab bar padding = %+v, want %+v", got, want)
+	}
+}
+
+// TestTabBarView_SeparatorGap verifies the bar leaves tabSeparatorGap on each
+// side of the 1px separator. The bar's children alternate tab, separator,
+// tab, so the row's child spacing is exactly the gap around each separator.
+// Without it the active tab's background runs into the separator.
+func TestTabBarView_SeparatorGap(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.tabs = []*tab{{id: "tab-0"}, {id: "tab-1"}}
+
+	layout := ws.tabBarView().GenerateLayout(ws.w)
+	if layout.Shape == nil {
+		t.Fatal("tab bar layout has no shape")
+	}
+	if got := layout.Shape.Spacing; got != tabSeparatorGap {
+		t.Errorf("tab bar spacing = %v, want %v", got, tabSeparatorGap)
+	}
+}

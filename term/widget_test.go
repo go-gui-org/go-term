@@ -4124,3 +4124,25 @@ func TestTermRuneStr_CacheBounded(t *testing.T) {
 		t.Errorf("termRuneStr('é') = %q, want %q", got, "é")
 	}
 }
+
+// TestTerm_View_GridPadding verifies the pane container insets the canvas by
+// gridPadding on every side. On macOS with a hidden titlebar the content view
+// runs under the window's 1px outline and rounded corners, so a grid flush at
+// x=0 has its first column drawn under the frame.
+func TestTerm_View_GridPadding(t *testing.T) {
+	win := gui.NewWindow(gui.WindowCfg{})
+	term, err := New(win, Cfg{})
+	if err != nil {
+		t.Fatalf("New term: %v", err)
+	}
+	defer func() { _ = term.Close() }()
+
+	layout := term.View(win).GenerateLayout(win)
+	if layout.Shape == nil {
+		t.Fatal("layout has no shape")
+	}
+	want := gui.PadAll(gridPadding)
+	if got := layout.Shape.Padding; got != want {
+		t.Errorf("padding = %+v, want %+v", got, want)
+	}
+}

@@ -460,6 +460,16 @@ func (t *Term) onAmendLayout(ctx gui.EventCtx) {
 	}
 }
 
+// gridPadding is the inset, in logical pixels, between the pane edge and the
+// cell grid. The container fills it with the default background, so it reads
+// as part of the terminal. It exists because macOS draws the window outline
+// and rounded corners over the content view when the titlebar is hidden (the
+// content view is full size), so a grid flush at x=0 puts its first column
+// under the frame. Every cell calculation reads the canvas size and canvas-local
+// mouse coordinates, so the grid shrinks and hit tests stay correct with no
+// other change. Mouse events in the padding band do not reach the canvas.
+const gridPadding float32 = 4
+
 // View returns the go-gui view tree for this terminal. Usable as a
 // gui.Window SetView generator: w.SetView(t.View).
 func (t *Term) View(w *gui.Window) gui.View {
@@ -512,7 +522,7 @@ func (t *Term) View(w *gui.Window) gui.View {
 		OnMouseUp:     t.onMouseUp,
 	})
 	colCfg := gui.ContainerCfg{
-		Padding:     gui.PaddingNone,
+		Padding:     gui.PadAll(gridPadding),
 		Spacing:     gui.SomeF(0),
 		Color:       bgColor,
 		OnChar:      t.onChar,

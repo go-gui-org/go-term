@@ -783,6 +783,20 @@ func (ws *Workspace) onWindowEvent(e *gui.Event, w *gui.Window) {
 	}
 }
 
+// tabBarPad is the horizontal inset, in logical pixels, between the window edges
+// and the first and last tab. The bar's panel color fills it. With a hidden
+// macOS titlebar the content view runs under the window outline and rounded
+// corners, so without this inset the first tab's background is drawn under
+// the frame. It matches the terminal's grid padding, so tab text and pane text
+// start at almost the same x. The inset is horizontal only: tabBarHeight
+// reports the bar height without it, and the pane area below uses that value.
+const tabBarPad float32 = 4
+
+// tabSeparatorGap is the space, in logical pixels, on each side of the 1px rule
+// between two tabs. The bar's panel color fills it, so the active tab's
+// background stops short of the rule and does not touch it.
+const tabSeparatorGap float32 = 2
+
 // tabBarView renders the tab bar. Only called when 2+ tabs exist.
 func (ws *Workspace) tabBarView() gui.View {
 	theme := gui.CurrentTheme()
@@ -802,6 +816,10 @@ func (ws *Workspace) tabBarView() gui.View {
 		buttons = append(buttons, ws.tabButton(theme, tab, isActive, i))
 	}
 	bar := tight(gui.FillFit)
+	bar.Padding = gui.NewPadding(0, tabBarPad, 0, tabBarPad)
+	// Children alternate tab, rule, tab, so the child spacing is exactly the
+	// gap on each side of every rule.
+	bar.Spacing = gui.SomeF(tabSeparatorGap)
 	bar.Color = theme.ColorPanel
 	bar.Content = buttons
 	return gui.Row(bar)
