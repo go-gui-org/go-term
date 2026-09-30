@@ -7,7 +7,8 @@ input bytes and expected grid output.
 ## Quick Start: Go-Generated Fixtures
 
 For programmatic fixture capture, edit and run the `TestCaptureFixture` helper
-in `term/fixture_capture_test.go`:
+in `term/fixture_capture_test.go` (gated behind the `fixture_capture` build tag
+so ordinary runs never write to `testdata/`):
 
 ```go
 func TestCaptureFixture(t *testing.T) {
@@ -20,7 +21,7 @@ func TestCaptureFixture(t *testing.T) {
 ```
 
 ```bash
-go test -run TestCaptureFixture -count=1 ./term
+go test -tags fixture_capture -run TestCaptureFixture -count=1 ./term
 ```
 
 ## Capturing from a Real Terminal with `script`
@@ -70,8 +71,8 @@ The helper:
 After generating the fixture:
 
 ```bash
-# Verify it replays correctly.
-go test -run TestEmulatorReplayFixtures -count=1 ./term
+# Verify it replays correctly (matches TestEmulatorReplay + TestEmulatorReplayFixtures).
+go test -run EmulatorReplay -count=1 ./term
 ```
 
 ### Converting a `.gtr` recording
