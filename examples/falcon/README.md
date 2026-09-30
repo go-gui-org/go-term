@@ -32,8 +32,10 @@ signed.
 
 Download `falcon-<version>-linux-amd64.tar.gz` from the release page — it
 contains the binary, a `.desktop` entry, the icon, and install instructions
-(`packaging/install.txt` in the repo). Requires SDL2, FreeType, HarfBuzz, Pango,
-fontconfig, and GLib at runtime.
+(`packaging/install.txt` in the repo). The Linux build is cgo-free (pure-Go
+ConPTY layer, go-glyph shaping, GL through purego — only macOS needs cgo for the
+Metal backend), so there are no SDL2/FreeType/HarfBuzz/Pango runtime
+dependencies; it needs an OpenGL-capable driver and installed fonts.
 
 ### Windows
 
@@ -178,24 +180,25 @@ that is (e.g. `Menlo`).
 `Cmd+/` opens the in-app help overlay, which is generated from the live binding
 table — it is always accurate for your config. Highlights:
 
-| Chord                                         | Action                                                       |
-| --------------------------------------------- | ------------------------------------------------------------ |
-| `Cmd+D` / `Cmd+Shift+D`                       | Split vertically / horizontally                              |
-| `Cmd+[` / `Cmd+]`                             | Previous / next pane                                         |
-| `Cmd+Ctrl+←↑↓→`                               | Resize the split                                             |
-| `Cmd+T` / `Cmd+Shift+W` / `Cmd+Ctrl+W`        | New tab / close pane / close tab                             |
-| `Cmd+S`                                       | Save workspace                                               |
-| `Cmd+/` / `Cmd+Shift+P`                       | Shortcut help / command palette                              |
-| `Cmd+1`…`Cmd+9`, `Cmd+Shift+[` / `]`          | Select tab, previous / next tab                              |
-| `Cmd+C` / `Cmd+V`                             | Copy / paste (`Ctrl+Shift+C/V` also)                         |
-| `Cmd+A`                                       | Select all, including scrollback                             |
-| `Cmd+F`                                       | Find, with `Ctrl+R` for regex                                |
-| `Cmd+Shift+Space`                             | Copy mode — vim-keyed selection, output frozen               |
-| `Cmd+Shift+O` / `Cmd+Shift+U` / `Cmd+Shift+Y` | Select command output / open link / copy link (hints)        |
-| `Cmd+↑` / `Cmd+↓` / `Cmd+Shift+E`             | Previous / next prompt, jump to last failure (needs OSC 133) |
-| `Cmd+=` / `Cmd+-` / `Cmd+0`                   | Font zoom in / out / reset                                   |
-| `Cmd+Shift+T` / `Cmd+Shift+I` / `Cmd+Shift+R` | Theme picker / broadcast input / toggle recording            |
-| `Cmd+,` / `Cmd+Shift+,`                       | Open config / reload config                                  |
+| Chord                                         | Action                                                         |
+| --------------------------------------------- | -------------------------------------------------------------- |
+| `Cmd+D` / `Cmd+Shift+D`                       | Split vertically / horizontally                                |
+| `Cmd+[` / `Cmd+]`                             | Previous / next pane                                           |
+| `Cmd+Ctrl+←↑↓→`                               | Resize the split                                               |
+| `Cmd+T` / `Cmd+Shift+W` / `Cmd+Ctrl+W`        | New tab / close pane / close tab                               |
+| `Cmd+S`                                       | Save workspace                                                 |
+| `Cmd+/` / `Cmd+Shift+P`                       | Shortcut help / command palette                                |
+| `Cmd+1`…`Cmd+9`, `Cmd+Shift+[` / `]`          | Select tab, previous / next tab                                |
+| `Cmd+C` / `Cmd+V`                             | Copy / paste (`Ctrl+Shift+C/V` also)                           |
+| `Cmd+A`                                       | Select all, including scrollback                               |
+| `Cmd+F`                                       | Find, with `Ctrl+R` for regex                                  |
+| `Cmd+Shift+Space`                             | Copy mode — vim-keyed selection, output frozen                 |
+| `Cmd+Shift+O` / `Cmd+Shift+U` / `Cmd+Shift+Y` | Select command output / open link / copy link (hints)          |
+| `Cmd+↑` / `Cmd+↓` / `Cmd+Shift+E`             | Previous / next prompt, jump to last failure (needs OSC 133)   |
+| `Cmd+=` / `Cmd+-` / `Cmd+0`                   | Font zoom in / out / reset                                     |
+| `Cmd+Shift+T` / `Cmd+Shift+I` / `Cmd+Shift+R` | Theme picker / broadcast input / toggle recording              |
+| `Cmd+,` / `Cmd+Shift+,`                       | Open config (Settings) / reload config                         |
+| `Cmd+Shift+P`, then type `cursor`             | Cursor style / blink / lock (palette-only, apply to all panes) |
 
 On Windows the Super key is OS-reserved, so `Cmd`-based defaults are remapped
 (`Cmd`→`Ctrl+Shift`, `Cmd+Shift`→`Ctrl+Alt`, …). Chords written in the config
@@ -217,7 +220,8 @@ falcon --replay session.gtr    # space pauses, +/- speed, . steps, 0 restarts
 ```
 
 `Cmd+Shift+R` recordings land in the `recordings` subdirectory of the go-term
-config directory. Inspect and convert them with the `gotermrec` CLI:
+config directory (`~/.config/go-term/recordings`, not falcon's own directory).
+Inspect and convert them with the `gotermrec` CLI:
 
 ```bash
 go run ../../term/gotermrec info    session.gtr

@@ -445,6 +445,17 @@ press the second form.
 | `workspace.overlayPageUp` / `overlayPageDown` | `PageUp` / `PageDown` (only while a list overlay is open) |
 | `workspace.overlayConfirm`                    | `Enter` (only while a list overlay is open)               |
 
+Palette-only rows with no shortcut (not rebindable to a chord, listed here so
+the palette's full contents are documented): `workspace.cursorStyleBlock`,
+`workspace.cursorStyleUnderline`, `workspace.cursorStyleBar`,
+`workspace.cursorBlinkOn`, `workspace.cursorBlinkOff`, `workspace.cursorLockOn`,
+`workspace.cursorLockOff`. They apply the cursor choice to every open pane for
+the session; the config file stays the durable setting (see [Cursor](#cursor)).
+
+An embedder can append its own window commands via `workspace.Cfg.ExtraCommands`
+(falcon's About and Settings). They join the same table, appear in the palette,
+and are rebindable from the config file by full ID.
+
 The `overlay*` commands are shared by every list overlay — the theme browser and
 the command palette — and route to whichever one is open. They are one
 registration each on purpose: duplicate shortcuts are rejected by the command
@@ -457,12 +468,14 @@ so a command you know by name doesn't have to be known by chord. Type to filter,
 `Up`/`Down` to move, `Enter` to run, `Escape` to clear the filter and then to
 close.
 
-- It spans both registries: the `workspace.*` commands above **and** the
-  `term.*` actions of the focused pane.
+- It spans three registries: the `workspace.*` commands above (including the
+  palette-only cursor rows below and any embedder `ExtraCommands`, such as
+  falcon's About and Settings) **and** the `term.*` actions of the focused pane.
 - The `term.copy-mode.*` motions appear only while that pane is actually in copy
   mode, since they do nothing outside it.
-- Actions you have unbound (`none`) are not listed. The palette invokes an
-  action by way of its chord, so an action with no chord has no way to run.
+- Actions you have unbound (`none`) are not listed. `RunAction` itself can still
+  run an unbound action by name — the palette just doesn't offer one, since its
+  rows come from the bound-action list.
 - A single click runs a row, and clicking outside the panel dismisses. Hovering
   a row only changes the pointer — it deliberately does not move the selection,
   so a nudged mouse can't retarget what `Enter` runs.

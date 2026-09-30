@@ -14,9 +14,10 @@ Targets macOS, Linux, and Windows (ConPTY).
 ## Falcon
 
 The screenshot above is **falcon**, the example app: a full terminal emulator
-with tabs, splits, workspace save/restore, themes, and session replay. It is the
-reference embedder for `term/workspace` and a daily driver on macOS. Falcon is a
-trademark of Mike Ward.
+with tabs, splits, workspace save/restore, themes, session replay, command
+palette, broadcast input, and copy mode. It is the reference embedder for
+`term/workspace` and a daily driver on macOS. Falcon is a trademark of Mike
+Ward.
 
 ```bash
 cd examples/falcon && go run .
@@ -28,8 +29,9 @@ bindings, bundling, and how the pieces fit together.
 ## Configuration
 
 Fonts, theme, scrollback, bell, scrollbar and every keyboard shortcut can be set
-in an optional INI file at `~/.config/go-term/config`, reloadable at runtime
-with `Cmd+Shift+,`:
+in an optional INI file — `~/.config/falcon/config` for falcon,
+`~/.config/go-term/config` for a bare `term/workspace` embedder — reloadable at
+runtime with `Cmd+Shift+,`:
 
 ```ini
 [font]
@@ -50,10 +52,10 @@ full list of rebindable actions.
 
 ## Embedding
 
-`term` is a library; falcon is its proof. The public surface is frozen at v0.9.0
-— the export audit and Godoc pass landed there, so what is documented is what
-v1.0.0 will keep. Build against v0.9.0; breaking changes before 1.0 would ship
-as v0.10.0.
+`term` is a library; falcon is its proof. The public surface froze at v0.9.0
+(the export audit and Godoc pass landed there) and was amended once since, by
+the v0.10.0 `CursorBlink` bool change. Build against v0.14.0; further breaking
+changes before 1.0 ship as a new minor.
 
 ```go
 import "github.com/go-gui-org/go-term/term"
@@ -132,7 +134,10 @@ round trip; keystrokes are captured only when explicitly enabled
 
 ```bash
 go test ./...
+go test -race ./...   # same suite with the race detector
+go vet ./...
 go test ./term -run EmulatorReplay   # replay-style emulator checks
+go test ./term -run TestConformance  # vttest-parity smoke tests
 ```
 
 The emulator checks run against JSON fixtures in `term/testdata/` — recorded
