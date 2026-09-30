@@ -180,18 +180,20 @@ build-falcon:
 
 # Recommended full local validation before pushing (issue go-gui#314).
 # Approximates the CI matrix from one host: race tests, vet, lint, the prod
-# falcon build, the Windows cross-compile, and the benchmark regression gate.
-# Aborts on the first failing target.
+# falcon build, and the Windows cross-compile. Aborts on the first failing
+# target.
 #
-# Unlike go-gui, whose benchmark gate needs a baseline cached from main,
-# this repo's baseline is committed at .github/benchmarks/baseline.txt, so
-# bench-regress runs locally. It is the long pole: -count=10 over ./term.
+# The benchmark regression gate stays CI-only: it is the long pole
+# (-count=10 over ./term) and runs there on every PR and push.
 #
 # Omissions vs CI, by design:
+#   - bench-regress (CI-only; see above — still runnable via `make
+#     bench-regress`, whose baseline lives at
+#     .github/benchmarks/baseline.txt)
 #   - native macOS and Windows test execution (the OS matrix)
 #   - the fuzz jobs, which are schedule- and diff-gated
 #   - release.yml packaging
-prepush: test-race vet lint build-falcon cross-windows bench-regress
+prepush: test-race vet lint build-falcon cross-windows
 
 # Package falcon as a macOS .app bundle.
 app: $(APP_NAME).app
