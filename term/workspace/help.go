@@ -11,7 +11,7 @@ import (
 // registry grew past ~35 entries, which overflows a laptop viewport.
 const (
 	helpColW    = 330 // per-column content width, px
-	helpColGap  = 22  // gap between columns, px
+	helpColGap  = 28  // gap between columns, px
 	helpMaxCols = 3
 
 	// helpPanelChrome is the vertical space the panel spends on padding and
@@ -222,7 +222,7 @@ func (ws *Workspace) helpPanel(ww, wh int) gui.View {
 	for _, col := range packed {
 		c := tight(gui.FixedFit)
 		c.Width = helpColW
-		c.Spacing = gui.SomeF(1)
+		c.Spacing = gui.SpacingTight
 		views := make([]gui.View, 0, len(col)*2)
 		for _, s := range col {
 			views = append(views, ws.helpHeader(s.title, theme, headStyle))
@@ -235,7 +235,7 @@ func (ws *Workspace) helpPanel(ww, wh int) gui.View {
 	}
 
 	body := tight(gui.FitFit)
-	body.Spacing = gui.SomeF(helpColGap)
+	body.Spacing = gui.SpacingPx(helpColGap)
 	body.Content = colViews
 
 	// Scroll fallback: even the widest column count can overflow a short
@@ -256,7 +256,7 @@ func (ws *Workspace) helpPanel(ww, wh int) gui.View {
 
 	panel := overlayPanel(theme)
 	panel.Padding = gui.NewPadding(10, 14, 10, 14)
-	panel.Spacing = gui.SomeF(1)
+	panel.Spacing = gui.SpacingTight
 	panel.Content = []gui.View{gui.Column(inner)}
 	return gui.Column(panel)
 }
@@ -270,7 +270,7 @@ func (ws *Workspace) helpHeader(text string, theme gui.Theme, style gui.TextStyl
 	headerRow.Content = []gui.View{gui.Text(gui.TextCfg{Text: text, TextStyle: style})}
 
 	col := tight(gui.FillFit)
-	col.Spacing = gui.SomeF(0)
+	col.Spacing = gui.NoSpacing
 	col.Content = []gui.View{
 		gui.Row(headerRow),
 		gui.Rectangle(gui.RectangleCfg{

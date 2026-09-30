@@ -47,7 +47,7 @@ const (
 
 	// Vertical gap between rows. Named because the pinned viewport height has
 	// to account for it — n rows carry n-1 gaps.
-	paletteRowGap = 1
+	paletteRowGap = 2
 
 	// PageUp/PageDown step, in rows. A fixed count rather than the actual
 	// visible row count, which only the layout knows — the same trade
@@ -361,7 +361,7 @@ func (ws *Workspace) palettePanel(ww, wh int) gui.View {
 
 	inner := tight(gui.FixedFit)
 	inner.Width = palettePanelW
-	inner.Spacing = gui.SomeF(8)
+	inner.Spacing = gui.SpacingSmall
 	inner.Content = []gui.View{
 		ws.helpHeader("Commands", theme, head),
 		gui.Input(gui.InputCfg{
@@ -390,7 +390,7 @@ func (ws *Workspace) palettePanel(ww, wh int) gui.View {
 // measure.
 func (ws *Workspace) paletteRows(theme gui.Theme, wh float32) gui.View {
 	list := tight(gui.FillFit)
-	list.Spacing = gui.SomeF(paletteRowGap)
+	list.Spacing = gui.SpacingPx(paletteRowGap)
 
 	p := &ws.palette
 	rowStyle := theme.TextStyleCodeTiny
@@ -416,7 +416,7 @@ func (ws *Workspace) paletteRows(theme gui.Theme, wh float32) gui.View {
 		row := tight(gui.FillFixed)
 		row.Height = rowH
 		row.Padding = gui.NewPadding(paletteRowPadV, paletteRowPadH, paletteRowPadV, paletteRowPadH)
-		row.Radius = gui.SomeF(3)
+		row.Radius = gui.RadiusSmall
 		if j == p.idx {
 			row.Color = theme.ColorActive
 		}

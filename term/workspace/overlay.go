@@ -71,8 +71,8 @@ func overlayPanel(theme gui.Theme) gui.ContainerCfg {
 	panel.FloatZIndex = overlayPanelZ
 	panel.Color = theme.ColorPanel
 	panel.ColorBorder = theme.ColorBorder
-	panel.SizeBorder = gui.SomeF(1)
-	panel.Radius = gui.SomeF(6)
+	panel.SizeBorder = gui.BorderThin
+	panel.Radius = gui.RadiusMedium
 	// Swallow clicks so they don't fall through to the backdrop, which would
 	// dismiss the overlay when clicking inside it.
 	panel.OnClick = func(ctx gui.EventCtx) {}

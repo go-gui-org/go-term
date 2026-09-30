@@ -337,7 +337,7 @@ func aboutDialogCfg(theme gui.Theme) gui.DialogCfg {
 		HAlign:     gui.HAlignCenter,
 		Padding:    gui.NoPadding,
 		SizeBorder: gui.NoBorder,
-		Spacing:    gui.Some(gui.SpacingMedium),
+		Spacing:    gui.SpacingMedium,
 		Content: []gui.View{
 			gui.Text(gui.TextCfg{Text: appName, TextStyle: name}),
 			gui.Text(gui.TextCfg{
@@ -353,7 +353,7 @@ func aboutDialogCfg(theme gui.Theme) gui.DialogCfg {
 		HAlign:     gui.HAlignCenter,
 		Padding:    gui.NoPadding,
 		SizeBorder: gui.NoBorder,
-		Spacing:    gui.Some(gui.SpacingLarge),
+		Spacing:    gui.SpacingLarge,
 		Content: []gui.View{
 			aboutLinkButton(aboutDocsID, "Docs", docsURL),
 			aboutLinkButton(aboutGitHubID, "GitHub", repoURL),
@@ -393,7 +393,7 @@ func aboutKeys(content []gui.View) gui.View {
 		// Large, not Medium: the four blocks here are separate ideas
 		// (what it is, how old it is, where to read more), and the
 		// panel reads as a stack of them rather than a dense list.
-		Spacing: gui.Some(gui.SpacingLarge),
+		Spacing: gui.SpacingLarge,
 		OnKeyDown: func(ctx gui.EventCtx) {
 			switch ctx.Event.KeyCode {
 			case gui.KeyEnter, gui.KeyKPEnter:
@@ -435,7 +435,7 @@ func aboutMetadata(theme gui.Theme) gui.View {
 		Sizing:     gui.FitFit,
 		Padding:    gui.NoPadding,
 		SizeBorder: gui.NoBorder,
-		Spacing:    gui.Some(gui.SpacingTight),
+		Spacing:    gui.SpacingTight,
 		Content:    rows,
 	})
 }
@@ -449,7 +449,7 @@ func aboutRow(theme gui.Theme, label string, value gui.View) gui.View {
 		VAlign:     gui.VAlignMiddle,
 		Padding:    gui.NoPadding,
 		SizeBorder: gui.NoBorder,
-		Spacing:    gui.Some(gui.SpacingSmall),
+		Spacing:    gui.SpacingSmall,
 		Content: []gui.View{
 			gui.Text(gui.TextCfg{
 				Text:      label,
