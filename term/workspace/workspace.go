@@ -525,7 +525,7 @@ func tight(sizing gui.Sizing) gui.ContainerCfg {
 	return gui.ContainerCfg{
 		Sizing:     sizing,
 		Padding:    gui.NoPadding,
-		Spacing:    gui.SomeF(0),
+		Spacing:    gui.NoSpacing,
 		SizeBorder: gui.NoBorder,
 	}
 }
@@ -819,7 +819,7 @@ func (ws *Workspace) tabBarView() gui.View {
 	bar.Padding = gui.NewPadding(0, tabBarPad, 0, tabBarPad)
 	// Children alternate tab, rule, tab, so the child spacing is exactly the
 	// gap on each side of every rule.
-	bar.Spacing = gui.SomeF(tabSeparatorGap)
+	bar.Spacing = gui.SpacingPx(tabSeparatorGap)
 	bar.Color = theme.ColorPanel
 	bar.Content = buttons
 	return gui.Row(bar)

@@ -428,28 +428,28 @@ func TestPalette_RevealNoOpsWithoutGeometry(t *testing.T) {
 func TestPalette_RevealScrollsMinimally(t *testing.T) {
 	ws := newLiveWorkspace(t)
 	ws.togglePalette()
-	// Row pitch is rowH plus the inter-row gap, so rows sit 11px apart.
+	// Row pitch is rowH plus the inter-row gap, so rows sit 12px apart.
 	ws.palette.rowH, ws.palette.listH = 10, 100
 
-	// Row 14 spans [154,164); the viewport is [0,100). Bottom-align it.
+	// Row 14 spans [168,178); the viewport is [0,100). Bottom-align it.
 	ws.palette.idx = 14
 	ws.revealPaletteRow()
-	if got := ws.w.ScrollVerticalOffset(paletteScrollID); got != -64 {
-		t.Errorf("scrolling down: offset = %v, want -64", got)
+	if got := ws.w.ScrollVerticalOffset(paletteScrollID); got != -78 {
+		t.Errorf("scrolling down: offset = %v, want -78", got)
 	}
 
-	// Row 12 spans [132,142), inside the now-visible [64,164). No movement.
+	// Row 12 spans [144,154), inside the now-visible [78,178). No movement.
 	ws.palette.idx = 12
 	ws.revealPaletteRow()
-	if got := ws.w.ScrollVerticalOffset(paletteScrollID); got != -64 {
-		t.Errorf("already visible: offset = %v, want -64 (unchanged)", got)
+	if got := ws.w.ScrollVerticalOffset(paletteScrollID); got != -78 {
+		t.Errorf("already visible: offset = %v, want -78 (unchanged)", got)
 	}
 
-	// Row 2 spans [22,32), above the viewport. Top-align it.
+	// Row 2 spans [24,34), above the viewport. Top-align it.
 	ws.palette.idx = 2
 	ws.revealPaletteRow()
-	if got := ws.w.ScrollVerticalOffset(paletteScrollID); got != -22 {
-		t.Errorf("scrolling up: offset = %v, want -22", got)
+	if got := ws.w.ScrollVerticalOffset(paletteScrollID); got != -24 {
+		t.Errorf("scrolling up: offset = %v, want -24", got)
 	}
 }
 

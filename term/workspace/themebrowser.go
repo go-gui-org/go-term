@@ -51,8 +51,7 @@ const (
 
 	// Swatch grid: two rows of eight, matching how ANSI 0-15 is conventionally
 	// shown (normal above, bright below).
-	browserSwatch    = 22
-	browserSwatchGap = 4
+	browserSwatch = 22
 
 	// Estimated row height, as a multiple of the type size. No DrawContext
 	// exists at view-build time, so the number of rows that fit has to be
@@ -418,7 +417,7 @@ func (ws *Workspace) themeBrowserView(w, h float32) gui.View {
 	page.Color = theme.ColorPanel
 
 	body := tight(gui.FillFill)
-	body.Spacing = gui.SomeF(0)
+	body.Spacing = gui.NoSpacing
 	if showPreview {
 		body.Content = []gui.View{
 			ws.themeListColumn(theme, listW, h),
@@ -449,7 +448,7 @@ func (ws *Workspace) themeListColumn(theme gui.Theme, w, h float32) gui.View {
 	col := tight(gui.FixedFill)
 	col.Width = w
 	col.Padding = gui.NewPadding(browserPad, browserPad, browserPad, browserPad)
-	col.Spacing = gui.SomeF(10)
+	col.Spacing = gui.SpacingSmall
 
 	head := theme.TextStyleCodeSmall
 	head.Typeface = glyph.TypefaceBold
@@ -498,7 +497,7 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 	rowH := listRowH(theme.TextStyleCodeSmall.Size, browserRowFactor)
 	listH := browserListHeight(h, theme.TextStyleCodeSmall.Size)
 	b.rowH, b.listH = rowH, listH
-	list.Spacing = gui.SomeF(0)
+	list.Spacing = gui.NoSpacing
 	if b.revealPending {
 		// Geometry exists now, so the deferred opening scroll can run. Doing it
 		// before the range is computed means this build already shows the right
@@ -526,8 +525,8 @@ func (ws *Workspace) themeListRows(theme gui.Theme, h float32) gui.View {
 		row := tight(gui.FillFixed)
 		row.Height = rowH
 		row.Padding = gui.NewPadding(browserRowPadV, browserRowPadH, browserRowPadV, browserRowPadH)
-		row.Radius = gui.SomeF(3)
-		row.Spacing = gui.SomeF(8)
+		row.Radius = gui.RadiusSmall
+		row.Spacing = gui.SpacingSmall
 		if j == b.idx {
 			row.Color = theme.ColorActive
 		}
@@ -651,9 +650,9 @@ func themeChip(th term.Theme) gui.View {
 	outer.Width = 14
 	outer.Height = 14
 	outer.Color = th.DefaultBG
-	outer.Radius = gui.SomeF(3)
+	outer.Radius = gui.RadiusSmall
 	outer.ColorBorder = th.ANSI[8]
-	outer.SizeBorder = gui.SomeF(1)
+	outer.SizeBorder = gui.BorderThin
 	outer.Padding = gui.NewPadding(4, 4, 4, 4)
 	outer.Content = []gui.View{gui.Rectangle(gui.RectangleCfg{
 		Sizing: gui.FillFill,
@@ -687,7 +686,7 @@ func (ws *Workspace) themePreviewColumn(theme gui.Theme) gui.View {
 	}
 
 	inner := tight(gui.FillFit)
-	inner.Spacing = gui.SomeF(14)
+	inner.Spacing = gui.SpacingMedium
 	inner.Content = []gui.View{
 		gui.Text(gui.TextCfg{Text: nt.Name, TextStyle: styled(title, th.DefaultFG)}),
 		gui.Text(gui.TextCfg{
@@ -724,7 +723,7 @@ func (ws *Workspace) themePreviewColumn(theme gui.Theme) gui.View {
 // these colors — "my prompt uses color 4" is the question being answered.
 func swatchGrid(th term.Theme, theme gui.Theme) gui.View {
 	grid := tight(gui.FillFit)
-	grid.Spacing = gui.SomeF(browserSwatchGap)
+	grid.Spacing = gui.SpacingTight
 
 	label := theme.TextStyleCodeTiny
 
@@ -739,7 +738,7 @@ func swatchGrid(th term.Theme, theme gui.Theme) gui.View {
 
 	makeRow := func(base int) gui.View {
 		row := tight(gui.FillFit)
-		row.Spacing = gui.SomeF(browserSwatchGap)
+		row.Spacing = gui.SpacingTight
 		cells := make([]gui.View, 0, 8)
 		for i := base; i < base+8; i++ {
 			num := tight(gui.FixedFit)
@@ -755,7 +754,7 @@ func swatchGrid(th term.Theme, theme gui.Theme) gui.View {
 			}
 
 			cell := tight(gui.FitFit)
-			cell.Spacing = gui.SomeF(3)
+			cell.Spacing = gui.SpacingTight
 			cell.Content = []gui.View{
 				gui.Row(num),
 				gui.Rectangle(gui.RectangleCfg{
@@ -799,7 +798,7 @@ func (ws *Workspace) monoStyle() gui.TextStyle {
 // renderSpans turns lines of spans into a column of rows.
 func renderSpans(lines [][]span, mono gui.TextStyle, selBG gui.Color, gap float32) gui.View {
 	out := tight(gui.FillFit)
-	out.Spacing = gui.SomeF(2)
+	out.Spacing = gui.SpacingTight
 	views := make([]gui.View, 0, len(lines))
 	for _, ln := range lines {
 		if len(ln) == 0 {
@@ -812,7 +811,7 @@ func renderSpans(lines [][]span, mono gui.TextStyle, selBG gui.Color, gap float3
 			continue
 		}
 		row := tight(gui.FillFit)
-		row.Spacing = gui.SomeF(0)
+		row.Spacing = gui.NoSpacing
 		spans := make([]gui.View, 0, len(ln))
 		for _, sp := range ln {
 			st := styled(mono, sp.col)
@@ -901,7 +900,7 @@ func (ws *Workspace) themeProse(th term.Theme) gui.View {
 	strike.Strikethrough = true
 
 	attrs := tight(gui.FillFit)
-	attrs.Spacing = gui.SomeF(14)
+	attrs.Spacing = gui.SpacingMedium
 	attrs.Content = []gui.View{
 		gui.Text(gui.TextCfg{Text: "normal", TextStyle: styled(mono, th.DefaultFG)}),
 		gui.Text(gui.TextCfg{Text: "bold", TextStyle: styled(bold, th.DefaultFG)}),
@@ -935,7 +934,7 @@ func (ws *Workspace) themeProse(th term.Theme) gui.View {
 	})
 
 	out := tight(gui.FillFit)
-	out.Spacing = gui.SomeF(10)
+	out.Spacing = gui.SpacingSmall
 	out.Content = []gui.View{gui.Row(attrs), para}
 	return gui.Column(out)
 }
@@ -974,7 +973,7 @@ func (ws *Workspace) themeCountText() string {
 func (ws *Workspace) themeBrowserFooter(theme gui.Theme) gui.View {
 	bar := tight(gui.FillFit)
 	bar.Padding = gui.NewPadding(8, browserPad, 8, browserPad)
-	bar.Spacing = gui.SomeF(18)
+	bar.Spacing = gui.SpacingMedium
 
 	hint := func(s string) gui.View {
 		return gui.Text(gui.TextCfg{Text: s, TextStyle: theme.TextStyleCodeTiny})

@@ -523,7 +523,7 @@ func (t *Term) View(w *gui.Window) gui.View {
 	})
 	colCfg := gui.ContainerCfg{
 		Padding:     gui.PadAll(gridPadding),
-		Spacing:     gui.SomeF(0),
+		Spacing:     gui.NoSpacing,
 		Color:       bgColor,
 		OnChar:      t.onChar,
 		OnKeyDown:   t.onKeyDown,

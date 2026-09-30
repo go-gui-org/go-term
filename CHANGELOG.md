@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Bump go-gui v0.81.0 → v0.82.0. Workspace panels, the palette, the theme
+  browser and the help overlay take theme roles for spacing, radius and border,
+  so they follow the theme. Gaps and corners snap to the nearest step, so they
+  move by a few pixels: palette rows are 2 px apart (was 1), help columns 28 px
+  (was 22), row corners 4 px (was 3). A 1 px panel border is `gui.BorderThin`,
+  so it goes away under `Theme.WithBorders(false)`.
 - macOS: right Option types what the keyboard layout prints (@, [, ], { and } on
   a German layout). Left Option stays Meta for readline's Alt+f, Alt+b and Alt+.
   keys.
