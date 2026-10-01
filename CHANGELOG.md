@@ -6,9 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-01
+
 ### Changed
 
-- Bump go-gui v0.81.0 → v0.82.0. Workspace panels, the palette, the theme
+- Bumped go-gui v0.78.0 → v0.84.0 and go-glyph v1.25.2 → v1.26.1.
+- Workspace panels, the palette, the theme
   browser and the help overlay take theme roles for spacing, radius and border,
   so they follow the theme. Gaps and corners snap to the nearest step, so they
   move by a few pixels: palette rows are 2 px apart (was 1), help columns 28 px
@@ -19,6 +22,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   keys.
 - Alt on cursor, editing and function keys is sent in xterm's modifier form
   (Alt+Left is `CSI 1;3D`) instead of an ESC prefix.
+- `Term.View` pads the pane 4pt on every side and the tab bar insets 4pt
+  left and right (2pt around the tab separator), so the grid no longer
+  slides under the macOS window outline with a hidden titlebar. Cell math
+  and hit tests account for the inset.
 
 ### Added
 
@@ -27,6 +34,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   `?1002` or `?1003` without also enabling `?1006` previously got no reports at
   all. Not available on Windows builds whose ConPTY consumes the mouse mode
   sets — see `docs/terminal-verification.md`.
+- `workspace.Cfg.ExtraCommands`: embedder window commands that join the
+  built-in table, appear in the palette and help overlay, survive config
+  reloads, and rebind by full ID. Falcon backs About (palette-only) and
+  Settings (`Cmd+,`, opens the config file) with it.
 
 ### Fixed
 
@@ -81,6 +92,27 @@ adheres to [Semantic Versioning](https://semver.org/).
   cleared no tab stop.
 - DECCRA (copy rectangle) over a sixel or iTerm2 image left the image drawn over
   the copied text.
+- A PTY read that moved only the cursor scheduled no frame, so the cursor
+  stayed painted behind (backspacing over blank cells froze it on ConPTY
+  until a real erase caught up). Cursor-only moves now repaint, DECTCEM and
+  DECSCUSR dirty the cursor row on change, and the blink cycle re-phases on
+  cursor moves so a moving cursor stays solid.
+- New tabs inherit the source pane font size. Tab bar labels are vertically
+  centered instead of flush to the top edge.
+- Bidi selection anchors handle RTL boundaries and spans; early-wrap blanks
+  carry wrap-pad so CJK copy skips padding; selection and copy work over
+  main-screen history shown above the alt screen.
+- Downloads publish by hard link so they never replace a file another program
+  saved (rename fallback only where links are unavailable); workspace Save
+  and downloads share one atomic temp-sync-rename writer, and quitting saves
+  the last session from the live tab before teardown. Close waits briefly
+  (about 2s) for a transfer in progress, then returns; no download callback
+  or notification starts after Close begins.
+- Clipboard and notification hardening: hint-copy of OSC 8 URLs carrying
+  control bytes fails closed, empty OSC 9/777 notifications are dropped, and
+  the download placeholder is verified after create.
+- Grid, bidi, search, selection, clipboard and PTY review sweep: audit panics
+  fixed across wrap, occlusion and link state, with allocation guards.
 
 ## [0.14.0] - 2026-09-21
 
