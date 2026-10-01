@@ -750,11 +750,16 @@ func TestClose_BoundedWaitThenNoCallbacks(t *testing.T) {
 // every pane mid-transfer on a slow disk, the freeze must be about one
 // closeWait, not one per pane. Regression: #239 waited closeWait per pane, so
 // quitting with 4 busy panes froze the UI for about 8s.
+//
+// The panes after the first are timed against a closeWait far longer than pty
+// teardown, not against the total. On Windows, ptyDev.Close waits up to
+// closeGrace (1s) for a child that survives the console close, and the old
+// whole-loop bound read that as a second download wait (#252).
 func TestClose_BackToBackClosesShareOneWait(t *testing.T) {
 	resetCloseChain(t)
 	origWait := closeWait
 	t.Cleanup(func() { closeWait = origWait })
-	closeWait = 300 * time.Millisecond
+	closeWait = 50 * time.Millisecond
 
 	entered, release := blockStaging(t)
 	panes := make([]*Term, 0, 3)
@@ -766,14 +771,19 @@ func TestClose_BackToBackClosesShareOneWait(t *testing.T) {
 	}
 	t.Cleanup(release)
 
-	start := time.Now()
-	for _, tm := range panes {
-		_ = tm.Close()
+	_ = panes[0].Close()
+	if lastCloseTimeout.Load() == 0 {
+		t.Fatal("first Close did not record giving up on its download")
 	}
-	// One wait is 300ms; three in a row would be 900ms. The margin absorbs a
-	// slow CI machine without letting a second full wait pass.
-	if el := time.Since(start); el < 250*time.Millisecond || el >= 550*time.Millisecond {
-		t.Errorf("closing 3 busy panes took %v, want about one closeWait (300ms)", el)
+	// A pane that waited would now take 10s; one that skipped takes only its
+	// teardown, a few seconds at worst.
+	closeWait = 10 * time.Second
+	for i, tm := range panes[1:] {
+		start := time.Now()
+		_ = tm.Close()
+		if el := time.Since(start); el >= closeWait/2 {
+			t.Errorf("pane %d: Close took %v, want no download wait after a timeout", i+2, el)
+		}
 	}
 }
 
