@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-05
+
+### Changed
+
+- Cursor blink repaints the canvas without a view rebuild or layout pass, so an
+  idle blinking cursor costs less per tick (#261).
+- Bumped go-gui v0.84.0 → v0.85.0 (adds `DrawCanvasCfg.VersionFn`, used by the
+  blink repaint).
+- Bumped the pinned golangci-lint to v2.14.0 (#259).
+
 ## [0.15.0] - 2026-10-01
 
 ### Changed

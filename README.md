@@ -54,7 +54,7 @@ full list of rebindable actions.
 
 `term` is a library; falcon is its proof. The public surface froze at v0.9.0
 (the export audit and Godoc pass landed there) and was amended once since, by
-the v0.10.0 `CursorBlink` bool change. Build against v0.15.0; further breaking
+the v0.10.0 `CursorBlink` bool change. Build against v0.15.1; further breaking
 changes before 1.0 ship as a new minor.
 
 ```go
