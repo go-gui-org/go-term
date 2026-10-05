@@ -24,7 +24,11 @@ this file holds the per-subsystem detail.
    a monotonically-incrementing sequence number) and a `Version` counter —
    go-gui's tessellation cache skips `OnDraw` entirely when the version is
    unchanged. `readLoop` only bumps the version when `HasDirtyRows` is true, so
-   no-op PTY sequences do not invalidate the cache.
+   no-op PTY sequences do not invalidate the cache. The canvas also sets
+   `VersionFn` (a live `drawVersion` load), so a render-only frame
+   (`InvalidateRender`) repaints it too — the blink tick uses this to skip the
+   view rebuild. `OnDraw` must keep reading live Term state, never values `View`
+   captured.
 
 ## Parser scope
 
@@ -111,9 +115,8 @@ Supports a modern xterm/kitty-compatible subset:
   resets modes/SGR without touching the screen. Both live in `grid_reset.go`.
   DECSTR restores autowrap ON, diverging from VT510 — see the comment there.
 - Modes: alt screen (1049/1047/47), mouse (1000/1002/1003/1006/1015/1016),
-  bracketed
-  paste (2004), focus reporting (1004), synchronized updates (2026 — DECSET
-  begins a block, DECRST ends + flushes; a 500 ms watchdog in the widget
+  bracketed paste (2004), focus reporting (1004), synchronized updates (2026 —
+  DECSET begins a block, DECRST ends + flushes; a 500 ms watchdog in the widget
   force-ends a block whose end never arrives), grapheme clustering (2027 —
   always on; DECRQM reports it permanently set, DECSET/DECRST are no-ops),
   color-scheme change notification (2031 — `Term.SetTheme` pushes `CSI ? 997` at

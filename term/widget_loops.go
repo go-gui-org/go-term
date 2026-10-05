@@ -134,38 +134,44 @@ func (t *Term) blinkLoop() {
 		case <-t.blinkKick:
 			tk.arm()
 		case <-tk.tick:
-			redraw := func() bool {
-				t.grid.Mu.Lock()
-				defer t.grid.Mu.Unlock()
-				return t.grid.CursorVisible &&
-					t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0 &&
-					t.cursorBlinkActive()
-			}()
-			// Blinking text needs the same periodic repaint, and unlike the
-			// cursor it blinks in any viewport position. The recording
-			// indicator rides the same tick to advance its elapsed timer,
-			// which is why the timer shows whole seconds and no finer.
-			redraw = redraw || t.blinkCells.Load() || t.Recording()
-			if !redraw {
+			if !t.blinkTick() {
 				tk.stop() // nothing animating — park until kicked
-				continue
 			}
-			// drawVersion directly, not bumpVersion: bumping would kick this
-			// loop's own channel every tick for no gain.
-			t.drawVersion.Add(1)
-			// InvalidateLayout, not InvalidateRender: the canvas tessellation cache
-			// is keyed on the Version carried by the *layout shape*, which
-			// View writes (widget.go). A render-only refresh reuses the
-			// existing layout tree, so the shape keeps the stale version, the
-			// cache hits, and OnDraw never runs — SGR 5 text and a blinking
-			// cursor would then only change phase when some other event
-			// forced a full update. The view rebuild is affordable because
-			// this loop now only ticks while something is actually blinking.
-			t.queueCommand(func(w *gui.Window) {
-				w.InvalidateLayout()
-			})
 		}
 	}
+}
+
+// blinkTick is one blinkLoop wake. It repaints when something on screen blinks
+// and reports whether anything does; false tells the loop to park its ticker.
+// Loop goroutine only (tests call it directly).
+func (t *Term) blinkTick() bool {
+	redraw := func() bool {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		return t.grid.CursorVisible &&
+			t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0 &&
+			t.cursorBlinkActive()
+	}()
+	// Blinking text needs the same periodic repaint, and unlike the
+	// cursor it blinks in any viewport position. The recording
+	// indicator rides the same tick to advance its elapsed timer,
+	// which is why the timer shows whole seconds and no finer.
+	redraw = redraw || t.blinkCells.Load() || t.Recording()
+	if !redraw {
+		return false
+	}
+	// drawVersion directly, not bumpVersion: bumping would kick this
+	// loop's own channel every tick for no gain.
+	t.drawVersion.Add(1)
+	// InvalidateRender, not InvalidateLayout: a blink changes paint only, so
+	// the view function and layout have no work to do. The canvas still
+	// repaints because its VersionFn (View, widget.go) reads drawVersion at
+	// render time; the Version on the layout shape stays stale until the
+	// next full layout, and the tessellation cache no longer looks at it.
+	t.queueCommand(func(w *gui.Window) {
+		w.InvalidateRender()
+	})
+	return true
 }
 
 // autoScrollLoop scrolls the viewport while autoScrollDir is non-zero.
