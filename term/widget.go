@@ -507,7 +507,13 @@ func (t *Term) View(w *gui.Window) gui.View {
 	canvas := gui.DrawCanvas(gui.DrawCanvasCfg{
 		ID:      t.canvasID,
 		Version: t.drawVersion.Load(),
-		Sizing:  gui.FillFill,
+		// VersionFn lets a render-only frame repaint the canvas. Version is
+		// stamped here at view time, which such a frame skips, so only the
+		// live load reaches the cache; blinkTick depends on it. Safe because
+		// OnDraw reads the same live Term state rather than values this view
+		// captured, and an atomic load is cheap enough for the window lock.
+		VersionFn: t.drawVersion.Load,
+		Sizing:    gui.FillFill,
 		// Clip is mandatory, not cosmetic. Smooth scrolling draws the
 		// partial top row at y = -cellH + ViewSubPx — i.e. *above* the
 		// canvas — and shifts the bottom row past dc.Height by ViewSubPx.
