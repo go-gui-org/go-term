@@ -114,7 +114,11 @@ input) lives in `term/CLAUDE.md`, loaded when working under `term/`.
   pair a pane manager needs to mirror keys and pastes to sibling panes
   (`term/workspace` broadcast mode). What the tap hands out, `SendInput` takes
   back in; keep them symmetric, and keep the per-kind encoding rules in
-  `SendInput` rather than in the embedder. Keep it that way; add unexported
+  `SendInput` rather than in the embedder, plus
+  `ProgramStatus`/`ProgramState`/`Term.ProgramStatus`/`Cfg.OnProgramStatus` —
+  the OSC 7501 record set a tab bar reads for its working/blocked/done markers.
+  The hook is coalesced and carries no data; the snapshot is the only read path,
+  so the grid's record store never leaks out. Keep it that way; add unexported
   helpers freely. The recording _format_ stays in `internal/recfmt` precisely so
   it never becomes public API.
 - User settings (fonts, theme, terminal settings, keybindings) are parsed and

@@ -388,6 +388,13 @@ type Term struct {
 	// Reader-goroutine local, like bell.readCount.
 	overlayVersion uint64
 
+	// statusVersion mirrors grid.StatusVersion as the reader goroutine last
+	// reported it to Cfg.OnProgramStatus. Reader-goroutine local, like
+	// overlayVersion. statusPending coalesces those reports the way
+	// redrawPending coalesces repaints. See widget_status.go.
+	statusVersion uint64
+	statusPending atomic.Bool
+
 	// pendingReplies buffers parser-originated reply bytes (DA, DECRQSS,
 	// XTGETTCAP, ...) emitted during parser.Feed. Reader-goroutine local:
 	// onParserReply appends during Feed, applyChunk hands the batch to the

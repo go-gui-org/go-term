@@ -128,3 +128,33 @@ const maxXTGETTCAPParts = 32
 // hostile, and echoing it back in the 0+r failure reply would turn the
 // query into a reflection amplifier.
 const maxXTGETTCAPNameLen = 64
+
+// OSC 7501 (program status) limits, taken from the protocol's own table. Each
+// is a hard cap on one report: a report that breaks any of them is discarded
+// whole, so a hostile program cannot grow the record store or make the parser
+// decode megabytes of base64.
+const (
+	// maxStatusSeqBytes caps the whole sequence, OSC through ST. The largest
+	// legal report is under 3300 bytes.
+	maxStatusSeqBytes = 4096
+	// maxStatusKeyBytes caps one key name.
+	maxStatusKeyBytes = 16
+	// maxStatusMsgEncoded / maxStatusMsgDecoded cap msg. The encoded size is
+	// checked before decoding, so the decode itself is bounded.
+	maxStatusMsgEncoded = 2732
+	maxStatusMsgDecoded = 2048
+	// maxStatusTitleEncoded / maxStatusTitleDecoded cap title.
+	maxStatusTitleEncoded = 256
+	maxStatusTitleDecoded = 192
+	// maxStatusAppBytes caps app.
+	maxStatusAppBytes = 32
+	// maxStatusIDBytes, maxStatusIDSegment and maxStatusIDDepth cap id: total
+	// length, one "/"-separated segment, and the number of segments.
+	maxStatusIDBytes   = 128
+	maxStatusIDSegment = 32
+	maxStatusIDDepth   = 8
+	// maxStatusRecords caps the records one terminal holds (the protocol's
+	// ceiling; it requires at least 64). Past it the least recently updated
+	// record is evicted.
+	maxStatusRecords = 256
+)

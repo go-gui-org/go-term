@@ -306,6 +306,8 @@ func (t *Term) writeLoop() {
 func (t *Term) readLoop() {
 	defer recoverLoop("readLoop")
 	defer func() {
+		// The child is gone, and its working and blocked records with it.
+		t.dropTransientStatusOnExit()
 		close(t.readDone)
 		if fn := t.cfg.OnExit; fn != nil {
 			func() {
@@ -369,6 +371,7 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 	}
 	bellCount := t.grid.BellCount
 	overlayVer := t.grid.OverlayVersion
+	statusVer := t.grid.StatusVersion
 	// A block still open at the end of this chunk normally suppresses the
 	// repaint, since the grid may hold a half-written frame. But applications
 	// commonly close one frame and open the next back to back (BSU … ESU BSU),
@@ -437,6 +440,10 @@ func (t *Term) applyChunk(data []byte, flush bool) bool {
 		// OSC 133 handler in widget_command_notify.go.
 		t.reportActivity(ActivityBell)
 	}
+
+	// OSC 7501 records changed. They draw nothing in the pane, so this is
+	// separate from the repaint decision above and ignores sync blocks.
+	t.syncStatusVersion(statusVer)
 
 	// Coalesce: queue at most one outstanding InvalidateLayout so a burst of
 	// reads between frames doesn't pile up redundant command closures.

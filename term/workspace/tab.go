@@ -27,6 +27,16 @@ type tab struct {
 	cmdDone   bool
 	cmdFailed bool
 
+	// status is each pane's current OSC 7501 record states (leafID → record
+	// id → state), refreshed whenever a pane reports a change. Kept on every
+	// tab, active or not, so a tab knows which done and error records the
+	// user has already seen. statusDone and statusError latch a record
+	// entering those states while the tab is in the background, and clear
+	// with the rest on activation. See noteProgramStatus.
+	status      map[string]map[string]term.ProgramState
+	statusDone  bool
+	statusError bool
+
 	// broadcast mirrors user input from the focused pane to every other
 	// live pane in *this* tab. Toggled unconditionally, including on a
 	// single-pane tab — the status pill, not a pane-count rule, is what
@@ -45,6 +55,8 @@ type paneHooks struct {
 	onTitle    func(leafID, title string)
 	onInput    func(leafID string, p []byte, kind term.InputKind)
 	onActivity func(leafID string, kind term.ActivityKind)
+	// onStatus is Term's Cfg.OnProgramStatus for the pane.
+	onStatus func(leafID string)
 }
 
 // errWindowClosing is returned instead of spawning a pane into a window whose
@@ -160,6 +172,13 @@ func (t *tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHoo
 		OnActivity: func(kind term.ActivityKind) {
 			hooks.onActivity(panelID, kind)
 		},
+		// Main thread too, and coalesced by Term: one call per burst of
+		// OSC 7501 changes.
+		OnProgramStatus: func() {
+			if hooks.onStatus != nil {
+				hooks.onStatus(panelID)
+			}
+		},
 	}
 }
 
@@ -229,6 +248,9 @@ func (t *tab) removePane(leafID string) {
 		delete(t.terms, leafID)
 		delete(t.titles, leafID)
 	}
+	// Outside the guard: a pane's last OSC 7501 report can outlive its Term
+	// entry, and a stale blocked record would mark the tab forever.
+	delete(t.status, leafID)
 }
 
 // closeAll closes all Terms in the tab.

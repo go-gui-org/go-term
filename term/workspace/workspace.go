@@ -284,6 +284,7 @@ func (ws *Workspace) hooks() paneHooks {
 		onTitle:    ws.onPaneTitle,
 		onInput:    ws.onPaneInput,
 		onActivity: ws.onPaneActivity,
+		onStatus:   ws.onPaneProgramStatus,
 	}
 }
 

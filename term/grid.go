@@ -548,6 +548,14 @@ type grid struct {
 	ProgressState uint8
 	ProgressValue uint8
 
+	// status holds the OSC 7501 program status records (grid_status.go),
+	// capped at maxStatusRecords. statusSeq orders updates for LRU eviction.
+	// StatusVersion moves on every change to the set; the widget compares it
+	// the way it compares OverlayVersion, to know when to tell the embedder.
+	status        []statusRec
+	statusSeq     uint64
+	StatusVersion uint64
+
 	// PointerShape is OSC 22 — the mouse cursor an application asked for over
 	// this pane. A hovered hyperlink outranks it (see updateHover).
 	PointerShape pointerShape

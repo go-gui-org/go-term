@@ -98,6 +98,17 @@ type Cfg struct {
 	// grid on the next draw instead.
 	OnActivity func(kind ActivityKind)
 
+	// OnProgramStatus, if non-nil, is called on the main thread after the
+	// child's OSC 7501 program status records change: a report, a clear, a
+	// new shell prompt or the child's exit dropping a working or blocked
+	// record, or a reset. Read the new set with Term.ProgramStatus.
+	//
+	// Coalesced: a program can report progress as fast as it can write, so a
+	// burst of changes produces one call, made after the last of them. The
+	// call carries no data for that reason — a missed intermediate state is
+	// not lost information, because only the current set matters.
+	OnProgramStatus func()
+
 	// OnExit, if non-nil, is called when the child process exits.
 	// Runs on the reader goroutine — fire a goroutine for any slow
 	// work (e.g. calling Term.Close on the main thread via QueueCommand).
