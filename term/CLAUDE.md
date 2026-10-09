@@ -148,7 +148,14 @@ Supports a modern xterm/kitty-compatible subset:
   Transfers reach the host only when it opted in via
   `Cfg.OnDownload`/`Cfg.DownloadDir`; the parser never touches disk itself.
   Color specs accept `rgb:H/H/H`…`rgb:HHHH/HHHH/HHHH` and `#RGB` through
-  `#RRRRGGGGBBBB`; X11 color _names_ are not supported.
+  `#RRRRGGGGBBBB`; X11 color _names_ are not supported. Program status (7501,
+  `parser_status.go` + `grid_status.go`): one record per id, replaced whole by
+  each report, capped and validated by the protocol's own limits table — a
+  report that breaks any check is dropped whole. Lifetime is tied to events the
+  terminal already sees: OSC 133 A and child exit drop working/blocked, RIS
+  drops all, DECSTR and the alt screen drop none. The parser renders nothing;
+  `Term.ProgramStatus` / `Cfg.OnProgramStatus` (coalesced) hand the set to the
+  embedder.
 - DCS: DECRQSS (`m`, `r`, ` q`, `"q` DECSCA, `*x` DECSACE), XTGETTCAP (incl.
   `Smulx`/`Setulc` to advertise styled + colored underlines), sixel graphics,
   synchronized updates.

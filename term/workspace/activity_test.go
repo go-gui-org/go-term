@@ -232,6 +232,8 @@ func TestTabIndicator_Glyphs(t *testing.T) {
 		{indicatorCommandDone, "✓"},
 		{indicatorCommandFailed, "✗"},
 		{indicatorBell, "!"},
+		{indicatorWorking, "…"},
+		{indicatorBlocked, "?"},
 	}
 	for _, tc := range tests {
 		if got := tc.in.glyph(); got != tc.want {
@@ -250,5 +252,131 @@ func TestTabGlyph_ActiveTabNeverMarked(t *testing.T) {
 	}
 	if got := ws.tabGlyph(ws.tabs[0], false); got != "!" {
 		t.Errorf("background glyph = %q; want \"!\"", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// OSC 7501 program status
+// ---------------------------------------------------------------------------
+
+// recs builds a pane's record set from id/state pairs.
+func recs(pairs ...any) []term.ProgramStatus {
+	var out []term.ProgramStatus
+	for i := 0; i < len(pairs); i += 2 {
+		out = append(out, term.ProgramStatus{
+			ID: pairs[i].(string), State: pairs[i+1].(term.ProgramState), Progress: -1,
+		})
+	}
+	return out
+}
+
+// Working and blocked are live: the marker follows the current records and
+// goes away with them, without the user having to visit the tab.
+func TestProgramStatus_LiveStates(t *testing.T) {
+	tab := &tab{}
+	tab.noteProgramStatus("p", recs("", term.ProgramWorking), true)
+	if got := tab.indicator(); got != indicatorWorking {
+		t.Fatalf("working: indicator = %v", got)
+	}
+	tab.noteProgramStatus("p", recs("", term.ProgramWorking, "job", term.ProgramBlocked), true)
+	if got := tab.indicator(); got != indicatorBlocked {
+		t.Fatalf("blocked: indicator = %v", got)
+	}
+	// The prompt came back: Term dropped both records.
+	tab.noteProgramStatus("p", nil, true)
+	if got := tab.indicator(); got != indicatorNone {
+		t.Fatalf("after drop: indicator = %v", got)
+	}
+	if len(tab.status) != 0 {
+		t.Fatalf("empty pane kept an entry: %v", tab.status)
+	}
+}
+
+// Blocked outranks every latched event, including the bell.
+func TestProgramStatus_BlockedOutranksBell(t *testing.T) {
+	tab := &tab{bell: true, cmdFailed: true}
+	tab.noteProgramStatus("p", recs("", term.ProgramBlocked), true)
+	if got := tab.indicator(); got != indicatorBlocked {
+		t.Fatalf("indicator = %v; want blocked", got)
+	}
+}
+
+// A program's own error report outranks the bell; a bare failed exit does not
+// (that ordering predates OSC 7501 and is kept).
+func TestProgramStatus_ErrorOrdering(t *testing.T) {
+	tab := &tab{bell: true}
+	if got := tab.indicator(); got != indicatorBell {
+		t.Fatalf("bell alone = %v", got)
+	}
+	tab.cmdFailed = true
+	if got := tab.indicator(); got != indicatorBell {
+		t.Fatalf("bell + failed command = %v; want bell", got)
+	}
+	tab.noteProgramStatus("p", recs("", term.ProgramError), true)
+	if got := tab.indicator(); got != indicatorCommandFailed {
+		t.Fatalf("bell + status error = %v; want failed", got)
+	}
+}
+
+// Done latches on the transition and clears on activation. A done record that
+// is still present must not re-light the tab when some other record changes.
+func TestProgramStatus_DoneLatchesOnTransitionOnly(t *testing.T) {
+	tab := &tab{}
+	tab.noteProgramStatus("p", recs("", term.ProgramWorking), true)
+	tab.noteProgramStatus("p", recs("", term.ProgramDone), true)
+	if got := tab.indicator(); got != indicatorCommandDone {
+		t.Fatalf("after done: indicator = %v", got)
+	}
+	tab.clearActivity() // the user visited the tab
+	tab.noteProgramStatus("p", recs("", term.ProgramDone, "other", term.ProgramIdle), true)
+	if got := tab.indicator(); got != indicatorNone {
+		t.Fatalf("stale done re-lit the tab: indicator = %v", got)
+	}
+}
+
+// Done reported while the tab was active is seen; it must not light the tab
+// once the user switches away.
+func TestProgramStatus_DoneWhileActiveIsSeen(t *testing.T) {
+	tab := &tab{}
+	tab.noteProgramStatus("p", recs("", term.ProgramDone), false)
+	tab.noteProgramStatus("p", recs("", term.ProgramDone, "x", term.ProgramIdle), true)
+	if got := tab.indicator(); got != indicatorNone {
+		t.Fatalf("indicator = %v; want none", got)
+	}
+}
+
+// Working stays visible after activation: it is current state, not news.
+func TestProgramStatus_ActivationKeepsLiveState(t *testing.T) {
+	tab := &tab{}
+	tab.noteProgramStatus("p", recs("", term.ProgramWorking), true)
+	tab.clearActivity()
+	if got := tab.indicator(); got != indicatorWorking {
+		t.Fatalf("indicator = %v; want working", got)
+	}
+}
+
+// Closing a pane takes its live state with it.
+func TestProgramStatus_RemovePaneDropsState(t *testing.T) {
+	tab := &tab{terms: map[string]*term.Term{}, titles: map[string]string{}}
+	tab.noteProgramStatus("p", recs("", term.ProgramBlocked), true)
+	tab.removePane("p") // no Term registered: exercises only the map cleanup
+	if got := tab.indicator(); got != indicatorNone {
+		t.Fatalf("indicator = %v; want none", got)
+	}
+}
+
+// Each pane's records are its own: one pane's prompt dropping its records must
+// not clear another pane's blocked marker in the same tab.
+func TestProgramStatus_PanesAreIndependent(t *testing.T) {
+	tab := &tab{}
+	tab.noteProgramStatus("a", recs("", term.ProgramBlocked), true)
+	tab.noteProgramStatus("b", recs("", term.ProgramWorking), true)
+	tab.noteProgramStatus("b", nil, true)
+	if got := tab.indicator(); got != indicatorBlocked {
+		t.Fatalf("indicator = %v; want blocked from pane a", got)
+	}
+	tab.noteProgramStatus("a", nil, true)
+	if got := tab.indicator(); got != indicatorNone {
+		t.Fatalf("indicator = %v; want none", got)
 	}
 }

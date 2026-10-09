@@ -195,6 +195,9 @@ func (p *parser) dispatchOSC() {
 		switch pt[0] {
 		case 'A':
 			p.g.AddMark(markPromptStart)
+			// A new prompt means the foreground program is gone: OSC 7501
+			// working and blocked records die with it.
+			p.g.dropTransientStatus()
 		case 'B':
 			p.g.AddMark(markCommandStart)
 		case 'C':
@@ -281,6 +284,8 @@ func (p *parser) dispatchOSC() {
 		}
 	case 1337:
 		p.handleOSC1337(pt)
+	case 7501:
+		p.handleOSC7501(pt)
 	}
 }
 

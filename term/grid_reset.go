@@ -148,6 +148,10 @@ func (g *grid) HardReset() {
 	g.ProgressState, g.ProgressValue = 0, 0
 	g.OverlayVersion++
 
+	// OSC 7501 program status. The protocol has RIS remove every record and
+	// DECSTR none, which is why this is here and not in SoftReset.
+	g.clearStatus("")
+
 	// DECSACE back to the power-on stream extent. DECSTR leaves it alone —
 	// VT510's soft-reset table does not list it.
 	g.RectExtent = 0
