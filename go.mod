@@ -7,8 +7,8 @@ require (
 	github.com/go-gui-org/go-glyph v1.26.2
 	github.com/go-gui-org/go-gui v0.86.0
 	github.com/rivo/uniseg v0.4.7
-	golang.org/x/sys v0.48.0
-	golang.org/x/text v0.42.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/text v0.43.0
 )
 
 require (
@@ -20,7 +20,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/jezek/xgb v1.3.1 // indirect
 	github.com/tdewolff/parse/v2 v2.8.16 // indirect
-	github.com/yuin/goldmark v1.8.5 // indirect
+	github.com/yuin/goldmark v1.8.6 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
-	golang.org/x/image v0.46.0 // indirect
+	golang.org/x/image v0.47.0 // indirect
 )

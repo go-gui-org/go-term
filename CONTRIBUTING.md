@@ -75,15 +75,61 @@ which is what CI does — the local `go.work` pointing at `../go-gui` and
 
 ## Scope
 
-Before adding a feature, check the **Post-1.0 backlog** list in
-[ROADMAP.md](ROADMAP.md) and the open issues. Items there were excluded
-deliberately. If you want one of them, open an issue first to discuss whether
-the cost is worth carrying — the goal is to keep the codebase approachable.
+Before adding a feature, check the open issues. Backlog items there were left
+out of the v1.0 scope deliberately. If you want one of them, comment on its
+issue first to discuss whether the cost is worth carrying — the goal is to keep
+the codebase approachable. The v1.0.0 gate is tracked in #266.
 
 The public API in `term/` is small on purpose and frozen at v0.9.0 — widget,
 themes, actions, recording/replay, the live setters, and the activity/input taps
 (see `CLAUDE.md` for the full list). Add unexported helpers freely; expand the
 public surface only when there is a clear caller need.
+
+## Version policy
+
+SemVer pre-1.0: the frozen surface (as amended by v0.10.0) is stable until
+v1.0.0, but breaking changes (should any slip through) ship as a new minor, not
+into patches.
+
+## Architecture
+
+```
+examples/falcon/main.go
+        │
+        ▼
+term/widget.go           Term struct, New, View, Close; reader goroutine.
+term/widget_draw*.go     OnDraw: bg/fg/graphics/cursor/overlay render passes.
+term/widget_keyboard.go  onChar, onKeyDown, onKeyUp; KKP encoding.
+term/keybind.go          RunAction direct dispatch; SetKeyBindings.
+term/shortcuts.go        Action table; defaultBindings; help overlay data.
+term/widget_mouse.go     Mouse button/motion/wheel; SGR/X10/urxvt encoding.
+term/widget_clipboard.go Cmd+C/V; opt-in OSC 52 clipboard write.
+term/widget_scroll.go    Scrollbar, momentum scroll.
+term/widget_copymode.go  Vim-keyed copy mode; frozen output.
+term/widget_hints.go     Keyboard link hints (open/copy).
+term/widget_notify.go    Desktop notifications; OSC 9/777.
+term/widget_record.go    Session recording; Start/StopRecording.
+        │
+        ▼
+term/parser.go           VT state machine. Bytes → grid mutations.
+term/parser_csi.go       CSI dispatch (SGR, cursor, erase, modes, …)
+term/parser_osc.go       OSC dispatch (title, CWD, clipboard, …)
+term/parser_dcs.go       DCS dispatch (DECRQSS, sixel, sync)
+term/parser_apc.go       APC dispatch (Kitty Graphics)
+        │
+        ▼
+term/grid.go             Cell buffer + cursor state + alt-screen.
+term/grid_*.go           Scroll, reflow, search, selection, marks, BiDi, graphics.
+term/scrollback.go       Ring buffer.
+term/pty.go              ptyIO interface; creack/pty (Unix) + ConPTY (Windows).
+term/palette.go          256-color table.
+
+term/replay.go           replayPTY (a recording as a ptyIO); NewReplay.
+
+term/workspace/          Panes/tabs/persistence — sits above term, public API only.
+internal/recfmt/         .gtr session-recording container (Recorder + Reader).
+term/gotermrec/          CLI over a recording: info/cat/play/fixture/export.
+```
 
 ## Architectural rules
 
