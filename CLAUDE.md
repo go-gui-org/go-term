@@ -2,14 +2,12 @@
 
 ## Roadmap
 
-`ROADMAP.md` is thin now: the API froze at v0.9.0, and the only remaining phase
-is the v1.0.0 tag, blocked on go-gui v1.0. Pre-1.0 phase history lives in
-`ROADMAP-v0.md` and is not maintained — do not edit it to add entries.
-
-When the v1.0.0 tag ships, delete the phase from `Upcoming`, add one row to
-`Completed` (number, short description, what it unlocked), and move
-`ROADMAP-v0.md` back or archive it — do not keep finished checklists in the live
-file.
+There is no `ROADMAP.md`. The API froze at v0.9.0; the v1.0.0 tag (blocked on
+go-gui v1.0) is tracked in issue #266, and backlog items are GitHub issues —
+file new work there, not in a roadmap file. Shipped history is `CHANGELOG.md`.
+Pre-1.0 phase history lives in `docs/history/ROADMAP-v0.md` and is not
+maintained — do not edit it to add entries. The architecture diagram and version
+policy live in `CONTRIBUTING.md`.
 
 ## Common commands
 

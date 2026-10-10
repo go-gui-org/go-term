@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- OSC 7501 program status protocol (spec revision 0.3). A child program can
+  report its state (working, blocked, done, error) with one record per id. Each
+  report replaces the record whole and is checked against the protocol's limits
+  table; a report that fails any check is dropped. OSC 133 A and child exit drop
+  working and blocked records; RIS drops all of them (#265).
+- New public API: `ProgramStatus`, `ProgramState`, `Term.ProgramStatus` (a
+  snapshot of the current records) and `Cfg.OnProgramStatus` (a coalesced hook
+  with no data; read the snapshot when it fires).
+- The workspace tab bar shows program status on background tabs: `?` blocked,
+  `✗` error, `!` bell, `✓` done, `…` working. Done and error clear when the tab
+  is opened.
+
+### Changed
+
+- Bumped go-gui v0.85.0 → v0.86.0 and go-glyph v1.26.1 → v1.26.2 (#263).
+- Bumped golang.org/x/sys v0.48.0 → v0.49.0 and golang.org/x/text v0.42.0 →
+  v0.43.0, plus the indirect golang.org/x/image v0.47.0 and goldmark v1.8.6.
+- `ROADMAP.md` is removed. The v1.0.0 gate is tracked in #266 and backlog items
+  are GitHub issues (#267–#271). The architecture diagram and version policy
+  moved to `CONTRIBUTING.md`, and the pre-1.0 phase history moved to
+  `docs/history/ROADMAP-v0.md`.
+
 ## [0.15.1] - 2026-10-05
 
 ### Changed
@@ -21,33 +45,33 @@ adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Bumped go-gui v0.78.0 → v0.84.0 and go-glyph v1.25.2 → v1.26.1.
-- Workspace panels, the palette, the theme
-  browser and the help overlay take theme roles for spacing, radius and border,
-  so they follow the theme. Gaps and corners snap to the nearest step, so they
-  move by a few pixels: palette rows are 2 px apart (was 1), help columns 28 px
-  (was 22), row corners 4 px (was 3). A 1 px panel border is `gui.BorderThin`,
-  so it goes away under `Theme.WithBorders(false)`.
+- Workspace panels, the palette, the theme browser and the help overlay take
+  theme roles for spacing, radius and border, so they follow the theme. Gaps and
+  corners snap to the nearest step, so they move by a few pixels: palette rows
+  are 2 px apart (was 1), help columns 28 px (was 22), row corners 4 px (was 3).
+  A 1 px panel border is `gui.BorderThin`, so it goes away under
+  `Theme.WithBorders(false)`.
 - macOS: right Option types what the keyboard layout prints (@, [, ], { and } on
   a German layout). Left Option stays Meta for readline's Alt+f, Alt+b and Alt+.
   keys.
 - Alt on cursor, editing and function keys is sent in xterm's modifier form
   (Alt+Left is `CSI 1;3D`) instead of an ESC prefix.
-- `Term.View` pads the pane 4pt on every side and the tab bar insets 4pt
-  left and right (2pt around the tab separator), so the grid no longer
-  slides under the macOS window outline with a hidden titlebar. Cell math
-  and hit tests account for the inset.
+- `Term.View` pads the pane 4pt on every side and the tab bar insets 4pt left
+  and right (2pt around the tab separator), so the grid no longer slides under
+  the macOS window outline with a hidden titlebar. Cell math and hit tests
+  account for the inset.
 
 ### Added
 
 - Mouse reports are sent in the legacy X10 byte encoding and the urxvt encoding
   (`?1015`), not only SGR (`?1006`). An application that enabled `?1000`,
   `?1002` or `?1003` without also enabling `?1006` previously got no reports at
-  all. Not available on Windows builds whose ConPTY consumes the mouse mode
-  sets — see `docs/terminal-verification.md`.
-- `workspace.Cfg.ExtraCommands`: embedder window commands that join the
-  built-in table, appear in the palette and help overlay, survive config
-  reloads, and rebind by full ID. Falcon backs About (palette-only) and
-  Settings (`Cmd+,`, opens the config file) with it.
+  all. Not available on Windows builds whose ConPTY consumes the mouse mode sets
+  — see `docs/terminal-verification.md`.
+- `workspace.Cfg.ExtraCommands`: embedder window commands that join the built-in
+  table, appear in the palette and help overlay, survive config reloads, and
+  rebind by full ID. Falcon backs About (palette-only) and Settings (`Cmd+,`,
+  opens the config file) with it.
 
 ### Fixed
 
@@ -102,25 +126,25 @@ adheres to [Semantic Versioning](https://semver.org/).
   cleared no tab stop.
 - DECCRA (copy rectangle) over a sixel or iTerm2 image left the image drawn over
   the copied text.
-- A PTY read that moved only the cursor scheduled no frame, so the cursor
-  stayed painted behind (backspacing over blank cells froze it on ConPTY
-  until a real erase caught up). Cursor-only moves now repaint, DECTCEM and
-  DECSCUSR dirty the cursor row on change, and the blink cycle re-phases on
-  cursor moves so a moving cursor stays solid.
+- A PTY read that moved only the cursor scheduled no frame, so the cursor stayed
+  painted behind (backspacing over blank cells froze it on ConPTY until a real
+  erase caught up). Cursor-only moves now repaint, DECTCEM and DECSCUSR dirty
+  the cursor row on change, and the blink cycle re-phases on cursor moves so a
+  moving cursor stays solid.
 - New tabs inherit the source pane font size. Tab bar labels are vertically
   centered instead of flush to the top edge.
 - Bidi selection anchors handle RTL boundaries and spans; early-wrap blanks
   carry wrap-pad so CJK copy skips padding; selection and copy work over
   main-screen history shown above the alt screen.
 - Downloads publish by hard link so they never replace a file another program
-  saved (rename fallback only where links are unavailable); workspace Save
-  and downloads share one atomic temp-sync-rename writer, and quitting saves
-  the last session from the live tab before teardown. Close waits briefly
-  (about 2s) for a transfer in progress, then returns; no download callback
-  or notification starts after Close begins.
-- Clipboard and notification hardening: hint-copy of OSC 8 URLs carrying
-  control bytes fails closed, empty OSC 9/777 notifications are dropped, and
-  the download placeholder is verified after create.
+  saved (rename fallback only where links are unavailable); workspace Save and
+  downloads share one atomic temp-sync-rename writer, and quitting saves the
+  last session from the live tab before teardown. Close waits briefly (about 2s)
+  for a transfer in progress, then returns; no download callback or notification
+  starts after Close begins.
+- Clipboard and notification hardening: hint-copy of OSC 8 URLs carrying control
+  bytes fails closed, empty OSC 9/777 notifications are dropped, and the
+  download placeholder is verified after create.
 - Grid, bidi, search, selection, clipboard and PTY review sweep: audit panics
   fixed across wrap, occlusion and link state, with allocation guards.
 
