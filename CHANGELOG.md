@@ -16,6 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 - New public API: `ProgramStatus`, `ProgramState`, `Term.ProgramStatus` (a
   snapshot of the current records) and `Cfg.OnProgramStatus` (a coalesced hook
   with no data; read the snapshot when it fires).
+- Smart selection. A double-click on a URL, file path, IP address, hex hash, or
+  a quote mark selects that unit without the characters around it, so
+  `(https://go.dev).` gives the URL and `--out=/tmp/x` gives the path. Other
+  text still selects the plain word (#267).
 - The workspace tab bar shows program status on background tabs: `?` blocked,
   `✗` error, `!` bell, `✓` done, `…` working. Done and error clear when the tab
   is opened.
