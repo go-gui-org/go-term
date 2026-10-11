@@ -298,15 +298,15 @@ tab forever and tell you nothing.
 Mouse gestures are fixed, not rebindable — they are pointer behavior rather than
 commands, and every terminal spells them the same way.
 
-| Gesture                              | Effect                                                                    |
-| ------------------------------------ | ------------------------------------------------------------------------- |
-| Drag                                 | Select by character                                                       |
-| Double click                         | Select the word under the pointer; drag to extend word by word            |
-| Triple click                         | Select the whole logical line; drag to extend line by line                |
-| <kbd>Alt</kbd>+drag                  | Rectangular (block) selection — one column band across every row it spans |
-| <kbd>Shift</kbd>+click               | Extend the existing selection to the click point                          |
-| Middle click                         | Paste (see `middle-click-paste` above)                                    |
-| <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+click | Open the URL under the pointer                                            |
+| Gesture                              | Effect                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------- |
+| Drag                                 | Select by character                                                             |
+| Double click                         | Select the word (or URL, path, address, hash) under the pointer; drag to extend |
+| Triple click                         | Select the whole logical line; drag to extend line by line                      |
+| <kbd>Alt</kbd>+drag                  | Rectangular (block) selection — one column band across every row it spans       |
+| <kbd>Shift</kbd>+click               | Extend the existing selection to the click point                                |
+| Middle click                         | Paste (see `middle-click-paste` above)                                          |
+| <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+click | Open the URL under the pointer                                                  |
 
 Releasing a selection copies it, so there is no separate copy step for the
 mouse. On X11 the selection is also published as PRIMARY, the buffer
@@ -315,8 +315,23 @@ mouse selection can hold two different values at once.
 
 A word is a run of non-blank characters with no punctuation class, so
 double-clicking grabs a whole path, URL, or `--flag=value` rather than stopping
-at every `/` or `-`. Double-clicking whitespace selects the whitespace run. A
-logical line follows soft wraps, so triple-clicking one row of a wrapped
+at every `/` or `-`. Double-clicking whitespace selects the whitespace run.
+
+Double-clicking a known kind of text selects only that text, without the
+characters around it:
+
+- A URL, without enclosing brackets or a final period: `(https://go.dev).` gives
+  `https://go.dev`.
+- A file path: `--out=/tmp/x` gives `/tmp/x`, and `term/grid.go:42:` gives
+  `term/grid.go`. Windows paths with a drive letter and git remotes such as
+  `git@github.com:org/repo.git` also work.
+- An IPv4 or IPv6 address, with a port or prefix length if there is one.
+- A hex hash of 7 or more digits that holds both letters and numbers:
+  `abc1234..def5678` gives one side of the range.
+- A quoted string, quotes included, when you double-click one of its quote
+  marks. A double-click on a word inside the quotes still selects that word.
+
+A logical line follows soft wraps, so triple-clicking one row of a wrapped
 paragraph selects all of it.
 
 Clicking a fourth time returns to character selection, cycling the

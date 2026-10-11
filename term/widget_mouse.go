@@ -385,8 +385,8 @@ func (t *Term) resetClickCount() {
 	t.mouse.lastClickAt = time.Time{}
 }
 
-// selectUnitAt selects the whole word or logical line containing cp, per the
-// grid's current SelMode, and records the unit's bounds so a following drag
+// selectUnitAt selects the whole word (or smart unit — see unitBoundsAt) or
+// logical line containing cp, per the grid's current SelMode, and records the unit's bounds so a following drag
 // can pivot around it. Boundary columns are half-open, hence the +1 on the
 // inclusive end cell — the same conversion syncSelection does for copy mode.
 // Caller holds Mu; SelMode must already be selWord or selLine.
@@ -397,7 +397,7 @@ func (t *Term) selectUnitAt(cp contentPos) {
 		sRow, eRow := g.lineBoundsAt(cp.Row)
 		start, end = contentPos{Row: sRow}, contentPos{Row: eRow, Col: g.Cols - 1}
 	} else {
-		start, end = g.wordBoundsAt(cp)
+		start, end = g.unitBoundsAt(cp)
 	}
 	t.mouse.selUnitStart, t.mouse.selUnitEnd = start, end
 	g.SelAnchor = start
@@ -415,7 +415,7 @@ func (t *Term) extendUnitSelection(cp contentPos) {
 	var us, ue contentPos // unit under the pointer, inclusive cells
 	switch g.SelMode {
 	case selWord:
-		us, ue = g.wordBoundsAt(cp)
+		us, ue = g.unitBoundsAt(cp)
 	case selLine:
 		sRow, eRow := g.lineBoundsAt(cp.Row)
 		us, ue = contentPos{Row: sRow}, contentPos{Row: eRow, Col: g.Cols - 1}

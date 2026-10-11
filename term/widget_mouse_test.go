@@ -1485,6 +1485,23 @@ func TestOnClick_DoubleClickSelectsWord(t *testing.T) {
 	}
 }
 
+// A double-click on a URL in parentheses selects the URL alone: the smart
+// unit wins over the plain word, which would take the brackets and the period.
+func TestOnClick_DoubleClickSelectsSmartUnit(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	writeRowText(tm.grid, 0, "see (https://go.dev/doc).")
+
+	// Two clicks inside the URL (column 10 → x = 105).
+	clickAt(tm, 105, 10, 0)
+	clickAt(tm, 105, 10, 0)
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "https://go.dev/doc"; got != want {
+		t.Errorf("double-click selected %q, want %q", got, want)
+	}
+}
+
 func TestOnClick_TripleClickSelectsLine(t *testing.T) {
 	tm, _ := newMouseTerm(4, 10)
 	writeRowText(tm.grid, 0, "first")
@@ -1546,6 +1563,23 @@ func TestOnMouseMove_WordDragExtends(t *testing.T) {
 	defer tm.grid.Mu.Unlock()
 	if got, want := tm.grid.SelectedText(), "alpha"; got != want {
 		t.Errorf("drag back to the origin selected %q, want %q", got, want)
+	}
+}
+
+// A drag begun on a smart unit extends to smart units: both ends drop the
+// brackets around the paths, as a double-click on either path would.
+func TestOnMouseMove_SmartUnitDragExtends(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	writeRowText(tm.grid, 0, "x (/a/b) and (/c/d)")
+
+	clickAt(tm, 45, 10, 0) // inside "/a/b"
+	clickAt(tm, 45, 10, 0)
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 155, MouseY: 10}, Window: &gui.Window{}}) // "/c/d"
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "/a/b) and (/c/d"; got != want {
+		t.Errorf("smart unit drag selected %q, want %q", got, want)
 	}
 }
 
