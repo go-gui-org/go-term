@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-11
+
 ### Added
 
 - OSC 7501 program status protocol (spec revision 0.3). A child program can
@@ -27,6 +29,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Bumped go-gui v0.85.0 → v0.86.0 and go-glyph v1.26.1 → v1.26.2 (#263).
+- Bumped go-gui v0.86.0 → v0.87.0 and go-glyph v1.26.2 → v1.26.3 (#274).
 - Bumped golang.org/x/sys v0.48.0 → v0.49.0 and golang.org/x/text v0.42.0 →
   v0.43.0, plus the indirect golang.org/x/image v0.47.0 and goldmark v1.8.6.
 - `ROADMAP.md` is removed. The v1.0.0 gate is tracked in #266 and backlog items
