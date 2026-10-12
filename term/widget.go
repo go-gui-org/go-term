@@ -540,6 +540,11 @@ func (t *Term) View(w *gui.Window) gui.View {
 	if t.focused.Load() {
 		colCfg.ID = t.focusID
 		colCfg.Focusable = true
+		// The pane draws on a DrawCanvas, so go-gui sees no TextChunk and would
+		// not start the platform input method for it. This flag opts in
+		// (go-gui#999): CJK composition then works, preedit reaches drawIME
+		// through Window.IMECompText, and the commit arrives in onChar.
+		colCfg.AcceptsTextInput = true
 		// SetView → clearViewStateLocked clears the window's
 		// focus ID. Reassert after every full layout rebuild so
 		// keystrokes reach onChar/onKeyDown without requiring a

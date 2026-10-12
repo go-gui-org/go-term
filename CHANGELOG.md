@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- CJK and other composing input methods (IME) can type into the terminal again.
+  go-gui started the input method only for widgets with a built-in text shape,
+  and the terminal draws its text on a canvas, so the input method never
+  started. The focused pane now sets go-gui's new
+  `ContainerCfg.AcceptsTextInput`. Requires go-gui v0.88.1.
+
 ## [0.16.0] - 2026-10-11
 
 ### Added
