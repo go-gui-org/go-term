@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The active tab now shows a working (`…`) or blocked (`?`) marker in the tab
+  bar and in the window title when a program reports that state over OSC 7501.
+  Claude Code removes its own title spinner when the terminal answers its OSC
+  7501 query. Before, the active tab showed no marker, and a window with one tab
+  has no tab bar. Thus nothing on screen showed that the program was working.
+  Latched markers (bell, done, failed) stay on background tabs only.
+
 ## [0.16.1] - 2026-10-12
 
 ### Fixed

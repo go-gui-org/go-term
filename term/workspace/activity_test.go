@@ -242,9 +242,9 @@ func TestTabIndicator_Glyphs(t *testing.T) {
 	}
 }
 
-// tabGlyph is the render-path entry point: the active tab never carries a
-// marker even when state somehow survived on it.
-func TestTabGlyph_ActiveTabNeverMarked(t *testing.T) {
+// tabGlyph is the render-path entry point: the active tab never shows latched
+// news, even when state somehow survived on it, but does show live state.
+func TestTabGlyph_ActiveTabShowsOnlyLiveState(t *testing.T) {
 	ws := activityWorkspace(t)
 	ws.tabs[0].bell = true
 	if got := ws.tabGlyph(ws.tabs[0], true); got != "" {
@@ -252,6 +252,16 @@ func TestTabGlyph_ActiveTabNeverMarked(t *testing.T) {
 	}
 	if got := ws.tabGlyph(ws.tabs[0], false); got != "!" {
 		t.Errorf("background glyph = %q; want \"!\"", got)
+	}
+	// The user watching the tab still needs to see that its program is busy
+	// or waiting — with one tab focused, nothing else on the bar says so.
+	ws.tabs[0].noteProgramStatus("pane-0", recs("", term.ProgramWorking), false)
+	if got := ws.tabGlyph(ws.tabs[0], true); got != "…" {
+		t.Errorf("active working glyph = %q; want \"…\"", got)
+	}
+	ws.tabs[0].noteProgramStatus("pane-0", recs("", term.ProgramBlocked), false)
+	if got := ws.tabGlyph(ws.tabs[0], true); got != "?" {
+		t.Errorf("active blocked glyph = %q; want \"?\"", got)
 	}
 }
 
@@ -378,5 +388,84 @@ func TestProgramStatus_PanesAreIndependent(t *testing.T) {
 	tab.noteProgramStatus("a", nil, true)
 	if got := tab.indicator(); got != indicatorNone {
 		t.Fatalf("indicator = %v; want none", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Window title marker
+// ---------------------------------------------------------------------------
+
+// The active tab draws no tab-bar marker, and a lone tab has no tab bar at all.
+// The window title is where the user watching a pane sees its live state —
+// Claude Code drops its own title spinner once the terminal answers the OSC
+// 7501 query, so without this nothing on screen says it is working.
+func TestWindowTitle_LiveStateMarker(t *testing.T) {
+	tab := &tab{focused: "p", titles: map[string]string{"p": "Claude Code"}}
+	if got := tab.windowTitle(); got != "Claude Code" {
+		t.Fatalf("no status: title = %q", got)
+	}
+	tab.noteProgramStatus("p", recs("", term.ProgramWorking), false)
+	if got := tab.windowTitle(); got != "… Claude Code" {
+		t.Fatalf("working: title = %q", got)
+	}
+	tab.noteProgramStatus("p", recs("", term.ProgramBlocked), false)
+	if got := tab.windowTitle(); got != "? Claude Code" {
+		t.Fatalf("blocked: title = %q", got)
+	}
+	tab.noteProgramStatus("p", recs("", term.ProgramDone), false)
+	if got := tab.windowTitle(); got != "Claude Code" {
+		t.Fatalf("done: title = %q; want no marker", got)
+	}
+}
+
+// Latched news (bell, command ends, done) belongs to the tab bar, which shows
+// what happened while a tab was hidden. The window title shows the active tab,
+// which the user is looking at, so only live state goes there.
+func TestWindowTitle_IgnoresLatchedEvents(t *testing.T) {
+	tab := &tab{
+		focused: "p", titles: map[string]string{"p": "sh"},
+		bell: true, cmdFailed: true, cmdDone: true, statusDone: true, statusError: true,
+	}
+	if got := tab.windowTitle(); got != "sh" {
+		t.Fatalf("title = %q; want no marker", got)
+	}
+}
+
+// A live-state change on the active tab must reach the window title. Before
+// this, onPaneProgramStatus repainted only background tabs, so the title kept
+// whatever it showed when the program started.
+func TestProgramStatus_ActiveTabUpdatesWindowTitle(t *testing.T) {
+	ws := activityWorkspace(t)
+	// The focused leaf has a title but no Term entry: the fixture's Terms are
+	// nil placeholders, and refresh would call SetFocused on one.
+	ws.tabs[0].focused = "pane-x"
+	ws.tabs[0].titles = map[string]string{"pane-x": "Claude Code"}
+	ws.refresh()
+	if got := ws.w.Config.Title; got != "Claude Code" {
+		t.Fatalf("setup: title = %q", got)
+	}
+	ws.applyProgramStatus(0, ws.tabs[0], "pane-0", recs("", term.ProgramWorking))
+	if got := ws.w.Config.Title; got != "… Claude Code" {
+		t.Fatalf("working: title = %q", got)
+	}
+	ws.applyProgramStatus(0, ws.tabs[0], "pane-0", nil)
+	if got := ws.w.Config.Title; got != "Claude Code" {
+		t.Fatalf("cleared: title = %q", got)
+	}
+}
+
+// The window title belongs to the active tab. A background tab's live state
+// goes to its tab-bar marker and must not leak into the title.
+func TestProgramStatus_BackgroundTabLeavesWindowTitle(t *testing.T) {
+	ws := activityWorkspace(t)
+	ws.tabs[0].focused = "pane-x" // titled leaf with no Term; see above
+	ws.tabs[0].titles = map[string]string{"pane-x": "sh"}
+	ws.refresh()
+	ws.applyProgramStatus(1, ws.tabs[1], "pane-1", recs("", term.ProgramWorking))
+	if got := ws.w.Config.Title; got != "sh" {
+		t.Fatalf("title = %q; want the active tab's unmarked title", got)
+	}
+	if got := ws.tabs[1].indicator(); got != indicatorWorking {
+		t.Fatalf("background indicator = %v; want working", got)
 	}
 }

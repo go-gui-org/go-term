@@ -590,7 +590,7 @@ func (ws *Workspace) overlayOwnsKeys() bool {
 // overlay is up.
 func (ws *Workspace) refresh() {
 	if tab := ws.activeTabPtr(); tab != nil {
-		ws.w.SetTitle(tab.focusedTitle())
+		ws.w.SetTitle(tab.windowTitle())
 		// Ensure the active pane owns keyboard focus. No-op when already
 		// correct — cheap atomic compare-and-swap.
 		if t, ok := tab.terms[tab.focused]; ok {
@@ -845,8 +845,8 @@ func (ws *Workspace) tabButton(theme gui.Theme, tab *tab, isActive bool, idx int
 	inner.VAlign = gui.VAlignMiddle
 
 	content := make([]gui.View, 0, 4)
-	// The activity marker leads the title. Only background tabs carry one —
-	// activateTab clears the state of whichever tab the user switches to.
+	// The activity marker leads the title. The active tab carries only its live
+	// OSC 7501 state; see tabGlyph.
 	if g := ws.tabGlyph(tab, isActive); g != "" {
 		markStyle := style
 		// Undimmed title color: an inactive tab's text is faded to 0.65, and

@@ -20,8 +20,9 @@ import (
 type tabIndicator int
 
 const (
-	// indicatorNone is the active tab, or a background tab that has reported
-	// nothing since it went to the background.
+	// indicatorNone: nothing to show. An active tab with no live OSC 7501
+	// state, or a background tab that has reported nothing since it went to
+	// the background.
 	indicatorNone tabIndicator = iota
 	// indicatorCommandDone: a command finished successfully in this tab, or
 	// a program reported OSC 7501 done.
@@ -92,15 +93,29 @@ func (ws *Workspace) onPaneProgramStatus(leafID string) {
 		if !ok {
 			continue
 		}
-		was := tab.indicator()
-		tab.noteProgramStatus(leafID, tm.ProgramStatus(), i != ws.activeTab)
-		// Same rule as onPaneActivity: the active tab draws no marker, and a
-		// background one repaints only when its marker changes. Progress
-		// updates arrive many times a second and almost never change it.
-		if i != ws.activeTab && tab.indicator() != was {
-			ws.refresh()
-		}
+		ws.applyProgramStatus(i, tab, leafID, tm.ProgramStatus())
 		return
+	}
+}
+
+// applyProgramStatus is onPaneProgramStatus after the pane lookup: it folds
+// recs into the tab at index i and repaints if what the user sees changed.
+// Split out so tests can drive it without a live Term.
+func (ws *Workspace) applyProgramStatus(i int, tab *tab, leafID string, recs []term.ProgramStatus) {
+	active := i == ws.activeTab
+	// visible is the marker the user can see for this tab. A background tab's
+	// marker covers latched news too; the active tab shows only its live state
+	// (tab bar and window title).
+	visible := tab.indicator
+	if active {
+		visible = tab.liveIndicator
+	}
+	was := visible()
+	tab.noteProgramStatus(leafID, recs, !active)
+	// Repaint only when the visible marker changes. Progress updates arrive
+	// many times a second and almost never change it.
+	if visible() != was {
+		ws.refresh()
 	}
 }
 
@@ -157,13 +172,46 @@ func (t *tab) liveStatus() (blocked, working bool) {
 	return blocked, working
 }
 
+// liveIndicator is the marker for the tab's live OSC 7501 state only: blocked,
+// working, or none. The latched events (bell, command ends, done, error) are
+// left out: they report what happened while the tab was hidden, and the window
+// title shows the tab the user is looking at.
+func (t *tab) liveIndicator() tabIndicator {
+	blocked, working := t.liveStatus()
+	switch {
+	case blocked:
+		return indicatorBlocked
+	case working:
+		return indicatorWorking
+	default:
+		return indicatorNone
+	}
+}
+
+// windowTitle is the OS window title for the tab: the focused pane's title,
+// with the live-state marker in front of it when a program reports one.
+//
+// The marker is necessary because the active tab carries no tab-bar marker, and
+// a window with one tab has no tab bar. Claude Code removes its own spinner from
+// the title when the terminal answers the OSC 7501 query. Without this marker,
+// nothing on screen would show that the program is working or waiting.
+func (t *tab) windowTitle() string {
+	title := t.focusedTitle()
+	if g := t.liveIndicator().glyph(); g != "" {
+		return g + " " + title
+	}
+	return title
+}
+
 // tabGlyph is the marker the tab bar paints for a tab, or "" for none. The
-// active tab never carries one — activateTab clears the state of whichever tab
-// the user switches to, and the check short-circuits ahead of resolving an
-// indicator that would be discarded.
+// active tab carries only its live state (working, blocked): the user is looking
+// at it, so latched news (bell, command ends, done, error) means nothing there,
+// and activateTab clears that state anyway. Live state still matters — it says
+// the program is busy or waiting right now, the same marker the window title
+// shows.
 func (ws *Workspace) tabGlyph(tab *tab, isActive bool) string {
 	if isActive {
-		return ""
+		return tab.liveIndicator().glyph()
 	}
 	return tab.indicator().glyph()
 }
