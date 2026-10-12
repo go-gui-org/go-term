@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-12
+
 ### Fixed
 
 - CJK and other composing input methods (IME) can type into the terminal again.
