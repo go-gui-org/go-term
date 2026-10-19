@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-10-19
+
 ### Fixed
 
 - The active tab now shows a working (`…`) or blocked (`?`) marker in the tab
@@ -14,6 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   7501 query. Before, the active tab showed no marker, and a window with one tab
   has no tab bar. Thus nothing on screen showed that the program was working.
   Latched markers (bell, done, failed) stay on background tabs only.
+
+### Changed
+
+- Bumped go-gui v0.88.1 → v0.91.0 and go-glyph v1.26.3 → v1.26.4.
 
 ## [0.16.1] - 2026-10-12
 
