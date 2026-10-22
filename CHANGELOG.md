@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `Cfg.IdentityVersion` (also on `workspace.Cfg`) gives the embedder's own
+  version. It goes in `TERM_PROGRAM_VERSION` and the XTVERSION reply.
+
+### Changed
+
+- `Cfg.Identity` now also names the terminal in the XTVERSION reply (`CSI > q`).
+  Falcon reports `falcon 0.16.2` to tools such as ucs-detect, not `go-term 0.1`.
+- The XTVERSION reply uses the `name version` form, not `name(version)`. The
+  default is now `go-term 0.1`.
+
 ## [0.16.2] - 2026-10-19
 
 ### Fixed

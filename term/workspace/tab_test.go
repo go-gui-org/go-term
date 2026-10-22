@@ -78,12 +78,16 @@ func TestTermCfg_CarriesIdentityAndEnv(t *testing.T) {
 		onInput: func(string, []byte, term.InputKind) {},
 	}
 	cfg := Cfg{
-		Identity: "Falcon",
-		opts:     termOpts{env: []string{"TERM_PROGRAM=Ghostty", "PATH=/bin"}},
+		Identity:        "Falcon",
+		IdentityVersion: "0.16.2",
+		opts:            termOpts{env: []string{"TERM_PROGRAM=Ghostty", "PATH=/bin"}},
 	}
 	tc := tab.termCfg(&gui.Window{}, cfg, "tab-0-pane-0", "", hooks)
 	if tc.Identity != "Falcon" {
 		t.Errorf("termCfg().Identity = %q, want Falcon", tc.Identity)
+	}
+	if tc.IdentityVersion != "0.16.2" {
+		t.Errorf("termCfg().IdentityVersion = %q, want 0.16.2", tc.IdentityVersion)
 	}
 	if !slices.Equal(tc.Env, []string{"TERM_PROGRAM=Ghostty", "PATH=/bin"}) {
 		t.Errorf("termCfg().Env = %q", tc.Env)

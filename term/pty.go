@@ -70,13 +70,20 @@ var hostTerminalEnvKeys = [...]string{
 // that of a real emulator ("Ghostty") is still an honest one when it is the
 // embedder's own: yazi and superfile pick their image protocol from
 // TERM_PROGRAM, so a host that implements the Kitty protocol can say so.
-func selfIdentity(name string) []string {
+//
+// version is the embedder's own (Cfg.IdentityVersion). It counts only beside
+// an embedder name — paired with "go-term" it would claim a go-term release
+// that does not exist — and empty falls back to go-term's version.
+func selfIdentity(name, version string) []string {
 	if name == "" {
-		name = "go-term"
+		name, version = "go-term", ""
+	}
+	if version == "" {
+		version = termVersion
 	}
 	return []string{
 		"TERM_PROGRAM=" + name,
-		"TERM_PROGRAM_VERSION=" + termVersion,
+		"TERM_PROGRAM_VERSION=" + version,
 	}
 }
 
@@ -84,8 +91,8 @@ func selfIdentity(name string) []string {
 // this terminal in their place. The two halves belong together — a scrub
 // without the replacement leaves TERM_PROGRAM unset — so every startPTY goes
 // through here rather than pairing dropEnv with an append of its own.
-func setTerminalIdentity(env []string, name string) []string {
-	return append(dropEnv(env, hostTerminalEnvKeys[:]), selfIdentity(name)...)
+func setTerminalIdentity(env []string, name, version string) []string {
+	return append(dropEnv(env, hostTerminalEnvKeys[:]), selfIdentity(name, version)...)
 }
 
 // colorFGBGEnv builds the COLORFGBG value describing the theme the child is
@@ -186,7 +193,7 @@ func setEnvEntry(env []string, entry string) []string {
 // deliberately not applied here — applyCfgEnv runs after any platform fixups
 // (macOS PATH, LANG) so caller overrides always win.
 func baseChildEnv(cfg Cfg, parent []string) []string {
-	env := setTerminalIdentity(parent, cfg.Identity)
+	env := setTerminalIdentity(parent, cfg.Identity, cfg.IdentityVersion)
 	env = setEnvEntry(env, "TERM=xterm-256color")
 	// The widget renders 24-bit color, but TERM=xterm-256color only promises
 	// the 256-color palette — TUI toolkits (lipgloss/bubbletea, among others)
@@ -207,14 +214,17 @@ func applyCfgEnv(env []string, cfgEnv []string) []string {
 	return env
 }
 
-// checkIdentity rejects a Cfg.Identity that can never become an environment
-// value. NUL terminates C strings and the Windows UTF-16 env block alike, so
-// it fails the spawn late with a confusing error; fail here instead. '=' and
-// newlines are legal in a value (getenv returns them verbatim) and need no
-// special handling.
-func checkIdentity(name string) error {
+// checkIdentity rejects a Cfg.Identity or Cfg.IdentityVersion that can never
+// become an environment value (TERM_PROGRAM, TERM_PROGRAM_VERSION). NUL
+// terminates C strings and the Windows UTF-16 env block alike, so it fails the
+// spawn late with a confusing error; fail here instead. '=' and newlines are
+// legal in a value (getenv returns them verbatim) and need no special handling.
+func checkIdentity(name, version string) error {
 	if strings.IndexByte(name, 0) >= 0 {
 		return errors.New("term: Identity contains NUL")
+	}
+	if strings.IndexByte(version, 0) >= 0 {
+		return errors.New("term: IdentityVersion contains NUL")
 	}
 	return nil
 }

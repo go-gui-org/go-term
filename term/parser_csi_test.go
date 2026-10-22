@@ -3,6 +3,7 @@ package term
 import (
 	"bytes"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -1234,9 +1235,43 @@ func TestParser_XTVERSION(t *testing.T) {
 	var reply []byte
 	p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
 	feed(t, g, p, []byte("\x1b[>q"))
-	want := []byte("\x1bP>|go-term(" + termVersion + ")\x1b\\")
+	want := []byte("\x1bP>|go-term " + termVersion + "\x1b\\")
 	if !bytes.Equal(reply, want) {
 		t.Errorf("XTVERSION reply = %q, want %q", reply, want)
+	}
+}
+
+func TestParser_XTVERSION_Identity(t *testing.T) {
+	// An embedder identity replaces "go-term version" outright, with the
+	// embedder's own version after the name; go-term's version is never
+	// borrowed, so a missing one leaves the name bare. Bytes outside printable
+	// ASCII are dropped so the reply stays a valid DCS string (an ESC would end
+	// it early). An identity with nothing printable keeps the default.
+	for _, tc := range []struct{ id, ver, want string }{
+		{"falcon", "0.16.2", "\x1bP>|falcon 0.16.2\x1b\\"},
+		{"falcon", "", "\x1bP>|falcon\x1b\\"},
+		{"falcon", "\x1b\n", "\x1bP>|falcon\x1b\\"},
+		{"fal\x1b\\con\n", "1\x1b.2", "\x1bP>|fal\\con 1.2\x1b\\"},
+		// A space in the name would move blessed's name/version split point.
+		{"Falcon Term", "1.0 beta", "\x1bP>|Falcon-Term 1.0 beta\x1b\\"},
+		// Each field is capped so a child that repeats the query cannot make an
+		// oversized embedder string cost more than a short reply.
+		{strings.Repeat("n", 500), strings.Repeat("9", 500),
+			"\x1bP>|" + strings.Repeat("n", maxXTVersionField) + " " +
+				strings.Repeat("9", maxXTVersionField) + "\x1b\\"},
+		{"", "", "\x1bP>|go-term " + termVersion + "\x1b\\"},
+		{"", "9.9", "\x1bP>|go-term " + termVersion + "\x1b\\"},
+		{"\x1b\n", "9.9", "\x1bP>|go-term " + termVersion + "\x1b\\"},
+	} {
+		g, p := newParserGrid(2, 10)
+		p.SetIdentity(tc.id, tc.ver)
+		var reply []byte
+		p.SetReplyHandler(func(b []byte) { reply = append(reply, b...) })
+		feed(t, g, p, []byte("\x1b[>q"))
+		if string(reply) != tc.want {
+			t.Errorf("identity %q %q: XTVERSION reply = %q, want %q",
+				tc.id, tc.ver, reply, tc.want)
+		}
 	}
 }
 

@@ -79,7 +79,7 @@ func startPTY(rows, cols int, cfg Cfg) (*ptyDev, error) {
 			shell = "cmd.exe"
 		}
 	}
-	if err := checkIdentity(cfg.Identity); err != nil {
+	if err := checkIdentity(cfg.Identity, cfg.IdentityVersion); err != nil {
 		return nil, err
 	}
 

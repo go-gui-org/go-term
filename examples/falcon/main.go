@@ -114,6 +114,7 @@ func run() int {
 		wc: workspace.Cfg{
 			TextStyle:              defaultTextStyle(),
 			Identity:               "falcon",
+			IdentityVersion:        terminalVersion(),
 			ConfigPath:             defaultConfigPath(),
 			ExitWhenLastShellExits: true,
 			DownloadDir:            defaultDownloadDir(),

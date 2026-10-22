@@ -68,6 +68,21 @@ func TestAboutVersionFor(t *testing.T) {
 	}
 }
 
+func TestTerminalVersionFor(t *testing.T) {
+	rel := strings.TrimPrefix(releaseVersion, "v")
+	tests := []struct{ in, want string }{
+		{releaseVersion, rel},
+		{releaseVersion + "-7-gc61ccae-dirty", rel + "-7-gc61ccae-dirty"},
+		{"v0.9.0", "0.9.0"},
+		{"dev", rel + "-dev"},
+	}
+	for _, tt := range tests {
+		if got := terminalVersionFor(tt.in); got != tt.want {
+			t.Errorf("terminalVersionFor(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 // TestAboutVersion_DialogInvariant guards what showAbout renders: the
 // dialog must name a version on every build path — never empty, never a
 // bare "dev". The unstamped half depends on the toolchain's build info,

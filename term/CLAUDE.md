@@ -82,16 +82,17 @@ Supports a modern xterm/kitty-compatible subset:
 - CSI: cursor movement and positioning, erase in line/display, scroll regions
   (DECSTBM), IND/RI/NEL, IL/DL/ICH/DCH/SU/SD, DECSCUSR (cursor shape/blink), DA1
   (advertises Sixel via extension 4: `CSI ?1;2;4c`), DA2, XTVERSION (`CSI > q` →
-  `DCS >| go-term(ver) ST`), XTWINOPS reports (`CSI 11 t` state → `1 t`,
-  `CSI 13 t` position → `3;0;0t`, `CSI 14 t`/`CSI 15 t` pixel sizes, `CSI 16 t`
-  cell size, `CSI 18 t`/`CSI 19 t` text-area/screen size in chars,
-  `CSI 20 t`/`CSI 21 t` icon label/title as `OSC L`/`l`) and title stack
-  (`CSI 22 t` push / `CSI 23 t` pop; resize/move/raise manipulation ops stay
-  ignored — an embedded widget must not drive the host window), tab stop clear
-  (TBC), tab navigation (CHT `CSI Ps I` / CBT `CSI Ps Z`), erase characters (ECH
-  `CSI Ps X`), repeat (REP `CSI Ps b` — ncurses emits it wherever terminfo has
-  `rep`). A final whose intermediate byte is not one it implements (`CSI 2 SP @`
-  is SL, not ICH) is ignored — `csiIntermediateKnown` lists the pairs.
+  `DCS >| go-term ver ST`, or `DCS >| <Cfg.Identity> <Cfg.IdentityVersion> ST`
+  when set), XTWINOPS reports (`CSI 11 t` state → `1 t`, `CSI 13 t` position →
+  `3;0;0t`, `CSI 14 t`/`CSI 15 t` pixel sizes, `CSI 16 t` cell size,
+  `CSI 18 t`/`CSI 19 t` text-area/screen size in chars, `CSI 20 t`/`CSI 21 t`
+  icon label/title as `OSC L`/`l`) and title stack (`CSI 22 t` push / `CSI 23 t`
+  pop; resize/move/raise manipulation ops stay ignored — an embedded widget must
+  not drive the host window), tab stop clear (TBC), tab navigation (CHT
+  `CSI Ps I` / CBT `CSI Ps Z`), erase characters (ECH `CSI Ps X`), repeat (REP
+  `CSI Ps b` — ncurses emits it wherever terminfo has `rep`). A final whose
+  intermediate byte is not one it implements (`CSI 2 SP @` is SL, not ICH) is
+  ignored — `csiIntermediateKnown` lists the pairs.
 - Character protection + rectangular areas (VT420, `grid_rect.go`): DECSCA
   (`CSI Ps " q`) marks characters protected; only the selective erases honor it
   — DECSEL (`CSI ? Ps K`), DECSED (`CSI ? Ps J`), DECSERA (`CSI … $ {`). DECERA
