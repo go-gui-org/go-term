@@ -93,6 +93,10 @@ type parser struct {
 	oscTrunc            bool // true once a byte was dropped for exceeding the OSC cap
 	dcsTrunc            bool // true once a byte was dropped for exceeding the DCS cap
 	allowClipboardWrite bool
+
+	// xtversion is the XTVERSION reply: xtversionReply until SetIdentity
+	// points it at an embedder-named one.
+	xtversion []byte
 }
 
 // SetGraphicsDir tells the parser where to write decoded Sixel images.
@@ -145,6 +149,54 @@ func (p *parser) SetReplyHandler(fn func([]byte)) { p.onReply = fn }
 // disable. Called while grid.Mu is held. OSC 52 writes are ignored unless
 // SetClipboardWriteAllowed(true) is also called.
 func (p *parser) SetClipboardHandler(fn func([]byte)) { p.onClipboard = fn }
+
+// SetIdentity names this terminal in the XTVERSION reply (Cfg.Identity and
+// Cfg.IdentityVersion), so a child that asks the terminal directly —
+// ucs-detect, blessed, notcurses — sees the same name and version
+// TERM_PROGRAM and TERM_PROGRAM_VERSION give it. The reply is "name version",
+// or the bare name when version is empty: go-term's own version is never
+// borrowed, since it would describe a different program. Spaces in the name
+// become '-' so the name/version split stays put. Only printable ASCII
+// is kept, because the reply is a DCS string and an ESC or control byte inside
+// it would end it early or corrupt it. A name with nothing printable keeps the
+// default, version included.
+func (p *parser) SetIdentity(name, version string) {
+	b := make([]byte, 0, len(xtversionPrefix)+2*maxXTVersionField+1+len(xtversionSuffix))
+	b = append(b, xtversionPrefix...)
+	b = appendPrintable(b, name, maxXTVersionField)
+	// blessed and ucs-detect take everything before the first space as the
+	// name, so a space inside the name would push half of it into the version.
+	for i := len(xtversionPrefix); i < len(b); i++ {
+		if b[i] == ' ' {
+			b[i] = '-'
+		}
+	}
+	if len(b) == len(xtversionPrefix) {
+		p.xtversion = xtversionReply
+		return
+	}
+	// The separator goes in only when a printable version follows, so an
+	// unprintable one cannot leave a trailing space that reads as "version ''".
+	n := len(b)
+	b = append(b, ' ')
+	if b = appendPrintable(b, version, maxXTVersionField); len(b) == n+1 {
+		b = b[:n]
+	}
+	p.xtversion = append(b, xtversionSuffix...)
+}
+
+// appendPrintable appends at most limit printable-ASCII bytes of s to b,
+// dropping the rest. It keeps XTVERSION text inside what a DCS string may
+// carry, and bounded.
+func appendPrintable(b []byte, s string, limit int) []byte {
+	for i := 0; i < len(s) && limit > 0; i++ {
+		if c := s[i]; c >= ' ' && c <= '~' {
+			b = append(b, c)
+			limit--
+		}
+	}
+	return b
+}
 
 // SetClipboardWriteAllowed controls whether OSC 52 write requests may invoke
 // the registered clipboard handler. Disabled by default.
@@ -211,7 +263,10 @@ func (p *parser) hardReset() {
 // newParser binds a parser to a grid. Callers must hold g.Mu while calling
 // Feed.
 func newParser(g *grid) *parser {
-	return &parser{g: g, params: make([]int, 0, 8), paramSub: make([]bool, 0, 8)}
+	return &parser{
+		g: g, params: make([]int, 0, 8), paramSub: make([]bool, 0, 8),
+		xtversion: xtversionReply,
+	}
 }
 
 // currentSGRString renders the current SGR state as the parameter string a

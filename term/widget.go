@@ -77,6 +77,7 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 			t.parser.SetGraphicsDir(dir)
 		}
 	}
+	t.parser.SetIdentity(cfg.Identity, cfg.IdentityVersion)
 	t.parser.SetTitleHandler(t.onParserTitle)
 	t.parser.SetReplyHandler(t.onParserReply)
 	t.parser.SetClipboardWriteAllowed(cfg.AllowOSC52Write)

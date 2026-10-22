@@ -235,12 +235,20 @@ func TestApplyCfgEnvOverrides(t *testing.T) {
 
 func TestCheckIdentity(t *testing.T) {
 	for _, ok := range []string{"", "go-term", "Falcon", "a=b", "a\nb"} {
-		if err := checkIdentity(ok); err != nil {
+		if err := checkIdentity(ok, ""); err != nil {
 			t.Errorf("checkIdentity(%q) = %v, want nil", ok, err)
 		}
 	}
-	if err := checkIdentity("a\x00b"); err == nil {
-		t.Error("checkIdentity(NUL) = nil, want an error")
+	for _, ok := range []string{"", "0.16.2", "0.16.2-dev", "1.0 beta"} {
+		if err := checkIdentity("falcon", ok); err != nil {
+			t.Errorf("checkIdentity(version %q) = %v, want nil", ok, err)
+		}
+	}
+	if err := checkIdentity("a\x00b", ""); err == nil {
+		t.Error("checkIdentity(NUL name) = nil, want an error")
+	}
+	if err := checkIdentity("falcon", "1\x00"); err == nil {
+		t.Error("checkIdentity(NUL version) = nil, want an error")
 	}
 }
 
@@ -301,5 +309,19 @@ func TestColorFGBGEnv(t *testing.T) {
 				t.Errorf("colorFGBGEnv = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// IdentityVersion is the embedder's own version: it rides TERM_PROGRAM_VERSION
+// next to the embedder's name instead of go-term's library version.
+func TestBaseChildEnv_IdentityVersion(t *testing.T) {
+	got := baseChildEnv(Cfg{Identity: "falcon", IdentityVersion: "0.16.2"}, nil)
+	if v := envValue(got, "TERM_PROGRAM_VERSION"); v != "0.16.2" {
+		t.Errorf("TERM_PROGRAM_VERSION = %q; want 0.16.2", v)
+	}
+	// Without a name the version would describe some other program.
+	got = baseChildEnv(Cfg{IdentityVersion: "0.16.2"}, nil)
+	if v := envValue(got, "TERM_PROGRAM_VERSION"); v != termVersion {
+		t.Errorf("no Identity: TERM_PROGRAM_VERSION = %q; want %q", v, termVersion)
 	}
 }

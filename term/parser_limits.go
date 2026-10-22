@@ -88,9 +88,22 @@ var da1Reply = []byte("\x1b[?1;2;4c")
 // version, firmware version, or hardware options.
 var da2Reply = []byte("\x1b[>0;0;0c")
 
-// xtversionReply answers XTVERSION (CSI > q): DCS > | name(version) ST.
-// blessed/ucs-detect parse the parenthesized form into name + version.
-var xtversionReply = []byte("\x1bP>|go-term(" + termVersion + ")\x1b\\")
+// xtversionReply answers XTVERSION (CSI > q): DCS > | name version ST.
+// blessed/ucs-detect split the text at its first space into name + version
+// (tmux's form), so a name must not contain one. parser.SetIdentity swaps
+// in the embedder's name (spaces turned to '-') and version.
+var xtversionReply = []byte(xtversionPrefix + "go-term " + termVersion + xtversionSuffix)
+
+// maxXTVersionField caps the embedder name and version in the XTVERSION reply,
+// each. A child can repeat the query freely, so the reply must stay short
+// whatever string the embedder passed; real names and versions fit easily.
+const maxXTVersionField = 64
+
+// xtversionPrefix and xtversionSuffix frame the XTVERSION reply text.
+const (
+	xtversionPrefix = "\x1bP>|"
+	xtversionSuffix = "\x1b\\"
+)
 
 // termVersion is the advertised software version (XTVERSION). Bump on release.
 const termVersion = "0.1"

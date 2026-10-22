@@ -107,7 +107,7 @@ func (p *parser) dispatchCSI(final byte) {
 			case 'q':
 				// XTVERSION (CSI > q / CSI > 0 q): report name + version.
 				if p.param(0, 0) == 0 && p.onReply != nil {
-					p.onReply([]byte(xtversionReply))
+					p.onReply(p.xtversion)
 				}
 			}
 		case '<':

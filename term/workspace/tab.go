@@ -129,6 +129,7 @@ func (t *tab) termCfg(w *gui.Window, cfg Cfg, panelID, dir string, hooks paneHoo
 		Themes:          paneThemes(cfg),
 		Dir:             dir,
 		Identity:        cfg.Identity,
+		IdentityVersion: cfg.IdentityVersion,
 		Env:             cfg.opts.env,
 		RecordInput:     cfg.RecordInput,
 		DownloadDir:     cfg.DownloadDir,

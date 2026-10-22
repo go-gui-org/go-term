@@ -35,6 +35,25 @@ func aboutVersion() string {
 	return aboutVersionFor(appVersion())
 }
 
+// terminalVersion is the version falcon reports to the programs it runs, in
+// TERM_PROGRAM_VERSION and the XTVERSION reply ("falcon 0.16.2"). Terminals
+// report a bare number there (kitty, WezTerm, Ghostty), so the leading "v" is
+// dropped, and a dev build gets a "-dev" suffix rather than the About string's
+// " (dev)" so the number stays one token.
+func terminalVersion() string {
+	return terminalVersionFor(appVersion())
+}
+
+// terminalVersionFor applies the terminalVersion rule to one version string.
+// A build that names no release reports the release line with a "-dev"
+// suffix, so a child never mistakes it for the tagged release.
+func terminalVersionFor(v string) string {
+	if strings.HasPrefix(v, "v") {
+		return strings.TrimPrefix(v, "v")
+	}
+	return strings.TrimPrefix(releaseVersion, "v") + "-" + v
+}
+
 // aboutVersionFor applies the About display rule to one version string.
 // Split out so tests can cover the rule without stubbing the linker
 // stamp or the toolchain's build info.

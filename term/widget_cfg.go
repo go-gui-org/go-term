@@ -160,8 +160,16 @@ type Cfg struct {
 	// capability profile as a known emulator can set that name here so
 	// children that key their behavior off TERM_PROGRAM — yazi and superfile
 	// pick their image protocol from it — get the right one. cfg.Env is
-	// applied after, so an Env entry still wins.
+	// applied after, so an Env entry still wins. It also replaces "go-term" in
+	// the XTVERSION reply (CSI > q), which tools such as ucs-detect read.
 	Identity string
+
+	// IdentityVersion is the embedder's own version, reported beside Identity
+	// in TERM_PROGRAM_VERSION and the XTVERSION reply ("falcon 0.16.2").
+	// Ignored when Identity is empty: go-term then reports its own version.
+	// Empty with Identity set leaves XTVERSION a bare name and
+	// TERM_PROGRAM_VERSION at go-term's version, as before this field existed.
+	IdentityVersion string
 
 	// TextStyle overrides the default monospace text style. When set to
 	// the zero value, the widget falls back to gui.CurrentTheme().TextStyleCodeSmall.
