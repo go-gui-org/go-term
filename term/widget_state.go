@@ -65,6 +65,11 @@ type resizeState struct {
 	// Zero initially, so the first frame always publishes.
 	ptyLastRows int
 	ptyLastCols int
+	// ptyLastXpx/ptyLastYpx are the text-area pixels the child was last
+	// told about. A cell-size change at fixed rows/cols (font zoom, DPI
+	// change) must still reach the child, or its image sizing goes stale.
+	ptyLastXpx int
+	ptyLastYpx int
 
 	// sized suppresses the badge for the window's initial sizing, which is
 	// not a user gesture and would flash the readout at startup.
@@ -543,6 +548,8 @@ type Term struct {
 	ptyResizePending atomic.Bool
 	ptyResizeRows    atomic.Int32
 	ptyResizeCols    atomic.Int32
+	ptyResizeXpx     atomic.Int32  // text-area width in device pixels
+	ptyResizeYpx     atomic.Int32  // text-area height in device pixels
 	ptyResizeKick    chan struct{} // buffered(1); nil in bare test Terms
 
 	// capture is the opt-in raw pty-output tee (GOTERM_CAPTURE env var):

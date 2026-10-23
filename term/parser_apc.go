@@ -1,8 +1,11 @@
 package term
 
 import (
+	"bytes"
+	"compress/zlib"
 	"encoding/base64"
 	"image"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -55,6 +58,9 @@ type kgpParams struct {
 	medium   byte   // t=: 'd' direct (default), 'f' file, 't' temp-file, 's' shared-memory
 	more     bool   // m=: true when m=1 (more chunks follow)
 	noCursor bool   // C=: true when C=1 (place without moving the cursor)
+	// zlib is o=z: the decoded payload is RFC 1950 zlib data and must be
+	// inflated before the format decode. ttt sends all its images this way.
+	zlib bool
 	// cols/rows are the c=/r= cell footprint the client asked for; 0 means
 	// "unspecified, derive from the pixel size". Lowercase, and unrelated to
 	// C= above.
@@ -184,6 +190,11 @@ func splitKGPPayload(payload []byte) (kgpParams, []byte) {
 			}
 		case 'm':
 			params.more = val == "1"
+		case 'o':
+			// z (zlib) is the only compression the spec defines. Any other
+			// value is left unset, so the decode fails and the client gets an
+			// error instead of a picture made of compressed bytes.
+			params.zlib = val == "z"
 		case 'C':
 			// Cursor movement policy. C=1 means "do not move the cursor";
 			// any other value (including the C=0 default) leaves the normal
@@ -470,6 +481,9 @@ func (p *parser) kittyFinish(params kgpParams, id uint32, assembledB64 []byte) {
 		}
 	}
 
+	if params.zlib && raw != nil {
+		raw = kittyInflate(raw, kittyInflateLimit(params))
+	}
 	img := p.kittyDecodeImage(params, raw)
 	if img == nil {
 		p.kittyReply(id, params.quiet, false)
@@ -745,6 +759,49 @@ func (p *parser) kittyDecodeImage(params kgpParams, raw []byte) *image.NRGBA {
 	default:
 		return decodeImageBytes(raw)
 	}
+}
+
+// kittyInflateLimit is the most bytes an o=z payload may inflate to. A raw
+// image needs exactly s*v*bpp bytes, so that is the limit: a few KB of deflate
+// data can expand to gigabytes, and this stops at the size the decode can use.
+// A PNG (f=100) has no declared size and gets the transmission cap instead.
+func kittyInflateLimit(params kgpParams) int {
+	bpp := 0
+	switch params.format {
+	case 32:
+		bpp = 4
+	case 24:
+		bpp = 3
+	}
+	if bpp == 0 {
+		return maxKittyImageBytes
+	}
+	// Raw dims are bounded by maxSixelWidth/Height at the opening chunk and in
+	// kittyRawToNRGBA, so this product fits in an int. A zero or negative dim
+	// gives a 0 limit, and the decode refuses the empty result.
+	if params.widthPx <= 0 || params.heightPx <= 0 ||
+		params.widthPx > maxSixelWidth || params.heightPx > maxSixelHeight {
+		return 0
+	}
+	return params.widthPx * params.heightPx * bpp
+}
+
+// kittyInflate decodes zlib data, returning nil when it is corrupt or inflates
+// past limit. Past limit is an error and not a truncation: the data does not
+// match the image the client described.
+func kittyInflate(data []byte, limit int) []byte {
+	zr, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = zr.Close() }()
+	// Read one byte past limit, so "exactly limit" and "more than limit" can be
+	// told apart without inflating the rest.
+	out, err := io.ReadAll(io.LimitReader(zr, int64(limit)+1))
+	if err != nil || len(out) > limit {
+		return nil
+	}
+	return out
 }
 
 // kittyRawToNRGBA constructs image.NRGBA from raw pixel bytes.

@@ -18,17 +18,28 @@ import (
 type recordPty struct {
 	mu    sync.Mutex
 	calls [][2]int
+	// px holds the text-area pixel size passed with each call, index-aligned
+	// with calls, so the pixel tests can check it without every rows/cols
+	// test spelling out pixels it does not care about.
+	px [][2]int
 }
 
 func (p *recordPty) Read(b []byte) (int, error)  { return 0, io.EOF }
 func (p *recordPty) Write(b []byte) (int, error) { return len(b), nil }
 func (p *recordPty) Close() error                { return nil }
 func (p *recordPty) PID() int                    { return 0 }
-func (p *recordPty) Resize(rows, cols int) error {
+func (p *recordPty) Resize(rows, cols, xpx, ypx int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls = append(p.calls, [2]int{rows, cols})
+	p.px = append(p.px, [2]int{xpx, ypx})
 	return nil
+}
+
+func (p *recordPty) pxSnapshot() [][2]int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([][2]int(nil), p.px...)
 }
 
 func (p *recordPty) snapshot() [][2]int {
@@ -56,9 +67,15 @@ func newResizeLoopTerm() (*Term, *recordPty, func()) {
 
 // latchResize simulates onDraw's doResize path: store dims, set pending,
 // kick the loop.
-func latchResize(tm *Term, rows, cols int) {
+func latchResize(tm *Term, rows, cols int) { latchResizePx(tm, rows, cols, 0, 0) }
+
+// latchResizePx is latchResize with the text-area pixel size onDraw also
+// stores (ws_xpixel/ws_ypixel).
+func latchResizePx(tm *Term, rows, cols, xpx, ypx int) {
 	tm.ptyResizeRows.Store(int32(rows))
 	tm.ptyResizeCols.Store(int32(cols))
+	tm.ptyResizeXpx.Store(int32(xpx))
+	tm.ptyResizeYpx.Store(int32(ypx))
 	tm.ptyResizePending.Store(true)
 	select {
 	case tm.ptyResizeKick <- struct{}{}:
@@ -115,6 +132,34 @@ func TestResizeLoop_SameSizeHealBumpsRows(t *testing.T) {
 	// same size is the coalesced A→B→A case.
 	latchResize(tm, initRows, initCols)
 	waitCalls(t, p, [][2]int{{initRows - 1, initCols}, {initRows, initCols}})
+}
+
+// The text-area pixel size must reach the pty with the rows/cols. Children
+// such as ttt derive cell pixels from TIOCGWINSZ (ws_xpixel/ws_ypixel over
+// cols/rows) and turn Kitty graphics off when it reads 0.
+func TestResizeLoop_PassesPixelSize(t *testing.T) {
+	tm, p, teardown := newResizeLoopTerm()
+	defer teardown()
+
+	latchResizePx(tm, 30, 100, 1600, 960)
+	waitCalls(t, p, [][2]int{{30, 100}})
+	if got := p.pxSnapshot(); len(got) != 1 || got[0] != [2]int{1600, 960} {
+		t.Fatalf("pixel sizes = %v, want [[1600 960]]", got)
+	}
+}
+
+// A pixel-only change (font zoom that keeps rows/cols, a move to a display
+// with another scale) is a real size change, not the A→B→A case: one
+// TIOCSWINSZ with the new pixels, no one-row bounce.
+func TestResizeLoop_PixelOnlyChangeSkipsHealBump(t *testing.T) {
+	tm, p, teardown := newResizeLoopTerm()
+	defer teardown()
+
+	latchResizePx(tm, initRows, initCols, 800, 480)
+	waitCalls(t, p, [][2]int{{initRows, initCols}})
+	if got := p.pxSnapshot(); got[0] != [2]int{800, 480} {
+		t.Fatalf("pixel sizes = %v, want [[800 480]]", got)
+	}
 }
 
 // At the 1-row floor the heal must bump up, not to an invalid 0 rows.
@@ -218,7 +263,7 @@ type errPty struct{ recordPty }
 
 var errResize = errors.New("resize failed")
 
-func (p *errPty) Resize(rows, cols int) error {
+func (p *errPty) Resize(rows, cols, _, _ int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls = append(p.calls, [2]int{rows, cols})
@@ -283,5 +328,38 @@ func TestReadLoop_CaptureWriteFails(t *testing.T) {
 	tm.grid.Mu.Unlock()
 	if c0.Ch != 'h' {
 		t.Errorf("first cell = %c, want 'h'", c0.Ch)
+	}
+}
+
+// prepareResize must publish the text-area pixel size, and republish it when
+// only the cell size changes (font zoom at fixed rows/cols, a DPI change). It
+// is in device pixels, the unit of CSI 14 t and of Kitty image sizes.
+func TestPrepareResize_PublishesPixelSize(t *testing.T) {
+	tm := newBareTerm(&recordPty{}, 24, 80)
+	tm.cellW, tm.cellH = 10, 20
+	tm.draw.pxScale = 2
+	// The child already knows these rows/cols, so only pixels are new.
+	tm.resize.ptyLastRows, tm.resize.ptyLastCols = 24, 80
+
+	ds := drawState{rows: 24, cols: 80, now: time.Now()}
+	tm.prepareResize(&ds)
+	if !ds.doResize || ds.ptyXpx != 1600 || ds.ptyYpx != 960 {
+		t.Fatalf("first frame: doResize=%v px=%dx%d, want true 1600x960",
+			ds.doResize, ds.ptyXpx, ds.ptyYpx)
+	}
+
+	ds = drawState{rows: 24, cols: 80, now: time.Now()}
+	tm.prepareResize(&ds)
+	if ds.doResize {
+		t.Fatal("unchanged frame republished the pty size")
+	}
+
+	// Zoom: the cell grows but the canvas still fits 24x80 here.
+	tm.cellW, tm.cellH = 11, 22
+	ds = drawState{rows: 24, cols: 80, now: time.Now()}
+	tm.prepareResize(&ds)
+	if !ds.doResize || ds.ptyXpx != 1760 || ds.ptyYpx != 1056 {
+		t.Fatalf("zoom: doResize=%v px=%dx%d, want true 1760x1056",
+			ds.doResize, ds.ptyXpx, ds.ptyYpx)
 	}
 }

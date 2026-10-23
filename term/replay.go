@@ -365,7 +365,7 @@ func (p *replayPTY) step() {
 
 // Resize is a no-op: a recording has no child process to inform. The pane's
 // own geometry drives the grid, as it does for a live pty.
-func (p *replayPTY) Resize(int, int) error { return nil }
+func (p *replayPTY) Resize(int, int, int, int) error { return nil }
 
 // PID reports 0 — there is no child process.
 func (p *replayPTY) PID() int { return 0 }
