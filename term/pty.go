@@ -15,7 +15,9 @@ import (
 type ptyIO interface {
 	Read([]byte) (int, error)
 	Write([]byte) (int, error)
-	Resize(int, int) error
+	// Resize takes rows, cols, then the text-area size in device pixels
+	// (width, height). Pixels are 0 until the first frame measures a cell.
+	Resize(rows, cols, xpx, ypx int) error
 	Close() error
 	PID() int
 }
@@ -30,6 +32,19 @@ type ptyIO interface {
 func clampWinsize(n int) uint16 {
 	if n < 1 {
 		return 1
+	}
+	if n > 0xFFFF {
+		return 0xFFFF
+	}
+	return uint16(n)
+}
+
+// clampPixels bounds a pixel size to the uint16 winsize field. Unlike
+// clampWinsize, 0 is kept: it is how the kernel says "unknown", and children
+// treat it as "no pixel size" rather than as a size.
+func clampPixels(n int) uint16 {
+	if n < 0 {
+		return 0
 	}
 	if n > 0xFFFF {
 		return 0xFFFF

@@ -6,7 +6,29 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/creack/pty"
 )
+
+// The pixel size must land in the kernel winsize, where a child's
+// TIOCGWINSZ (tcell's CellDimensions in ttt) reads it.
+func TestPTY_ResizeSetsPixelSize(t *testing.T) {
+	p, err := startPTY(24, 80, Cfg{})
+	if err != nil {
+		t.Skipf("startPTY failed: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	if err := p.Resize(30, 100, 1600, 960); err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
+	ws, err := pty.GetsizeFull(p.file)
+	if err != nil {
+		t.Fatalf("GetsizeFull: %v", err)
+	}
+	if ws.Rows != 30 || ws.Cols != 100 || ws.X != 1600 || ws.Y != 960 {
+		t.Errorf("winsize = %+v, want 30x100 at 1600x960 px", *ws)
+	}
+}
 
 func TestPTY_StartWithDir(t *testing.T) {
 	p, err := startPTY(24, 80, Cfg{Dir: "/tmp"})

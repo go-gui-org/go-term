@@ -90,11 +90,15 @@ func (p *ptyDev) Read(b []byte) (int, error) { return p.file.Read(b) }
 func (p *ptyDev) Write(b []byte) (int, error) { return p.file.Write(b) }
 
 // Resize updates the pty winsize so child processes see the new
-// rows/cols on their next stty/SIGWINCH.
-func (p *ptyDev) Resize(rows, cols int) error {
+// rows/cols on their next stty/SIGWINCH. xpx/ypx fill ws_xpixel/ws_ypixel:
+// image-capable children (ttt, through tcell's CellDimensions) read the cell
+// pixel size from them and turn Kitty graphics off when they are 0.
+func (p *ptyDev) Resize(rows, cols, xpx, ypx int) error {
 	return pty.Setsize(p.file, &pty.Winsize{
 		Rows: clampWinsize(rows),
 		Cols: clampWinsize(cols),
+		X:    clampPixels(xpx),
+		Y:    clampPixels(ypx),
 	})
 }
 

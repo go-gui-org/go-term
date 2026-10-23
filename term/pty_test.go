@@ -25,12 +25,21 @@ func TestClampWinsize(t *testing.T) {
 	}
 }
 
+func TestClampPixels(t *testing.T) {
+	// 0 must survive: it is the winsize "unknown" value, not a size to raise.
+	for in, want := range map[int]uint16{-1: 0, 0: 0, 1600: 1600, 0x10000: 0xFFFF} {
+		if got := clampPixels(in); got != want {
+			t.Errorf("clampPixels(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
+
 func TestPTY_StartResizeClose(t *testing.T) {
 	p, err := startPTY(24, 80, Cfg{})
 	if err != nil {
 		t.Skipf("startPTY failed (no shell available?): %v", err)
 	}
-	if err := p.Resize(30, 100); err != nil {
+	if err := p.Resize(30, 100, 0, 0); err != nil {
 		t.Errorf("Resize: %v", err)
 	}
 	// Close is idempotent best-effort teardown: always nil, safe to repeat.

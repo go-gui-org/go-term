@@ -26,7 +26,9 @@ import (
 func (t *Term) resizeLoop() {
 	defer t.loopWg.Done()
 	defer recoverLoop("resizeLoop")
-	lastRows, lastCols := initRows, initCols
+	// The pty starts with no pixel size (the cell is not measured yet), so
+	// the last applied pixels start at 0.
+	lastRows, lastCols, lastXpx, lastYpx := initRows, initCols, 0, 0
 	for {
 		select {
 		case <-t.blinkDone:
@@ -38,7 +40,11 @@ func (t *Term) resizeLoop() {
 		}
 		rows := clampDim(int(t.ptyResizeRows.Load()))
 		cols := clampDim(int(t.ptyResizeCols.Load()))
-		if rows == lastRows && cols == lastCols {
+		xpx := int(t.ptyResizeXpx.Load())
+		ypx := int(t.ptyResizeYpx.Load())
+		// A pixel-only change is a real change: the kernel sends SIGWINCH
+		// for any winsize difference, so no bounce is needed for it.
+		if rows == lastRows && cols == lastCols && xpx == lastXpx && ypx == lastYpx {
 			// Same-size re-apply: the grid diverged and returned while
 			// no intermediate size reached the kernel. Bump one row off
 			// and back to force SIGWINCH delivery (see doc comment).
@@ -46,17 +52,17 @@ func (t *Term) resizeLoop() {
 			if bump < 1 {
 				bump = rows + 1
 			}
-			if err := t.pty.Resize(bump, cols); err != nil && !t.closed.Load() {
+			if err := t.pty.Resize(bump, cols, xpx, ypx); err != nil && !t.closed.Load() {
 				log.Printf("term: pty resize: %v", err)
 			}
 		}
-		if err := t.pty.Resize(rows, cols); err != nil && !t.closed.Load() {
+		if err := t.pty.Resize(rows, cols, xpx, ypx); err != nil && !t.closed.Load() {
 			log.Printf("term: pty resize: %v", err)
 		}
 		// Record the new geometry so a replay can report the size the
 		// session actually ran at (recfmt.KindResize).
 		t.rec.Load().Resize(rows, cols)
-		lastRows, lastCols = rows, cols
+		lastRows, lastCols, lastXpx, lastYpx = rows, cols, xpx, ypx
 	}
 }
 

@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `term`: Kitty graphics now honor `o=z` (zlib-compressed payload). It was
+  ignored, so ttt, which compresses every image, got no image or an error.
+  Without `o=z` support, compressed bytes were also drawn as pixels when there
+  were enough of them. The inflated size is capped at the size the image needs,
+  so a small payload cannot expand to gigabytes.
+
+- `term`: the pty winsize now carries the text-area size in device pixels
+  (`ws_xpixel`/`ws_ypixel`). It was always 0, so children that read the cell
+  size from `TIOCGWINSZ` turned image support off. ttt is one of them: it
+  detected falcon as a Kitty graphics terminal but showed no images. A cell-size
+  change at fixed rows and columns (font zoom, a display change) now also
+  updates the winsize.
+
 ## [0.17.0] - 2026-10-22
 
 ### Added

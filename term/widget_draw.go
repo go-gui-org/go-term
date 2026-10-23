@@ -125,6 +125,9 @@ type drawState struct {
 	renderYOff float32
 	live       bool
 	doResize   bool
+	// ptyXpx/ptyYpx are the text-area device pixels to publish with
+	// doResize (ws_xpixel/ws_ypixel).
+	ptyXpx, ptyYpx int
 	// blinkOff is true during the hidden half of the SGR 5/6 blink cycle.
 	blinkOff bool
 	// IME composition state, populated by drawIME and consumed by drawCursor.
@@ -348,6 +351,8 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 		// them only after observing pending via Swap.
 		t.ptyResizeRows.Store(int32(ds.rows))
 		t.ptyResizeCols.Store(int32(ds.cols))
+		t.ptyResizeXpx.Store(int32(ds.ptyXpx))
+		t.ptyResizeYpx.Store(int32(ds.ptyYpx))
 		t.ptyResizePending.Store(true)
 		// Non-blocking: a buffered kick already in flight is enough —
 		// resizeLoop re-reads the latch after every wake. Nil channel
@@ -442,8 +447,16 @@ func (t *Term) prepareResize(ds *drawState) {
 	// canvas change at all, so a check keyed on the canvas would leave the
 	// child believing the old width — which is precisely the geometry
 	// disagreement DECCOLM exists to prevent.
-	if ds.rows != t.resize.ptyLastRows || ds.cols != t.resize.ptyLastCols {
+	//
+	// The pixel size rides along. It is the same rounded device-pixel text
+	// area CSI 14 t reports, so the two ways a child can ask agree.
+	xpx := int(float32(ds.cols)*t.grid.CellPxW + 0.5)
+	ypx := int(float32(ds.rows)*t.grid.CellPxH + 0.5)
+	if ds.rows != t.resize.ptyLastRows || ds.cols != t.resize.ptyLastCols ||
+		xpx != t.resize.ptyLastXpx || ypx != t.resize.ptyLastYpx {
 		t.resize.ptyLastRows, t.resize.ptyLastCols = ds.rows, ds.cols
+		t.resize.ptyLastXpx, t.resize.ptyLastYpx = xpx, ypx
+		ds.ptyXpx, ds.ptyYpx = xpx, ypx
 		ds.doResize = true
 	}
 }

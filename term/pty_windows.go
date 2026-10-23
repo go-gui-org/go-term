@@ -263,7 +263,8 @@ func (p *ptyDev) Write(b []byte) (int, error) { return p.in.Write(b) }
 
 // Resize updates the pseudoconsole dimensions; the child sees the new size on
 // its next query (ConPTY raises the equivalent of SIGWINCH internally).
-func (p *ptyDev) Resize(rows, cols int) error {
+// ConPTY has no pixel fields, so the pixel size is dropped.
+func (p *ptyDev) Resize(rows, cols, _, _ int) error {
 	return windows.ResizePseudoConsole(p.hpc, coordSize(rows, cols))
 }
 
