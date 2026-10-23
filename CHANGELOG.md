@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-23
+
 ### Fixed
 
 - `term`: Kitty graphics now honor `o=z` (zlib-compressed payload). It was
