@@ -50,8 +50,15 @@ var actionDispatch = map[Action]actionFn{
 		return true
 	},
 	ActionJumpFailure: func(t *Term, w *gui.Window) bool {
-		t.jumpToFailure(w)
+		t.jumpToFailure(true, w)
 		return true
+	},
+	ActionJumpFailureNext: func(t *Term, w *gui.Window) bool {
+		t.jumpToFailure(false, w)
+		return true
+	},
+	ActionCopyFailure: func(t *Term, w *gui.Window) bool {
+		return t.copyFailure(w)
 	},
 	ActionSelectOutput: func(t *Term, w *gui.Window) bool {
 		t.selectCommandOutput(w)
@@ -145,8 +152,9 @@ var actionDispatch = map[Action]actionFn{
 // and runActionDirect consults it directly, so the keyboard path and the
 // palette cannot apply different operations to the same action.
 //
-// The four Term-level actions with copy-mode behavior (ActionCopy yanks,
-// ActionJumpFailure, ActionSelectOutput and ActionSelectAll keep working)
+// The five Term-level actions with copy-mode behavior (ActionCopy yanks;
+// ActionJumpFailure, ActionJumpFailureNext, ActionSelectOutput and
+// ActionSelectAll keep working)
 // are included with their copy-mode meaning; runActionDirect resolves
 // their state first.
 var copyModeOps = map[Action]actionFn{
@@ -255,7 +263,11 @@ var copyModeOps = map[Action]actionFn{
 		return true
 	},
 	ActionJumpFailure: func(t *Term, w *gui.Window) bool {
-		t.jumpToFailure(w)
+		t.jumpToFailure(true, w)
+		return true
+	},
+	ActionJumpFailureNext: func(t *Term, w *gui.Window) bool {
+		t.jumpToFailure(false, w)
 		return true
 	},
 	ActionSelectOutput: func(t *Term, w *gui.Window) bool {
@@ -271,7 +283,7 @@ var copyModeOps = map[Action]actionFn{
 // copyModeOrder is the dispatch order for copy-mode keys. It preserves the
 // case order of the old binds-switch in handleCopyModeKey, which decided
 // which action wins when a user rebinds two actions onto one chord —
-// first-listed wins. The four Term-level tail actions keep their places at
+// first-listed wins. The five Term-level tail actions keep their places at
 // the end.
 var copyModeOrder = []Action{
 	ActionCopyModeExit,
@@ -300,6 +312,7 @@ var copyModeOrder = []Action{
 	ActionCopyModePrevMark,
 	ActionCopyModeNextMark,
 	ActionJumpFailure,
+	ActionJumpFailureNext,
 	ActionSelectOutput,
 	ActionSelectAll,
 }
@@ -336,7 +349,7 @@ func (t *Term) runActionDirect(a Action, w *gui.Window) bool {
 	if t.search.active {
 		switch a {
 		case ActionFind, ActionPrevPrompt, ActionNextPrompt,
-			ActionJumpFailure, ActionSelectOutput, ActionSelectAll,
+			ActionJumpFailure, ActionJumpFailureNext, ActionSelectOutput, ActionSelectAll,
 			ActionToggleRegex, ActionNextMatch, ActionPrevMatch:
 			return actionDispatch[a](t, w)
 		default:

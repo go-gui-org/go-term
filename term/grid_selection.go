@@ -151,6 +151,23 @@ func (g *grid) SelectedText() string {
 	return b.String()
 }
 
+// rowsText returns content rows r0..r1 (inclusive) as text, with the same
+// rules a line selection copies by: trailing blanks trimmed, soft-wrapped rows
+// joined, clusters expanded. It reads through a temporary selection so those
+// rules have one implementation, and puts the user's selection back after.
+// Caller holds Mu.
+func (g *grid) rowsText(r0, r1 int) string {
+	active, anchor, head := g.SelActive, g.SelAnchor, g.SelHead
+	hasAnchor, mode := g.hasSelAnchor, g.SelMode
+	g.SelActive, g.SelMode = true, selChar
+	g.SelAnchor = contentPos{Row: r0, Col: 0}
+	g.SelHead = contentPos{Row: r1, Col: g.Cols}
+	text := g.SelectedText()
+	g.SelActive, g.SelAnchor, g.SelHead = active, anchor, head
+	g.hasSelAnchor, g.SelMode = hasAnchor, mode
+	return text
+}
+
 // ClearSelection drops any active selection. Caller holds Mu.
 func (g *grid) ClearSelection() {
 	g.SelActive = false

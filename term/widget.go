@@ -776,6 +776,9 @@ func (t *Term) writeBytes(out []byte) {
 // writeRaw records out and pushes it to the pty. Split out of writeBytes so
 // SendInput can reuse the write without re-firing the tap it came from.
 func (t *Term) writeRaw(out []byte) {
+	// Input to the child means the user has moved on from the failure they
+	// jumped to. Cleared here so keys, SendInput and wheel-as-arrows all agree.
+	t.failBox.active = false
 	// Opens a latency measurement (no-op unless GOTERM_LATENCY is set). Stamped
 	// before the write so the pty hand-off counts against the child's span, not
 	// against nothing.

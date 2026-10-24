@@ -161,13 +161,14 @@ func (t *Term) jumpToMark(backward bool, w *gui.Window) {
 	}
 }
 
-// jumpToFailure moves to the newest failed command above the reference row,
-// wrapping to the newest failure overall when there is none above, so
-// repeated presses walk back through failures instead of sticking at the
-// oldest. In copy mode it moves the copy cursor (matching copyMarkJump);
-// otherwise it scrolls the viewport. Suppressed while the alt screen is
-// active, and a silent no-op when nothing has failed.
-func (t *Term) jumpToFailure(w *gui.Window) {
+// jumpToFailure moves to the nearest failed command above the reference row
+// (older=true) or below it (older=false). Each direction wraps at its end —
+// past the oldest back to the newest, past the newest back to the oldest — so
+// repeated presses cycle instead of sticking. In copy mode it moves the copy
+// cursor (matching copyMarkJump); otherwise it scrolls the viewport.
+// Suppressed while the alt screen is active, and a silent no-op when nothing
+// has failed.
+func (t *Term) jumpToFailure(older bool, w *gui.Window) {
 	var found, copyMode bool
 	func() {
 		t.grid.Mu.Lock()
@@ -177,11 +178,30 @@ func (t *Term) jumpToFailure(w *gui.Window) {
 			return
 		}
 		copyMode = t.copy.active
-		span, ok := g.lastFailedBefore(t.markRefRow())
+		ref := t.markRefRow()
+		// While the box from the last press is still live, measure from it.
+		// The viewport top is not enough: a failure on the live screen cannot
+		// be scrolled to the top (scrollTopTo snaps to live), so markRefRow
+		// would stay at the bottom and every press would find the same
+		// newest failure. Copy mode keeps its cursor as the reference, since
+		// the user may have moved it on purpose.
+		if !copyMode && t.failBoxLive() {
+			ref = t.failBox.span.Prompt
+		}
+		var span commandSpan
+		var ok bool
+		if older {
+			span, ok = g.lastFailedBefore(ref)
+		} else {
+			span, ok = g.firstFailedAfter(ref)
+		}
 		if !ok || span.Prompt < 0 {
 			return
 		}
 		found = true
+		// Outline the whole command, not just its prompt row: the scroll
+		// lands on the prompt, but the user is here to read the output.
+		t.failBox = failBoxState{span: span, ver: g.marksVer, active: true}
 		if copyMode {
 			t.copy.cursor = contentPos{Row: span.Prompt}
 			return

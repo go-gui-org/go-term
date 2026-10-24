@@ -211,6 +211,7 @@ around each command. Until you install the hooks below, these do nothing:
 | ---------------------------------- | ---------------------------------------------- |
 | Jump to the previous / next prompt | <kbd>Cmd</kbd>+<kbd>Up</kbd> / <kbd>Down</kbd> |
 | Jump to the last failed command    | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>   |
+| Jump to the next failed command    | <kbd>Cmd</kbd>+<kbd>Ctrl</kbd>+<kbd>E</kbd>    |
 | Select a command's whole output    | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>   |
 | Failure ticks in the scrollbar     | —                                              |
 | `notify-after` (below)             | —                                              |
@@ -523,29 +524,31 @@ window.
 
 ### `term.*` actions
 
-| Action                  | Default                                |
-| ----------------------- | -------------------------------------- |
-| `term.copy`             | `Cmd+C` / `Ctrl+Shift+C`               |
-| `term.paste`            | `Cmd+V` / `Ctrl+Shift+V`               |
-| `term.find`             | `Cmd+F`                                |
-| `term.toggle-regex`     | `Ctrl+R` (in Find)                     |
-| `term.next-match`       | `Enter` (in Find)                      |
-| `term.prev-match`       | `Shift+Enter` (in Find)                |
-| `term.prev-prompt`      | `Cmd+Up`                               |
-| `term.next-prompt`      | `Cmd+Down`                             |
-| `term.jump-failure`     | `Cmd+Shift+E`                          |
-| `term.select-output`    | `Cmd+Shift+O`                          |
-| `term.select-all`       | `Cmd+A`                                |
-| `term.scroll-page-up`   | `PageUp`                               |
-| `term.scroll-page-down` | `PageDown`                             |
-| `term.scroll-top`       | `Shift+Home`                           |
-| `term.scroll-bottom`    | `Shift+End`                            |
-| `term.font-inc`         | `Cmd+=`                                |
-| `term.font-dec`         | `Cmd+-`                                |
-| `term.font-reset`       | `Cmd+0`                                |
-| `term.copy-mode`        | `Cmd+Shift+Space` / `Ctrl+Shift+Space` |
-| `term.hints`            | `Cmd+Shift+U` / `Ctrl+Shift+U`         |
-| `term.hints-copy`       | `Cmd+Shift+Y` / `Ctrl+Shift+Y`         |
+| Action                   | Default                                |
+| ------------------------ | -------------------------------------- |
+| `term.copy`              | `Cmd+C` / `Ctrl+Shift+C`               |
+| `term.paste`             | `Cmd+V` / `Ctrl+Shift+V`               |
+| `term.find`              | `Cmd+F`                                |
+| `term.toggle-regex`      | `Ctrl+R` (in Find)                     |
+| `term.next-match`        | `Enter` (in Find)                      |
+| `term.prev-match`        | `Shift+Enter` (in Find)                |
+| `term.prev-prompt`       | `Cmd+Up`                               |
+| `term.next-prompt`       | `Cmd+Down`                             |
+| `term.jump-failure`      | `Cmd+Shift+E`                          |
+| `term.jump-failure-next` | `Cmd+Ctrl+E`                           |
+| `term.copy-failure`      | `Enter` (while the failure box shows)  |
+| `term.select-output`     | `Cmd+Shift+O`                          |
+| `term.select-all`        | `Cmd+A`                                |
+| `term.scroll-page-up`    | `PageUp`                               |
+| `term.scroll-page-down`  | `PageDown`                             |
+| `term.scroll-top`        | `Shift+Home`                           |
+| `term.scroll-bottom`     | `Shift+End`                            |
+| `term.font-inc`          | `Cmd+=`                                |
+| `term.font-dec`          | `Cmd+-`                                |
+| `term.font-reset`        | `Cmd+0`                                |
+| `term.copy-mode`         | `Cmd+Shift+Space` / `Ctrl+Shift+Space` |
+| `term.hints`             | `Cmd+Shift+U` / `Ctrl+Shift+U`         |
+| `term.hints-copy`        | `Cmd+Shift+Y` / `Ctrl+Shift+Y`         |
 
 An override replaces the action's whole default chord list with the single chord
 you give, but inherits the action's Shift tolerance. Where Shift is a keyboard
@@ -592,9 +595,18 @@ them these keys do nothing:
 
 - `term.prev-prompt` / `term.next-prompt` scroll between prompts.
 - `term.jump-failure` scrolls to the most recent command that exited non-zero,
-  and each failure gets a red tick in the scrollbar track. Repeated presses walk
-  back through older failures and then wrap to the newest. A command whose shell
-  reported _no_ exit status never counts as a failure.
+  draws a red box around that command's prompt and output, and each failure gets
+  a red tick in the scrollbar track. The box stays while you scroll. It goes
+  away when you type or paste, or when the next command starts. Repeated presses
+  walk back through older failures and then wrap to the newest. A command whose
+  shell reported _no_ exit status never counts as a failure.
+- `term.jump-failure-next` goes the other way: to the next newer failure, and
+  after the newest it wraps to the oldest. Use it to step back down after
+  `term.jump-failure` went one failure too far.
+- `term.copy-failure` works only while the red failure box shows. It copies the
+  boxed prompt and output to the clipboard, removes the box and returns to the
+  prompt. The key is not sent to the shell. With no box, `Enter` goes to the
+  shell as usual.
 - `term.select-output` selects exactly the output region of the command under
   the cursor and enters copy mode with that selection live, so `y` or `Cmd+C`
   copies it. With the cursor on a fresh prompt it selects the previous command's
