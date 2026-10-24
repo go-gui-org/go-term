@@ -714,6 +714,12 @@ func (t *Term) onKeyDown(ctx gui.EventCtx) {
 	if t.handleClipboardKey(ctx.Event, ctx.Window) {
 		return
 	}
+	// After the search bar, so Enter there still means next match. Falls
+	// through to the child when no failure box is showing.
+	if t.binds(ActionCopyFailure, ctx.Event) && t.copyFailure(ctx.Window) {
+		ctx.Consume()
+		return
+	}
 	shift := ctx.Event.Modifiers.Has(gui.ModShift)
 	ctrl := ctx.Event.Modifiers.Has(gui.ModCtrl)
 	if t.scrollbackIntercept(ctx.Event, ctx.Window, shift) {
@@ -793,10 +799,11 @@ func (t *Term) handleSearchKey(e *gui.Event, w *gui.Window) bool {
 		return true
 	}
 
-	// The other two mark-driven actions: jump to the newest failed command,
-	// and select a command's output region.
-	if t.binds(ActionJumpFailure, e) {
-		t.jumpToFailure(w)
+	// The other mark-driven actions: jump between failed commands, and
+	// select a command's output region. older is computed once, as for the
+	// prompt jump above.
+	if older := t.binds(ActionJumpFailure, e); older || t.binds(ActionJumpFailureNext, e) {
+		t.jumpToFailure(older, w)
 		e.IsHandled = true
 		return true
 	}

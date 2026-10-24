@@ -135,6 +135,19 @@ type searchState struct {
 	cacheRegex bool
 }
 
+// failBoxState records the failed command the last jump landed on, so the
+// draw pass can outline its prompt and output. The span is in content rows,
+// which only stay meaningful while the mark stream is unchanged: every path
+// that moves content rows (scrollback eviction, ED 3, reflow) and every new
+// OSC 133 mark bumps marksVer. So the box is valid only while ver still
+// matches, and needs no row-shift bookkeeping of its own. A new command
+// starting is also exactly when the user has moved on from the old failure.
+type failBoxState struct {
+	span   commandSpan
+	ver    uint64
+	active bool
+}
+
 // copySelMode is copy mode's selection state: none yet, character-wise (v), or
 // line-wise (V).
 type copySelMode uint8
@@ -432,6 +445,10 @@ type Term struct {
 	cfg Cfg
 
 	search searchState
+
+	// failBox is the red outline jumpToFailure leaves around the command it
+	// landed on. Main-thread only, like search.
+	failBox failBoxState
 
 	copy copyState
 

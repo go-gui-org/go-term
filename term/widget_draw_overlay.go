@@ -363,6 +363,10 @@ func (t *Term) drawOverlays(ds *drawState) {
 		t.scrollbar.hovered = false
 	}
 
+	// Failed-command outline: over the text, under every bar and label, so it
+	// can never hide the controls the user is aiming at.
+	t.drawFailBox(ds)
+
 	// Copy mode: its cursor, then its status bar. The two bars no longer
 	// contend — copy's is at the top, search's at the bottom — so a search
 	// opened from copy mode shows both, which is what the state actually is.
@@ -395,6 +399,74 @@ func (t *Term) drawOverlays(ds *drawState) {
 	// duration rather than switching on and off, so an incidental BEL
 	// registers peripherally instead of strobing the whole pane.
 	t.drawBellFlash(ds)
+}
+
+// failBoxStroke is the outline width in logical pixels. Thick enough to read
+// as a frame around the text, thin enough not to cover a glyph's edge.
+const failBoxStroke = 2
+
+// failBoxLive reports whether the jump outline still names the rows it was set
+// on: shown, and no mark change since (see failBoxState). Caller holds Mu.
+func (t *Term) failBoxLive() bool {
+	return t.failBox.active && t.failBox.ver == t.grid.marksVer
+}
+
+// failBoxRows maps the jump outline onto viewport rows [top, bottom). It
+// returns the painted row range [sr0, sr1) and whether the top and bottom
+// edges are really on screen. A clipped edge must not be drawn: a line at the
+// viewport top would say the command starts there when it starts above.
+// ok is false when no outline is live or none of it is visible. Caller
+// holds Mu.
+func (t *Term) failBoxRows(top, bottom int) (sr0, sr1 int, drawTop, drawBottom, ok bool) {
+	fb := &t.failBox
+	g := t.grid
+	if !t.failBoxLive() {
+		return 0, 0, false, false, false
+	}
+	start := fb.span.start()
+	if start < 0 || fb.span.OutEnd < start {
+		return 0, 0, false, false, false
+	}
+	s := g.ContentRowToScreen(start)
+	e := g.ContentRowToScreen(fb.span.OutEnd) // inclusive
+	if e < top || s >= bottom {
+		return 0, 0, false, false, false
+	}
+	return max(s, top), min(e+1, bottom), s >= top, e < bottom, true
+}
+
+// drawFailBox outlines the failed command jumpToFailure landed on, from its
+// prompt through its last output row, across the full width of the text
+// area. Four filled edges rather than dc.Rect, because dc.Rect always draws
+// all four and a clipped edge must be left off (see failBoxRows).
+func (t *Term) drawFailBox(ds *drawState) {
+	g := ds.g
+	if g.AltActive {
+		return
+	}
+	sr0, sr1, drawTop, drawBottom, ok := t.failBoxRows(ds.renderTop, ds.renderRows)
+	if !ok {
+		return
+	}
+	// Same theme-derived red as the scrollbar failure ticks, at full alpha:
+	// the ticks are peripheral chrome, the box is the thing being pointed at.
+	c := withAlpha(g.ov.fail, 255)
+	lw := max(t.snapPx(failBoxStroke), 1)
+	x0, x1 := t.colX(0), t.colX(ds.cols)
+	y0, y1 := t.rowY(sr0, ds.renderYOff), t.rowY(sr1, ds.renderYOff)
+	if x1-x0 < 2*lw || y1 <= y0 {
+		return
+	}
+	// The edges sit inside the box so the outline never paints over a
+	// neighbouring command's rows.
+	ds.dc.FilledRect(x0, y0, lw, y1-y0, c)
+	ds.dc.FilledRect(x1-lw, y0, lw, y1-y0, c)
+	if drawTop {
+		ds.dc.FilledRect(x0, y0, x1-x0, lw, c)
+	}
+	if drawBottom {
+		ds.dc.FilledRect(x0, y1-lw, x1-x0, lw, c)
+	}
 }
 
 // drawBellFlash paints the visual-bell overlay at an alpha derived from how

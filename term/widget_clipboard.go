@@ -92,6 +92,8 @@ func (t *Term) pasteText(clean string) {
 		return
 	}
 	t.snapToLive()
+	// Paste bypasses writeRaw, so it clears the jump outline itself.
+	t.failBox.active = false
 	// Read BracketedPaste under the lock, then release before calling
 	// pw.Write — holding Mu across a blocking pty write can deadlock
 	// when the slave-side input buffer is full and the reader goroutine
@@ -151,6 +153,40 @@ func (t *Term) copySelection(w *gui.Window) bool {
 	// their explicit Cmd+C value stays put — and a no-op everywhere without
 	// PRIMARY (macOS, Windows, web).
 	w.SetPrimary(text)
+	return true
+}
+
+// copyFailure copies the command the failure box outlines — prompt through
+// last output row — to the clipboard, then clears the box and returns the view
+// to the live prompt. Returns false, doing nothing, when no box is showing, so
+// the caller lets the key through to the child: Enter at a prompt with no box
+// must still run the command line. A nil window copies nothing but still
+// counts as handled, so the key never leaks to the shell while a box is up.
+func (t *Term) copyFailure(w *gui.Window) bool {
+	var text string
+	ok := func() bool {
+		g := t.grid
+		g.Mu.Lock()
+		defer g.Mu.Unlock()
+		if !t.failBoxLive() || g.AltActive {
+			return false
+		}
+		fb := t.failBox
+		if start := fb.span.start(); start >= 0 && fb.span.OutEnd >= start {
+			text = g.rowsText(start, fb.span.OutEnd)
+		}
+		return true
+	}()
+	if !ok {
+		return false
+	}
+	if w != nil && text != "" {
+		w.SetClipboard(text)
+		w.SetPrimary(text) // same as copySelection: free where PRIMARY exists
+	}
+	t.failBox.active = false
+	t.snapToLive()
+	t.scheduleViewUpdate(w)
 	return true
 }
 

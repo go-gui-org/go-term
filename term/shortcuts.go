@@ -18,27 +18,29 @@ type Action string
 // Term-level rebindable actions. The "term." prefix keeps them distinct from
 // workspace command IDs when both are named in one config file.
 const (
-	ActionCopy           Action = "term.copy"
-	ActionPaste          Action = "term.paste"
-	ActionFind           Action = "term.find"
-	ActionToggleRegex    Action = "term.toggle-regex"
-	ActionNextMatch      Action = "term.next-match"
-	ActionPrevMatch      Action = "term.prev-match"
-	ActionPrevPrompt     Action = "term.prev-prompt"
-	ActionNextPrompt     Action = "term.next-prompt"
-	ActionJumpFailure    Action = "term.jump-failure"
-	ActionSelectOutput   Action = "term.select-output"
-	ActionSelectAll      Action = "term.select-all"
-	ActionScrollPageUp   Action = "term.scroll-page-up"
-	ActionScrollPageDown Action = "term.scroll-page-down"
-	ActionScrollTop      Action = "term.scroll-top"
-	ActionScrollBottom   Action = "term.scroll-bottom"
-	ActionFontInc        Action = "term.font-inc"
-	ActionFontDec        Action = "term.font-dec"
-	ActionFontReset      Action = "term.font-reset"
-	ActionCopyMode       Action = "term.copy-mode"
-	ActionHints          Action = "term.hints"
-	ActionHintsCopy      Action = "term.hints-copy"
+	ActionCopy            Action = "term.copy"
+	ActionPaste           Action = "term.paste"
+	ActionFind            Action = "term.find"
+	ActionToggleRegex     Action = "term.toggle-regex"
+	ActionNextMatch       Action = "term.next-match"
+	ActionPrevMatch       Action = "term.prev-match"
+	ActionPrevPrompt      Action = "term.prev-prompt"
+	ActionNextPrompt      Action = "term.next-prompt"
+	ActionJumpFailure     Action = "term.jump-failure"
+	ActionJumpFailureNext Action = "term.jump-failure-next"
+	ActionCopyFailure     Action = "term.copy-failure"
+	ActionSelectOutput    Action = "term.select-output"
+	ActionSelectAll       Action = "term.select-all"
+	ActionScrollPageUp    Action = "term.scroll-page-up"
+	ActionScrollPageDown  Action = "term.scroll-page-down"
+	ActionScrollTop       Action = "term.scroll-top"
+	ActionScrollBottom    Action = "term.scroll-bottom"
+	ActionFontInc         Action = "term.font-inc"
+	ActionFontDec         Action = "term.font-dec"
+	ActionFontReset       Action = "term.font-reset"
+	ActionCopyMode        Action = "term.copy-mode"
+	ActionHints           Action = "term.hints"
+	ActionHintsCopy       Action = "term.hints-copy"
 )
 
 // Copy-mode actions. These are only consulted while copy mode is active, so
@@ -175,7 +177,8 @@ func (b binding) matches(key gui.KeyCode, mods gui.Modifier) bool {
 var actionOrder = []Action{
 	ActionCopy, ActionPaste, ActionFind, ActionToggleRegex,
 	ActionNextMatch, ActionPrevMatch, ActionPrevPrompt, ActionNextPrompt,
-	ActionJumpFailure, ActionSelectOutput, ActionSelectAll,
+	ActionJumpFailure, ActionJumpFailureNext, ActionCopyFailure,
+	ActionSelectOutput, ActionSelectAll,
 	ActionScrollPageUp, ActionScrollPageDown, ActionScrollTop, ActionScrollBottom,
 	ActionFontInc, ActionFontDec, ActionFontReset,
 	ActionCopyMode, ActionHints, ActionHintsCopy,
@@ -200,27 +203,29 @@ var copyActionOrder = []Action{
 
 // actionLabels are the human-readable names shown in the help overlay.
 var actionLabels = map[Action]string{
-	ActionCopy:           "Copy",
-	ActionPaste:          "Paste",
-	ActionFind:           "Find",
-	ActionToggleRegex:    "Toggle regex (in Find)",
-	ActionNextMatch:      "Next match (in Find)",
-	ActionPrevMatch:      "Previous match (in Find)",
-	ActionPrevPrompt:     "Previous prompt mark",
-	ActionNextPrompt:     "Next prompt mark",
-	ActionJumpFailure:    "Jump to last failed command",
-	ActionSelectOutput:   "Select command output",
-	ActionSelectAll:      "Select all",
-	ActionScrollPageUp:   "Scroll page up",
-	ActionScrollPageDown: "Scroll page down",
-	ActionScrollTop:      "Scroll to top",
-	ActionScrollBottom:   "Scroll to bottom",
-	ActionFontInc:        "Increase font size",
-	ActionFontDec:        "Decrease font size",
-	ActionFontReset:      "Reset font size",
-	ActionCopyMode:       "Copy mode",
-	ActionHints:          "Open link (keyboard hints)",
-	ActionHintsCopy:      "Copy link (keyboard hints)",
+	ActionCopy:            "Copy",
+	ActionPaste:           "Paste",
+	ActionFind:            "Find",
+	ActionToggleRegex:     "Toggle regex (in Find)",
+	ActionNextMatch:       "Next match (in Find)",
+	ActionPrevMatch:       "Previous match (in Find)",
+	ActionPrevPrompt:      "Previous prompt mark",
+	ActionNextPrompt:      "Next prompt mark",
+	ActionJumpFailure:     "Jump to last failed command",
+	ActionJumpFailureNext: "Jump to next failed command",
+	ActionCopyFailure:     "Copy failed command (after a jump)",
+	ActionSelectOutput:    "Select command output",
+	ActionSelectAll:       "Select all",
+	ActionScrollPageUp:    "Scroll page up",
+	ActionScrollPageDown:  "Scroll page down",
+	ActionScrollTop:       "Scroll to top",
+	ActionScrollBottom:    "Scroll to bottom",
+	ActionFontInc:         "Increase font size",
+	ActionFontDec:         "Decrease font size",
+	ActionFontReset:       "Reset font size",
+	ActionCopyMode:        "Copy mode",
+	ActionHints:           "Open link (keyboard hints)",
+	ActionHintsCopy:       "Copy link (keyboard hints)",
 
 	// Copy-mode labels are unused by the flat help overlay (copyActionOrder is
 	// not walked by shortcutsFrom) but kept complete so an embedder rendering
@@ -288,7 +293,14 @@ func defaultBindings() map[Action]binding {
 		ActionNextPrompt: b(true, k(gui.KeyDown, gui.ModSuper)),
 
 		// shiftOptional is moot for a chord that already names Shift.
-		ActionJumpFailure:  b(false, k(gui.KeyE, gui.ModSuper|gui.ModShift)),
+		ActionJumpFailure: b(false, k(gui.KeyE, gui.ModSuper|gui.ModShift)),
+		// Super+Ctrl, not Super+Alt: remapMod turns Super+Alt into Alt+Shift
+		// on Windows, which is a Meta chord the shell expects to receive.
+		// Super+Ctrl becomes Ctrl+Alt+Shift there, which nothing else sends.
+		ActionJumpFailureNext: b(false, k(gui.KeyE, gui.ModSuper|gui.ModCtrl)),
+		// Bare Enter, like next-match in Find: only consulted while the
+		// failure box is up, and copyFailure lets it through otherwise.
+		ActionCopyFailure:  b(false, k(gui.KeyEnter, 0), k(gui.KeyKPEnter, 0)),
 		ActionSelectOutput: b(false, k(gui.KeyO, gui.ModSuper|gui.ModShift)),
 
 		// Select-all tolerates Shift like Copy and Find do: it names no

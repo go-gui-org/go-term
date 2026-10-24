@@ -311,6 +311,33 @@ func (g *grid) lastFailedBefore(row int) (commandSpan, bool) {
 	return newest, any
 }
 
+// firstFailedAfter is lastFailedBefore's mirror: the oldest failed command
+// starting strictly after row, wrapping to the oldest failure overall when
+// there is none below — so repeated presses of the next-failure chord walk
+// forward through failures and then start again. Caller holds Mu.
+func (g *grid) firstFailedAfter(row int) (commandSpan, bool) {
+	var found, oldest commandSpan
+	ok, any := false, false
+	// Finished commands only, as in lastFailedBefore.
+	g.walkCommands(false, func(s commandSpan) bool {
+		if !s.failed() || s.Prompt < 0 {
+			return true
+		}
+		if !any {
+			oldest, any = s, true
+		}
+		if s.Prompt > row {
+			found, ok = s, true
+			return false // spans are ordered: the first one past row wins
+		}
+		return true
+	})
+	if ok {
+		return found, true
+	}
+	return oldest, any
+}
+
 // failureRows returns the prompt rows of failed commands, oldest first.
 // The result is cached against marksVer and the backing array is reused, so
 // the draw path costs a version comparison and allocates nothing on a

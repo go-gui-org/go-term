@@ -327,3 +327,34 @@ func TestOSCExitStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestFirstFailedAfter_WrapsToOldest(t *testing.T) {
+	g := markStream(40,
+		mark{Row: 0, Kind: markPromptStart},
+		end(3, 1), // failure A
+		mark{Row: 4, Kind: markPromptStart},
+		end(7, 0), // success
+		mark{Row: 8, Kind: markPromptStart},
+		end(11, 2), // failure B
+	)
+	if s, ok := g.firstFailedAfter(0); !ok || s.Prompt != 8 {
+		t.Errorf("below failure A: got %+v, %v; want prompt 8", s, ok)
+	}
+	if s, ok := g.firstFailedAfter(-1); !ok || s.Prompt != 0 {
+		t.Errorf("from top: got %+v, %v; want prompt 0", s, ok)
+	}
+	// Nothing failed below failure B, so it wraps to the oldest failure.
+	if s, ok := g.firstFailedAfter(8); !ok || s.Prompt != 0 {
+		t.Errorf("wrap: got %+v, %v; want prompt 0", s, ok)
+	}
+}
+
+func TestFirstFailedAfter_NoFailures(t *testing.T) {
+	g := markStream(20,
+		mark{Row: 0, Kind: markPromptStart},
+		end(3, 0),
+	)
+	if _, ok := g.firstFailedAfter(-1); ok {
+		t.Error("found a failure where none exists")
+	}
+}

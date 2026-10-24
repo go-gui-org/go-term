@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `term`: jump to the last failed command (`term.jump-failure`) now draws a red
+  box around the prompt and output of the command it jumps to. The box stays
+  while you scroll. Typing, pasting or the start of a new command removes it.
+
+- `term`: new action `term.jump-failure-next` (`Cmd+Ctrl+E`, `Ctrl+Alt+Shift+E`
+  on Windows) jumps to the next newer failed command. After the newest failure
+  it wraps to the oldest. It moves the same red box.
+
+- `term`: while the failure box shows, `Enter` (`term.copy-failure`) copies the
+  boxed prompt and output to the clipboard and returns to the prompt. It is not
+  sent to the shell. With no box, `Enter` goes to the shell as before.
+
+### Fixed
+
+- `term`: pressing jump to the last failed command again now goes to the
+  previous failure when the failures are on the live screen. Before, each press
+  found the newest failure again, because a row on the live screen cannot be
+  scrolled to the top of the view.
+
 ## [0.17.1] - 2026-10-23
 
 ### Fixed
