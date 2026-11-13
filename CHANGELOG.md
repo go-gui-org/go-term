@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-13
+
 ### Added
 
 - `term`: jump to the last failed command (`term.jump-failure`) now draws a red
@@ -26,6 +28,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   previous failure when the failures are on the live screen. Before, each press
   found the newest failure again, because a row on the live screen cannot be
   scrolled to the top of the view.
+
+### Changed
+
+- Bumped go-gui v0.92.0 → v0.96.0 and go-glyph v1.26.4 → v1.26.5 (#290, #291,
+  #292, #293).
 
 ## [0.17.1] - 2026-10-23
 
