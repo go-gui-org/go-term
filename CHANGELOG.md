@@ -11,6 +11,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - `term`: ignore DEL (0x7F) in the ground state instead of routing it through
   the grapheme assembler, where it split clusters (e.g. dropping a combining
   mark that followed it). Cursor and cells are unchanged by DEL, as in xterm.
+- `term`: narrow width-2 glyphs to one cell on a 1-column pane instead of leaving a continuation-less Width-2 head.
 
 ## [0.18.0] - 2026-11-13
 

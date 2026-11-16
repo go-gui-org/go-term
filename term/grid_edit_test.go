@@ -529,6 +529,40 @@ func TestGrid_Put_WideCharOneColumn_CursorAtWrapPending(t *testing.T) {
 	}
 }
 
+// Regression: on a 1-column grid a width-2 glyph has no room for its
+// continuation on either putCell wrap path, so it must be narrowed to
+// one cell (as the no-autowrap path does) instead of leaving a
+// continuation-less Width-2 head.
+func TestPutCell_NarrowsWideOnOneColumn(t *testing.T) {
+	g := newGrid(4, 1) // 4 rows: pad row + 2 head rows + margin (no scroll)
+	// Path A: fresh cursor takes the early-wrap branch.
+	g.Put('你')
+	if g.CursorR != 1 || g.CursorC != 1 {
+		t.Fatalf("after 1st Put: r=%d c=%d, want r=1 c=1", g.CursorR, g.CursorC)
+	}
+	if !g.RowWrapped[0] {
+		t.Errorf("row 0 wrapped flag = false, want true (early-wrap kept)")
+	}
+	if c := g.At(1, 0); c.Ch != '你' || c.Width != 1 {
+		t.Errorf("head at (1,0): ch=%U width=%d, want 你 width 1", c.Ch, c.Width)
+	}
+	// Path B: wrap-pending cursor takes the justWrapped branch.
+	g.Put('你')
+	if g.CursorR != 2 || g.CursorC != 1 {
+		t.Fatalf("after 2nd Put: r=%d c=%d, want r=2 c=1", g.CursorR, g.CursorC)
+	}
+	if c := g.At(2, 0); c.Ch != '你' || c.Width != 1 {
+		t.Errorf("head at (2,0): ch=%U width=%d, want 你 width 1", c.Ch, c.Width)
+	}
+	// The invariant: no Width==2 head anywhere (a 1-col row has no
+	// room for a continuation). Covers both paths at once.
+	for r := 0; r < 3; r++ {
+		if c := g.At(r, 0); c.Width == 2 {
+			t.Errorf("row %d: Width-2 head with no continuation slot", r)
+		}
+	}
+}
+
 func TestGrid_Put_OverwriteWideHeadClearsContinuation(t *testing.T) {
 	g := newGrid(1, 5)
 	g.Put('好')
