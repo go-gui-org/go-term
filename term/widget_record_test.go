@@ -202,6 +202,31 @@ func TestStartRecordingCreatesDir(t *testing.T) {
 	}
 }
 
+// Recordings can hold keystrokes and tokens, so StartRecording must leave
+// an owner-only file in an owner-only directory.
+func TestStartRecordingOwnerOnlyModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits do not apply on Windows")
+	}
+	dir := filepath.Join(t.TempDir(), "nested")
+	path := filepath.Join(dir, "s.gtr")
+	tm := &Term{grid: newGrid(4, 8)}
+	if err := tm.StartRecording(path); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tm.StopRecording() }()
+	if fi, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	} else if got := fi.Mode().Perm(); got != 0o600 {
+		t.Errorf("recording mode = %o, want 600", got)
+	}
+	if fi, err := os.Stat(dir); err != nil {
+		t.Fatal(err)
+	} else if got := fi.Mode().Perm(); got != 0o700 {
+		t.Errorf("recording dir mode = %o, want 700", got)
+	}
+}
+
 // Recording must not touch the widget's behavior: an unwritable destination
 // fails the call, and the terminal keeps working.
 func TestStartRecordingBadPathFails(t *testing.T) {

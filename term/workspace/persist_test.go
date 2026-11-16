@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -233,6 +234,32 @@ func TestSave_AtomicWrite(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name() != "workspace.json" {
 		t.Errorf("dir entries = %v, want only workspace.json", entries)
+	}
+}
+
+// Saved workspace state can reference session files, so Save must leave
+// an owner-only file in an owner-only directory.
+func TestSave_OwnerOnlyModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits do not apply on Windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub", "workspace.json")
+
+	tb := &tab{id: "tab-0", root: leaf("tab-0-pane-0"), terms: map[string]*term.Term{}, focused: "tab-0-pane-0"}
+	ws := buildTestWorkspace([]*tab{tb}, 0)
+	if err := ws.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if fi, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	} else if got := fi.Mode().Perm(); got != 0o600 {
+		t.Errorf("state mode = %o, want 600", got)
+	}
+	if fi, err := os.Stat(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	} else if got := fi.Mode().Perm(); got != 0o700 {
+		t.Errorf("state dir mode = %o, want 700", got)
 	}
 }
 

@@ -148,9 +148,14 @@ func openCapture(seq uint64) *recfmt.Recorder {
 		return nil
 	}
 	path := prefix + "-" + strconv.FormatUint(seq, 10) + ".bin"
-	f, err := os.Create(path)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		log.Printf("term: GOTERM_CAPTURE: %v", err)
+		return nil
+	}
+	if err := f.Chmod(0o600); err != nil {
+		log.Printf("term: GOTERM_CAPTURE: %v", err)
+		_ = f.Close()
 		return nil
 	}
 	log.Printf("term: capturing pty output to %s", path)

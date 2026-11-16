@@ -155,10 +155,10 @@ func (ws *Workspace) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("workspace.Save: marshal: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("workspace.Save: mkdir: %w", err)
 	}
-	if err := atomicfile.WriteFile(path, data, 0o644); err != nil {
+	if err := atomicfile.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("workspace.Save: write: %w", err)
 	}
 	return nil

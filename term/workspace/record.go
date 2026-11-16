@@ -63,7 +63,7 @@ func (ws *Workspace) recordingPath() (string, error) {
 		}
 		dir = filepath.Join(base, recordingsDirName)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	name := time.Now().Format("2006-01-02T15-04-05") + ".gtr"

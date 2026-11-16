@@ -12,6 +12,9 @@ adheres to [Semantic Versioning](https://semver.org/).
   the grapheme assembler, where it split clusters (e.g. dropping a combining
   mark that followed it). Cursor and cells are unchanged by DEL, as in xterm.
 - `term`: narrow width-2 glyphs to one cell on a 1-column pane instead of leaving a continuation-less Width-2 head.
+- Recordings, raw captures, and saved workspace state are now created
+  owner-only (0600 files, 0700 directories). Files written by older
+  versions keep their existing modes until re-recorded/re-saved.
 
 ## [0.18.0] - 2026-11-13
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -251,5 +252,45 @@ func TestRecorderNilSafe(t *testing.T) {
 	r.Resize(1, 1)
 	if r.Active() || r.Elapsed() != 0 || r.Close() != nil {
 		t.Error("nil recorder should be inert")
+	}
+}
+
+// Recordings can hold passwords and tokens, so NewRecorder must create
+// owner-only files — and tighten a pre-existing file left behind by an
+// older, world-readable version.
+func TestRecorderOwnerOnlyMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits do not apply on Windows")
+	}
+	path := filepath.Join(t.TempDir(), "s.gtr")
+	r, err := NewRecorder(path, 24, 80, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	} else if got := fi.Mode().Perm(); got != 0o600 {
+		t.Errorf("mode = %o, want 600", got)
+	}
+
+	// A pre-existing 0644 file must be tightened, not left as is.
+	old := filepath.Join(t.TempDir(), "old.gtr")
+	if err := os.WriteFile(old, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r2, err := NewRecorder(old, 24, 80, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r2.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(old); err != nil {
+		t.Fatal(err)
+	} else if got := fi.Mode().Perm(); got != 0o600 {
+		t.Errorf("pre-existing mode = %o, want 600", got)
 	}
 }
