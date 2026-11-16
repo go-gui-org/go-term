@@ -230,7 +230,14 @@ jobs:
           done
 
   bench:
-    runs-on: ubuntu-latest
+    # Pinned to 24.04: on 2026-11-16 both attempts of the scheduled bench died on
+    # the ubuntu-26.04 image (runner shutdown, then a stall with no log), while the
+    # same commit passes the same command on macOS and in a Linux container. Move
+    # back to ubuntu-latest once a 26.04 run is seen to pass.
+    runs-on: ubuntu-24.04
+    # A normal run takes about 4 minutes. Without a limit a stall holds the runner
+    # for GitHub's 6-hour default.
+    timeout-minutes: 20
     if: github.event_name == 'schedule'
     steps:
       - name: Checkout go-term
