@@ -205,6 +205,9 @@ func TestStartRecordingCreatesDir(t *testing.T) {
 // Recordings can hold keystrokes and tokens, so StartRecording must leave
 // an owner-only file in an owner-only directory.
 func TestStartRecordingOwnerOnlyModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits do not apply on Windows")
+	}
 	dir := filepath.Join(t.TempDir(), "nested")
 	path := filepath.Join(dir, "s.gtr")
 	tm := &Term{grid: newGrid(4, 8)}

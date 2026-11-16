@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -239,6 +240,9 @@ func TestSave_AtomicWrite(t *testing.T) {
 // Saved workspace state can reference session files, so Save must leave
 // an owner-only file in an owner-only directory.
 func TestSave_OwnerOnlyModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits do not apply on Windows")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "workspace.json")
 

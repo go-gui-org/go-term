@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -258,6 +259,9 @@ func TestRecorderNilSafe(t *testing.T) {
 // owner-only files — and tighten a pre-existing file left behind by an
 // older, world-readable version.
 func TestRecorderOwnerOnlyMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits do not apply on Windows")
+	}
 	path := filepath.Join(t.TempDir(), "s.gtr")
 	r, err := NewRecorder(path, 24, 80, nil, false)
 	if err != nil {
