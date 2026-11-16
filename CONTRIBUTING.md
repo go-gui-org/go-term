@@ -34,9 +34,11 @@ make prepush
 ```
 
 `make prepush` approximates the CI matrix from one host: race-enabled tests,
-`go vet`, lint at the version CI pins, the prod falcon build, the Windows
-cross-compile (`make cross-windows`), and the benchmark regression gate
-(`make bench-regress`). It aborts on the first failing target.
+`go vet`, lint at the version CI pins, the prod falcon build, and the Windows
+cross-compile (`make cross-windows`). It aborts on the first failing target.
+`make bench-regress` is intentionally not part of `prepush` — it is the long
+pole (`-count=10` over `./term`) and runs in CI on every PR and push; run it
+explicitly before merging perf-sensitive changes (see below).
 
 `bench-regress` is the long pole — `-count=10` over `./term`. Unlike go-gui,
 whose benchmark gate needs a baseline cached from `main`, this repo's baseline
@@ -157,8 +159,8 @@ term/gotermrec/          CLI over a recording: info/cat/play/fixture/export.
 
 ## Pull request checklist
 
-1. `make prepush` passes (build, vet, race tests, lint, Windows cross-compile,
-   benchmark gate)
+1. `make prepush` passes (build, vet, race tests, lint, Windows cross-compile)
+   plus `make bench-regress` when the change touches render/parser hot paths
 2. New tests for new pure-logic code
 3. Manual smoke test of `examples/falcon` for any change touching `widget.go`,
    `pty.go`, or render/input paths

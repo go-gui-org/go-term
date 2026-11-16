@@ -12,21 +12,21 @@ This project verifies terminal-emulator behavior in three layers:
 Run the full automated suite:
 
 ```bash
-go test ./...
-go test -race ./...
-go vet ./...
+GOWORK=off go test ./...
+GOWORK=off go test -race ./...
+GOWORK=off go vet ./...
 ```
 
 Run only the replay-style emulator checks:
 
 ```bash
-go test ./term -run EmulatorReplay
+GOWORK=off go test ./term -run EmulatorReplay
 ```
 
 Run only the conformance smoke tests (vttest-parity checks):
 
 ```bash
-go test ./term -run TestConformance
+GOWORK=off go test ./term -run TestConformance
 ```
 
 ## Capability Matrix
