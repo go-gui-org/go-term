@@ -1401,3 +1401,23 @@ func TestOnDraw_GapCellBreaksRun(t *testing.T) {
 	}
 	t.Errorf("no 'i' text entry; got %v", dc.Texts())
 }
+
+func TestCellRunKeyHover(t *testing.T) {
+	g := newGrid(4, 8)
+	base := gui.TextStyle{}
+	c := cell{Ch: 'x', Width: 1, LinkID: 7}
+
+	plain := cellRunKey(c, base, g, 0, false)
+
+	// hoverLinkID matches the cell's LinkID: the blue hover recolor applies.
+	if hovered := cellRunKey(c, base, g, 7, false); hovered.color == plain.color {
+		t.Error("hoverLinkID == LinkID: expected hover recolor, color unchanged")
+	}
+
+	// hoverLinkID zero or for another link: no recolor, same key as plain.
+	for _, id := range []uint16{0, 8} {
+		if k := cellRunKey(c, base, g, id, false); k.color != plain.color {
+			t.Errorf("hoverLinkID %d: expected no recolor, got %v", id, k.color)
+		}
+	}
+}

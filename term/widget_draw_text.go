@@ -92,10 +92,12 @@ type runKey struct {
 
 // cellRunKey computes the runKey for cell, applying attribute and
 // hyperlink-hover color transforms. Must be called under grid.Mu.
-// Link underline is always applied; hover recolor is gated on cmdHeld.
+// Link underline is always applied; hover recolor applies when hoverLinkID
+// (the LinkID under the pointer, resolved once per frame by the caller)
+// matches this cell's LinkID. 0 means no highlight.
 // urlHover is true when this cell is inside the Cmd-hovered implicit-URL span
 // (issue 72); it gets the same underline + blue recolor as an OSC 8 link.
-func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int, cmdHeld, urlHover bool) runKey {
+func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverLinkID uint16, urlHover bool) runKey {
 	rawFG := g.fgOf(cell)
 	color := rawFG
 	if cell.Attrs&attrDim != 0 {
@@ -128,11 +130,9 @@ func cellRunKey(cell cell, base gui.TextStyle, g *grid, hoverR, hoverC int, cmdH
 		if ulStyle == ulNone {
 			ulStyle = ulSingle
 		}
-		if cmdHeld && hoverR >= 0 && hoverC >= 0 {
-			if g.ViewCellAt(hoverR, hoverC).LinkID == cell.LinkID {
-				col := color
-				color = gui.RGB(col.R/2, col.G/2, 255)
-			}
+		if hoverLinkID != 0 && hoverLinkID == cell.LinkID {
+			col := color
+			color = gui.RGB(col.R/2, col.G/2, 255)
 		}
 	} else if urlHover {
 		// Implicit URL under the Cmd-hovered pointer: reveal it exactly like an
@@ -275,6 +275,12 @@ func (t *Term) drawFgPass(ds *drawState) {
 		hC = logicalCell(v2l, hC, cols)
 	}
 	cmdHeld := t.mouse.cmdHeld.Load()
+	// The hovered cell is identical for every cell in the frame, so
+	// resolve its LinkID once instead of per painted cell.
+	var hoverLinkID uint16
+	if cmdHeld && hR >= 0 && hC >= 0 {
+		hoverLinkID = g.ViewCellAt(hR, hC).LinkID
+	}
 
 	// sawBlink tracks whether any painted cell carries SGR 5/6, so the blink
 	// ticker knows whether periodic repaints are needed at all. Recomputed
@@ -295,8 +301,9 @@ func (t *Term) drawFgPass(ds *drawState) {
 				continue
 			}
 			// The partial top row sits above viewport row 0; hover coords never
-			// land there (posToCell clamps to 0..Rows-1), so no URL highlight.
-			k := cellRunKey(cell, style, g, hR, hC, cmdHeld, false)
+			// land there (posToCell clamps to 0..Rows-1), so no URL highlight,
+			// so hoverLinkID is 0 here.
+			k := cellRunKey(cell, style, g, 0, false)
 			t.emitCell(dc, t.colX(c), partialY,
 				t.spanW(c, c+int(cell.Width)), cell, k, style)
 		}
@@ -330,7 +337,7 @@ func (t *Term) drawFgPass(ds *drawState) {
 					urlHover = true
 				}
 			}
-			k := cellRunKey(cell, style, g, hR, hC, cmdHeld, urlHover)
+			k := cellRunKey(cell, style, g, hoverLinkID, urlHover)
 			isPlainSpace := cell.Ch == ' ' && cell.Attrs&attrVisual == 0 && cell.LinkID == 0
 			if cell.Width == 2 {
 				t.flushRun(dc, r, style, yOff, &fr)

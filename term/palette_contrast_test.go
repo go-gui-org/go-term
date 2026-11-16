@@ -258,13 +258,13 @@ func BenchmarkCellRunKey(b *testing.B) {
 	b.Run("clamp_off", func(b *testing.B) {
 		g.MinContrast = 0
 		for b.Loop() {
-			_ = cellRunKey(c, style, g, -1, -1, false, false)
+			_ = cellRunKey(c, style, g, 0, false)
 		}
 	})
 	b.Run("clamp_on", func(b *testing.B) {
 		g.MinContrast = 4.5
 		for b.Loop() {
-			_ = cellRunKey(c, style, g, -1, -1, false, false)
+			_ = cellRunKey(c, style, g, 0, false)
 		}
 	})
 }
@@ -282,19 +282,19 @@ func TestCellRunKey_AppliesMinimumContrast(t *testing.T) {
 	style := gui.TextStyle{}
 
 	orange := cell{Ch: 'x', Width: 1, FG: rgbColor(255, 161, 1)}
-	if r := contrastRatio(cellRunKey(orange, style, g, -1, -1, false, false).color, bg); r >= 4.5 {
+	if r := contrastRatio(cellRunKey(orange, style, g, 0, false).color, bg); r >= 4.5 {
 		t.Fatalf("premise broken: orange already at %.2f with the clamp off", r)
 	}
 
 	g.MinContrast = 4.5
-	if r := contrastRatio(cellRunKey(orange, style, g, -1, -1, false, false).color, bg); r < 4.5 {
+	if r := contrastRatio(cellRunKey(orange, style, g, 0, false).color, bg); r < 4.5 {
 		t.Errorf("clamp did not reach the foreground pass: ratio %.2f", r)
 	}
 
 	// Dim runs before the clamp, so a dimmed cell must still clear the floor.
 	dim := orange
 	dim.Attrs |= attrDim
-	if r := contrastRatio(cellRunKey(dim, style, g, -1, -1, false, false).color, bg); r < 4.5 {
+	if r := contrastRatio(cellRunKey(dim, style, g, 0, false).color, bg); r < 4.5 {
 		t.Errorf("dimmed cell below the floor: ratio %.2f", r)
 	}
 
@@ -304,7 +304,7 @@ func TestCellRunKey_AppliesMinimumContrast(t *testing.T) {
 	ul := orange
 	ul.ULColor = rgbColor(255, 161, 1)
 	ul.ULStyle = ulSingle
-	if got := cellRunKey(ul, style, g, -1, -1, false, false).ulColor; got != gui.RGB(255, 161, 1) {
+	if got := cellRunKey(ul, style, g, 0, false).ulColor; got != gui.RGB(255, 161, 1) {
 		t.Errorf("underline color %v was clamped, want it left alone", got)
 	}
 }
