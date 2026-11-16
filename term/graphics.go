@@ -402,11 +402,14 @@ func encodePNGFile(img *image.NRGBA, dir string) string {
 	tmpPath := tmp.Name()
 	h := sha1.New()
 	if err := png.Encode(io.MultiWriter(tmp, h), img); err != nil {
+		// Best-effort close; the encode already failed, nothing to report.
 		_ = tmp.Close()
+		// Best-effort removal of the unusable temp file.
 		_ = os.Remove(tmpPath)
 		return ""
 	}
 	if err := tmp.Close(); err != nil {
+		// Best-effort removal; the file may hold a truncated PNG.
 		_ = os.Remove(tmpPath)
 		return ""
 	}
@@ -416,6 +419,7 @@ func encodePNGFile(img *image.NRGBA, dir string) string {
 		return tmpPath
 	}
 	if _, err := os.Stat(finalPath); err == nil {
+		// Best-effort removal; the content-addressed file already exists.
 		_ = os.Remove(tmpPath)
 		return finalPath
 	}

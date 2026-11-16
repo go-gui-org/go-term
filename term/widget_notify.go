@@ -79,9 +79,11 @@ func sendDesktopNotify(title, body string) {
 	clean := func(s string) string { return strings.ReplaceAll(s, "\x00", "") }
 	switch runtime.GOOS {
 	case "darwin":
+		// Notification failure is not actionable: the terminal keeps running.
 		exec.Command("osascript", osascriptNotifyArgs(clean(title), clean(body))...).
 			Run() //nolint:errcheck
 	case "linux":
+		// Notification failure is not actionable: the terminal keeps running.
 		exec.Command("notify-send", notifySendArgs(clean(title), clean(body))...).
 			Run() //nolint:errcheck
 	case "windows":
@@ -95,6 +97,7 @@ func sendDesktopNotify(title, body string) {
 		cmd.Env = append(os.Environ(),
 			"GOTERM_NOTIFY_TITLE="+clean(title),
 			"GOTERM_NOTIFY_BODY="+clean(body))
+		// Notification failure is not actionable: the terminal keeps running.
 		cmd.Run() //nolint:errcheck
 	}
 }

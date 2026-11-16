@@ -15,6 +15,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Recordings, raw captures, and saved workspace state are now created
   owner-only (0600 files, 0700 directories). Files written by older
   versions keep their existing modes until re-recorded/re-saved.
+- `term`: malformed Kitty-graphics diagnostics no longer print to
+  stderr unconditionally; set GOTERM_DEBUG=1 to see them.
 
 ## [0.18.0] - 2026-11-13
 
