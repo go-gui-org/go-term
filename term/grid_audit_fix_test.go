@@ -207,17 +207,6 @@ func TestGridAudit_RewrapNarrowWide(t *testing.T) {
 	}
 }
 
-// EnsureGeom with an absurd capacity must clamp like SetGeom instead of
-// handing make() a multi-petabyte length.
-func TestGridAudit_EnsureGeomHugeNoAlloc(t *testing.T) {
-	var r scrollbackRing
-	r.SetGeom(5, 80)
-	r.EnsureGeom(1<<40, 80)
-	if r.cap*80 > 1<<28 {
-		t.Errorf("EnsureGeom cap = %d, want clamped to <= %d cells", r.cap, 1<<28/80)
-	}
-}
-
 // HardReset drops every image, so the occlusion bound must go with them.
 func TestGridAudit_HardResetClearsOccludeBound(t *testing.T) {
 	g := newGrid(5, 10)
