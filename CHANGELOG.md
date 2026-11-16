@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `term`: ignore DEL (0x7F) in the ground state instead of routing it through
+  the grapheme assembler, where it split clusters (e.g. dropping a combining
+  mark that followed it). Cursor and cells are unchanged by DEL, as in xterm.
+
 ## [0.18.0] - 2026-11-13
 
 ### Added
