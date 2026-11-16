@@ -49,6 +49,41 @@ func TestParser_C0Bytes(t *testing.T) {
 	}
 }
 
+func TestParser_DELIgnored(t *testing.T) {
+	g, p := newParserGrid(2, 5)
+	feed(t, g, p, []byte{'a', 'b'})
+	feed(t, g, p, []byte{0x7F, 0x7F, 0x7F})
+	if g.CursorC != 2 {
+		t.Errorf("DEL moved cursor: %d", g.CursorC)
+	}
+	feed(t, g, p, []byte{'c'})
+	// 'c' must land exactly where 'b' ended: no gap cell from the DELs.
+	if got := g.At(0, 2).Ch; got != 'c' {
+		t.Errorf("cell after DEL = %q, want 'c'", got)
+	}
+	// DEL is not a grapheme boundary: a combining mark after a DEL must
+	// still fuse with its base. (Without the ground-state guard DEL went
+	// through PutRune, split the cluster, and the lone mark was dropped —
+	// uniseg widths DEL at 0 — so this assertion fails on the old path
+	// while the cursor/cell assertions above pass either way.)
+	g2, p2 := newParserGrid(1, 5)
+	feed(t, g2, p2, []byte{'e', 0x7F, 0xCC, 0x81}) // e + DEL + combining acute
+	if g2.CursorC != 1 {
+		t.Errorf("e+DEL+acute advanced %d cols, want 1", g2.CursorC)
+	}
+	c2 := g2.At(0, 0)
+	if c2.Ch != 'e' {
+		t.Errorf("base rune = %q, want 'e'", c2.Ch)
+	}
+	if c2.clusterID == 0 || g2.clusters[c2.clusterID] != "é" {
+		got := "<no cluster>"
+		if c2.clusterID != 0 && int(c2.clusterID) < len(g2.clusters) {
+			got = g2.clusters[c2.clusterID]
+		}
+		t.Errorf("cluster = %q, want e+acute", got)
+	}
+}
+
 func TestParser_UTF8SplitAcrossFeeds(t *testing.T) {
 	cases := []struct {
 		name  string

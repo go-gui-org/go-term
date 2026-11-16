@@ -76,6 +76,10 @@ func (p *parser) feedChunk(b []byte) {
 			case c == 0x1B:
 				p.state = stEsc
 				i++
+			case c == 0x7F:
+				// DEL is ignored, as in xterm. It is not a grapheme
+				// boundary and must not advance the cursor.
+				i++
 			case c < 0x20:
 				// execC0 covers BEL/BS/HT/LF/VT/FF/CR/SO/SI and ignores the
 				// rest; it is the same routine the mid-sequence execute path
