@@ -347,16 +347,26 @@ func (g *grid) putCell(ch rune, clusterID uint16, w int) {
 		justWrapped = true
 	}
 
-	// Guard with justWrapped: if we already wrapped once (cursor is now at
-	// col 0), the wide-char check would fire again when Cols==1, producing a
-	// second spurious Newline for a single Put call.
-	if !justWrapped && g.AutoWrap && w == 2 && g.CursorC+1 >= g.Cols {
-		if c := g.At(g.CursorR, g.CursorC); c != nil {
-			*c = blankCell(g.CurFG, g.CurBG, g.CurAttrs|attrWrapPad)
+	if g.AutoWrap && w == 2 && g.CursorC+1 >= g.Cols {
+		if justWrapped {
+			// Cols==1 (or a wrap that landed on the last column): no room
+			// for head plus continuation, and a second Newline would be
+			// spurious — narrow to one cell, as the no-autowrap path does.
+			w = 1
+		} else {
+			if c := g.At(g.CursorR, g.CursorC); c != nil {
+				*c = blankCell(g.CurFG, g.CurBG, g.CurAttrs|attrWrapPad)
+			}
+			g.RowWrapped[g.CursorR] = true
+			g.Newline()
+			g.CursorC = 0
+			if g.CursorC+1 >= g.Cols {
+				// The wrap landed roomless (Cols==1): narrowing here is
+				// what stops the continuation-less Width-2 head on the
+				// fresh-cursor path; a second Newline would be spurious.
+				w = 1
+			}
 		}
-		g.RowWrapped[g.CursorR] = true
-		g.Newline()
-		g.CursorC = 0
 	}
 
 	if g.InsertMode {
