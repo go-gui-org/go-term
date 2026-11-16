@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"image"
 	"io"
-	"log"
 	"os"
 	"strconv"
 )
@@ -81,7 +80,7 @@ type kgpParams struct {
 func parseIntKV(val string, key byte) (int, bool) {
 	n, err := strconv.Atoi(val)
 	if err != nil {
-		log.Printf("term: KGP bad %c= value %q: %v", key, val, err)
+		debugf("KGP bad %c= value %q: %v", key, val, err)
 		return 0, false
 	}
 	return n, true
@@ -93,7 +92,7 @@ func parseIntKV(val string, key byte) (int, bool) {
 func parseUint32KV(val string, key byte) (uint32, bool) {
 	n, err := strconv.ParseUint(val, 10, 32)
 	if err != nil {
-		log.Printf("term: KGP bad %c= value %q: %v", key, val, err)
+		debugf("KGP bad %c= value %q: %v", key, val, err)
 		return 0, false
 	}
 	return uint32(n), true
@@ -291,7 +290,7 @@ func (p *parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 		// kittyRawToNRGBA is going to refuse anyway.
 		if (params.format == 32 || params.format == 24) &&
 			(params.widthPx > maxSixelWidth || params.heightPx > maxSixelHeight) {
-			log.Printf("term: KGP image %d×%d exceeds %d×%d, rejected",
+			debugf("KGP image %d×%d exceeds %d×%d, rejected",
 				params.widthPx, params.heightPx, maxSixelWidth, maxSixelHeight)
 			p.kittyRefuse(id, params)
 			return
@@ -324,7 +323,7 @@ func (p *parser) kittyAccumulate(params kgpParams, rawB64 []byte) {
 			// asked for quiet (q=2), so leave a trace for whoever debugs it —
 			// once per transmission, not once per dropped chunk.
 			if !pend.truncated {
-				log.Printf("term: KGP transmission %d exceeds the %d-byte per-image "+
+				debugf("KGP transmission %d exceeds the %d-byte per-image "+
 					"or %d-byte total base64 budget, truncated",
 					id, maxKittyImageBytes, maxKittyPendingBytes)
 				pend.truncated = true
@@ -625,6 +624,7 @@ func (p *parser) releaseStoreFile(path string) {
 	if path == "" || p.storeUsesSrc(path) {
 		return
 	}
+	// Best-effort removal; failure only leaves a stray temp PNG behind.
 	_ = os.Remove(path)
 	p.g.deleteGraphicsBySrc(path)
 }
@@ -794,6 +794,7 @@ func kittyInflate(data []byte, limit int) []byte {
 	if err != nil {
 		return nil
 	}
+	// The read result is already captured; a close error is not actionable.
 	defer func() { _ = zr.Close() }()
 	// Read one byte past limit, so "exactly limit" and "more than limit" can be
 	// told apart without inflating the rest.

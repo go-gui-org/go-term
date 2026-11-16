@@ -433,6 +433,7 @@ func parseOSC1337Args(args string) iterm2FileArgs {
 	a := iterm2FileArgs{size: -1, preserveAR: true}
 	for rest := args; rest != ""; {
 		var field string
+		// The ok flag is unneeded: a missing ";" leaves field holding all of rest.
 		field, rest, _ = strings.Cut(rest, ";")
 		key, val, ok := strings.Cut(field, "=")
 		if !ok {
