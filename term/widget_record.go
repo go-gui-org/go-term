@@ -35,7 +35,7 @@ func (t *Term) StartRecording(path string) error {
 		return errAlreadyRecording
 	}
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
 		}
 	}
