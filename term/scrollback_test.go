@@ -694,6 +694,24 @@ func TestClampRingGeom(t *testing.T) {
 	}
 }
 
+// The ring never legitimately holds more than MaxScrollbackCap rows of MaxGridDim
+// cells, because clampScrollback and clampDim bound its inputs. The slab ceiling
+// must be that product: a larger ceiling only lets a wild caller allocate more
+// than any real configuration can (#295: 2^28 cells let one test ask for 6.4 GB),
+// and a smaller one would cut a legal maximum-size scrollback.
+func TestMaxRingCells_MatchesUpstreamBound(t *testing.T) {
+	if want := int64(MaxScrollbackCap) * int64(MaxGridDim); maxRingCells != want {
+		t.Errorf("maxRingCells = %d, want MaxScrollbackCap*MaxGridDim = %d",
+			int64(maxRingCells), want)
+	}
+	// A real maximum geometry must pass the clamp untouched.
+	if c, co := clampRingGeom(MaxScrollbackCap, MaxGridDim); c != MaxScrollbackCap ||
+		co != MaxGridDim {
+		t.Errorf("clampRingGeom(max, max) = (%d, %d), want (%d, %d)",
+			c, co, MaxScrollbackCap, MaxGridDim)
+	}
+}
+
 // ---- Benchmarks ----
 
 func BenchmarkScrollback_EnsureGeom(b *testing.B) {

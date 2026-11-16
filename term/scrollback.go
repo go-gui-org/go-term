@@ -30,12 +30,15 @@ type scrollbackRing struct {
 	gen uint32
 }
 
-// maxRingCells bounds a single ring slab in cells, not bytes. A cell is
-// roughly two dozen bytes, so this still permits gigabytes in theory; the
-// real defense is the upstream clamp (clampScrollback + clampDim). This is
-// belt-and-braces so a wild capacity can never hand make() a length that
-// panics or exhausts memory.
-const maxRingCells = 1 << 28
+// maxRingCells bounds a single ring slab in cells, not bytes. The real defense
+// is the upstream clamp (clampScrollback + clampDim); this is belt-and-braces so
+// a wild capacity can never hand make() a length that panics or exhausts memory.
+//
+// It is exactly the largest geometry those clamps allow: a larger ceiling only
+// lets a caller that bypasses them allocate more than any real configuration
+// can, and a smaller one would cut a legal maximum-size scrollback. (It was 2^28,
+// 2.6 times this, which let one test reserve 6.4 GB; see #295.)
+const maxRingCells = MaxScrollbackCap * MaxGridDim
 
 // clampRingGeom clamps negative inputs to zero and bounds capacity so
 // capacity*cols never exceeds maxRingCells. The product is computed in
