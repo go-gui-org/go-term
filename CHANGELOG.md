@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `term`: scrolled-viewport frames resolve each row once and share the
+  result across the BiDi scan and both text passes instead of re-calling
+  `ViewCellAt` per cell (~8% faster on a 60x200 mid-history frame,
+  allocations unchanged).
 - `term`: ignore DEL (0x7F) in the ground state instead of routing it through
   the grapheme assembler, where it split clusters (e.g. dropping a combining
   mark that followed it). Cursor and cells are unchanged by DEL, as in xterm.
