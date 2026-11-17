@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -442,6 +443,9 @@ func TestImportCast_RoundTrip(t *testing.T) {
 		t.Errorf("geometry = %dx%d, want %dx%d",
 			backHdr.Width, backHdr.Height, srcHdr.Width, srcHdr.Height)
 	}
+	if !reflect.DeepEqual(backHdr.Env, srcHdr.Env) {
+		t.Errorf("env = %v, want %v", backHdr.Env, srcHdr.Env)
+	}
 	want, got := outputInputOnly(srcFrames), outputInputOnly(backFrames)
 	if len(want) != len(got) {
 		t.Fatalf("%d output/input frames survived, want %d", len(got), len(want))
@@ -566,5 +570,59 @@ func TestImportCast_UnknownCodesSkipped(t *testing.T) {
 	}
 	if string(frames[0].Data) != "a" || string(frames[1].Data) != "b" {
 		t.Errorf("output frames = %q %q, want \"a\" \"b\"", frames[0].Data, frames[1].Data)
+	}
+}
+
+// Without -out the output defaults to the input basename with .cast
+// replaced by .gtr, in the same directory.
+func TestImportCast_DefaultOutName(t *testing.T) {
+	dir := t.TempDir()
+	cast := filepath.Join(dir, "in.cast")
+	content := importCastHeader + `[0.1,"o","a"]` + "\n"
+	if err := os.WriteFile(cast, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := captureStdout(t, func() error {
+		return cmdImportCast([]string{cast})
+	}); err != nil {
+		t.Fatalf("cmdImportCast: %v", err)
+	}
+	want := filepath.Join(dir, "in.gtr")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("default output %s missing: %v", want, err)
+	}
+	_, frames := readGtrFrames(t, want)
+	if len(frames) != 1 || string(frames[0].Data) != "a" {
+		t.Errorf("default-output frames = %+v, want one output \"a\"", frames)
+	}
+}
+
+// A header-only cast is a valid empty recording: success, zero frames.
+func TestImportCast_EmptyCast(t *testing.T) {
+	cast := writeCastFile(t, importCastHeader)
+	out := filepath.Join(t.TempDir(), "out.gtr")
+	if _, err := captureStdout(t, func() error {
+		return cmdImportCast([]string{cast, "-out", out})
+	}); err != nil {
+		t.Fatalf("cmdImportCast: %v", err)
+	}
+	_, frames := readGtrFrames(t, out)
+	if len(frames) != 0 {
+		t.Errorf("%d frames imported, want 0", len(frames))
+	}
+}
+
+// -out naming the input would truncate the cast before pass 2 reads it,
+// so it is rejected up front and the input is left byte-identical.
+func TestImportCast_SameFileRejected(t *testing.T) {
+	content := importCastHeader + `[0.1,"o","a"]` + "\n"
+	cast := writeCastFile(t, content)
+	if _, err := captureStdout(t, func() error {
+		return cmdImportCast([]string{cast, "-out", cast})
+	}); err == nil {
+		t.Fatalf("cmdImportCast accepted -out naming the input")
+	}
+	if got, err := os.ReadFile(cast); err != nil || string(got) != content {
+		t.Errorf("input modified by rejected import (err %v)", err)
 	}
 }

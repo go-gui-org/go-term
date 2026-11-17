@@ -392,6 +392,11 @@ func cmdImportCast(args []string) error {
 	if outPath == "" {
 		outPath = strings.TrimSuffix(inPath, ".cast") + ".gtr"
 	}
+	// Pass 2 re-reads the input after the output is created, so an -out
+	// that names the input would truncate the cast before it is read.
+	if filepath.Clean(outPath) == filepath.Clean(inPath) {
+		return errors.New("output would overwrite input (choose another -out path)")
+	}
 
 	hdr, env, st, err := scanCast(inPath)
 	if err != nil {
