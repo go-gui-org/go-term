@@ -311,6 +311,12 @@ type drawBufs struct {
 	bidiVisRows [][]cell        // visual-reordered rows for current frame
 	bidiV2LRows [][]int         // visual→logical column maps
 	bidiScratch []cell          // reused per-row cell buffer for BiDi pre-pass
+	// resolvedFlat is the backing store for resolvedRows: one resolveCell
+	// per viewport cell, resolved once per non-live frame and shared by
+	// the BiDi scan and both text passes. Grown on resize, resliced (never
+	// reallocated) per frame, so the OnDraw hot path allocates nothing.
+	resolvedFlat []cell   // backing store, rows*cols cells
+	resolvedRows [][]cell // per-frame row views into resolvedFlat
 	// phRects accumulates the Kitty Unicode-placeholder rectangles found in
 	// the viewport (see drawPlaceholders). Kept here so a screen full of
 	// placeholder cells does not allocate every frame.

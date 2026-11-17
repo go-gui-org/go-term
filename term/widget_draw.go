@@ -112,6 +112,11 @@ type drawState struct {
 	bidiVisRows   [][]cell
 	bidiV2LRows   [][]int
 	partialRow    []cell
+	// resolvedRows caches one resolveCell(r, c) per viewport cell for the
+	// current frame. Non-nil only when !live: every non-live row is
+	// resolved once in prepareResolved and shared by the BiDi scan, the
+	// bg pass and the fg pass instead of re-calling ViewCellAt per cell.
+	resolvedRows  [][]cell
 	imeRunes      []rune
 	imeWidths     []int
 	style         gui.TextStyle
@@ -203,10 +208,15 @@ func (ds *drawState) rawCell(r, c int) cell {
 }
 
 // resolveVisual returns the cell at viewport (r, c), routing through the
-// BiDi visual-reorder map when row r contains RTL content.
+// BiDi visual-reorder map when row r contains RTL content. On non-live
+// frames prepareResolved has already cached resolveCell for every row, so
+// plain rows read the cache instead of re-calling ViewCellAt per cell.
 func (ds *drawState) resolveVisual(r, c int) cell {
 	if ds.bidiVisRows[r] != nil {
 		return ds.bidiVisRows[r][c]
+	}
+	if ds.resolvedRows != nil {
+		return ds.resolvedRows[r][c]
 	}
 	return ds.resolveCell(r, c)
 }
@@ -314,6 +324,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.prepareFastPath(&ds)
 	t.prepareSearch(&ds)
 	t.prepareSelection(&ds)
+	t.prepareResolved(&ds)
 	t.prepareBiDi(&ds)
 	t.prepareHoverURL(&ds)
 	t.preparePartialRow(&ds)
@@ -607,6 +618,39 @@ func (t *Term) prepareHoverURL(ds *drawState) {
 	}
 }
 
+// prepareResolved resolves every viewport row once per non-live frame into
+// reusable buffers, so the BiDi scan, the bg pass and the fg pass share one
+// resolveCell per cell instead of each re-calling ViewCellAt. Runs after
+// prepareSearch/prepareSelection (resolveCell applies their spans) and
+// before prepareBiDi (whose scan reads the cache). Live frames keep the
+// direct slots indexing and leave the cache nil. resolveCell stays the
+// single definition of what a cell resolves to — the cache holds exactly
+// what resolveCell(r, c) returns, in the same order. No semantic change.
+func (t *Term) prepareResolved(ds *drawState) {
+	if ds.live {
+		ds.resolvedRows = nil
+		return
+	}
+	rows, cols := ds.renderRows, ds.cols
+	if cap(t.draw.resolvedRows) < rows {
+		t.draw.resolvedRows = make([][]cell, rows)
+	}
+	t.draw.resolvedRows = t.draw.resolvedRows[:rows]
+	if need := rows * cols; cap(t.draw.resolvedFlat) < need {
+		t.draw.resolvedFlat = make([]cell, need)
+	} else {
+		t.draw.resolvedFlat = t.draw.resolvedFlat[:need]
+	}
+	for r := 0; r < rows; r++ {
+		row := t.draw.resolvedFlat[r*cols : (r+1)*cols : (r+1)*cols]
+		for c := range cols {
+			row[c] = ds.resolveCell(r, c)
+		}
+		t.draw.resolvedRows[r] = row
+	}
+	ds.resolvedRows = t.draw.resolvedRows
+}
+
 // prepareBiDi detects viewport rows containing reorder triggers and computes
 // their visual-reordered cell slices + visual→logical column maps. For live
 // LTR-only terminals rowNeedsBidi returns false immediately — zero allocations.
@@ -633,8 +677,11 @@ func (t *Term) prepareBiDi(ds *drawState) {
 		if ds.live {
 			needBidi = rowNeedsBidi(ds.slots[ds.rowMap[r]], cols)
 		} else {
+			// Scan the prepareResolved cache: resolveCell's selection
+			// tint and search inversion never touch Ch, so the predicate
+			// matches the old per-cell ViewCellAt scan exactly.
 			for c := range cols {
-				if ch := ds.g.ViewCellAt(r, c).Ch; ch != 0 && needsReorder(ch) {
+				if ch := ds.resolvedRows[r][c].Ch; ch != 0 && needsReorder(ch) {
 					needBidi = true
 					break
 				}
@@ -648,8 +695,12 @@ func (t *Term) prepareBiDi(ds *drawState) {
 		} else {
 			t.draw.bidiScratch = t.draw.bidiScratch[:cols]
 		}
-		for c := range cols {
-			t.draw.bidiScratch[c] = ds.resolveCell(r, c)
+		if ds.live {
+			for c := range cols {
+				t.draw.bidiScratch[c] = ds.resolveCell(r, c)
+			}
+		} else {
+			copy(t.draw.bidiScratch, ds.resolvedRows[r])
 		}
 		ds.bidiVisRows[r], ds.bidiV2LRows[r] = visualReorder(t.draw.bidiScratch, cols)
 	}
