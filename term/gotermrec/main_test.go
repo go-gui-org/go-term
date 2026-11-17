@@ -471,9 +471,9 @@ func TestImportCast_RejectsDialects(t *testing.T) {
 			`[0.5,"o","a"]` + "\n" + `[0.2,"o","b"]` + "\n",
 		"negative time": importCastHeader +
 			`[-1.0,"o","x"]` + "\n",
-		"zero width": `{"version":2,"width":0,"height":24}` + "\n",
+		"zero width":      `{"version":2,"width":0,"height":24}` + "\n",
 		"negative height": `{"version":2,"width":80,"height":-5}` + "\n",
-		"oversize width": `{"version":2,"width":100000,"height":24}` + "\n",
+		"oversize width":  `{"version":2,"width":100000,"height":24}` + "\n",
 		"malformed resize": importCastHeader +
 			`[0.1,"r","bogus"]` + "\n",
 		"zero resize dims": importCastHeader +
