@@ -2,6 +2,7 @@ package term
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -1419,5 +1420,57 @@ func TestCellRunKeyHover(t *testing.T) {
 		if k := cellRunKey(c, base, g, id, false); k.color != plain.color {
 			t.Errorf("hoverLinkID %d: expected no recolor, got %v", id, k.color)
 		}
+	}
+}
+
+// BenchmarkOnDrawScrolled paints a full 60x200 frame while scrolled into
+// history (the live == false path: every viewport row resolves through
+// ViewCellAt). Scrollback holds mixed ASCII + SGR colors + background-color
+// runs + OSC 8 hyperlinks so the bg and fg passes coalesce real runs, and
+// every fourth row carries a Hebrew word so the BiDi branch stays live.
+// The Live sub-benchmark paints the same content at ViewOffset 0 (direct
+// slots indexing) as the GO/NO-GO comparison point.
+func BenchmarkOnDrawScrolled(b *testing.B) {
+	const rows, cols = 60, 200
+	const cellW, cellH = 10, 20
+	tm, _ := newDrawTerm(rows, cols, cellW, cellH)
+	tm.grid.Mu.Lock()
+	tm.grid.CursorVisible = false
+	// Without a cap the fed lines never reach scrollback and the scrolled
+	// case below would paint the live screen.
+	tm.grid.ScrollbackCap = 400
+	tm.grid.Mu.Unlock()
+	var sb strings.Builder
+	for i := 0; i < rows+120; i++ {
+		heb := ""
+		if i%4 == 0 {
+			heb = " hebrew שלום"
+		}
+		fmt.Fprintf(&sb, "line %03d \x1b[32mgreen-%03d\x1b[0m \x1b[44mblue-bg-%03d\x1b[0m \x1b]8;;https://example.com/%03d\x07link-%03d\x1b]8;;\x07%s tail-%03d\r\n",
+			i, i, i, i, i, heb, i)
+	}
+	feedDrawBytes(tm, sb.String())
+
+	w, h := float32(cols)*cellW, float32(rows)*cellH
+	meas := testTextMeasurer{cellW: cellW, cellH: cellH}
+	for _, tc := range []struct {
+		name   string
+		offset int
+	}{
+		{"Live", 0},
+		{"Scrolled", 60},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			tm.grid.Mu.Lock()
+			tm.grid.ViewOffset = tc.offset
+			tm.grid.Mu.Unlock()
+			b.ResetTimer()
+			b.ReportAllocs()
+			for b.Loop() {
+				// Fresh context per frame: DrawContext accumulates calls.
+				dc := gui.NewDrawContext(w, h, meas)
+				tm.onDraw(dc)
+			}
+		})
 	}
 }
