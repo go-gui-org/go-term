@@ -29,8 +29,9 @@ var DefaultTheme Theme
 
 // palette holds the xterm 256-color table. Indices 0–15 mirror
 // DefaultTheme.ANSI (for backwards-compat lookup); 16–231 are the
-// 6×6×6 RGB cube; 232–255 are 24 grayscale steps. Theme.resolve uses
-// Theme.ANSI for 0–15 and this table for 16–255.
+// 6×6×6 RGB cube; 232–255 are 24 grayscale steps. grid.resolveColor
+// reads the effective palette (theme ANSI for 0–15 overlaid on this
+// table) for any non-RGB, non-default packed value.
 var palette [256]gui.Color
 
 func init() {
@@ -76,30 +77,6 @@ func init() {
 		v := uint8(8 + 10*i)
 		palette[232+i] = gui.RGB(v, v, v)
 	}
-}
-
-// resolve decodes a packed color value. Indices 0–15 use th.ANSI;
-// indices 16–255 use the global xterm table. defaultColor returns def.
-// Unknown high-byte tags fall through to palette[low byte] so a corrupt
-// value renders as some valid color rather than panicking.
-//
-// Test oracle only: production resolves through grid.resolveColor, which
-// reads the effective table (theme + OSC 4 overrides) and honors
-// ReverseScreen via fgOf/bgOf. This method ignores both, so no draw path
-// may call it; TestPalette_NoOverrideMatchesTheme pins the two in
-// agreement for a fresh grid.
-func (th *Theme) resolve(c uint32, def gui.Color) gui.Color {
-	if c == defaultColor {
-		return def
-	}
-	if c&0xFF000000 == colorRGB {
-		return rgbToGUIColor(c)
-	}
-	idx := c & 0xFF
-	if idx < 16 {
-		return th.ANSI[idx]
-	}
-	return palette[idx]
 }
 
 // palTable is a full 256-entry color table. Two live on the grid: the
@@ -369,28 +346,6 @@ func (g *grid) ResetPalette() {
 func (g *grid) paletteColorRGB(idx uint8) (r, gr, b uint8) {
 	c := g.pal[idx]
 	return c.R, c.G, c.B
-}
-
-// fg resolves a cell's foreground to a Color, honoring inverse.
-//
-// Test oracle only — see resolve. Production uses grid.fgOf, which reads
-// the effective palette and folds in ReverseScreen.
-func (th *Theme) fg(c cell) gui.Color {
-	if c.Attrs&attrInverse != 0 {
-		return th.resolve(c.BG, th.DefaultBG)
-	}
-	return th.resolve(c.FG, th.DefaultFG)
-}
-
-// bg resolves a cell's background to a Color, honoring inverse.
-//
-// Test oracle only — see resolve. Production uses grid.bgOf, which reads
-// the effective palette and folds in ReverseScreen.
-func (th *Theme) bg(c cell) gui.Color {
-	if c.Attrs&attrInverse != 0 {
-		return th.resolve(c.FG, th.DefaultFG)
-	}
-	return th.resolve(c.BG, th.DefaultBG)
 }
 
 // rgbToGUIColor unpacks a colorRGB-tagged uint32 into a gui.Color.
