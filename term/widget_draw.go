@@ -116,12 +116,12 @@ type drawState struct {
 	// current frame. Non-nil only when !live: every non-live row is
 	// resolved once in prepareResolved and shared by the BiDi scan, the
 	// bg pass and the fg pass instead of re-calling ViewCellAt per cell.
-	resolvedRows  [][]cell
-	imeRunes      []rune
-	imeWidths     []int
-	style         gui.TextStyle
-	rows, cols    int
-	renderRows    int
+	resolvedRows [][]cell
+	imeRunes     []rune
+	imeWidths    []int
+	style        gui.TextStyle
+	rows, cols   int
+	renderRows   int
 	// renderTop is the first viewport row the text passes paint, reserving the
 	// rows above it for an overlay bar. Copy mode sets it to 1: its status bar
 	// sits at the top, so the row it covers must not be painted under it.
