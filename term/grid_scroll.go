@@ -201,12 +201,15 @@ func (g *grid) scrollUpRegion(n int) {
 			g.trimMarks(evicted)
 			g.trimGraphics(evicted)
 		}
-		// Frozen viewport (copy mode): ViewOffset counts rows back from the
-		// live bottom, so the bottom moving away from the viewer is exactly
-		// what makes the view drift. Bump by the same n to cancel it out.
-		// Clamped to the ring length, which is also what caps the pin once
-		// eviction starts — see grid.ViewFrozen.
-		if g.ViewFrozen {
+		// Frozen viewport (copy mode), or one scrolled back into history:
+		// ViewOffset counts rows back from the live bottom, so the bottom
+		// moving away from the viewer is exactly what makes the view drift.
+		// Bump by the same n to cancel it out, so text being read stays put
+		// while output streams in below, as in other terminals. A view at
+		// the live bottom (offset 0) keeps following. Clamped to the ring
+		// length, which is also what caps the pin once eviction starts —
+		// see grid.ViewFrozen.
+		if g.ViewFrozen || g.ViewOffset > 0 {
 			g.ViewOffset = clamp(g.ViewOffset+n, 0, g.Scrollback.Len())
 		}
 		// Graphics are anchored in content coordinates (scrollback length +

@@ -54,6 +54,28 @@ func TestGrid_ScrollViewClamp(t *testing.T) {
 	}
 }
 
+// A view scrolled back into history stays on the same rows while output
+// pushes more into scrollback; one at the live bottom keeps following.
+func TestGrid_ScrolledViewStaysPut(t *testing.T) {
+	g := newGrid(3, 2)
+	g.ScrollbackCap = 10
+	for range 4 {
+		g.scrollUpRegion(1)
+	}
+	g.ScrollView(2)
+	for range 3 {
+		g.scrollUpRegion(1)
+	}
+	if g.ViewOffset != 5 {
+		t.Errorf("scrolled view drifted: offset %d, want 5", g.ViewOffset)
+	}
+	g.ResetView()
+	g.scrollUpRegion(1)
+	if g.ViewOffset != 0 {
+		t.Errorf("live view stopped following: offset %d", g.ViewOffset)
+	}
+}
+
 func TestGrid_ScrollView_SaturatingAdd(t *testing.T) {
 	g := newGrid(2, 2)
 	g.ScrollbackCap = 10
