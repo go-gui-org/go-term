@@ -252,3 +252,88 @@ func TestJumpScrollbarTo(t *testing.T) {
 		t.Errorf("mid track: ViewOffset=%d, want strictly between 0 and %d", off, tm.grid.Scrollback.Len())
 	}
 }
+
+// dragTerm returns a Term whose grid has sb rows of scrollback, a 480 px
+// track, and a scrollbar that takes clicks anywhere.
+func dragTerm(sb int) *Term {
+	tm := newScrollTerm(24, 80)
+	tm.grid.ScrollbackCap = 10_000
+	for range sb {
+		tm.grid.scrollUpRegion(1)
+	}
+	tm.scrollbar.viewH = 480
+	tm.scrollbar.active = true
+	tm.scrollbar.hitX0 = 0
+	return tm
+}
+
+func viewPos(tm *Term) float32 {
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	return float32(tm.grid.ViewOffset) + tm.grid.ViewSubPx/tm.cellH
+}
+
+// Output that arrives during a thumb drag pins the view (scrollUpRegion bumps
+// ViewOffset). The next pointer move must keep that pin. It must not
+// map the pointer to an absolute offset again, because that moves the text
+// by up to n rows on each move while the pointer stays still. Before the pin
+// change the same jump happened, in the other direction.
+func TestScrollbarDrag_KeepsPinFromStreamingOutput(t *testing.T) {
+	tm := dragTerm(100)
+	const y = 240
+	if !tm.scrollbarClick(&gui.Event{MouseX: 1, MouseY: y}, nil) {
+		t.Fatal("click on track not taken")
+	}
+	tm.scrollbarDrag(&gui.Event{MouseY: y}, nil)
+	before := viewPos(tm)
+
+	// Output streams in while the pointer is held still.
+	tm.grid.Mu.Lock()
+	for range 10 {
+		tm.grid.scrollUpRegion(1)
+	}
+	tm.grid.Mu.Unlock()
+	if got := viewPos(tm); got != before+10 {
+		t.Fatalf("setup: pin gave %v, want %v", got, before+10)
+	}
+
+	// A move with no pointer change must not move the view.
+	tm.scrollbarDrag(&gui.Event{MouseY: y}, nil)
+	if got := viewPos(tm); got != before+10 {
+		t.Errorf("still pointer moved the view: %v, want %v", got, before+10)
+	}
+
+	// A real move scrolls by the pointer change, starting from the pinned
+	// position. Moving down 48 px (a tenth of the track) goes toward live by
+	// a tenth of the content (110 scrollback + 24 screen rows).
+	tm.scrollbarDrag(&gui.Event{MouseY: y + 48}, nil)
+	want := before + 10 - 13.4
+	if got := viewPos(tm); got < want-0.01 || got > want+0.01 {
+		t.Errorf("relative move: %v, want %v", got, want)
+	}
+}
+
+// The ends of the track still map absolutely. Dragging past the bottom
+// reaches live, and past the top reaches the oldest row, even after the pin
+// moved the thumb away from the pointer.
+func TestScrollbarDrag_EndsStillReachable(t *testing.T) {
+	tm := dragTerm(100)
+	tm.scrollbarClick(&gui.Event{MouseX: 1, MouseY: 240}, nil)
+	tm.grid.Mu.Lock()
+	for range 30 {
+		tm.grid.scrollUpRegion(1)
+	}
+	tm.grid.Mu.Unlock()
+
+	tm.scrollbarDrag(&gui.Event{MouseY: 480}, nil)
+	if got := viewPos(tm); got != 0 {
+		t.Errorf("past bottom: view %v, want live (0)", got)
+	}
+	tm.scrollbarDrag(&gui.Event{MouseY: -50}, nil)
+	tm.grid.Mu.Lock()
+	sb := tm.grid.Scrollback.Len()
+	tm.grid.Mu.Unlock()
+	if got := viewPos(tm); got != float32(sb) {
+		t.Errorf("past top: view %v, want %d", got, sb)
+	}
+}

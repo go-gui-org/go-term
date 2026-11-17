@@ -148,7 +148,7 @@ type mouseSnap struct {
 	sgr    bool // ?1006
 	urxvt  bool // ?1015
 	pixels bool // ?1016 — pixel-precise SGR coordinates
-	live   bool // ViewOffset == 0 && ViewSubPx == 0
+	live   bool // grid.viewLive()
 	alt    bool // alt screen active — the wheel drives arrow keys instead
 }
 
@@ -162,7 +162,7 @@ func (t *Term) mouseSnap() mouseSnap {
 		sgr:    t.grid.MouseSGR,
 		urxvt:  t.grid.MouseURXVT,
 		pixels: t.grid.MouseSGRPixels,
-		live:   t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0,
+		live:   t.grid.viewLive(),
 		alt:    t.grid.AltActive,
 	}
 }

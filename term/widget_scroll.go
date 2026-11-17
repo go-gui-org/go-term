@@ -65,18 +65,48 @@ func (t *Term) scrollbarClick(e *gui.Event, w *gui.Window) bool {
 		t.jumpScrollbarTo(e.MouseY - t.scrollbar.grabDy)
 	}
 	t.scrollbar.dragging = true
+	t.scrollbar.lastY = e.MouseY
 	t.lockMouse(w)
 	t.scheduleViewUpdate(w)
 	return true
 }
 
-// scrollbarDrag repositions the viewport during a thumb drag so the thumb top
-// tracks the pointer (minus the grab offset). Main-thread only.
+// scrollbarDrag moves the viewport during a thumb drag. Main-thread only.
+//
+// The move is relative: the view moves by the pointer change since the last
+// drag event, starting from where the view is now. An absolute mapping
+// (pointer Y to offset) is wrong while output streams in. Between two moves
+// the reader goroutine pins the view by bumping ViewOffset (scrollUpRegion).
+// The scrollback also grew, so the pointer now maps to a different row. Each
+// move would then jump the text by up to n rows while the pointer is still.
+// Starting from the current offset keeps the pin.
+//
+// The ends of the track still map absolutely. When the pointer is at or past
+// either end, the absolute mapping clamps to live or to the oldest row, and
+// that result is used. So a drag can always reach live or the top, even if
+// the pin moved the thumb away from the pointer. With no output between
+// moves, the relative and absolute results are the same.
 func (t *Term) scrollbarDrag(e *gui.Event, w *gui.Window) {
 	if !finite(t.cellH) || !realNumber(e.MouseY) {
 		return
 	}
-	t.jumpScrollbarTo(e.MouseY - t.scrollbar.grabDy)
+	dy := e.MouseY - t.scrollbar.lastY
+	t.scrollbar.lastY = e.MouseY
+	func() {
+		g := t.grid
+		g.Mu.Lock()
+		defer g.Mu.Unlock()
+		sb, rows, viewH := g.Scrollback.Len(), g.Rows, t.scrollbar.viewH
+		off := scrollbarOffsetForY(sb, rows, e.MouseY-t.scrollbar.grabDy, viewH)
+		if off > 0 && off < float32(sb) {
+			// Inside the track: move the thumb from where it is now.
+			cur := float32(g.ViewOffset) + g.ViewSubPx/t.cellH
+			thumbY, _ := scrollbarGeometry(sb, rows, cur, viewH)
+			off = scrollbarOffsetForY(sb, rows, thumbY+dy, viewH)
+		}
+		g.ClearSelection()
+		g.SetViewFractional(off, t.cellH)
+	}()
 	t.scheduleViewUpdate(w)
 }
 
@@ -96,7 +126,7 @@ func (t *Term) snapToLive() {
 	t.grid.Mu.Lock()
 	defer t.grid.Mu.Unlock()
 	t.grid.ClearSelection()
-	if t.grid.ViewOffset != 0 || t.grid.ViewSubPx != 0 {
+	if !t.grid.viewLive() {
 		t.grid.ResetView()
 	}
 }

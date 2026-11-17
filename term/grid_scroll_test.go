@@ -54,25 +54,130 @@ func TestGrid_ScrollViewClamp(t *testing.T) {
 	}
 }
 
+// labeledGrid returns a grid whose every line, on screen and in scrollback,
+// carries a unique rune in column 0. The pin tests compare what is on screen
+// before and after output arrives. Blank rows would all look the same and
+// let a drifted view pass, so every row gets a label.
+// pushLabeled feeds n more lines and keeps the labels unique.
+func labeledGrid(rows, cols, sbCap int) (*grid, func(n int)) {
+	g := newGrid(rows, cols)
+	g.ScrollbackCap = sbCap
+	next := 'A'
+	for r := range g.Rows {
+		g.At(r, 0).Ch = next
+		next++
+	}
+	push := func(n int) {
+		for range n {
+			// Scroll first, then label the new blank bottom row. The label
+			// therefore belongs to the row that the next push sends up.
+			g.scrollUpRegion(1)
+			g.At(g.Rows-1, 0).Ch = next
+			next++
+		}
+	}
+	return g, push
+}
+
+// viewLabels returns the column-0 rune of every visible viewport row. This is
+// what the reader sees, so it is the real test of a pin. ViewOffset alone can
+// be right while the rows shown are wrong.
+func viewLabels(g *grid) string {
+	out := make([]rune, g.Rows)
+	for r := range g.Rows {
+		out[r] = g.ViewCellAt(r, 0).Ch
+	}
+	return string(out)
+}
+
 // A view scrolled back into history stays on the same rows while output
 // pushes more into scrollback; one at the live bottom keeps following.
 func TestGrid_ScrolledViewStaysPut(t *testing.T) {
-	g := newGrid(3, 2)
-	g.ScrollbackCap = 10
-	for range 4 {
-		g.scrollUpRegion(1)
-	}
+	g, push := labeledGrid(3, 2, 10)
+	push(4)
 	g.ScrollView(2)
-	for range 3 {
-		g.scrollUpRegion(1)
-	}
+	want := viewLabels(g)
+	push(3)
 	if g.ViewOffset != 5 {
 		t.Errorf("scrolled view drifted: offset %d, want 5", g.ViewOffset)
 	}
+	if got := viewLabels(g); got != want {
+		t.Errorf("scrolled view shows %q, want %q", got, want)
+	}
 	g.ResetView()
-	g.scrollUpRegion(1)
+	push(1)
 	if g.ViewOffset != 0 {
 		t.Errorf("live view stopped following: offset %d", g.ViewOffset)
+	}
+}
+
+// A view scrolled back by less than one row (ViewOffset 0, ViewSubPx > 0) is
+// not live: the scrollbar shows and the cursor hides. Output must not slide
+// the text under the reader. A small trackpad scroll gives this state.
+func TestGrid_SubRowScrolledViewStaysPut(t *testing.T) {
+	g, push := labeledGrid(3, 2, 10)
+	push(4)
+	const cellH = 10
+	g.ScrollViewPx(5, cellH)
+	if g.ViewOffset != 0 || g.ViewSubPx != 5 {
+		t.Fatalf("setup: offset %d subpx %v, want 0 / 5", g.ViewOffset, g.ViewSubPx)
+	}
+	want := viewLabels(g)
+	wantTop := g.partialTopRow()[0].Ch
+	push(2)
+	if g.ViewOffset != 2 {
+		t.Errorf("sub-row view drifted: offset %d, want 2", g.ViewOffset)
+	}
+	if g.ViewSubPx != 5 {
+		t.Errorf("sub-row remainder changed: %v, want 5", g.ViewSubPx)
+	}
+	if got := viewLabels(g); got != want {
+		t.Errorf("sub-row view shows %q, want %q", got, want)
+	}
+	// The partly visible row above the viewport is on screen too.
+	if got := g.partialTopRow()[0].Ch; got != wantTop {
+		t.Errorf("partial top row %q, want %q", got, wantTop)
+	}
+}
+
+// Once the ring is full, every push evicts the oldest row and shifts every
+// content index down by one. The ViewOffset bump makes up for that exactly:
+// the view stays on the same rows until ViewOffset reaches Scrollback.Len().
+// After that the clamp holds the view at the oldest row, and the view drifts
+// as that row is evicted. Long build logs fill the ring, so this is the
+// common case.
+func TestGrid_ScrolledViewPinnedThroughEviction(t *testing.T) {
+	const sbCap = 3
+	g, push := labeledGrid(3, 2, sbCap)
+	push(sbCap + 2) // ring full and already evicting
+	if g.Scrollback.Len() != sbCap {
+		t.Fatalf("setup: scrollback len %d, want %d", g.Scrollback.Len(), sbCap)
+	}
+	g.ScrollView(1)
+	want := viewLabels(g)
+
+	// Two pushes take ViewOffset from 1 to the clamp (3). Each one evicts.
+	for i := range 2 {
+		push(1)
+		if g.ViewOffset != 2+i {
+			t.Fatalf("push %d: offset %d, want %d", i+1, g.ViewOffset, 2+i)
+		}
+		if got := viewLabels(g); got != want {
+			t.Fatalf("push %d: view shows %q, want %q (slipped during eviction)",
+				i+1, got, want)
+		}
+	}
+
+	// At the clamp the view shows the oldest row, so the next eviction
+	// removes the top row. The view must move by exactly that one row and
+	// must not jump further.
+	push(1)
+	if g.ViewOffset != sbCap {
+		t.Errorf("past clamp: offset %d, want %d", g.ViewOffset, sbCap)
+	}
+	if got := viewLabels(g); got != want[1:]+got[len(got)-1:] {
+		t.Errorf("past clamp: view shows %q, want it to slide one row from %q",
+			got, want)
 	}
 }
 
@@ -542,6 +647,34 @@ func TestGrid_SetViewFractional_NoOpGuards(t *testing.T) {
 		g.SetViewFractional(bad.off, bad.cellH)
 		if g.ViewOffset != off || g.ViewSubPx != sub {
 			t.Errorf("%s changed state: (%d,%v)", bad.name, g.ViewOffset, g.ViewSubPx)
+		}
+	}
+}
+
+// viewLive is the single test for "the view is at the live bottom". The pin
+// in scrollUpRegion, the cursor, IME, blink, scrollbar and mouse paths all
+// use it, so they cannot disagree about a sub-row scroll again.
+func TestGrid_ViewLive(t *testing.T) {
+	cases := []struct {
+		name   string
+		off    int
+		subPx  float32
+		frozen bool
+		want   bool
+	}{
+		{"live", 0, 0, false, true},
+		{"whole rows back", 2, 0, false, false},
+		{"sub-row back", 0, 5, false, false},
+		{"rows and sub-row", 1, 3, false, false},
+		// ViewFrozen pins a live view, but the view is still live: the
+		// cursor shows and the scrollbar can hide.
+		{"frozen at bottom", 0, 0, true, true},
+	}
+	for _, tc := range cases {
+		g := newGrid(3, 2)
+		g.ViewOffset, g.ViewSubPx, g.ViewFrozen = tc.off, tc.subPx, tc.frozen
+		if got := g.viewLive(); got != tc.want {
+			t.Errorf("%s: viewLive() = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

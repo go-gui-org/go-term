@@ -209,7 +209,7 @@ func (t *Term) drawIME(ds *drawState) {
 	ds.imeCursor = min(t.ime.compCursor, len(ds.imeRunes))
 
 	if len(ds.imeRunes) == 0 || g.CursorR < ds.renderTop || g.CursorR >= ds.renderRows ||
-		g.ViewOffset != 0 || ds.renderYOff != 0 {
+		!g.viewLive() {
 		return
 	}
 	startX := t.colX(g.CursorC)
@@ -253,7 +253,7 @@ func (t *Term) drawCursor(ds *drawState) {
 		return
 	}
 	if !g.CursorVisible || g.CursorR < ds.renderTop || g.CursorR >= ds.renderRows ||
-		g.ViewOffset != 0 || ds.renderYOff != 0 {
+		!g.viewLive() {
 		return
 	}
 	if t.cursorBlinkOff(ds.now) {
@@ -317,7 +317,7 @@ func (t *Term) drawOverlays(ds *drawState) {
 	// for the whole drag so releasing the thumb doesn't hide it mid-gesture.
 	sb := g.Scrollback.Len()
 	sw := t.effectiveScrollbarWidth()
-	visible := ds.now.Before(t.scrollbar.until) || g.ViewOffset > 0 || g.ViewSubPx > 0 || t.scrollbar.dragging
+	visible := ds.now.Before(t.scrollbar.until) || !g.viewLive() || t.scrollbar.dragging
 	active := visible && sb > 0 && ds.dc.Width >= sw && sw > 0
 	t.scrollbar.active = active
 

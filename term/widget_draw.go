@@ -477,7 +477,7 @@ func (t *Term) prepareResize(ds *drawState) {
 func (t *Term) prepareFastPath(ds *drawState) {
 	g := ds.g
 	ds.renderYOff = g.ViewSubPx
-	ds.live = g.ViewOffset == 0 && ds.renderYOff == 0 && !g.SelActive &&
+	ds.live = g.viewLive() && !g.SelActive &&
 		!t.search.active && !t.copy.active
 	ds.slots, ds.rowMap = g.slots, g.rowMap
 	ds.renderRows = ds.rows

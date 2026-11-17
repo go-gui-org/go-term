@@ -205,11 +205,14 @@ func (g *grid) scrollUpRegion(n int) {
 		// ViewOffset counts rows back from the live bottom, so the bottom
 		// moving away from the viewer is exactly what makes the view drift.
 		// Bump by the same n to cancel it out, so text being read stays put
-		// while output streams in below, as in other terminals. A view at
-		// the live bottom (offset 0) keeps following. Clamped to the ring
-		// length, which is also what caps the pin once eviction starts —
-		// see grid.ViewFrozen.
-		if g.ViewFrozen || g.ViewOffset > 0 {
+		// while output streams in below, as in other terminals. Only a live
+		// view (viewLive) keeps following. A view scrolled back by less than
+		// one row is not live, so a small trackpad scroll is pinned too.
+		// ViewSubPx is kept as it is, so the fractional position does not
+		// change.
+		// Clamped to the ring length. See grid.ViewFrozen for how the pin
+		// behaves when the ring evicts.
+		if g.ViewFrozen || !g.viewLive() {
 			g.ViewOffset = clamp(g.ViewOffset+n, 0, g.Scrollback.Len())
 		}
 		// Graphics are anchored in content coordinates (scrollback length +
@@ -315,6 +318,17 @@ func (g *grid) ScrollView(delta int) {
 		g.ViewOffset = clamp(g.ViewOffset+delta, 0, max)
 	}
 	g.ViewSubPx = 0
+}
+
+// viewLive reports whether the viewport is exactly at the live bottom: no
+// whole rows (ViewOffset) and no fraction of a row (ViewSubPx) scrolled back.
+// It is the one test for "live". The scroll pin, cursor, IME, blink, scrollbar
+// and mouse paths all use it. When each site tested the fields itself, the pin
+// forgot ViewSubPx, and a sub-row scroll still drifted with output.
+// ViewFrozen is a separate thing: it pins a view that is still live.
+// Caller holds Mu.
+func (g *grid) viewLive() bool {
+	return g.ViewOffset == 0 && g.ViewSubPx == 0
 }
 
 // ScrollViewPx scrolls the viewport by deltaPx pixels. The total pixel

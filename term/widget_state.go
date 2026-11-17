@@ -209,8 +209,12 @@ type scrollbarState struct {
 	// dragging is true while the user holds the thumb; grabDy is the
 	// pointer offset from the thumb top captured at grab time so the thumb
 	// tracks the cursor without snapping its center to the pointer.
+	// lastY is the pointer Y of the previous drag event. scrollbarDrag moves
+	// the view by the change from lastY, so output that the reader pins in
+	// between moves is kept (see scrollbarDrag).
 	dragging bool
 	grabDy   float32
+	lastY    float32
 }
 
 // mouseState tracks pointer state for selection drags, host-side mouse
