@@ -481,8 +481,11 @@ func decodeCastHeader(dec *json.Decoder, path string) (castHeader, error) {
 // parseCastEvent validates one decoded `[time, code, data]` envelope. prev
 // is the previous event's time; times must be non-negative and
 // non-decreasing, and known codes must carry string data within MaxFrame.
-// Unknown codes keep no data — the caller skips them. JSON has no NaN
-// literal, but a hostile number is rejected explicitly all the same.
+// Unknown codes keep no data — the caller skips them — but their raw
+// payload is still bounded so a hostile extension event cannot blow up
+// memory (raw length is a conservative proxy: it includes JSON framing).
+// JSON has no NaN literal, but a hostile number is rejected explicitly all
+// the same.
 func parseCastEvent(raw []json.RawMessage, path string, index int, prev float64) (code, data string, now float64, err error) {
 	if len(raw) != 3 {
 		return "", "", prev, fmt.Errorf("%s: event %d has %d fields, want 3", path, index, len(raw))
@@ -499,6 +502,9 @@ func parseCastEvent(raw []json.RawMessage, path string, index int, prev float64)
 	}
 	if err := json.Unmarshal(raw[1], &code); err != nil {
 		return "", "", prev, fmt.Errorf("%s: event %d has a non-string code", path, index)
+	}
+	if len(raw[2]) > recfmt.MaxFrame {
+		return "", "", prev, fmt.Errorf("%s: event %d exceeds %d bytes", path, index, recfmt.MaxFrame)
 	}
 	switch code {
 	case "o", "i", "m", "r":

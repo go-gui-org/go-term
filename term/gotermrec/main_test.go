@@ -480,6 +480,8 @@ func TestImportCast_RejectsDialects(t *testing.T) {
 			`[0.1,"r","0x0"]` + "\n",
 		"truncated json": importCastHeader +
 			`[0.1,"o"` + "\n",
+		"oversize unknown payload": importCastHeader +
+			`[0.1,"x","` + strings.Repeat("A", (16<<20)+1) + `"]` + "\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {

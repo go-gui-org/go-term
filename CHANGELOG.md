@@ -12,7 +12,8 @@ adheres to [Semantic Versioning](https://semver.org/).
   repros and demo libraries convert to .gtr for falcon replay and
   fixture capture. Markers are dropped with a warning, unknown event
   codes are skipped with a warning, and resize events are preserved
-  as .gtr resize frames.
+  as .gtr resize frames. Event timing is validated but not reproduced
+  (recfmt stamps wall-clock deltas; frames land back-to-back).
 
 ### Fixed
 
