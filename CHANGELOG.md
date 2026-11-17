@@ -20,6 +20,9 @@ adheres to [Semantic Versioning](https://semver.org/).
   unconditionally; set GOTERM_DEBUG=1 to see them.
 - Docs: `make prepush` description no longer claims the benchmark gate; README
   version pin bumped to v0.18.0; test commands use GOWORK=off.
+- Docs: canonical GOTERM_* environment variable reference in
+  docs/terminal-verification.md; architecture diagram covers action dispatch,
+  program status, and workspace recording/overlay files.
 
 ## [0.18.0] - 2026-11-13
 
