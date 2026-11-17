@@ -215,3 +215,22 @@ broader compatibility work, use:
 Treat those as complementary to the Go conformance tests in
 `conformance_test.go`. The conformance tests automate the most common vttest
 checks as replay-style assertions that run in CI on every push.
+
+## Environment variables
+
+This section is the canonical home for debug environment knobs: when a new
+`GOTERM_*` knob lands, add a row here instead of documenting it where it was
+introduced.
+
+| Variable                                     | Effect                                                            | Owner                     |
+| -------------------------------------------- | ----------------------------------------------------------------- | ------------------------- |
+| `GOTERM_LATENCY`                             | Keystroke-to-frame latency percentiles in the log.                | `term/latency.go`         |
+| `GOTERM_CAPTURE`                             | Raw pty-output capture tee; value is a path prefix.               | `term/widget.go`          |
+| `GOTERM_DEBUG`                               | Parser diagnostics for malformed escape sequences.                | `term/parser_debug.go`    |
+| `GOTERM_PPROF`                               | Profiling server port (`1` means 6060, localhost only).           | `examples/falcon/main.go` |
+| `GOTERM_NOTIFY_TITLE` / `GOTERM_NOTIFY_BODY` | Title/body carrier for the Windows toast script (set by go-term). | `term/widget_notify.go`   |
+| `GOMEMLIMIT`                                 | Soft heap-limit override; wins over the baked-in default.         | `examples/falcon/main.go` |
+
+Set in the environment that launches falcon (or the test binary); unset means
+off — except `GOTERM_NOTIFY_*`, which go-term sets itself when spawning the
+Windows toast helper, and `GOMEMLIMIT`, where unset keeps the default.
