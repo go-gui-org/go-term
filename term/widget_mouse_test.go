@@ -3,6 +3,7 @@ package term
 import (
 	"math"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -2014,5 +2015,56 @@ func TestOnMouseMove_DragBackToPressCollapses(t *testing.T) {
 	if tm.grid.SelActive {
 		t.Errorf("selection active after drag back to press point: %v..%v",
 			tm.grid.SelAnchor, tm.grid.SelHead)
+	}
+}
+
+// TestTerm_NonLeftPressReachesChild sends presses through go-gui's real event
+// dispatch, not by calling onClick directly. go-gui's DrawCanvas OnClick runs on
+// a left press only, so a grid wired to OnClick reported left presses and dropped
+// right and middle ones: right-click menus in terminal apps (ttt) never opened.
+// The direct onClick tests could not see this, because the drop happens before
+// onClick runs.
+func TestTerm_NonLeftPressReachesChild(t *testing.T) {
+	win := gui.NewTestWindow(t, gui.WindowCfg{})
+	tm, err := New(win, Cfg{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = tm.Close() }()
+	// The writer is replaced after New, so the shell's own pty never sees these
+	// reports. The mutex is there because Close can race the last write.
+	var mu sync.Mutex
+	var got []byte
+	tm.pw = writerFunc(func(b []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, b...)
+		return len(b), nil
+	})
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack, tm.grid.MouseSGR = true, true // ?1000h ?1006h
+	tm.grid.Mu.Unlock()
+	win.TestRender(func(w *gui.Window) gui.View { return tm.View(w) })
+	for _, tc := range []struct {
+		btn  gui.MouseButton
+		want string // the SGR press; the release ends in 'm'
+	}{
+		{gui.MouseLeft, "\x1b[<0;"},
+		{gui.MouseRight, "\x1b[<2;"},
+		{gui.MouseMiddle, "\x1b[<1;"},
+	} {
+		mu.Lock()
+		got = nil
+		mu.Unlock()
+		win.EventFn(&gui.Event{Type: gui.EventMouseDown, MouseButton: tc.btn,
+			MouseX: 200, MouseY: 200})
+		win.EventFn(&gui.Event{Type: gui.EventMouseUp, MouseButton: tc.btn,
+			MouseX: 200, MouseY: 200})
+		mu.Lock()
+		s := string(got)
+		mu.Unlock()
+		if !strings.HasPrefix(s, tc.want) || !strings.HasSuffix(s, "m") {
+			t.Errorf("button %v: child got %q, want a press %q… and a release", tc.btn, s, tc.want)
+		}
 	}
 }

@@ -529,9 +529,13 @@ func (t *Term) View(w *gui.Window) gui.View {
 		Clip:          true,
 		OnDraw:        t.onDraw,
 		OnMouseScroll: t.onMouseScroll,
-		OnClick:       t.onClick,
-		OnMouseMove:   t.onMouseMove,
-		OnMouseUp:     t.onMouseUp,
+		// OnAnyClick, not OnClick: a canvas's OnClick runs on a left press
+		// only. The child needs right and middle presses too (right-click
+		// menus, middle-button reports), and middle-click paste needs the
+		// middle press. onClick sorts the buttons itself.
+		OnAnyClick:  t.onClick,
+		OnMouseMove: t.onMouseMove,
+		OnMouseUp:   t.onMouseUp,
 	})
 	colCfg := gui.ContainerCfg{
 		Padding:     gui.PadAll(gridPadding),

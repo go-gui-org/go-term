@@ -8,23 +8,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- `gotermrec` imports asciicast v2 (`import-cast`): external
-  repros and demo libraries convert to .gtr for falcon replay and
-  fixture capture. Markers are dropped with a warning, unknown event
-  codes are skipped with a warning, and resize events are preserved
-  as .gtr resize frames. Event timing is validated but not reproduced
-  (recfmt stamps wall-clock deltas; frames land back-to-back).
+- `gotermrec` imports asciicast v2 (`import-cast`): external repros and demo
+  libraries convert to .gtr for falcon replay and fixture capture. Markers are
+  dropped with a warning, unknown event codes are skipped with a warning, and
+  resize events are preserved as .gtr resize frames. Event timing is validated
+  but not reproduced (recfmt stamps wall-clock deltas; frames land
+  back-to-back).
 
 ### Fixed
 
+- `term`: right and middle presses reach the program in the terminal again.
+  go-gui v0.81.0 made a canvas's `OnClick` left-only, so the grid dropped every
+  other button: right-click menus in terminal apps (ttt) did not open, middle
+  button reports were lost, and middle-click paste did not work. The grid now
+  uses go-gui's `DrawCanvasCfg.OnAnyClick`.
 - `term`: a view scrolled back into history now stays on the rows being read
   while output streams in, as in other terminals. Before, it kept the same
   distance from the bottom, so the text slid up under the reader. A view at the
   bottom still follows output.
-- `term`: scrolled-viewport frames resolve each row once and share the
-  result across the BiDi scan and both text passes instead of re-calling
-  `ViewCellAt` per cell (~8% faster on a 60x200 mid-history frame,
-  allocations unchanged).
+- `term`: scrolled-viewport frames resolve each row once and share the result
+  across the BiDi scan and both text passes instead of re-calling `ViewCellAt`
+  per cell (~8% faster on a 60x200 mid-history frame, allocations unchanged).
 - `term`: ignore DEL (0x7F) in the ground state instead of routing it through
   the grapheme assembler, where it split clusters (e.g. dropping a combining
   mark that followed it). Cursor and cells are unchanged by DEL, as in xterm.
