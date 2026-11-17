@@ -17,6 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `term`: a view scrolled back into history now stays on the rows being read
+  while output streams in, as in other terminals. Before, it kept the same
+  distance from the bottom, so the text slid up under the reader. A view at the
+  bottom still follows output.
 - `term`: scrolled-viewport frames resolve each row once and share the
   result across the BiDi scan and both text passes instead of re-calling
   `ViewCellAt` per cell (~8% faster on a 60x200 mid-history frame,

@@ -387,17 +387,16 @@ func TestCopyMode_FreezesAgainstOutput(t *testing.T) {
 	}
 }
 
-// Without the freeze the viewport is unchanged by output, which is the
-// pre-existing behavior every other scroll path relies on.
-func TestScrollUpRegion_UnfrozenViewOffsetUnchanged(t *testing.T) {
+// Without the freeze a view at the live bottom keeps following output (a
+// scrolled-back view is pinned, see TestGrid_ScrolledViewStaysPut).
+func TestScrollUpRegion_LiveViewFollows(t *testing.T) {
 	g := newGrid(3, 3)
 	g.ScrollbackCap = 20
 	g.Scrollback.SetGeom(20, 3)
 	g.Bottom = g.Rows - 1
-	g.ViewOffset = 2
 	g.scrollUpRegion(1)
-	if g.ViewOffset != 2 {
-		t.Errorf("ViewOffset = %d, want 2 (unchanged when not frozen)", g.ViewOffset)
+	if g.ViewOffset != 0 {
+		t.Errorf("ViewOffset = %d, want 0 (a live view follows output)", g.ViewOffset)
 	}
 }
 

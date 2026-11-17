@@ -570,16 +570,23 @@ type grid struct {
 	ViewOffset    int
 	dirtyCount    int
 
-	// ViewFrozen pins the visible content against incoming output: while set,
-	// every row pushed into scrollback bumps ViewOffset by one, so the same
-	// content rows stay on screen instead of drifting upward as the buffer
-	// grows. Copy mode sets it — a moving target is unusable to select from.
+	// ViewFrozen pins the live view (ViewOffset 0, ViewSubPx 0) against
+	// incoming output. Copy mode sets it, because a moving target is unusable
+	// to select from. Any view scrolled back from the live bottom, even by a
+	// fraction of a row, is pinned whether or not this is set. So the flag
+	// only changes behavior at the live bottom. Clearing it does not make a
+	// scrolled-back view drift again.
 	//
-	// The pin is exact only until the scrollback ring starts evicting. Past
-	// that, content row indices themselves shift and the view slips by the
-	// number of evicted rows; callers clamp their own coordinates rather than
-	// this trying to rewrite history. Main-thread writes under Mu; read by the
-	// reader goroutine in scrollUpRegion, which already holds Mu.
+	// The pin: scrollUpRegion bumps ViewOffset by one for every row pushed
+	// into scrollback, so the same content rows stay on screen. This stays
+	// exact when the ring evicts. An eviction moves every content index down
+	// by one, and the bump moves the view top (Len - ViewOffset) down by the
+	// same one. The pin stops only when ViewOffset reaches Scrollback.Len().
+	// The clamp then holds the view at the oldest row, and each eviction
+	// moves the view by one row. Do not add eviction compensation on top of
+	// the bump; it would correct twice. Main-thread writes under Mu; read by
+	// the reader goroutine in scrollUpRegion, which already holds Mu.
+	// TestGrid_ScrolledViewPinnedThroughEviction tests this.
 	ViewFrozen bool
 
 	Mu         sync.Mutex

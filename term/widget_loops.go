@@ -155,7 +155,7 @@ func (t *Term) blinkTick() bool {
 		t.grid.Mu.Lock()
 		defer t.grid.Mu.Unlock()
 		return t.grid.CursorVisible &&
-			t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0 &&
+			t.grid.viewLive() &&
 			t.cursorBlinkActive()
 	}()
 	// Blinking text needs the same periodic repaint, and unlike the
