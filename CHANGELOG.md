@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `gotermrec` imports asciicast v2 (`import-cast`): external
+  repros and demo libraries convert to .gtr for falcon replay and
+  fixture capture. Markers are dropped with a warning, unknown event
+  codes are skipped with a warning, and resize events are preserved
+  as .gtr resize frames.
+
 ### Fixed
 
 - `term`: scrolled-viewport frames resolve each row once and share the

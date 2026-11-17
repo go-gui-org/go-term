@@ -124,6 +124,7 @@ go run ./term/gotermrec cat     session.gtr   # raw output bytes to stdout
 go run ./term/gotermrec play    session.gtr   # timed playback in any terminal
 go run ./term/gotermrec fixture session.gtr -name session   # replay-test fixture
 go run ./term/gotermrec export  session.gtr -cast session.cast   # asciicast v2
+go run ./term/gotermrec import-cast session.cast [-out session.gtr]   # asciicast v2 → .gtr (markers dropped, unknown codes skipped, resize events preserved)
 ```
 
 Recordings store the pty's bytes verbatim, so malformed output survives the

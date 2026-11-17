@@ -9,6 +9,7 @@
 //	gotermrec play    <file.gtr> [-speed 2] [-idle 2s] timed playback to stdout
 //	gotermrec fixture <file.gtr> -name X [-rows] [-cols] [-out dir]
 //	gotermrec export  <file.gtr> -cast out.cast        convert to asciicast v2
+//	gotermrec import-cast <file.cast> [-out session.gtr] convert from asciicast v2
 //
 // `cat` reproduces the byte stream exactly, which is what the GOTERM_CAPTURE
 // debugging workflow wants: pipe it into a reference terminal to decide
@@ -26,8 +27,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -54,6 +57,8 @@ func main() {
 		err = cmdFixture(args)
 	case "export":
 		err = cmdExport(args)
+	case "import-cast":
+		err = cmdImportCast(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -77,6 +82,7 @@ commands:
   play     replay to stdout with the original timing
   fixture  convert to a replay-test fixture (.json)
   export   convert to asciicast v2 (-cast out.cast)
+  import-cast convert from asciicast v2 (-out session.gtr)
 
 run "gotermrec <command> -h" for that command's flags
 `)
@@ -350,4 +356,279 @@ func cmdExport(args []string) error {
 	}
 	fmt.Fprintln(os.Stderr, ")")
 	return nil
+}
+
+// cmdImportCast converts an asciicast v2 file back into a .gtr recording —
+// the reverse of cmdExport. External repros and demo libraries held as
+// asciicast (docs pipelines, bug reports) re-enter the ecosystem this way:
+// the result feeds falcon --replay, cat/play, and fixture capture.
+//
+// The import streams the cast twice. Pass 1 validates the whole file
+// (version, geometry, monotonic times, resize payloads, the 16 MiB event
+// bound) and scans for input frames, which NewRecorder needs to know up
+// front; buffering every frame instead would trade bounded memory for one
+// fewer pass. Pass 2 re-decodes and writes the frames. Frame timing comes
+// from the Recorder's wall clock — recfmt offers no delta setter and
+// sleeping through idle gaps would stall the import — so cast times are
+// validated but not reproduced as deltas.
+//
+// Lossy like cmdExport, and honest about it: markers are dropped and unknown
+// event codes skipped, each counted in one per-file stderr warning.
+func cmdImportCast(args []string) error {
+	fs := flag.NewFlagSet("import-cast", flag.ContinueOnError)
+	out := fs.String("out", "", "output .gtr file (default: input with .cast replaced by .gtr)")
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+			fs.Usage()
+			return flag.ErrHelp
+		}
+		return errors.New("no asciicast file given")
+	}
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	inPath := args[0]
+	outPath := *out
+	if outPath == "" {
+		outPath = strings.TrimSuffix(inPath, ".cast") + ".gtr"
+	}
+
+	hdr, env, st, err := scanCast(inPath)
+	if err != nil {
+		return err
+	}
+	if st.droppedEnv > 0 {
+		fmt.Fprintf(os.Stderr, "gotermrec: dropped %d non-string env entries (no .gtr equivalent)\n",
+			st.droppedEnv)
+	}
+
+	rec, err := recfmt.NewRecorder(outPath, hdr.Height, hdr.Width, env, st.hasInput)
+	if err != nil {
+		return err
+	}
+	if err := writeCastFrames(inPath, rec); err != nil {
+		_ = rec.Close()
+		return err
+	}
+	if err := rec.Close(); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "wrote %s (%d output, %d input, %d resize",
+		outPath, st.nOut, st.nIn, st.nResize)
+	if st.nMarkers > 0 {
+		fmt.Fprintf(os.Stderr, ", %d markers dropped", st.nMarkers)
+	}
+	if st.nUnknown > 0 {
+		fmt.Fprintf(os.Stderr, ", %d unknown skipped", st.nUnknown)
+	}
+	fmt.Fprintln(os.Stderr, ")")
+	if st.nMarkers > 0 {
+		fmt.Fprintf(os.Stderr,
+			"gotermrec: dropped %d marker events; asciicast markers have no .gtr equivalent\n",
+			st.nMarkers)
+	}
+	if st.nUnknown > 0 {
+		fmt.Fprintf(os.Stderr,
+			"gotermrec: skipped %d events with unknown codes; the spec reserves them for extensions\n",
+			st.nUnknown)
+	}
+	if st.hasInput {
+		fmt.Fprintln(os.Stderr,
+			"gotermrec: input frames present; the .gtr may carry passwords (owner-only 0600)")
+	}
+	return nil
+}
+
+// castHeader is the first JSON value of an asciicast v2 file. Timestamp is
+// informational (NewRecorder stamps the import with now) but decoded so a
+// mistyped field fails fast rather than silently.
+type castHeader struct {
+	Version   int            `json:"version"`
+	Width     int            `json:"width"`
+	Height    int            `json:"height"`
+	Timestamp float64        `json:"timestamp"`
+	Env       map[string]any `json:"env"`
+}
+
+// castStats tallies one pass over a cast's events.
+type castStats struct {
+	nOut, nIn, nResize int
+	nMarkers, nUnknown int
+	droppedEnv         int
+	hasInput           bool
+}
+
+// decodeCastHeader reads and validates the first JSON value of a cast.
+// Geometry is load-bearing for NewRecorder, so out-of-range values are
+// rejected rather than clamped (the 1<<16 bound mirrors recfmt's maxDim,
+// which is unexported).
+func decodeCastHeader(dec *json.Decoder, path string) (castHeader, error) {
+	var hdr castHeader
+	if err := dec.Decode(&hdr); err != nil {
+		return hdr, fmt.Errorf("%s: bad asciicast header: %w", path, err)
+	}
+	if hdr.Version != 2 {
+		return hdr, fmt.Errorf("%s: unsupported asciicast version %d (want 2)", path, hdr.Version)
+	}
+	if hdr.Width < 1 || hdr.Height < 1 || hdr.Width > 1<<16 || hdr.Height > 1<<16 {
+		return hdr, fmt.Errorf("%s: bad geometry %dx%d (want 1..65536 cols×rows)",
+			path, hdr.Width, hdr.Height)
+	}
+	return hdr, nil
+}
+
+// parseCastEvent validates one decoded `[time, code, data]` envelope. prev
+// is the previous event's time; times must be non-negative and
+// non-decreasing, and known codes must carry string data within MaxFrame.
+// Unknown codes keep no data — the caller skips them. JSON has no NaN
+// literal, but a hostile number is rejected explicitly all the same.
+func parseCastEvent(raw []json.RawMessage, path string, index int, prev float64) (code, data string, now float64, err error) {
+	if len(raw) != 3 {
+		return "", "", prev, fmt.Errorf("%s: event %d has %d fields, want 3", path, index, len(raw))
+	}
+	var t float64
+	if err := json.Unmarshal(raw[0], &t); err != nil {
+		return "", "", prev, fmt.Errorf("%s: event %d has a non-numeric time", path, index)
+	}
+	if math.IsNaN(t) || t < 0 {
+		return "", "", prev, fmt.Errorf("%s: event %d has invalid time %v", path, index, t)
+	}
+	if t < prev {
+		return "", "", prev, fmt.Errorf("%s: event %d goes back in time (%v after %v)", path, index, t, prev)
+	}
+	if err := json.Unmarshal(raw[1], &code); err != nil {
+		return "", "", prev, fmt.Errorf("%s: event %d has a non-string code", path, index)
+	}
+	switch code {
+	case "o", "i", "m", "r":
+		if err := json.Unmarshal(raw[2], &data); err != nil {
+			return "", "", prev, fmt.Errorf("%s: event %d %q has non-string data", path, index, code)
+		}
+		if len(data) > recfmt.MaxFrame {
+			return "", "", prev, fmt.Errorf("%s: event %d exceeds %d bytes", path, index, recfmt.MaxFrame)
+		}
+	}
+	return code, data, t, nil
+}
+
+// parseResizePayload splits an "r" payload of the form "COLSxROWS"
+// (asciicast order: columns first) into rows and cols. Both must be
+// positive; absurd-but-positive values survive, since the .gtr reader
+// clamps those on read anyway.
+func parseResizePayload(payload, path string, index int) (rows, cols int, err error) {
+	parts := strings.Split(payload, "x")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("%s: event %d has malformed resize payload %q (want \"COLSxROWS\")",
+			path, index, payload)
+	}
+	cols, cerr := strconv.Atoi(parts[0])
+	rows, rerr := strconv.Atoi(parts[1])
+	if cerr != nil || rerr != nil {
+		return 0, 0, fmt.Errorf("%s: event %d has malformed resize payload %q (want \"COLSxROWS\")",
+			path, index, payload)
+	}
+	if rows < 1 || cols < 1 {
+		return 0, 0, fmt.Errorf("%s: event %d has non-positive resize %q", path, index, payload)
+	}
+	return rows, cols, nil
+}
+
+// scanCast validates a whole cast file and tallies its events without
+// retaining them: pass 1 of cmdImportCast. No output is created, so a
+// malformed file fails before any .gtr exists.
+func scanCast(path string) (castHeader, map[string]string, castStats, error) {
+	var st castStats
+	f, err := os.Open(path)
+	if err != nil {
+		return castHeader{}, nil, st, err
+	}
+	defer func() { _ = f.Close() }()
+	dec := json.NewDecoder(f)
+	hdr, err := decodeCastHeader(dec, path)
+	if err != nil {
+		return hdr, nil, st, err
+	}
+	env := make(map[string]string, len(hdr.Env))
+	for k, v := range hdr.Env {
+		s, ok := v.(string)
+		if !ok {
+			st.droppedEnv++
+			continue
+		}
+		env[k] = s
+	}
+	var prev float64
+	for index := 0; ; index++ {
+		var raw []json.RawMessage
+		if derr := dec.Decode(&raw); derr != nil {
+			if errors.Is(derr, io.EOF) {
+				return hdr, env, st, nil
+			}
+			return hdr, nil, st, fmt.Errorf("%s: bad event %d: %w", path, index, derr)
+		}
+		code, data, t, perr := parseCastEvent(raw, path, index, prev)
+		if perr != nil {
+			return hdr, nil, st, perr
+		}
+		prev = t
+		switch code {
+		case "o":
+			st.nOut++
+		case "i":
+			st.nIn++
+			st.hasInput = true
+		case "r":
+			if _, _, rerr := parseResizePayload(data, path, index); rerr != nil {
+				return hdr, nil, st, rerr
+			}
+			st.nResize++
+		case "m":
+			st.nMarkers++
+		default:
+			st.nUnknown++
+		}
+	}
+}
+
+// writeCastFrames re-decodes a validated cast and appends its frames: pass 2
+// of cmdImportCast. Every event re-validates; only a file changed between
+// the two passes can fail here.
+func writeCastFrames(path string, rec *recfmt.Recorder) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	dec := json.NewDecoder(f)
+	if _, err := decodeCastHeader(dec, path); err != nil {
+		return err
+	}
+	var prev float64
+	for index := 0; ; index++ {
+		var raw []json.RawMessage
+		if derr := dec.Decode(&raw); derr != nil {
+			if errors.Is(derr, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("%s: bad event %d: %w", path, index, derr)
+		}
+		code, data, t, perr := parseCastEvent(raw, path, index, prev)
+		if perr != nil {
+			return perr
+		}
+		prev = t
+		switch code {
+		case "o":
+			rec.Output([]byte(data))
+		case "i":
+			rec.Input([]byte(data))
+		case "r":
+			rows, cols, rerr := parseResizePayload(data, path, index)
+			if rerr != nil {
+				return rerr
+			}
+			rec.Resize(rows, cols)
+		}
+	}
 }

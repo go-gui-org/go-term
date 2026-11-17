@@ -8,6 +8,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -306,11 +307,12 @@ func TestCommands_BadInput(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "absent.gtr")
 
 	cmds := map[string]func([]string) error{
-		"info":    cmdInfo,
-		"cat":     cmdCat,
-		"play":    cmdPlay,
-		"fixture": cmdFixture,
-		"export":  cmdExport,
+		"info":        cmdInfo,
+		"cat":         cmdCat,
+		"play":        cmdPlay,
+		"fixture":     cmdFixture,
+		"export":      cmdExport,
+		"import-cast": cmdImportCast,
 	}
 	inputs := map[string][]string{
 		"no arguments":    {},
@@ -354,5 +356,213 @@ func TestCommands_TruncatedRecording(t *testing.T) {
 
 	if _, err := captureStdout(t, func() error { return cmdInfo([]string{truncated}) }); err != nil {
 		t.Errorf("info on a truncated recording: %v", err)
+	}
+}
+
+// importCastHeader is the header shared by the hand-written casts below: an
+// 80x24 asciicast v2 file.
+const importCastHeader = "{\"version\":2,\"width\":80,\"height\":24}\n"
+
+// writeCastFile writes content verbatim to a .cast file for the import-cast
+// tests. Content is raw so malformed inputs can be expressed exactly.
+func writeCastFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "in.cast")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+// readGtrFrames reads every frame of a .gtr, copying payloads out of the
+// reader's reuse buffer so they survive the next Next call.
+func readGtrFrames(t *testing.T, path string) (recfmt.Header, []recfmt.Frame) {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("os.Open %s: %v", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	rr, err := recfmt.NewReader(f)
+	if err != nil {
+		t.Fatalf("recfmt.NewReader %s: %v", path, err)
+	}
+	hdr := rr.Header()
+	var frames []recfmt.Frame
+	for {
+		fr, err := rr.Next()
+		if err != nil {
+			if err == io.EOF {
+				return hdr, frames
+			}
+			t.Fatalf("Reader.Next %s: %v", path, err)
+		}
+		fr.Data = append([]byte(nil), fr.Data...)
+		frames = append(frames, fr)
+	}
+}
+
+// outputInputOnly drops resize frames, which never survive an
+// export/import-cast loop: the export leg has no "r" equivalent handling
+// and skips them.
+func outputInputOnly(frames []recfmt.Frame) []recfmt.Frame {
+	var out []recfmt.Frame
+	for _, fr := range frames {
+		if fr.Kind == recfmt.KindOutput || fr.Kind == recfmt.KindInput {
+			out = append(out, fr)
+		}
+	}
+	return out
+}
+
+// Export then import-cast must preserve the output and input bytes exactly;
+// the resize frame is lost on the export leg (documented above), so only
+// header geometry and output/input frames are compared. Deltas on both sides
+// are sub-millisecond wall-clock gaps, hence the 1ms tolerance.
+func TestImportCast_RoundTrip(t *testing.T) {
+	src := recording(t)
+	dir := t.TempDir()
+	castPath := filepath.Join(dir, "session.cast")
+	if _, err := captureStdout(t, func() error {
+		return cmdExport([]string{src, "-cast", castPath})
+	}); err != nil {
+		t.Fatalf("cmdExport: %v", err)
+	}
+
+	backPath := filepath.Join(dir, "back.gtr")
+	if _, err := captureStdout(t, func() error {
+		return cmdImportCast([]string{castPath, "-out", backPath})
+	}); err != nil {
+		t.Fatalf("cmdImportCast: %v", err)
+	}
+
+	srcHdr, srcFrames := readGtrFrames(t, src)
+	backHdr, backFrames := readGtrFrames(t, backPath)
+	if srcHdr.Width != backHdr.Width || srcHdr.Height != backHdr.Height {
+		t.Errorf("geometry = %dx%d, want %dx%d",
+			backHdr.Width, backHdr.Height, srcHdr.Width, srcHdr.Height)
+	}
+	want, got := outputInputOnly(srcFrames), outputInputOnly(backFrames)
+	if len(want) != len(got) {
+		t.Fatalf("%d output/input frames survived, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if want[i].Kind != got[i].Kind {
+			t.Errorf("frame %d kind = %q, want %q", i, got[i].Kind, want[i].Kind)
+		}
+		if string(got[i].Data) != string(want[i].Data) {
+			t.Errorf("frame %d data = %q, want %q", i, got[i].Data, want[i].Data)
+		}
+		if d := want[i].Delta - got[i].Delta; d < -time.Millisecond || d > time.Millisecond {
+			t.Errorf("frame %d delta = %s, want within 1ms of %s", i, got[i].Delta, want[i].Delta)
+		}
+	}
+}
+
+// Files that are not well-formed asciicast v2 — a v1 header, times running
+// backwards, unusable geometry, or a resize payload that does not parse —
+// are rejected with an error, never a partial .gtr.
+func TestImportCast_RejectsDialects(t *testing.T) {
+	cases := map[string]string{
+		"v1 header": `{"version":1,"width":80,"height":24}` + "\n" +
+			`[0.1,"o","hi"]` + "\n",
+		"missing version": `{"width":80,"height":24}` + "\n",
+		"decreasing timestamps": importCastHeader +
+			`[0.5,"o","a"]` + "\n" + `[0.2,"o","b"]` + "\n",
+		"negative time": importCastHeader +
+			`[-1.0,"o","x"]` + "\n",
+		"zero width": `{"version":2,"width":0,"height":24}` + "\n",
+		"negative height": `{"version":2,"width":80,"height":-5}` + "\n",
+		"oversize width": `{"version":2,"width":100000,"height":24}` + "\n",
+		"malformed resize": importCastHeader +
+			`[0.1,"r","bogus"]` + "\n",
+		"zero resize dims": importCastHeader +
+			`[0.1,"r","0x0"]` + "\n",
+		"truncated json": importCastHeader +
+			`[0.1,"o"` + "\n",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			cast := writeCastFile(t, content)
+			out := filepath.Join(t.TempDir(), "out.gtr")
+			if _, err := captureStdout(t, func() error {
+				return cmdImportCast([]string{cast, "-out", out})
+			}); err == nil {
+				t.Errorf("cmdImportCast accepted %s", name)
+			}
+		})
+	}
+}
+
+// Markers have no .gtr equivalent, so they are dropped — but the import
+// succeeds and the surrounding output bytes are intact.
+func TestImportCast_MarkersDropped(t *testing.T) {
+	cast := writeCastFile(t, importCastHeader+
+		`[0.1,"o","hello "]`+"\n"+
+		`[0.2,"m","chapter 1"]`+"\n"+
+		`[0.3,"o","world"]`+"\n")
+	out := filepath.Join(t.TempDir(), "out.gtr")
+	if _, err := captureStdout(t, func() error {
+		return cmdImportCast([]string{cast, "-out", out})
+	}); err != nil {
+		t.Fatalf("cmdImportCast: %v", err)
+	}
+	_, frames := readGtrFrames(t, out)
+	if len(frames) != 2 {
+		t.Fatalf("%d frames imported, want 2 (markers dropped)", len(frames))
+	}
+	if got := string(frames[0].Data) + string(frames[1].Data); got != "hello world" {
+		t.Errorf("output bytes = %q, want %q", got, "hello world")
+	}
+}
+
+// Resize events ("r" with a "COLSxROWS" payload) become .gtr resize frames
+// with the same dims, in order between the surrounding output frames.
+func TestImportCast_ResizeEvents(t *testing.T) {
+	cast := writeCastFile(t, importCastHeader+
+		`[0.1,"o","a"]`+"\n"+
+		`[0.2,"r","100x30"]`+"\n"+
+		`[0.3,"o","b"]`+"\n")
+	out := filepath.Join(t.TempDir(), "out.gtr")
+	if _, err := captureStdout(t, func() error {
+		return cmdImportCast([]string{cast, "-out", out})
+	}); err != nil {
+		t.Fatalf("cmdImportCast: %v", err)
+	}
+	_, frames := readGtrFrames(t, out)
+	if len(frames) != 3 {
+		t.Fatalf("%d frames imported, want 3 (output, resize, output)", len(frames))
+	}
+	if frames[0].Kind != recfmt.KindOutput || string(frames[0].Data) != "a" {
+		t.Errorf("frame 0 = kind %q data %q, want output \"a\"", frames[0].Kind, frames[0].Data)
+	}
+	if frames[1].Kind != recfmt.KindResize || frames[1].Rows != 30 || frames[1].Cols != 100 {
+		t.Errorf("frame 1 = kind %q %dx%d, want resize 100x30 (cols×rows)",
+			frames[1].Kind, frames[1].Cols, frames[1].Rows)
+	}
+	if frames[2].Kind != recfmt.KindOutput || string(frames[2].Data) != "b" {
+		t.Errorf("frame 2 = kind %q data %q, want output \"b\"", frames[2].Kind, frames[2].Data)
+	}
+}
+
+// Unknown event codes are the spec's extension point, so they are skipped —
+// the import succeeds and the surrounding output frames are byte-intact.
+func TestImportCast_UnknownCodesSkipped(t *testing.T) {
+	cast := writeCastFile(t, importCastHeader+
+		`[0.1,"o","a"]`+"\n"+
+		`[0.2,"x",{"future":"payload"}]`+"\n"+
+		`[0.3,"o","b"]`+"\n")
+	out := filepath.Join(t.TempDir(), "out.gtr")
+	if _, err := captureStdout(t, func() error {
+		return cmdImportCast([]string{cast, "-out", out})
+	}); err != nil {
+		t.Fatalf("cmdImportCast with unknown codes: %v", err)
+	}
+	_, frames := readGtrFrames(t, out)
+	if len(frames) != 2 {
+		t.Fatalf("%d frames imported, want 2 (unknown skipped)", len(frames))
+	}
+	if string(frames[0].Data) != "a" || string(frames[1].Data) != "b" {
+		t.Errorf("output frames = %q %q, want \"a\" \"b\"", frames[0].Data, frames[1].Data)
 	}
 }
