@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.19.1] - 2026-11-19
+
+### Changed
+
+- Bumped go-gui v0.97.0 → v0.98.0 and go-glyph v1.26.5 → v1.28.0 (#313).
+
 ## [0.19.0] - 2026-11-18
 
 ### Added
