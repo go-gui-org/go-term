@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-11-22
+
 ### Fixed
 
 - **A Term inside an ID-bearing container takes keyboard input (go-gui#1284).**
@@ -16,7 +18,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   Focus now uses the effective ID. `View` builds its tree when go-gui generates
   it, so the ID resolves in the correct scope also when a parent's `Content`
   calls `tm.View(w)` directly. `FocusID` still returns the leaf; pass it through
-  `Window.ResolveID` to address the pane.
+  `Window.ResolveID` to address the pane. (#315)
+
+### Changed
+
+- Bumped go-gui v0.98.0 → v0.99.1 and go-glyph v1.28.0 → v1.29.2 (#317, #318).
 
 ## [0.19.1] - 2026-11-19
 
