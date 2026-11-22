@@ -498,6 +498,14 @@ type Term struct {
 	// in the same window don't compete for the same focus slot.
 	focusID string
 
+	// effFocusID is focusID as the last layout generation resolved it: the
+	// leaf joined to the pane's ID-bearing ancestors ("tabs:term-3" inside a
+	// TabControl). go-gui's SetFocus takes this form, never the bare leaf
+	// (go-gui#1284). Empty until the first generation. Main goroutine only:
+	// written in termView.GenerateLayout, read there and in SetFocused's queued
+	// command, both on the main thread.
+	effFocusID string
+
 	// winFocused tracks whether the *window* has focus. It is fed only by the
 	// EventFocused/EventUnfocused pair in HandleWindowEvent, i.e. by real
 	// window transitions — a pane manager must not synthesize the pair to
