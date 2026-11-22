@@ -243,8 +243,9 @@ build-windows:
 	  -ldflags '$(LDFLAGS) -H windowsgui' \
 	  -o $(BUILD)/$(DEMO_BIN)-windows-arm64.exe ./examples/falcon
 
-# Universal binary, so one .dmg serves Apple silicon and Intel. Each half
-# needs its own cgo -arch flags; lipo then fuses them. macOS host only:
+# Apple-silicon only: go-gui dropped Intel Macs (its backend fails the
+# amd64 link with macOS_requires_arm64__Intel_Macs_are_not_supported),
+# so there is only the arm64 half and nothing to fuse. macOS host only:
 # the Metal backend needs the macOS SDK.
 build-macos:
 	@mkdir -p $(BUILD)
@@ -252,14 +253,7 @@ build-macos:
 	  CGO_CFLAGS="-arch arm64" \
 	  CGO_LDFLAGS="-arch arm64 -Wl,-no_warn_duplicate_libraries" \
 	  $(GO) build $(PROD_TAGS) -ldflags '$(LDFLAGS)' \
-	  -o $(BUILD)/$(DEMO_BIN)-darwin-arm64 ./examples/falcon
-	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
-	  CGO_CFLAGS="-arch x86_64" \
-	  CGO_LDFLAGS="-arch x86_64 -Wl,-no_warn_duplicate_libraries" \
-	  $(GO) build $(PROD_TAGS) -ldflags '$(LDFLAGS)' \
-	  -o $(BUILD)/$(DEMO_BIN)-darwin-amd64 ./examples/falcon
-	lipo -create -output $(BUILD)/$(DEMO_BIN)-macos \
-	  $(BUILD)/$(DEMO_BIN)-darwin-arm64 $(BUILD)/$(DEMO_BIN)-darwin-amd64
+	  -o $(BUILD)/$(DEMO_BIN)-macos ./examples/falcon
 
 # ---------------------------------------------------------- packaging
 #
@@ -292,9 +286,7 @@ package-windows: build-windows $(BUILDAPP_BIN)
 	  $(BUILD)/pkg-windows-arm64/$(DEMO_BIN).exe
 
 # No -bundle-deps, unlike the `app` target: falcon links nothing outside
-# /System and /usr/lib, so there is nothing to copy, and buildapp's
-# dependency rewriter fails outright on a universal binary
-# (install_name_tool -id against the fat Mach-O exits 1).
+# /System and /usr/lib, so there is nothing to copy.
 package-macos: build-macos $(BUILDAPP_BIN)
 	@mkdir -p $(BUILD)/pkg-macos $(DIST)
 	cp $(BUILD)/$(DEMO_BIN)-macos $(BUILD)/pkg-macos/$(DEMO_BIN)

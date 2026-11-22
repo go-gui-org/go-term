@@ -73,7 +73,7 @@ jobs:
   macos:
     name: macOS
     # A Mac is required: the Metal backend is cgo, and the bundle needs
-    # iconutil, lipo, hdiutil and codesign.
+    # iconutil, hdiutil and codesign.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,10 +86,9 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      # Builds arm64 and amd64, fuses them with lipo, bundles the result
-      # as Falcon.app and writes an ad-hoc signed .dmg. One download
-      # serves Apple silicon and Intel.
-      - name: Package universal .dmg
+      # Builds arm64 only (go-gui dropped Intel Macs), bundles it
+      # as Falcon.app and writes an ad-hoc signed .dmg. Apple silicon only.
+      - name: Package arm64 .dmg
         run: make package-macos
 
       - uses: actions/upload-artifact@v4
