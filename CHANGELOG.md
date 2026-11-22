@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-11-22
+
+### Changed
+
+- The macOS `.dmg` is now Apple-silicon only. go-gui dropped Intel Macs, so
+  the amd64 half no longer links and there is nothing to fuse with `lipo`;
+  `build-macos` builds arm64 only. The `.dmg` keeps its filename, and Linux
+  and Windows still ship both architectures. (#320)
+
 ## [0.19.2] - 2026-11-22
 
 ### Fixed
