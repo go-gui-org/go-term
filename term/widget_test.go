@@ -2572,7 +2572,7 @@ func TestTerm_IMECompositionState(t *testing.T) {
 	})
 
 	// Invoke View to let it detect the composition and update cached state
-	_ = term.View(win)
+	_ = term.View(win).GenerateLayout(win)
 
 	if !term.ime.composing {
 		t.Error("expected ime.composing to be true")
@@ -2590,7 +2590,7 @@ func TestTerm_IMECompositionState(t *testing.T) {
 		IMEText: "",
 	})
 
-	_ = term.View(win)
+	_ = term.View(win).GenerateLayout(win)
 
 	if term.ime.composing {
 		t.Error("expected ime.composing to be false after clear")
@@ -2625,7 +2625,7 @@ func TestTerm_IMEComposition_UnfocusedPaneIgnores(t *testing.T) {
 	// Unfocused pane: the window is composing, this pane must ignore it.
 	term.SetFocused(false)
 	compose()
-	_ = term.View(win)
+	_ = term.View(win).GenerateLayout(win)
 	if term.ime.composing {
 		t.Error("unfocused pane adopted composition state")
 	}
@@ -2636,7 +2636,7 @@ func TestTerm_IMEComposition_UnfocusedPaneIgnores(t *testing.T) {
 	// Focused pane: same window state, now it must be picked up. Proves the
 	// gate keys off focus rather than being a dead branch.
 	term.SetFocused(true)
-	_ = term.View(win)
+	_ = term.View(win).GenerateLayout(win)
 	if !term.ime.composing {
 		t.Error("focused pane did not adopt composition state")
 	}
@@ -2647,7 +2647,7 @@ func TestTerm_IMEComposition_UnfocusedPaneIgnores(t *testing.T) {
 	// Focus moves away mid-composition: the stale preedit must be dropped,
 	// not left painted on the now-inactive pane.
 	term.SetFocused(false)
-	_ = term.View(win)
+	_ = term.View(win).GenerateLayout(win)
 	if term.ime.composing {
 		t.Error("composition state survived losing focus")
 	}
@@ -2675,7 +2675,7 @@ func TestTerm_View_RestoresFocus(t *testing.T) {
 	}
 
 	// View() must restore focus when the Term is focused.
-	_ = term.View(win)
+	_ = term.View(win).GenerateLayout(win)
 	if got := win.FocusID(); got != term.focusID {
 		t.Errorf("after View, FocusID = %q, want %q", got, term.focusID)
 	}
@@ -2684,7 +2684,7 @@ func TestTerm_View_RestoresFocus(t *testing.T) {
 	// FocusID guard in View() skips the SetFocus call only when this
 	// Term already owns the ID.
 	win.SetFocus("some-other-widget")
-	_ = term.View(win)
+	_ = term.View(win).GenerateLayout(win)
 	if got := win.FocusID(); got != term.focusID {
 		t.Errorf("after View over foreign focus, FocusID = %q, want %q", got, term.focusID)
 	}
@@ -2692,7 +2692,7 @@ func TestTerm_View_RestoresFocus(t *testing.T) {
 	// When unfocused, View() must not overwrite focus.
 	term.SetFocused(false)
 	win.ClearFocus()
-	_ = term.View(win)
+	_ = term.View(win).GenerateLayout(win)
 	if got := win.FocusID(); got != "" {
 		t.Errorf("unfocused: after View, FocusID = %q, want empty", got)
 	}

@@ -36,14 +36,14 @@ func TestTerm_View_FocusedAcceptsTextInput(t *testing.T) {
 	}
 	defer func() { _ = term.Close() }()
 
-	if !viewAcceptsTextInput(t, term.View(win)) {
+	if !viewAcceptsTextInput(t, term.columnView(win)) {
 		t.Error("focused pane: AcceptsTextInput = false, want true")
 	}
 
 	// An unfocused pane is not focusable and holds no focus ID, so it must
 	// not claim the input method either.
 	term.SetFocused(false)
-	if viewAcceptsTextInput(t, term.View(win)) {
+	if viewAcceptsTextInput(t, term.columnView(win)) {
 		t.Error("unfocused pane: AcceptsTextInput = true, want false")
 	}
 }
