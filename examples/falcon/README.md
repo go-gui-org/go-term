@@ -42,6 +42,14 @@ dependencies; it needs an OpenGL-capable driver and installed fonts.
 Download `falcon-<version>-windows-amd64.zip` from the release page and unzip it
 anywhere. No runtime dependencies beyond a stock Windows 10/11.
 
+Known limitation: Falcon uses the system ConPTY. Builds before Windows 11 24H2
+ignore its request to measure text by grapheme cluster, so conhost can width a
+glyph differently from Falcon's grid. Apps that redraw an input line (for
+example, Claude Code's prompt) may then show the cursor offset from the text.
+Resizing the window repaints it. Not fixed downlevel: WezTerm and Windows
+Terminal avoid it by bundling their own `conpty.dll` and `OpenConsole.exe`,
+which Falcon does not.
+
 ## Run from the source tree
 
 ```bash
