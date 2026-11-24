@@ -6,14 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A text field beside a Term takes keyboard input.** A click on a `gui.Input`
+  in the same window as a focused pane moved focus to the field, but the pane
+  took it back on the next rebuild, so every key went to the terminal. A pane
+  now takes focus back only when focus is empty or was never its own since the
+  last `SetFocused` change. After the user moves focus to another widget, the
+  pane leaves it there and dims its cursor. A click on the pane, or
+  `SetFocused`, gives the pane the keyboard again. (#323)
+
 ## [0.19.3] - 2026-11-22
 
 ### Changed
 
-- The macOS `.dmg` is now Apple-silicon only. go-gui dropped Intel Macs, so
-  the amd64 half no longer links and there is nothing to fuse with `lipo`;
-  `build-macos` builds arm64 only. The `.dmg` keeps its filename, and Linux
-  and Windows still ship both architectures. (#320)
+- The macOS `.dmg` is now Apple-silicon only. go-gui dropped Intel Macs, so the
+  amd64 half no longer links and there is nothing to fuse with `lipo`;
+  `build-macos` builds arm64 only. The `.dmg` keeps its filename, and Linux and
+  Windows still ship both architectures. (#320)
 
 ## [0.19.2] - 2026-11-22
 

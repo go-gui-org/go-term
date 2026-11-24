@@ -45,7 +45,7 @@ func (t *Term) columnView(w *gui.Window) gui.View {
 		compText   string
 		compCursor int
 	)
-	if t.focused.Load() && w != nil {
+	if t.ownsKeys() && w != nil {
 		composing = w.IMEComposing()
 		compText = w.IMECompText()
 		compCursor = w.IMECompCursor()
@@ -109,28 +109,7 @@ func (t *Term) columnView(w *gui.Window) gui.View {
 		// (go-gui#999): CJK composition then works, preedit reaches drawIME
 		// through Window.IMECompText, and the commit arrives in onChar.
 		colCfg.AcceptsTextInput = true
-		// SetView → clearViewStateLocked clears the window's
-		// focus ID. Reassert after every full layout rebuild so
-		// keystrokes reach onChar/onKeyDown without requiring a
-		// prior click. Skip while a modal dialog is up: go-gui routes
-		// keys to the dialog layer, and re-asserting here would steal
-		// focus back to the terminal, breaking Tab/Esc/Enter in the
-		// dialog. DialogDismiss restores focus to this pane on close.
-		//
-		// Only assert when the ID is not already ours: SetFocus takes the
-		// window lock and re-activates the platform input context, and View()
-		// runs on every layout rebuild — i.e. every keystroke. Re-asserting
-		// unconditionally is what surfaced go-gui#157, where SetFocus was not
-		// idempotent and cleared the IME preedit mid-composition.
-		//
-		// Compared and set with the effective ID. The bare leaf matched no
-		// shape under an ID-bearing ancestor (a TabControl): the guard fired on
-		// every rebuild, focus went to a dead ID, and go-gui's repair moved it
-		// to the first tab stop, so keys never reached the pane (go-gui#1284).
-		t.effFocusID = w.EffID(t.focusID)
-		if !w.DialogIsVisible() && w.FocusID() != t.effFocusID {
-			w.SetFocus(t.effFocusID)
-		}
+		t.syncFocus(w)
 	}
 	// FillFill without explicit Width/Height: the Term may be embedded
 	// in a multi-pane layout where the parent container dictates
@@ -140,4 +119,67 @@ func (t *Term) columnView(w *gui.Window) gui.View {
 	// the wrapping.
 	colCfg.Sizing = gui.FillFill
 	return gui.Column(colCfg)
+}
+
+// syncFocus keeps go-gui's keyboard focus on a focused pane, without taking it
+// from a widget the user chose. Called on every layout generation while
+// t.focused is set.
+//
+// Why reassert at all: SetView → clearViewStateLocked clears the window's focus
+// ID, so after every full rebuild the pane must take it back, or keystrokes stop
+// reaching onChar/onKeyDown until the user clicks.
+//
+// Why not always: View runs on every rebuild — every keystroke. Taking focus
+// whenever the ID was not ours stole it back from a text field the user had just
+// clicked, one frame later, so the field never got a key (#323). The rule that
+// tells the cases apart is whether this pane has held focus since the last
+// SetFocused change (focusHeld):
+//
+//   - focus is ours: note that we hold it, clear any yield.
+//   - focus is empty: SetView or ClearFocus wiped it. Take it.
+//   - focus is elsewhere and we held it: the user (click or Tab) or the embedder
+//     moved it on purpose. Yield, and stop reasserting until focus comes back —
+//     a click on the pane does that through go-gui's press-focus, since the
+//     column stays focusable — or SetFocused starts over.
+//   - focus is elsewhere and we never held it: our first SetFocus went to the
+//     bare leaf before the effective ID existed, and go-gui's repair moved it to
+//     the first tab stop (go-gui#1284). Take it.
+//
+// Skipped while a modal dialog is up: go-gui routes keys to the dialog layer,
+// and taking focus here would break Tab/Esc/Enter in it. DialogDismiss restores
+// focus to this pane on close. Skipping also keeps the dialog's focus from
+// reading as a yield.
+//
+// Compared and set with the effective ID. The bare leaf matches no shape under
+// an ID-bearing ancestor (a TabControl): the guard fired on every rebuild, focus
+// went to a dead ID, and go-gui's repair moved it to the first tab stop
+// (go-gui#1284). SetFocus runs only on a real change: it takes the window lock
+// and re-activates the platform input context, and calling it on every rebuild
+// is what surfaced go-gui#157, where SetFocus cleared the IME preedit.
+func (t *Term) syncFocus(w *gui.Window) {
+	t.effFocusID = w.EffID(t.focusID)
+	if w.DialogIsVisible() {
+		return
+	}
+	switch cur := w.FocusID(); {
+	case cur == t.effFocusID:
+		t.focusHeld = true
+		t.setFocusYielded(false)
+	case cur == "":
+		w.SetFocus(t.effFocusID)
+		t.setFocusYielded(false)
+	case t.focusHeld:
+		t.focusHeld = false
+		t.setFocusYielded(true)
+	case !t.focusYielded.Load():
+		w.SetFocus(t.effFocusID)
+	}
+}
+
+// setFocusYielded records a yield change and repaints, so the cursor dims or
+// undims in the same frame.
+func (t *Term) setFocusYielded(v bool) {
+	if t.focusYielded.Swap(v) != v {
+		t.bumpVersion()
+	}
 }

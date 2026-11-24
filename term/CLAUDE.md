@@ -370,3 +370,10 @@ The widget claims focus via `IDFocus` set to a unique per-Term `focusID` on its
 outer `gui.Column`. In multi-Term windows the pane manager calls `SetFocused` to
 route `IDFocus` to the active Term. If keystrokes don't reach the PTY, focus is
 the first place to look.
+
+A focused pane takes focus back on each rebuild (`syncFocus`) only while it has
+not yet held it since the last `SetFocused` change, or when focus is empty. Once
+it has held focus, a move to another widget (a click on a `gui.Input`) is a
+yield: the pane stops reasserting and draws as unfocused (`ownsKeys`) until
+focus comes back by a click (`claimFocusOnPress`) or `SetFocused`. Use
+`ownsKeys`, not `t.focused`, for "is the user typing here?" (#323).

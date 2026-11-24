@@ -107,3 +107,161 @@ func TestTerm_SetFocused_UsesEffectiveID(t *testing.T) {
 		t.Errorf("after SetFocused(true), FocusID = %q, want %q", got, want)
 	}
 }
+
+// focusRig is a Term beside a text Input under one ID-bearing container: the
+// shape of the #323 report (sidebar inputs next to a TabControl of panes).
+// keys collects what reached the child through the pane; text is the Input's
+// value as its OnTextChanged reports it.
+type focusRig struct {
+	win  *gui.Window
+	term *Term
+	mu   sync.Mutex
+	keys []byte
+	text string
+}
+
+func newFocusRig(t *testing.T) *focusRig {
+	t.Helper()
+	r := &focusRig{win: gui.NewWindow(gui.WindowCfg{Width: 640, Height: 480})}
+	term, err := New(r.win, Cfg{
+		OnInput: func(b []byte, _ InputKind) {
+			r.mu.Lock()
+			r.keys = append(r.keys, b...)
+			r.mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("New term: %v", err)
+	}
+	t.Cleanup(func() { _ = term.Close() })
+	r.term = term
+	view := func(w *gui.Window) gui.View {
+		return gui.Column(gui.ContainerCfg{
+			ID:     "outer",
+			Sizing: gui.FillFill,
+			Content: []gui.View{
+				gui.Input(gui.InputCfg{
+					ID:     "in",
+					Text:   r.text,
+					Sizing: gui.FillFit,
+					OnTextChanged: func(s string, ctx gui.EventCtx) {
+						ctx.Consume()
+						r.text = s
+					},
+				}),
+				term.View(w),
+			},
+		})
+	}
+	// Two frames: the first stamps the effective ID, the second lets the pane
+	// see that it holds focus.
+	r.win.TestRender(view)
+	r.win.TestRender(nil)
+	if got, want := r.win.FocusID(), r.paneID(); got != want {
+		t.Fatalf("setup: FocusID = %q, want pane %q", got, want)
+	}
+	return r
+}
+
+func (r *focusRig) paneID() string  { return gui.ScopeID("outer", r.term.FocusID()) }
+func (r *focusRig) inputID() string { return gui.ScopeID("outer", "in") }
+
+// frames runs n rebuilds, the way every keystroke and redraw does.
+func (r *focusRig) frames(n int) {
+	for range n {
+		r.win.TestRender(nil)
+	}
+}
+
+func (r *focusRig) typeChar(c rune) {
+	r.win.EventFn(&gui.Event{Type: gui.EventChar, CharCode: uint32(c)})
+}
+
+func (r *focusRig) paneKeys() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return string(r.keys)
+}
+
+// #323: a click on an Input beside a focused pane must leave focus on the Input.
+// View reasserted the pane's focus on every rebuild whenever the window's focus
+// ID was not the pane's, so the very next frame took focus back and the Input
+// never got a keystroke.
+func TestTerm_View_YieldsFocusToClickedInput(t *testing.T) {
+	r := newFocusRig(t)
+	if err := r.win.TestClick(r.inputID()); err != nil {
+		t.Fatalf("TestClick input: %v", err)
+	}
+	r.frames(3)
+	if got, want := r.win.FocusID(), r.inputID(); got != want {
+		t.Fatalf("after clicking input and rebuilding, FocusID = %q, want %q", got, want)
+	}
+	r.typeChar('x')
+	r.frames(1)
+	if r.text != "x" {
+		t.Errorf("input text = %q, want %q", r.text, "x")
+	}
+	if got := r.paneKeys(); got != "" {
+		t.Errorf("pane received %q, want nothing", got)
+	}
+	// A pane that gave the keyboard away must look like it: dimmed cursor, no
+	// blink, completion notifications on.
+	if r.term.ownsKeys() {
+		t.Error("ownsKeys = true after yielding focus to the input")
+	}
+}
+
+// A click back on the pane takes focus back: go-gui's press-focus does it, so
+// the pane's column must stay focusable while it has yielded.
+func TestTerm_View_ReclaimsFocusOnPaneClick(t *testing.T) {
+	r := newFocusRig(t)
+	if err := r.win.TestClick(r.inputID()); err != nil {
+		t.Fatalf("TestClick input: %v", err)
+	}
+	r.frames(2)
+	if err := r.win.TestClick(r.paneID()); err != nil {
+		t.Fatalf("TestClick pane: %v", err)
+	}
+	r.frames(2)
+	if got, want := r.win.FocusID(), r.paneID(); got != want {
+		t.Fatalf("after clicking pane, FocusID = %q, want %q", got, want)
+	}
+	if !r.term.ownsKeys() {
+		t.Error("ownsKeys = false after the pane took focus back")
+	}
+	r.typeChar('y')
+	if got := r.paneKeys(); got != "y" {
+		t.Errorf("pane received %q, want %q", got, "y")
+	}
+}
+
+// An embedder that focuses the pane explicitly (a tab switch) overrides a
+// yield: SetFocused(false) then (true) must bring keys back without a click.
+func TestTerm_SetFocused_OverridesYield(t *testing.T) {
+	r := newFocusRig(t)
+	if err := r.win.TestClick(r.inputID()); err != nil {
+		t.Fatalf("TestClick input: %v", err)
+	}
+	r.frames(2)
+	r.term.cmd = winScheduler{w: r.win}
+	r.term.SetFocused(false)
+	r.term.SetFocused(true)
+	r.frames(2)
+	if got, want := r.win.FocusID(), r.paneID(); got != want {
+		t.Fatalf("after SetFocused(true), FocusID = %q, want %q", got, want)
+	}
+	if !r.term.ownsKeys() {
+		t.Error("ownsKeys = false after SetFocused(true)")
+	}
+}
+
+// Focus cleared to nothing (SetView wipes it) is not a yield: the pane must
+// take it back on the next rebuild, with no click.
+func TestTerm_View_ReclaimsAfterClearedFocus(t *testing.T) {
+	r := newFocusRig(t)
+	r.win.ClearFocus()
+	r.frames(2)
+	if got, want := r.win.FocusID(), r.paneID(); got != want {
+		t.Fatalf("after ClearFocus, FocusID = %q, want %q", got, want)
+	}
+}
