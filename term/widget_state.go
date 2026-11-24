@@ -506,6 +506,20 @@ type Term struct {
 	// command, both on the main thread.
 	effFocusID string
 
+	// focusHeld records that the window's focus has been on this pane since the
+	// last SetFocused change. It is what tells a user's move to another widget
+	// (a click on a text field: yield) apart from focus that was never ours yet
+	// (bootstrap, or go-gui's repair of a dead ID: take it). See syncFocus. Main
+	// goroutine only.
+	focusHeld bool
+
+	// focusYielded is set when the user moved focus off this pane to another
+	// widget in the window (#323). While set, the pane stops taking focus back
+	// and draws as unfocused (ownsKeys). It clears when focus comes back, on its
+	// own or through SetFocused. Atomic: the blink and notify paths read it off
+	// the main goroutine.
+	focusYielded atomic.Bool
+
 	// winFocused tracks whether the *window* has focus. It is fed only by the
 	// EventFocused/EventUnfocused pair in HandleWindowEvent, i.e. by real
 	// window transitions — a pane manager must not synthesize the pair to

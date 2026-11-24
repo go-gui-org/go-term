@@ -442,6 +442,7 @@ func (t *Term) onClick(ctx gui.EventCtx) {
 	if t.cfg.OnClickFocus != nil {
 		t.cfg.OnClickFocus()
 	}
+	t.claimFocusOnPress(ctx)
 	// A click is the user reaching for the mouse: hand selection back to it
 	// rather than letting a keyboard copy cursor and a drag fight over the
 	// same SelAnchor/SelHead.
@@ -1435,5 +1436,23 @@ func (t *Term) momentumLoop() {
 				})
 			}
 		}
+	}
+}
+
+// claimFocusOnPress takes keyboard focus back when the user presses on a pane
+// that gave it to another widget (#323). go-gui focuses a focusable container on
+// press by itself, but the press lands on the canvas inside the pane's column,
+// and onClick consumes it, so that never happens here. Without this a pane that
+// yielded focus to a text field could not get it back by a click.
+//
+// A right press does not focus, matching go-gui's pressFocuses: it opens a menu,
+// not the control. An unfocused pane (t.focused false) is left to the embedder,
+// which owns that flag and hears about the click through Cfg.OnClickFocus.
+func (t *Term) claimFocusOnPress(ctx gui.EventCtx) {
+	if !t.focused.Load() || t.effFocusID == "" || ctx.Event.MouseButton == gui.MouseRight {
+		return
+	}
+	if ctx.Window.FocusID() != t.effFocusID {
+		ctx.Window.SetFocus(t.effFocusID)
 	}
 }

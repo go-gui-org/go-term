@@ -169,7 +169,7 @@ func openCapture(seq uint64) *recfmt.Recorder {
 // background window costs no wakeups at all. Caller holds grid.Mu: the blink
 // flag is grid state, which is also what keeps blinkLoop race-free.
 func (t *Term) cursorBlinkActive() bool {
-	return t.grid.CursorBlink && t.focused.Load() && t.winFocused.Load()
+	return t.grid.CursorBlink && t.ownsKeys() && t.winFocused.Load()
 }
 
 // cancelSelectDrag clears a selection drag stranded by a lost mouse-up:
@@ -423,6 +423,11 @@ func (t *Term) SetFocused(v bool) {
 	if t.focused.Swap(v) == v {
 		return // no change
 	}
+	// An explicit focus change from the embedder (a tab switch, a split) starts
+	// the hold/yield cycle over, so it always wins over a yield the user made
+	// earlier by clicking another widget. See syncFocus. focusHeld is reset in
+	// the queued command below, because it is main-goroutine state.
+	t.focusYielded.Store(false)
 	if v && t.cmd != nil {
 		t.queueCommand(func(w *gui.Window) {
 			// SetFocus takes the effective ID. The bare leaf misses whenever the
@@ -434,10 +439,20 @@ func (t *Term) SetFocused(v bool) {
 			if id == "" {
 				id = t.focusID
 			}
+			t.focusHeld = false
 			w.SetFocus(id)
 		})
 	}
 	t.bumpVersion()
+}
+
+// ownsKeys reports whether this pane has the keyboard: the embedder marked it
+// focused (SetFocused) and the user has not since moved focus to another widget
+// in the window (see syncFocus). Use it, not t.focused, wherever the question is
+// "is the user typing here?" — cursor dimming, blink, IME preedit, and the
+// command-done notification. Safe from any goroutine.
+func (t *Term) ownsKeys() bool {
+	return t.focused.Load() && !t.focusYielded.Load()
 }
 
 // FocusID returns the go-gui focus ID for this terminal.

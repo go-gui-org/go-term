@@ -597,7 +597,7 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 
 	// Dim the cursor to 40% when the terminal doesn't have pane focus.
 	opacity := float32(1.0)
-	if !t.focused.Load() {
+	if !t.ownsKeys() {
 		opacity = 0.4
 	}
 
