@@ -169,6 +169,34 @@ func (r *recordingNotifier) Notify(title, body string) {
 	r.mu.Unlock()
 }
 
+// waitNotified waits for one notifier signal. It fails the test instead of
+// blocking forever, so a dropped notification shows as a failure, not as a
+// 10-minute CI timeout (#316).
+func waitNotified(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for notification")
+	}
+}
+
+// waitNotifyIdle waits until notifyAsync's delivery goroutine clears
+// notifyBusy. The notifier signals the test from inside that goroutine, before
+// the deferred Store(false) runs, so a test that feeds a second notification
+// must wait here first. Otherwise notifyAsync drops it, which is the correct
+// production behaviour while busy (#316).
+func waitNotifyIdle(t *testing.T, tm *Term) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for tm.notifyBusy.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("timeout waiting for notifyBusy to clear")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestNotify_DesktopNotifier_NoCallback(t *testing.T) {
 	// When OnNotify is nil, OSC 9/777 must reach the notifier interface.
 	rec := &recordingNotifier{}
@@ -185,17 +213,23 @@ func TestNotify_DesktopNotifier_NoCallback(t *testing.T) {
 	// Bounded channel replaces time.Sleep — deterministic and fast.
 	notified := make(chan struct{}, 2)
 
-	// Wrap notif so each Notify call signals the channel.
+	// Wrap notif so each Notify call signals the channel. The sleep after the
+	// send keeps Notify from returning at once, so notifyAsync's deferred
+	// notifyBusy.Store(false) runs well after the test wakes. That makes the
+	// race in #316 happen on every run: without waitNotifyIdle the second
+	// feed lands while busy, is dropped by design, and the test never sees it.
 	tm.notif = notifierFunc(func(title, body string) {
 		rec.Notify(title, body)
 		notified <- struct{}{}
+		time.Sleep(20 * time.Millisecond)
 	})
 
 	feed(t, g, p, []byte("\x1b]9;hello world\x07"))
-	<-notified
+	waitNotified(t, notified)
+	waitNotifyIdle(t, tm)
 
 	feed(t, g, p, []byte("\x1b]777;notify;my title;my body\x07"))
-	<-notified
+	waitNotified(t, notified)
 
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
