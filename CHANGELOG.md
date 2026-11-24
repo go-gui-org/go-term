@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Bump go-gui v0.99.1 to v0.100.0.** Dependency update.
+
 ### Fixed
 
 - **IME pre-edit text no longer hides the text after the cursor.** The pre-edit
