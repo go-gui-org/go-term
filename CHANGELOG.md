@@ -8,6 +8,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The cursor covers all of a wide character.** On a CJK or emoji cell the
+  block and underline cursors covered only the left column, so only half of the
+  glyph was inverted. They now cover both columns. The copy-mode cursor does the
+  same. While composing with an IME, the caret now takes the width of the
+  pre-edit character it is on, not of the grid cell below it.
 - **IME conversion shows the selected clause.** During multi-clause conversion
   the pre-edit strip had one thin underline from end to end, so it did not show
   which clause the candidate window was for. The clause that is being converted
