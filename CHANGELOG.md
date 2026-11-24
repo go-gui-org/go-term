@@ -8,6 +8,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **IME pre-edit text no longer hides the text after the cursor.** The pre-edit
+  strip was painted over the cells at the cursor, so the text it covered was not
+  visible while the user composed. This looked like the IME typed over it. Now
+  the rest of the line moves right to make room, as it does when the shell
+  inserts the committed text.
 - **The cursor covers all of a wide character.** On a CJK or emoji cell the
   block and underline cursors covered only the left column, so only half of the
   glyph was inverted. They now cover both columns. The copy-mode cursor does the

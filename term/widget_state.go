@@ -334,6 +334,10 @@ type drawBufs struct {
 	// while composing does not allocate two slices every frame.
 	imeRunes  []rune
 	imeWidths []int
+	// imeShiftRow is the cursor row as prepareIMEShift redraws it while the
+	// user composes: the cells from the cursor on moved right by the preedit
+	// width. Reused so composing does not allocate a row every frame.
+	imeShiftRow []cell
 }
 
 // Term is a terminal-emulator widget bound to a single pty-backed shell.
