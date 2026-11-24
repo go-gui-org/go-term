@@ -10,8 +10,8 @@ github.com/dlclark/regexp2/v2 v2.13.2 h1:8vXJIqwqJRYqTHVl/DNQW8FPGNpkTn1aPrx2HZo
 github.com/dlclark/regexp2/v2 v2.13.2/go.mod h1:avUrQvPaLz2DrFNHJF0taWAFFX2C1GMSSoeiqFjcBmU=
 github.com/ebitengine/purego v0.11.3 h1:OB+JLpdm7ioymhyA+6s5kbb/uOuYycAgL8NNTFc5MLg=
 github.com/ebitengine/purego v0.11.3/go.mod h1:DCHPP08djqhNSoTfImcnHYQRZmd0qhakvrozqaEYhGQ=
-github.com/go-gui-org/go-glyph v1.29.2 h1:oY/SjaX3YXgHTTZlDDpIKLDRTF7Xs3d+ceM7TsUFH6k=
-github.com/go-gui-org/go-glyph v1.29.2/go.mod h1:aGDm1JjUNJ75HYaDDvUi0NZpUebaVUKHa7QCaCFQMek=
+github.com/go-gui-org/go-glyph v1.29.3 h1:LJY96ws2zn3d+w7bFx0JUaBnYJ68ac9kjWReB+Ea0Jg=
+github.com/go-gui-org/go-glyph v1.29.3/go.mod h1:aGDm1JjUNJ75HYaDDvUi0NZpUebaVUKHa7QCaCFQMek=
 github.com/go-gui-org/go-gui v0.99.1 h1:lRh8tFbaJC2oKrmvoISCcoNaHUr+ZbcnrVQ6lZY5lHU=
 github.com/go-gui-org/go-gui v0.99.1/go.mod h1:x1U5Be2Irc8CwqRPRbyliVQ3GFG2W8jauItxE7EpuMc=
 github.com/go-pdf/fpdf v0.9.0 h1:PPvSaUuo1iMi9KkaAn90NuKi+P4gwMedWPHhj8YlJQw=

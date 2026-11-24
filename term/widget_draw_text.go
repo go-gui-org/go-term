@@ -444,10 +444,10 @@ func (t *Term) emitCell(dc *gui.DrawContext, x, y, w float32, cell cell, k runKe
 	cs.Typeface = k.typeface
 	cs.Underline = false
 	cs.Strikethrough = k.strikethrough
-	// Tell go-glyph the cell box this glyph occupies so color/emoji fill the
-	// full reserved width (e.g. a width-2 emoji fills 2 cells) instead of the
-	// font's narrower natural emoji advance. Ignored for non-color glyphs.
-	cs.EmojiBoxWidth = w
+	// Tell go-glyph the cell box this glyph occupies: a width-2 emoji fills 2
+	// cells instead of the font's narrower natural advance, and a CJK
+	// ideograph fills 2 cells instead of leaving a gap (see cellBox).
+	cs = t.cellBox(cs, int(cell.Width), w)
 	dc.Text(x, y, t.cellText(cell), cs)
 	if k.ulStyle != ulNone {
 		t.drawUnderlineDecor(dc, x, y, w, k.ulStyle, k.ulColor)

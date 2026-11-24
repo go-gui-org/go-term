@@ -228,10 +228,14 @@ func (t *Term) drawIME(ds *drawState) {
 
 	// Column-accurate rather than accumulating a fractional advance: each
 	// composition glyph starts on a snapped cell origin, like the text pass.
+	// Each rune gets its own cell box, as committed text does, so a CJK
+	// pre-edit glyph is drawn at the size it will have once committed.
 	col := g.CursorC
 	for i, r := range ds.imeRunes {
-		ds.dc.Text(t.colX(col), rowY, t.termRuneStr(r), cs)
-		col += ds.imeWidths[i]
+		w := ds.imeWidths[i]
+		ds.dc.Text(t.colX(col), rowY, t.termRuneStr(r),
+			t.cellBox(cs, w, t.spanW(col, col+w)))
+		col += w
 	}
 	t.drawUnderlineDecor(ds.dc, startX, rowY, stripW, ulSingle, cs.Color)
 }
@@ -626,7 +630,7 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 		dc.FilledRect(x, y, cw, ch, fillColor.WithOpacity(opacity))
 		cs := style
 		cs.Color = t.grid.bgOf(cell)
-		cs.EmojiBoxWidth = t.spanW(col, col+int(cell.Width))
+		cs = t.cellBox(cs, int(cell.Width), t.spanW(col, col+int(cell.Width)))
 		dc.Text(x, y, t.cellText(cell), cs)
 	}
 }
@@ -840,7 +844,7 @@ func (t *Term) drawCopyCursor(ds *drawState) {
 	cell := maskGlyph(g.ViewCellAt(vr, cc), ds.blinkOff)
 	cs := ds.style
 	cs.Color = g.Theme.DefaultBG
-	cs.EmojiBoxWidth = t.spanW(cc, cc+int(cell.Width))
+	cs = t.cellBox(cs, int(cell.Width), t.spanW(cc, cc+int(cell.Width)))
 	ds.dc.Text(x, y, t.cellText(cell), cs)
 }
 

@@ -73,6 +73,26 @@ func (t *Term) rowY(r int, yOff float32) float32 {
 // row's own snapped origin in hand already and subtracts from rowY(r+1).
 func (t *Term) spanW(c0, c1 int) float32 { return t.colX(c1) - t.colX(c0) }
 
+// cellBox sets the box fields go-glyph needs to draw one cell's glyph that is
+// width columns wide and boxW pixels wide (boxW comes from spanW, so it tiles
+// with its neighbours).
+//
+// EmojiBoxWidth scales a color glyph to fill the box. CellWidth is set only for
+// a wide cell: go-glyph then sizes a CJK fallback face so one ideograph is two
+// cells wide, instead of matching the primary font's cap height, which leaves
+// a gap after every ideograph (#312, go-glyph#207). A narrow cell must not
+// carry it: CellWidth also switches on go-glyph's box-drawing snap, which
+// rounds the cell to a whole pixel, while the snapped cells here alternate
+// (8, 9, 8 px for an 8.4 px cell) and the rounded glyph would leave 1 px gaps
+// in lines. Box-drawing glyphs are never wide, so the two never meet.
+func (t *Term) cellBox(cs gui.TextStyle, width int, boxW float32) gui.TextStyle {
+	cs.EmojiBoxWidth = boxW
+	if width >= 2 {
+		cs.CellWidth = t.cellW
+	}
+	return cs
+}
+
 // searchOverlap returns the number of grid rows whose text footprint
 // overlaps the search bar's pixel region. Row r's text footprint spans
 // [r*cellH+renderYOff, (r+1)*cellH+renderYOff). The search bar occupies
