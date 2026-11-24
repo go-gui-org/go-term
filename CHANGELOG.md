@@ -14,6 +14,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   now has a thick underline, and the other pre-edit text keeps the thin one.
   This is how macOS, Windows and IBus show marked text. Also, a redraw during
   composition no longer allocates two new slices. (#326)
+- **The caret no longer covers the selected IME clause.** During conversion the
+  caret sat on the first cell of the selected clause and hid the start of its
+  thick underline, so the clause looked one cell short. The caret is now hidden
+  while a clause is selected, as on macOS and Windows. The candidate window
+  still opens at the clause start. (#329)
 - **A text field beside a Term takes keyboard input.** A click on a `gui.Input`
   in the same window as a focused pane moved focus to the field, but the pane
   took it back on the next rebuild, so every key went to the terminal. A pane

@@ -217,6 +217,20 @@ func (t *Term) drawIME(ds *drawState) {
 	ds.imeRunes, ds.imeWidths = runes, widths
 	ds.imeCursor = min(t.ime.compCursor, len(runes))
 
+	// The selected clause in runes, clipped to the decoded preedit. The
+	// platform may report a range past the rune cap, or a negative start.
+	// Found before the off-screen return below: drawCursor reads imeClauseSel
+	// to decide whether to hide the caret. The length is clipped before it is
+	// added: selStart+compSelLen could wrap int on a 32-bit target when the
+	// platform reports a huge length. selStart <= len(runes) (imeCursor is
+	// clipped above), so the room left is never negative.
+	selStart := max(ds.imeCursor, 0)
+	selEnd := selStart
+	if t.ime.compSelLen > 0 {
+		selEnd = selStart + min(t.ime.compSelLen, len(runes)-selStart)
+	}
+	ds.imeClauseSel = selEnd > selStart
+
 	if len(runes) == 0 || g.CursorR < ds.renderTop || g.CursorR >= ds.renderRows ||
 		!g.viewLive() {
 		return
@@ -235,13 +249,6 @@ func (t *Term) drawIME(ds *drawState) {
 	cs.Color = g.defaultFG()
 	cs.Underline = false
 
-	// The selected clause in runes, clipped to the decoded preedit. The
-	// platform may report a range past the rune cap, or a negative start.
-	selStart := max(ds.imeCursor, 0)
-	selEnd := selStart
-	if t.ime.compSelLen > 0 {
-		selEnd = min(selStart+t.ime.compSelLen, len(runes))
-	}
 	// Column of the clause edges, found in the glyph loop below so the strip
 	// is walked once.
 	selC0, selC1 := g.CursorC, g.CursorC
@@ -353,11 +360,18 @@ func (t *Term) drawCursor(ds *drawState) {
 	if ds.imeComposing && ds.imeCursor >= 0 && ds.imeCursor < len(ds.imeRunes) {
 		cursorCell.Ch = ds.imeRunes[ds.imeCursor]
 	}
-	t.drawCursorShape(ds.dc, cc, g.CursorR, cursorCell, g.cursorShape, ds.style)
+	// While a clause is selected the caret is hidden, as macOS and Windows hide
+	// the insertion point during conversion. It would sit on the clause's first
+	// cell and cover the start of its thick rule, so the clause would look one
+	// cell short (#329). The thick rule already shows where the user is.
+	if !ds.imeClauseSel {
+		t.drawCursorShape(ds.dc, cc, g.CursorR, cursorCell, g.cursorShape, ds.style)
+	}
 
 	// Stage the candidate-window rect for onDraw to report after it drops
 	// grid.Mu. IMESetRect reaches the platform, so calling it here would
-	// hold the grid lock across a go-gui call.
+	// hold the grid lock across a go-gui call. Staged even when the caret is
+	// hidden: the candidate window still anchors at the clause start.
 	if ds.imeComposing {
 		ds.pendingIME = true
 		ds.imeX = t.ime.layoutX + float32(cc)*t.cellW
