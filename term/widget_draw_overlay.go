@@ -359,6 +359,15 @@ func (t *Term) drawCursor(ds *drawState) {
 	}
 	if ds.imeComposing && ds.imeCursor >= 0 && ds.imeCursor < len(ds.imeRunes) {
 		cursorCell.Ch = ds.imeRunes[ds.imeCursor]
+		// The caret sits on a preedit rune, not on the grid cell under it, so
+		// it takes that rune's width. A narrow rune over a wide cell would
+		// otherwise get a two-column box, and a wide rune a one-column box.
+		cursorCell.Width = uint8(ds.imeWidths[ds.imeCursor])
+		cursorCell.clusterID = 0
+	}
+	// A wide cell at the clamped last column cannot spill past the right edge.
+	if int(cursorCell.Width) > 1 && cc+int(cursorCell.Width) > ds.cols {
+		cursorCell.Width = uint8(max(ds.cols-cc, 1))
 	}
 	// While a clause is selected the caret is hidden, as macOS and Windows hide
 	// the insertion point during conversion. It would sit on the clause's first
@@ -665,7 +674,11 @@ func (t *Term) drawCursorShape(dc *gui.DrawContext, col, row int, cell cell,
 	// cell it inverts instead of straddling a pixel boundary.
 	x := t.colX(col)
 	y := t.rowY(row, 0)
-	cw := t.colX(col+1) - x
+	// A wide cell (CJK, emoji) spans two columns, and the block and underline
+	// must cover both. A one-column box inverted only the left half of the
+	// glyph. Width 0 is a continuation cell: the cursor sits on that one column.
+	span := max(int(cell.Width), 1)
+	cw := t.colX(col+span) - x
 	ch := t.rowY(row+1, 0) - y
 
 	// Dim the cursor to 40% when the terminal doesn't have pane focus.
@@ -907,10 +920,12 @@ func (t *Term) drawCopyCursor(ds *drawState) {
 
 	// Steady, never blinking: it marks a position the user is aiming with, and
 	// a blinking target is harder to track than a still one.
-	ds.dc.FilledRect(x, y, t.colX(cc+1)-x, t.rowY(vr+1, ds.renderYOff)-y,
+	cell := maskGlyph(g.ViewCellAt(vr, cc), ds.blinkOff)
+	// Cover every column of a wide cell, as the text cursor does.
+	span := clamp(int(cell.Width), 1, max(ds.cols-cc, 1))
+	ds.dc.FilledRect(x, y, t.colX(cc+span)-x, t.rowY(vr+1, ds.renderYOff)-y,
 		g.ov.copyCurFill)
 
-	cell := maskGlyph(g.ViewCellAt(vr, cc), ds.blinkOff)
 	cs := ds.style
 	cs.Color = g.Theme.DefaultBG
 	cs = t.cellBox(cs, int(cell.Width), t.spanW(cc, cc+int(cell.Width)))
