@@ -15,6 +15,13 @@ adheres to [Semantic Versioning](https://semver.org/).
   last `SetFocused` change. After the user moves focus to another widget, the
   pane leaves it there and dims its cursor. A click on the pane, or
   `SetFocused`, gives the pane the keyboard again. (#323)
+- **CJK characters fill their two cells.** A wide cell now reaches go-glyph with
+  `TextStyle.CellWidth` set, so go-glyph sizes a CJK fallback font so that one
+  ideograph is exactly two cells wide. Before, an ideograph filled only 80–85%
+  of its box and a gap showed after each one. This applies to the text pass, the
+  cursor, the copy-mode cursor and IME pre-edit text. Narrow cells stay as
+  before, so box-drawing lines are not changed. go-glyph is bumped to v1.29.3,
+  which has the fit (go-glyph#207). (#312)
 
 ## [0.19.3] - 2026-11-22
 
