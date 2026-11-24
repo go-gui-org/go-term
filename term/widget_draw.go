@@ -349,6 +349,7 @@ func (t *Term) onDraw(dc *gui.DrawContext) {
 	t.prepareSelection(&ds)
 	t.prepareResolved(&ds)
 	t.prepareBiDi(&ds)
+	t.prepareIMEShift(&ds)
 	t.prepareHoverURL(&ds)
 	t.preparePartialRow(&ds)
 	t.drawBgPass(&ds)
@@ -727,6 +728,77 @@ func (t *Term) prepareBiDi(ds *drawState) {
 		}
 		ds.bidiVisRows[r], ds.bidiV2LRows[r] = visualReorder(t.draw.bidiScratch, cols)
 	}
+}
+
+// prepareIMEShift makes room for the IME preedit on the cursor row. The preedit
+// is text the user is inserting at the cursor, and on commit the shell inserts
+// it there and moves the rest of the line right. drawIME paints the strip over
+// the cells at the cursor, so without this the text it covers disappears while
+// the user composes, which looks like the IME types over it.
+//
+// The row is rebuilt with the cells from the cursor on moved right by the
+// preedit width, and set as the row's visual override, which the bg and fg
+// passes read through resolveVisual. The gap under the strip is blank. Cells
+// moved past the right edge are dropped, and a wide cell that no longer fits
+// whole is dropped too, not drawn cut in half. The grid is not touched: the
+// shift is display-only, and the real insert is the child's when it gets the
+// committed text.
+//
+// A BiDi row is shifted in visual order from the cursor's logical column. That
+// matches drawIME, which also draws the strip at the logical column.
+func (t *Term) prepareIMEShift(ds *drawState) {
+	if !t.ime.composing || !ds.g.viewLive() {
+		return
+	}
+	r, c0, cols := ds.g.CursorR, ds.g.CursorC, ds.cols
+	if r < ds.renderTop || r >= ds.renderRows || r >= len(ds.bidiVisRows) || c0 >= cols {
+		return
+	}
+	n := imeStripCols(t.ime.compText)
+	if n == 0 {
+		return
+	}
+	if cap(t.draw.imeShiftRow) < cols {
+		t.draw.imeShiftRow = make([]cell, cols)
+	}
+	row := t.draw.imeShiftRow[:cols]
+	// Read the source cells before the override is set: resolveVisual must
+	// still return the unshifted row here.
+	for c := range c0 {
+		row[c] = ds.resolveVisual(r, c)
+	}
+	for c := c0; c < min(c0+n, cols); c++ {
+		row[c] = defaultCell()
+	}
+	// row is a separate buffer, so reading the source left to right is safe.
+	for c := c0 + n; c < cols; c++ {
+		row[c] = ds.resolveVisual(r, c-n)
+	}
+	// The cursor can sit on a wide cell's continuation (CUP can put it there).
+	// The head then stays left of the strip and the continuation moves right
+	// alone. Blank it, or it would leave a column with no glyph.
+	if c := c0 + n; c < cols && row[c].Width == 0 && row[c].Ch == 0 {
+		row[c] = defaultCell()
+	}
+	// A wide head in the last column lost its continuation past the edge.
+	if last := cols - 1; last >= c0+n && row[last].Width == 2 {
+		row[last] = defaultCell()
+	}
+	ds.bidiVisRows[r] = row
+}
+
+// imeStripCols returns how many columns drawIME's preedit strip spans for s,
+// using drawIME's own per-rune width and rune cap so the two always agree.
+func imeStripCols(s string) int {
+	n, runes := 0, 0
+	for _, r := range s {
+		if runes == imeCompRuneLimit {
+			break
+		}
+		n += max(runeWidth(r), 1)
+		runes++
+	}
+	return n
 }
 
 // preparePartialRow resolves the partial top row (visible when sub-pixel
