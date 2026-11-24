@@ -157,6 +157,9 @@ type drawState struct {
 	blinkOff bool
 	// IME composition state, populated by drawIME and consumed by drawCursor.
 	imeComposing bool
+	// imeClauseSel is true while the IME has a clause selected for conversion.
+	// drawCursor hides the caret then, so it does not cover the clause rule.
+	imeClauseSel bool
 	// scrollInset is the window-edge gap for the scrollbar thumb, snapshotted
 	// from the window before grid.Mu is taken (see onDraw). A window call
 	// under the grid lock risks deadlock against the reader goroutine.
