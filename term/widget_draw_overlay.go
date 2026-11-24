@@ -188,27 +188,36 @@ func (t *Term) drawScrollbarProgress(ds *drawState, sw, inset float32, thumbVisi
 
 // drawIME renders the IME composition string at the cursor position. Fills
 // the background under the composition, draws each rune, and underlines the
-// full span. Populates ds.ime* fields for consumption by drawCursor.
+// span: a thin rule under unconverted text and a thick one under the clause
+// being converted, [compCursor, compCursor+compSelLen), as the platform IMEs
+// draw marked text (#326). Populates ds.ime* fields for consumption by
+// drawCursor.
 func (t *Term) drawIME(ds *drawState) {
 	if !t.ime.composing {
 		return
 	}
 	g := ds.g
 	ds.imeComposing = true
-	ds.imeRunes = []rune(t.ime.compText)
-	if len(ds.imeRunes) > imeCompRuneLimit {
-		ds.imeRunes = ds.imeRunes[:imeCompRuneLimit]
-	}
-	ds.imeWidths = make([]int, len(ds.imeRunes))
+	// Decode into the reused buffers instead of []rune(compText) and make([]int):
+	// this runs every frame while the user composes, and the cursor blink alone
+	// redraws twice a second.
+	runes := t.draw.imeRunes[:0]
+	widths := t.draw.imeWidths[:0]
 	var totalCols int
-	for i, r := range ds.imeRunes {
+	for _, r := range t.ime.compText {
+		if len(runes) == imeCompRuneLimit {
+			break
+		}
 		w := max(runeWidth(r), 1)
-		ds.imeWidths[i] = w
+		runes = append(runes, r)
+		widths = append(widths, w)
 		totalCols += w
 	}
-	ds.imeCursor = min(t.ime.compCursor, len(ds.imeRunes))
+	t.draw.imeRunes, t.draw.imeWidths = runes, widths
+	ds.imeRunes, ds.imeWidths = runes, widths
+	ds.imeCursor = min(t.ime.compCursor, len(runes))
 
-	if len(ds.imeRunes) == 0 || g.CursorR < ds.renderTop || g.CursorR >= ds.renderRows ||
+	if len(runes) == 0 || g.CursorR < ds.renderTop || g.CursorR >= ds.renderRows ||
 		!g.viewLive() {
 		return
 	}
@@ -226,18 +235,64 @@ func (t *Term) drawIME(ds *drawState) {
 	cs.Color = g.defaultFG()
 	cs.Underline = false
 
+	// The selected clause in runes, clipped to the decoded preedit. The
+	// platform may report a range past the rune cap, or a negative start.
+	selStart := max(ds.imeCursor, 0)
+	selEnd := selStart
+	if t.ime.compSelLen > 0 {
+		selEnd = min(selStart+t.ime.compSelLen, len(runes))
+	}
+	// Column of the clause edges, found in the glyph loop below so the strip
+	// is walked once.
+	selC0, selC1 := g.CursorC, g.CursorC
+
 	// Column-accurate rather than accumulating a fractional advance: each
 	// composition glyph starts on a snapped cell origin, like the text pass.
 	// Each rune gets its own cell box, as committed text does, so a CJK
 	// pre-edit glyph is drawn at the size it will have once committed.
 	col := g.CursorC
-	for i, r := range ds.imeRunes {
-		w := ds.imeWidths[i]
+	for i, r := range runes {
+		if i == selStart {
+			selC0 = col
+		}
+		if i == selEnd {
+			selC1 = col
+		}
+		w := widths[i]
 		ds.dc.Text(t.colX(col), rowY, t.termRuneStr(r),
 			t.cellBox(cs, w, t.spanW(col, col+w)))
 		col += w
 	}
-	t.drawUnderlineDecor(ds.dc, startX, rowY, stripW, ulSingle, cs.Color)
+	if selEnd == len(runes) {
+		selC1 = col
+	}
+
+	if selEnd <= selStart {
+		t.drawUnderlineDecor(ds.dc, startX, rowY, stripW, ulSingle, cs.Color)
+		return
+	}
+	// Thin rule either side of the clause, thick rule under it. Each edge is
+	// a snapped column origin, so the three rules tile with no seam.
+	if selC0 > g.CursorC {
+		t.drawUnderlineDecor(ds.dc, startX, rowY, t.colX(selC0)-startX, ulSingle, cs.Color)
+	}
+	t.drawIMEClauseRule(ds.dc, t.colX(selC0), rowY, t.spanW(selC0, selC1), cs.Color)
+	if end := g.CursorC + totalCols; selC1 < end {
+		t.drawUnderlineDecor(ds.dc, t.colX(selC1), rowY, t.spanW(selC1, end), ulSingle, cs.Color)
+	}
+}
+
+// drawIMEClauseRule draws the thick rule under the clause being converted. It
+// is twice the single underline's thickness and grows upward from the single
+// rule's bottom edge, so the two sit on one baseline and only the weight
+// differs.
+func (t *Term) drawIMEClauseRule(dc *gui.DrawContext, x, y, w float32, color gui.Color) {
+	thick := t.cellH / 14
+	if thick < 1 {
+		thick = 1
+	}
+	baseY := y + t.cellH - 2*thick - 1 // matches drawUnderlineDecor's ulSingle
+	dc.FilledRect(x, baseY-thick, w, 2*thick, color)
 }
 
 // drawCursor renders the text cursor at the current grid position, honoring

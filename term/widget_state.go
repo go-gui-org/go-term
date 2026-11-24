@@ -95,8 +95,12 @@ type syncState struct {
 // layout, View reads the window's IME state for change detection, and
 // onDraw reads layoutX/Y for IMESetRect.
 type imeState struct {
-	compText         string  // cached composition text for change detection
-	compCursor       int     // cached composition cursor position
+	compText   string // cached composition text for change detection
+	compCursor int    // cached composition cursor position
+	// compSelLen is the length in runes of the clause being converted, which
+	// starts at compCursor. Zero when no clause is selected. drawIME draws it
+	// with a thick rule (#326).
+	compSelLen       int
 	layoutX, layoutY float32 // widget absolute position (AmendLayout)
 	composing        bool    // whether IME composition is active
 }
@@ -325,6 +329,11 @@ type drawBufs struct {
 	// the viewport (see drawPlaceholders). Kept here so a screen full of
 	// placeholder cells does not allocate every frame.
 	phRects []placeholderRect
+	// imeRunes/imeWidths are drawIME's decoded preedit and per-rune column
+	// widths. drawState aliases them for drawCursor. Kept here so a redraw
+	// while composing does not allocate two slices every frame.
+	imeRunes  []rune
+	imeWidths []int
 }
 
 // Term is a terminal-emulator widget bound to a single pty-backed shell.
