@@ -44,16 +44,22 @@ func (t *Term) columnView(w *gui.Window) gui.View {
 		composing  bool
 		compText   string
 		compCursor int
+		compSelLen int
 	)
 	if t.ownsKeys() && w != nil {
 		composing = w.IMEComposing()
 		compText = w.IMECompText()
 		compCursor = w.IMECompCursor()
+		compSelLen = w.IMECompSelLen()
 	}
-	if composing != t.ime.composing || compText != t.ime.compText || compCursor != t.ime.compCursor {
+	// compSelLen is part of the key: moving to the next clause can keep the
+	// text and even the start the same while the selected span changes.
+	if composing != t.ime.composing || compText != t.ime.compText ||
+		compCursor != t.ime.compCursor || compSelLen != t.ime.compSelLen {
 		t.ime.composing = composing
 		t.ime.compText = compText
 		t.ime.compCursor = compCursor
+		t.ime.compSelLen = compSelLen
 		t.bumpVersion()
 	}
 

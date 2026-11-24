@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **IME conversion shows the selected clause.** During multi-clause conversion
+  the pre-edit strip had one thin underline from end to end, so it did not show
+  which clause the candidate window was for. The clause that is being converted
+  now has a thick underline, and the other pre-edit text keeps the thin one.
+  This is how macOS, Windows and IBus show marked text. Also, a redraw during
+  composition no longer allocates two new slices. (#326)
 - **A text field beside a Term takes keyboard input.** A click on a `gui.Input`
   in the same window as a focused pane moved focus to the field, but the pane
   took it back on the next rebuild, so every key went to the terminal. A pane
