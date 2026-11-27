@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// version is the build version shown in the About dialog. Stamped at link time
+// version is the build version shown in the help page about lines. Stamped at link time
 // by the Makefile from `git describe --tags`, so a tagged release reports its
 // tag verbatim and an in-between build reports "v0.6.0-3-g1a2b3c4[-dirty]".
 //
@@ -18,19 +18,19 @@ var version string
 
 // releaseVersion is the latest tagged release (the tag verbatim, leading
 // "v" included). It names the release line an unstamped dev build came
-// from, so the About dialog can show it when appVersion knows only a
+// from, so the help page about lines can show it when appVersion knows only a
 // VCS hash or nothing at all. Bump it in the same commit that adds the
 // CHANGELOG entry — TestReleaseVersionMatchesChangelog fails otherwise.
 // (A hand-maintained literal sat stale at 0.1.0 once before; the test is
 // what makes this one safe to keep.)
 const releaseVersion = "v0.19.3"
 
-// aboutVersion resolves the version string for the About dialog. A
+// aboutVersion resolves the version string for the help page about lines. A
 // linker-stamped tag, a post-tag describe string, or a module-proxy
 // version already names its release, so those are shown verbatim.
 // A build that names no release falls back to the release line plus a
 // dev marker: "v0.15.0 (dev)". Which revision that dev build came from is
-// the Commit row's job, not this string's.
+// the Commit line's job, not this string's.
 func aboutVersion() string {
 	return aboutVersionFor(appVersion())
 }
@@ -38,7 +38,7 @@ func aboutVersion() string {
 // terminalVersion is the version falcon reports to the programs it runs, in
 // TERM_PROGRAM_VERSION and the XTVERSION reply ("falcon 0.16.2"). Terminals
 // report a bare number there (kitty, WezTerm, Ghostty), so the leading "v" is
-// dropped, and a dev build gets a "-dev" suffix rather than the About string's
+// dropped, and a dev build gets a "-dev" suffix rather than the about string's
 // " (dev)" so the number stays one token.
 func terminalVersion() string {
 	return terminalVersionFor(appVersion())
@@ -54,7 +54,7 @@ func terminalVersionFor(v string) string {
 	return strings.TrimPrefix(releaseVersion, "v") + "-" + v
 }
 
-// aboutVersionFor applies the About display rule to one version string.
+// aboutVersionFor applies the about display rule to one version string.
 // Split out so tests can cover the rule without stubbing the linker
 // stamp or the toolchain's build info.
 func aboutVersionFor(v string) string {
@@ -111,15 +111,15 @@ func appVersion() string {
 		!isPseudoVersion(v) {
 		return v
 	}
-	// The revision is not folded in here: the About dialog gives the
-	// commit its own row, so a "dev-1a2b3c4-dirty" version string would
+	// The revision is not folded in here: the help page gives the
+	// commit its own line, so a "dev-1a2b3c4-dirty" version string would
 	// print the same hash twice.
 	return "dev"
 }
 
-// commitLen is how much of the revision hash the About dialog shows.
+// commitLen is how much of the revision hash the help page about lines show.
 // Long enough to be unambiguous in a repo this size, short enough not to
-// widen the dialog.
+// widen the help page.
 const commitLen = 9
 
 // buildInfo is the toolchain's embedded build record, or nil when there is
@@ -135,7 +135,7 @@ func buildInfo() *debug.BuildInfo {
 
 // buildCommit returns the full git revision the binary was built from, or
 // "" when the toolchain embedded none (a module-cache build, a tarball, or
-// -buildvcs=false). The About dialog turns it into a link to the commit,
+// -buildvcs=false). The help page turns it into a short Commit line,
 // so the full hash matters even though only commitLen characters show.
 func buildCommit() string { return settingValue(buildInfo(), "vcs.revision") }
 
@@ -159,7 +159,7 @@ func buildDateFrom(info *debug.BuildInfo) string {
 		return ""
 	}
 	// vcs.time is RFC 3339 in UTC. Trim to the date rather than parse:
-	// the dialog shows no clock, and a parse failure would have to be
+	// the help page shows no clock, and a parse failure would have to be
 	// handled for no gain.
 	if i := strings.IndexByte(t, 'T'); i > 0 {
 		return t[:i]

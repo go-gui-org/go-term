@@ -91,8 +91,8 @@ type Cfg struct {
 	// gui.SetTheme here lands in the same frame as the pane repaint.
 	OnColorScheme func(dark bool)
 
-	// ExtraCommands are embedder-provided window commands (falcon's About
-	// and Settings, for example). They are appended to the built-in table
+	// ExtraCommands are embedder-provided window commands (falcon's
+	// Settings, for example). They are appended to the built-in table
 	// in buildCommands, so they are registered on the window, listed in
 	// the command palette, and re-registered on every config reload —
 	// which is why they live here rather than in a separate
@@ -100,6 +100,10 @@ type Cfg struct {
 	// no Shortcut are palette-only; entries with one also appear in the
 	// help page and can be rebound from the config file by full ID.
 	ExtraCommands []gui.Command
+
+	// About lists the lines shown below the shortcut columns on the
+	// help page (app name, version, ...). Empty (default) shows nothing.
+	About []string
 
 	// opts carries the per-Term settings resolved from the config file. The
 	// workspace fills it in; embedders configure these through the config
@@ -389,7 +393,7 @@ func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
 //     in pendingExit until View sees the dialog gone.
 //
 // The hook runs only when no dialog is open. go-gui shows one dialog at a
-// time, so with one already up (About, an error) a hook that asks "quit?"
+// time, so with one already up (an error dialog, say) a hook that asks "quit?"
 // either returns early without asking or replaces that dialog, and the
 // workspace could not tell which dialog it then waits on. Instead the whole
 // exit waits in pendingExit, with the hook not yet run, until that dialog

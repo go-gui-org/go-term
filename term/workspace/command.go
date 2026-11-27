@@ -300,7 +300,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.goToTab(idx) },
 		})
 	}
-	// Embedder commands (About, Settings, …) ride the same table so the
+	// Embedder commands (Settings, …) ride the same table so the
 	// palette, the help page, and config reloads all see them. Sourced
 	// from baseCfg — the pristine copy — so a reload recomputes from the
 	// same starting point instead of stacking a copy per reload.

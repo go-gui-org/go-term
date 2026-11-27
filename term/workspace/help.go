@@ -254,6 +254,9 @@ func (ws *Workspace) helpView(w, h float32) gui.View {
 		ws.helpTitle(headStyle),
 		gui.Row(colsRow),
 	}
+	if about := ws.helpAbout(theme); about != nil {
+		block.Content = append(block.Content, about)
+	}
 
 	center := tight(gui.FillFit)
 	center.Content = []gui.View{
@@ -288,6 +291,51 @@ func (ws *Workspace) helpView(w, h float32) gui.View {
 	page.Color = theme.ColorPanel
 	page.Content = []gui.View{gui.Column(main), ws.helpFooter(theme)}
 	return gui.Column(page)
+}
+
+// helpAbout renders the embedder's about lines below the shortcut columns:
+// app name, version, build metadata, centered like the title. Nil when
+// Cfg.About is empty, so the page shows no gap for it.
+func (ws *Workspace) helpAbout(theme gui.Theme) gui.View {
+	if len(ws.cfg.About) == 0 {
+		return nil
+	}
+	style := theme.TextStyleSecondary
+	style.Size = theme.SizeTextTiny
+	style.Align = gui.TextAlignCenter
+	lines := make([]gui.View, 0, len(ws.cfg.About))
+	for _, ln := range ws.cfg.About {
+		if ln == "" {
+			continue
+		}
+		// Centered like the title: equal fills on both sides, since
+		// Align alone has nothing to center within.
+		row := tight(gui.FillFit)
+		row.Content = []gui.View{
+			gui.Row(tight(gui.FillFill)),
+			gui.Text(gui.TextCfg{Text: ln, TextStyle: style}),
+			gui.Row(tight(gui.FillFill)),
+		}
+		lines = append(lines, gui.Row(row))
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	body := tight(gui.FillFit)
+	body.Spacing = gui.NoSpacing
+	body.Content = lines
+
+	wrap := tight(gui.FillFit)
+	wrap.Spacing = gui.SpacingSmall
+	wrap.Content = []gui.View{
+		gui.Rectangle(gui.RectangleCfg{
+			Sizing: gui.FillFixed,
+			Height: 1.2,
+			Color:  theme.ColorBorder,
+		}),
+		gui.Column(body),
+	}
+	return gui.Column(wrap)
 }
 
 // helpFooter is the key-hint strip. The toggle chord is read from the live
