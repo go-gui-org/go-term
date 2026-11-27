@@ -265,7 +265,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Global:   true,
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.reloadConfig() },
 		},
-		// Help overlay.
+		// Help page.
 		{
 			ID:       "workspace.toggleHelp",
 			Label:    "Show / Hide Shortcuts",
@@ -274,13 +274,13 @@ func (ws *Workspace) buildCommands() []gui.Command {
 			Execute:  func(_ *gui.Event, w *gui.Window) { ws.toggleHelp() },
 		},
 		{
-			// Escape dismisses whichever overlay is up. A *single* Escape
-			// command owns both overlays: go-gui's registry rejects
-			// duplicate shortcuts, and one rejection aborts the whole
+			// Escape dismisses whichever overlay or takeover page is up. A
+			// *single* Escape command owns all of them: go-gui's registry
+			// rejects duplicate shortcuts, and one rejection aborts the whole
 			// RegisterCommands batch, so two Escape entries would silently
 			// drop every command registered after them. CanExecute gates on
 			// visibility so Escape still reaches the child process (vim,
-			// less, …) whenever no overlay is open.
+			// less, …) whenever nothing is open.
 			ID:       "workspace.dismissOverlay",
 			Shortcut: gui.Shortcut{Key: gui.KeyEscape},
 			Global:   true,
@@ -301,7 +301,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 		})
 	}
 	// Embedder commands (About, Settings, …) ride the same table so the
-	// palette, the help overlay, and config reloads all see them. Sourced
+	// palette, the help page, and config reloads all see them. Sourced
 	// from baseCfg — the pristine copy — so a reload recomputes from the
 	// same starting point instead of stacking a copy per reload.
 	cmds = append(cmds, ws.baseCfg.ExtraCommands...)
@@ -324,7 +324,7 @@ func (ws *Workspace) buildCommands() []gui.Command {
 func (ws *Workspace) loadAndApplyConfig() {
 	fc := loadConfig(ws.baseCfg)
 	cmds := ws.buildCommands()
-	// Overrides are applied before registering so the help overlay, which
+	// Overrides are applied before registering so the help page, which
 	// reads ws.commands, reflects the live bindings.
 	keys := applyKeybindingOverrides(cmds, fc.keybindings)
 	ws.cfg = applySettings(ws.baseCfg, fc, keys)
@@ -477,7 +477,7 @@ func (ws *Workspace) installCommands(cmds []gui.Command) {
 	for i := range ws.commands {
 		ws.w.UnregisterCommand(ws.commands[i].ID)
 	}
-	// Retain Label+Shortcut metadata so the help overlay renders the live
+	// Retain Label+Shortcut metadata so the help page renders the live
 	// bindings rather than a hand-maintained copy. The tab 1–9 commands
 	// carry no Label and are skipped by the overlay.
 	ws.commands = cmds
@@ -496,11 +496,11 @@ func (ws *Workspace) installCommands(cmds []gui.Command) {
 
 // listOverlayOpen reports whether an overlay that owns Up/Down/Enter is up.
 // Shared by every navigation command so the gate cannot drift between them.
-// Same set as overlayOwnsKeys, and deliberately expressed as that call: an
-// overlay that owns Up/Down/Enter is exactly one that has taken the keyboard
-// off the pane, so the two must not drift apart.
+// The shortcuts page is not one: it takes the keyboard off the pane (see
+// overlayOwnsKeys) but owns no cursor, so the navigation keys stay with
+// whatever they reached before it opened.
 func (ws *Workspace) listOverlayOpen(_ *gui.Window) bool {
-	return ws.overlayOwnsKeys()
+	return ws.palette.visible || ws.browser.visible
 }
 
 // overlayMove routes a cursor step to whichever list overlay is open. The
@@ -536,8 +536,8 @@ func (ws *Workspace) overlayConfirm() {
 }
 
 // dismissOverlay closes the topmost visible overlay. The palette floats above
-// the theme picker, which is drawn above the help panel, so precedence runs in
-// that order when more than one is open.
+// both takeover pages, and the theme picker replaces the shortcuts page, so
+// precedence runs in that order when more than one is open.
 func (ws *Workspace) dismissOverlay() {
 	switch {
 	case ws.palette.visible:
@@ -550,7 +550,7 @@ func (ws *Workspace) dismissOverlay() {
 		ws.themeBrowserDismiss()
 	case ws.helpVisible:
 		// Not toggleHelp: this arm only ever closes, and a toggle here would
-		// re-open the sheet if the guard above it ever stopped matching.
+		// re-open the page if the guard above it ever stopped matching.
 		ws.closeHelp()
 	}
 }
@@ -558,6 +558,9 @@ func (ws *Workspace) dismissOverlay() {
 // splitPane splits the focused pane. If horizontal is true, splits top/bottom;
 // otherwise splits left/right. Creates a new PTY with a fresh shell.
 func (ws *Workspace) splitPane(horizontal bool) {
+	if ws.takeoverVisible() {
+		return
+	}
 	tab := ws.activeTabPtr()
 	if tab == nil {
 		return
@@ -606,6 +609,9 @@ func (ws *Workspace) splitPane(horizontal bool) {
 // closePane closes the focused pane in the active tab. Falls back to the
 // nearest surviving pane. If the last pane, closes the tab.
 func (ws *Workspace) closePane() {
+	if ws.takeoverVisible() {
+		return
+	}
 	tab := ws.activeTabPtr()
 	if tab == nil {
 		return
@@ -615,6 +621,9 @@ func (ws *Workspace) closePane() {
 
 // nextPane cycles focus to the next pane, wrapping to first after last.
 func (ws *Workspace) nextPane() {
+	if ws.takeoverVisible() {
+		return
+	}
 	tab := ws.activeTabPtr()
 	if tab == nil {
 		return
@@ -626,6 +635,9 @@ func (ws *Workspace) nextPane() {
 
 // prevPane cycles focus to the previous pane, wrapping to last after first.
 func (ws *Workspace) prevPane() {
+	if ws.takeoverVisible() {
+		return
+	}
 	tab := ws.activeTabPtr()
 	if tab == nil {
 		return
@@ -657,6 +669,9 @@ func (ws *Workspace) focusedCwd() string {
 // an unzoomed source reports the workspace default, so the new pane matches it
 // either way).
 func (ws *Workspace) addTab() {
+	if ws.takeoverVisible() {
+		return
+	}
 	// Capture the source CWD, pane, and zoom before the active tab index moves.
 	cwd := ws.focusedCwd()
 	oldTab := ws.activeTabPtr()
@@ -692,12 +707,18 @@ func (ws *Workspace) addTab() {
 // closeTab closes the active tab. If it's the last tab, replaces it with
 // a fresh single-pane tab.
 func (ws *Workspace) closeTab() {
+	if ws.takeoverVisible() {
+		return
+	}
 	ws.closeTabAt(ws.activeTab)
 }
 
 // moveTabLeft swaps the active tab with the one to its left.
 // No-op when the active tab is already the first tab.
 func (ws *Workspace) moveTabLeft() {
+	if ws.takeoverVisible() {
+		return
+	}
 	if ws.activeTab <= 0 || len(ws.tabs) < 2 {
 		return
 	}
@@ -710,6 +731,9 @@ func (ws *Workspace) moveTabLeft() {
 // moveTabRight swaps the active tab with the one to its right.
 // No-op when the active tab is already the last tab.
 func (ws *Workspace) moveTabRight() {
+	if ws.takeoverVisible() {
+		return
+	}
 	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs)-1 || len(ws.tabs) < 2 {
 		return
 	}

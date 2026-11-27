@@ -98,7 +98,7 @@ type Cfg struct {
 	// which is why they live here rather than in a separate
 	// RegisterCommand call the reload would not know about. Entries with
 	// no Shortcut are palette-only; entries with one also appear in the
-	// help overlay and can be rebound from the config file by full ID.
+	// help page and can be rebound from the config file by full ID.
 	ExtraCommands []gui.Command
 
 	// opts carries the per-Term settings resolved from the config file. The
@@ -122,7 +122,7 @@ type Workspace struct {
 	activeTab int
 	nextTabID int
 
-	commands    []gui.Command // metadata source for the help overlay
+	commands    []gui.Command // metadata source for the help page
 	helpVisible bool
 
 	// browser is the full-window theme browser's state. Zero value is
@@ -572,18 +572,27 @@ func (ws *Workspace) revealListRow(scrollID string, idx int, rowH, listH, gap fl
 	}
 }
 
-// overlayOwnsKeys reports whether a modal overlay — the command palette or the
-// theme browser — is up and has a text field the keyboard belongs to.
+// overlayOwnsKeys reports whether a modal page — the command palette, the
+// theme browser, or the shortcuts page — has taken the keyboard off the pane.
 //
 // It exists because a focused Term re-asserts go-gui focus from inside its own
 // View (see the SetFocus in term/widget.go), which happens on every layout
 // build. With a pane still focused, the rebuild that follows each keystroke
 // yanks focus off the overlay's filter box and back into the terminal — so the
 // box takes no input at all, and the characters go to the child shell instead.
-// The help overlay is not listed: it has no input, and the pane keeping focus
-// under it is what lets Escape and the pane's own keys keep working.
+// The shortcuts page has no input of its own, but its panes are removed from
+// the tree while it is up, so focus must still leave the pane for the
+// page's global dismiss/toggle keys to win.
 func (ws *Workspace) overlayOwnsKeys() bool {
-	return ws.palette.visible || ws.browser.visible
+	return ws.palette.visible || ws.browser.visible || ws.helpVisible
+}
+
+// takeoverVisible reports whether a full-content page — the theme browser
+// or the shortcuts page — has replaced the panes. Structural tab/pane
+// commands no-op while it is up: creating, closing or switching tabs and
+// splits acts on panes the user cannot see.
+func (ws *Workspace) takeoverVisible() bool {
+	return ws.browser.visible || ws.helpVisible
 }
 
 // refresh updates the window title from the active tab's focused pane
@@ -633,7 +642,10 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 	// consumes height above the panes.
 	contentW := float32(ww)
 	contentH := float32(wh)
-	if len(ws.tabs) > 1 {
+	// No tab bar above a takeover page: the page gets the full height, and
+	// with no bar rendered there is nothing tab-switchable to guard.
+	takeover := ws.takeoverVisible()
+	if len(ws.tabs) > 1 && !takeover {
 		contentH -= ws.tabBarHeight()
 	}
 	// The theme browser takes over the content area outright: a floating
@@ -645,6 +657,8 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 	var split gui.View
 	if ws.browser.visible {
 		split = ws.themeBrowserView(contentW, contentH)
+	} else if ws.helpVisible {
+		split = ws.helpView(contentW, contentH)
 	} else {
 		split = ws.splitView(tab.root, tab, contentW, contentH)
 	}
@@ -653,25 +667,20 @@ func (ws *Workspace) View(w *gui.Window) gui.View {
 	outer.Width = float32(ww)
 	outer.Height = float32(wh)
 	var content []gui.View
-	if len(ws.tabs) > 1 {
+	if len(ws.tabs) > 1 && !takeover {
 		area := tight(gui.FillFill)
 		area.Content = []gui.View{split}
 		content = []gui.View{ws.tabBarView(), gui.Column(area)}
 	} else {
 		content = []gui.View{split}
 	}
-	// Appended before the overlays so a help panel draws over the pill
-	// rather than under it.
+	// The broadcast pill floats over the content area, below the palette in
+	// z-order, whether the panes or a takeover page is showing.
 	if tab.broadcast {
 		content = append(content, ws.broadcastPill())
 	}
-	if ws.helpVisible {
-		// Float children are excluded from normal flow, so the backdrop
-		// and panel overlay the panes without disturbing their layout.
-		content = append(content, ws.helpBackdrop(ww, wh), ws.helpPanel(ww, wh))
-	}
-	// The palette floats over everything else, help included: it is the thing
-	// with focus, and it is what the next keystroke belongs to.
+	// The palette floats over everything else, takeover pages included: it is
+	// the thing with focus, and it is what the next keystroke belongs to.
 	if ws.palette.visible {
 		content = append(content, ws.paletteBackdrop(ww, wh), ws.palettePanel(ww, wh))
 	}
@@ -939,6 +948,9 @@ func setTextColorByID(layout *gui.Layout, id string, c gui.Color) bool {
 
 // activateTab switches to the tab at idx.
 func (ws *Workspace) activateTab(idx int) {
+	if ws.takeoverVisible() {
+		return
+	}
 	if idx < 0 || idx >= len(ws.tabs) || idx == ws.activeTab {
 		return
 	}

@@ -55,6 +55,9 @@ func (d resizeDir) params() (axis splitDir, delta float32) {
 // pane, or only splits on the other axis) or the ratio is already at its
 // bound.
 func (ws *Workspace) resizeActivePane(dir resizeDir) {
+	if ws.takeoverVisible() {
+		return
+	}
 	tab := ws.activeTabPtr()
 	if tab == nil {
 		return

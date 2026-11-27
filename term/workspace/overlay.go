@@ -2,13 +2,11 @@ package workspace
 
 import "github.com/go-gui-org/go-gui/gui"
 
-// Chrome shared by the modal overlays — the help sheet and the command
-// palette. Both are a dimming backdrop under a centered floating panel, and
-// they were written twice: the same scrim color, the same z-order, the same
-// window-edge guard, the same click-swallowing panel. Two overlays that look
-// alike by accident drift apart on the first change to either, so the shape
-// lives here and each overlay supplies only what is actually its own — the
-// dismiss action, the padding, the content.
+// Chrome shared by the modal overlays — the command palette. A dimming
+// backdrop under a centered floating panel; written once so overlays that
+// look alike by accident don't drift apart on the first change to either.
+// The shortcuts page and the theme browser take over the content area
+// instead and do not use this.
 
 const (
 	// overlayBackdropZ / overlayPanelZ keep a panel above its own backdrop.
