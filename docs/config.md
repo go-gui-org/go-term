@@ -469,7 +469,7 @@ the palette's full contents are documented): `workspace.cursorStyleBlock`,
 the session; the config file stays the durable setting (see [Cursor](#cursor)).
 
 An embedder can append its own window commands via `workspace.Cfg.ExtraCommands`
-(falcon's About and Settings). They join the same table, appear in the palette,
+(falcon's Settings). They join the same table, appear in the palette,
 and are rebindable from the config file by full ID.
 
 The `overlay*` commands are shared by every list overlay — the theme browser and
@@ -486,7 +486,7 @@ close.
 
 - It spans three registries: the `workspace.*` commands above (including the
   palette-only cursor rows below and any embedder `ExtraCommands`, such as
-  falcon's About and Settings) **and** the `term.*` actions of the focused pane.
+  falcon's Settings) **and** the `term.*` actions of the focused pane.
 - The `term.copy-mode.*` motions appear only while that pane is actually in copy
   mode, since they do nothing outside it.
 - Actions you have unbound (`none`) are not listed. `RunAction` itself can still

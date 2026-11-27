@@ -21,8 +21,8 @@ func TestAppVersion_StampWins(t *testing.T) {
 }
 
 // TestAppVersion_Unstamped guards the fallback chain against returning an
-// empty string — "Version " with nothing after it is the one output the About
-// dialog must never show.
+// empty string — "Version " with nothing after it is the one output the
+// help page about lines must never show.
 func TestAppVersion_Unstamped(t *testing.T) {
 	old := version
 	t.Cleanup(func() { version = old })
@@ -33,9 +33,9 @@ func TestAppVersion_Unstamped(t *testing.T) {
 	}
 }
 
-// TestAboutVersionFor covers the About display rule: builds that already
+// TestAboutVersionFor covers the about display rule: builds that already
 // name a release show verbatim, while VCS/dev fallbacks gain the release
-// line so the dialog never shows a bare hash or "dev".
+// line so the help page never shows a bare hash or "dev".
 func TestAboutVersionFor(t *testing.T) {
 	tests := []struct {
 		name string
@@ -83,11 +83,11 @@ func TestTerminalVersionFor(t *testing.T) {
 	}
 }
 
-// TestAboutVersion_DialogInvariant guards what showAbout renders: the
-// dialog must name a version on every build path — never empty, never a
+// TestAboutVersion_HelpInvariant guards what the help page about lines render: the
+// they must name a version on every build path — never empty, never a
 // bare "dev". The unstamped half depends on the toolchain's build info,
 // so it asserts the invariant rather than an exact string.
-func TestAboutVersion_DialogInvariant(t *testing.T) {
+func TestAboutVersion_HelpInvariant(t *testing.T) {
 	old := version
 	t.Cleanup(func() { version = old })
 
@@ -140,7 +140,7 @@ func TestReleaseVersionMatchesChangelog(t *testing.T) {
 	t.Fatal("no versioned ## [x.y.z] entry in CHANGELOG.md")
 }
 
-// TestBuildDateFrom covers the Built row's value: an RFC 3339 stamp shows as
+// TestBuildDateFrom covers the Built line's value: an RFC 3339 stamp shows as
 // a bare date, and every shape that carries no stamp yields "" so the row is
 // dropped rather than rendered empty.
 func TestBuildDateFrom(t *testing.T) {
@@ -187,7 +187,7 @@ func TestSettingValue_NilInfo(t *testing.T) {
 	}
 }
 
-// TestCommitLenFitsShortHash keeps the About dialog's abbreviation inside a
+// TestCommitLenFitsShortHash keeps the help page's abbreviation inside a
 // real hash: a commitLen past 40 would slice out of range.
 func TestCommitLenFitsShortHash(t *testing.T) {
 	if commitLen < 7 || commitLen > 40 {
@@ -197,7 +197,7 @@ func TestCommitLenFitsShortHash(t *testing.T) {
 
 // TestIsPseudoVersion keeps the module-version branch of appVersion from
 // capturing a synthesized version. A pseudo-version names a release nobody
-// tagged and is far too wide for the dialog, so it must fall through to the
+// tagged and is far too wide for the help page, so it must fall through to the
 // release line plus "dev".
 func TestIsPseudoVersion(t *testing.T) {
 	pseudo := []string{
@@ -226,8 +226,8 @@ func TestIsPseudoVersion(t *testing.T) {
 	}
 }
 
-// TestAppVersion_NoBareHash locks in the split the About dialog's Commit row
-// created: the version string never carries a revision, so the two rows can
+// TestAppVersion_NoBareHash locks in the split the help page's Commit row
+// created: the version string never carries a revision, so the two lines can
 // never print the same hash twice.
 func TestAppVersion_NoBareHash(t *testing.T) {
 	old := version

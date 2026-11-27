@@ -58,7 +58,7 @@ go run .
 ```
 
 Build a versioned binary from the repo root (stamps `git describe --tags` into
-the About dialog; excludes the go-gui F12 inspector):
+the help page about lines; excludes the go-gui F12 inspector):
 
 ```bash
 make build-falcon    # ./falcon
@@ -70,9 +70,9 @@ Or install it:
 go install github.com/go-gui-org/go-term/examples/falcon@latest
 ```
 
-A `go install` build has no linker-stamped tag, so the About dialog falls back
+A `go install` build has no linker-stamped tag, so the help page about lines fall back
 to the module version, then the embedded VCS revision, then `dev`. The last two
-name no release, so the dialog prefixes them with the latest release.
+name no release, so the lines prefix them with the latest release.
 
 ### macOS `.app` bundle
 
@@ -256,8 +256,8 @@ home directory can't be resolved.
 | `main.go`          | Flag parsing, memory limit, profiling hook, app/window construction, exit-code plumbing                                                   |
 | `config.go`        | CLI config structs, workspace path resolution, font, theme list, download dir                                                             |
 | `window.go`        | `app` struct, workspace create/restore, quit confirmation, save-and-close, replay window                                                  |
-| `menu.go`          | Native menubar, About dialog, `Cmd+,` config command, config stub                                                                         |
-| `version.go`       | Version resolution: linker stamp → module version → VCS revision → `dev`, plus the release line the About dialog prefixes onto dev builds |
+| `menu.go`          | Native menubar, `Cmd+,` config command, config stub, help-page about lines                                                              |
+| `version.go`       | Version resolution: linker stamp → module version → VCS revision → `dev`, plus the release line the help page prefixes onto dev builds    |
 | `icon.go`, `icon/` | Embedded window/Dock icon and platform icon assets                                                                                        |
 
 Design notes worth knowing before editing:
@@ -269,8 +269,9 @@ Design notes worth knowing before editing:
 - Quit confirmation uses go-gui's in-app dialog, not `NativeConfirmDialog`: the
   native `NSAlert` modal loses keyboard focus under the Metal backend's manual
   event pump.
-- The About dialog is falcon's own, not `NSAboutPanel`, which reads from a
-  bundle `Info.plist` that a `go run` binary doesn't have.
+- There is no About dialog: the version lives on the help page below the shortcut
+  columns, since `NSAboutPanel` reads from a bundle `Info.plist` that a `go run`
+  binary doesn't have.
 - There is no Edit menu — an auto-wired one would swallow `Cmd+C`/`Cmd+V` before
   go-term's binding table sees them.
 

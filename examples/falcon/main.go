@@ -121,10 +121,13 @@ func run() int {
 			SavePath:               start.effectiveSavePath(),
 			Themes:                 themes,
 			OnColorScheme:          applyChrome,
-			// About and Settings live here so the workspace registers
-			// them, lists them in the command palette, and keeps them
+			// Settings lives here so the workspace registers
+			// it, lists it in the command palette, and keeps it
 			// across config reloads — see appCommands in menu.go.
 			ExtraCommands: appCommands(),
+			// About lines shown below the shortcut columns on the
+			// help page (app name, version, build metadata).
+			About: aboutInfo(),
 		},
 		loadPath:   start.resolvedWorkspacePath(),
 		savePath:   start.effectiveSavePath(),
