@@ -4,8 +4,8 @@ go 1.26.0
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/go-gui-org/go-glyph v1.29.3
-	github.com/go-gui-org/go-gui v0.100.0
+	github.com/go-gui-org/go-glyph v1.30.0
+	github.com/go-gui-org/go-gui v0.100.1
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/sys v0.50.0
 	golang.org/x/text v0.44.0
@@ -13,7 +13,7 @@ require (
 
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
-	github.com/dlclark/regexp2/v2 v2.13.2 // indirect
+	github.com/dlclark/regexp2/v2 v2.13.3 // indirect
 	github.com/ebitengine/purego v0.11.3 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
