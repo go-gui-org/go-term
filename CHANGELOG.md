@@ -4,11 +4,27 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.20.0] - 2026-11-27
+
+### Added
+
+- `workspace.Cfg.About` lists the lines shown below the shortcut columns on
+  the help page (app name, version, ...). Empty (default) shows nothing.
+  Falcon passes its app name, version, build date and commit there. (#337)
 
 ### Changed
 
-- **Bump go-gui v0.99.1 to v0.100.0.** Dependency update.
+- The keyboard-shortcut help is now a full-window page instead of a floating
+  overlay. It takes over the content area like the theme browser: panes leave
+  the tree (no redraws, no PTY resizes), with the sections in one or two
+  side-by-side columns under a centered title. While it or the theme browser
+  is up, structural tab/pane commands no-op and the tab bar is hidden; Esc
+  and the toggle close the page. (#336)
+- Falcon's About dialog is gone; the app name, version, build date and commit
+  now render as centered lines below the shortcut columns on the help page,
+  so there is one place for version info instead of two. (#337)
+- Bumped go-gui v0.99.1 → v0.100.1 and go-glyph v1.29.2 → v1.30.0
+  (#334, #335).
 
 ### Fixed
 
