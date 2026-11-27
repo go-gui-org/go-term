@@ -121,14 +121,15 @@ func TestHelpColumns(t *testing.T) {
 		// 37 rows + 2 headers ≈ 558px in one column. A full-height display
 		// swallows that, so stay at one column — narrower and more scannable.
 		{"tall display", 1440, 900, 1},
-		// falcon's default window: 600px tall leaves a ~486px budget, so the
+		// falcon's default window: 600px tall leaves a ~510px budget, so the
 		// list widens to two columns rather than overflowing.
 		{"default window", 900, 600, 2},
 		// Too narrow for a second 330px column: stay at one and let the
-		// scroll fallback handle the overflow.
+		// page body scroll the overflow.
 		{"narrow", 600, 700, 1},
-		// Short and wide: keeps widening until a column fits the height.
-		{"short and wide", 1800, 360, 3},
+		// Short and wide: takes the second column and scrolls what still
+		// overflows — there is no third column.
+		{"short and wide", 1800, 360, 2},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,8 +138,8 @@ func TestHelpColumns(t *testing.T) {
 				t.Errorf("got %d columns, want %d", cols, tc.wantCols)
 			}
 			// A single column may exceed the width budget on a very narrow
-			// window — there is no narrower option — but two or more never may.
-			if cols > 1 && helpPanelWidth(cols) > float32(tc.ww)*helpWidthFrac {
+			// window — there is no narrower option — but two never may.
+			if cols > 1 && helpPanelWidth(cols) > float32(tc.ww)-2*browserPad {
 				t.Errorf("panel width %.0f exceeds budget for ww=%d",
 					helpPanelWidth(cols), tc.ww)
 			}

@@ -167,8 +167,73 @@ func TestRegisterCommands_TabDigitsSelectTab(t *testing.T) {
 	}
 }
 
+// Structural tab/pane commands no-op while a takeover page (help or theme
+// browser) is up: creating, closing or switching tabs and splits acts on
+// panes the user cannot see.
+func TestStructuralCommandsNoOpDuringTakeover(t *testing.T) {
+	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
+	ws.addTab() // two tabs so switching has somewhere to go
+	ws.splitPane(false)
+
+	for _, tc := range []struct {
+		name string
+		show func()
+		hide func()
+	}{
+		{"help", ws.toggleHelp, ws.toggleHelp},
+		{"browser", ws.toggleThemeBrowser, ws.toggleThemeBrowser},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			active := ws.activeTab
+			tab := ws.tabs[active]
+			leaves := len(leavesOf(tab.root))
+			node := findResizeSplit(tab.root, tab.focused, splitVertical)
+			var ratio float32
+			if node != nil {
+				ratio = node.Ratio
+			}
+
+			tc.show()
+			if !ws.takeoverVisible() {
+				t.Fatalf("takeover not visible after show")
+			}
+			ws.addTab()
+			ws.splitPane(false)
+			ws.closePane()
+			ws.closeTab()
+			ws.nextTab()
+			ws.prevTab()
+			ws.goToTab(0)
+			ws.nextPane()
+			ws.prevPane()
+			ws.moveTabLeft()
+			ws.moveTabRight()
+			ws.resizeActivePane(resizeRight)
+			if len(ws.tabs) != 2 || ws.activeTab != active {
+				t.Errorf("tabs changed during takeover: got %d tabs active %d, want 2 active %d",
+					len(ws.tabs), ws.activeTab, active)
+			}
+			if got := len(leavesOf(ws.tabs[ws.activeTab].root)); got != leaves {
+				t.Errorf("split tree changed during takeover: got %d leaves, want %d", got, leaves)
+			}
+			if node != nil && node.Ratio != ratio {
+				t.Errorf("split ratio changed during takeover: got %v, want %v", node.Ratio, ratio)
+			}
+			tc.hide()
+			if ws.takeoverVisible() {
+				t.Fatal("takeover still visible after hide")
+			}
+			// And the same commands work again once the page is gone.
+			ws.nextTab()
+			if ws.activeTab == active {
+				t.Error("nextTab no-op after takeover closed")
+			}
+		})
+	}
+}
+
 // TestDismissOverlay_ThemeBrowserWinsOverHelp covers the merged Escape binding:
-// one command owns both the browser and the help overlay, closing the topmost
+// one command owns both the browser and the help page, closing the topmost
 // first.
 func TestDismissOverlay_ThemeBrowserWinsOverHelp(t *testing.T) {
 	ws := newTestWorkspace(t)

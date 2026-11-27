@@ -23,6 +23,91 @@ func buildView(t *testing.T, ws *Workspace) {
 	}
 }
 
+// The help page must build against a window whose dimensions are not real
+// numbers: View gets them from the platform, and a NaN would otherwise
+// propagate into every Fixed size on the page.
+func TestView_HelpNonFiniteDimensions(t *testing.T) {
+	ws := newLiveWorkspace(t)
+
+	for _, d := range []float32{float32(math.NaN()), float32(math.Inf(1)), 0, -400} {
+		if v := ws.helpView(d, d); v == nil {
+			t.Errorf("helpView(%v, %v) produced an empty view", d, d)
+		}
+	}
+}
+
+// The footer shows the toggle's live binding, so a rebound toggle reads
+// correctly without touching the page.
+func TestHelpFooter_ReflectsReboundToggle(t *testing.T) {
+	ws := newLiveWorkspace(t)
+	for i := range ws.commands {
+		if ws.commands[i].ID == "workspace.toggleHelp" {
+			ws.commands[i].Shortcut = gui.Shortcut{Key: gui.KeyF1}
+		}
+	}
+	ws.toggleHelp()
+
+	if got := layoutTexts(ws); !seenText(got, "F1 toggle") {
+		t.Error("footer does not show the rebound toggle chord")
+	}
+	ws.toggleHelp()
+}
+
+// collectTexts gathers every text string in the layout tree.
+func collectTexts(l *gui.Layout, out *[]string) {
+	if s := l.Shape; s != nil && s.TC != nil {
+		*out = append(*out, s.TC.Text)
+	}
+	for i := range l.Children {
+		collectTexts(&l.Children[i], out)
+	}
+}
+
+func layoutTexts(ws *Workspace) []string {
+	layout := ws.View(ws.w).GenerateLayout(ws.w)
+	var out []string
+	collectTexts(&layout, &out)
+	return out
+}
+
+func seenText(texts []string, want string) bool {
+	for _, s := range texts {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// The tab bar is hidden while a takeover page is up: the page gets the full
+// content area and no tab bar renders. The "×" close glyph is the marker —
+// it only renders once the bar exists (2+ tabs), and nothing on either
+// takeover page uses it.
+func TestView_TakeoverHidesTabBar(t *testing.T) {
+	ws := newLiveWorkspaceCfg(t, themeBrowserCfg(t))
+	ws.addTab() // two tabs so the bar renders at all
+
+	if got := layoutTexts(ws); !seenText(got, "×") {
+		t.Error("tab bar missing with no takeover visible")
+	}
+
+	ws.toggleHelp()
+	if got := layoutTexts(ws); !seenText(got, "KEYBOARD SHORTCUTS") {
+		t.Error("help page missing while help visible")
+	} else if seenText(got, "×") {
+		t.Error("tab bar renders above the help page")
+	}
+	ws.toggleHelp()
+
+	ws.toggleThemeBrowser()
+	if got := layoutTexts(ws); !seenText(got, "Themes") {
+		t.Error("theme browser missing while browser visible")
+	} else if seenText(got, "×") {
+		t.Error("tab bar renders above the theme browser")
+	}
+	ws.toggleThemeBrowser()
+}
+
 // The view builds in every structural state: one pane, splits, several tabs,
 // and combinations of the overlays.
 func TestView_BuildsInEveryState(t *testing.T) {
@@ -51,11 +136,15 @@ func TestView_BuildsInEveryState(t *testing.T) {
 			ws.addTab()
 			ws.splitPane(true)
 		}},
-		{"help overlay", func(t *testing.T, ws *Workspace) {
+		{"help page", func(t *testing.T, ws *Workspace) {
 			ws.toggleHelp()
 		}},
 		{"help over a split", func(t *testing.T, ws *Workspace) {
 			ws.splitPane(false)
+			ws.toggleHelp()
+		}},
+		{"help with multiple tabs", func(t *testing.T, ws *Workspace) {
+			ws.addTab()
 			ws.toggleHelp()
 		}},
 	} {
